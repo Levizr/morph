@@ -310,12 +310,12 @@ Run `morph doctor` after installing to verify your environment.
 
 ## Roadmap
 
-- [] Core pipeline — HTML/CSS parse → IR → C++ emit → compile
-- [] Dev mode — persistent window, Unix socket hot reload
-- [] Multi-window & navigation system
-- [] `<morph-viewport>` embedded OpenGL canvas
-- [] Custom C++ node integration
-- [] Package registry design
+- [ ] Core pipeline — HTML/CSS parse → IR → C++ emit → compile
+- [ ] Dev mode — persistent window, Unix socket hot reload
+- [ ] Multi-window & navigation system
+- [ ] `<morph-viewport>` embedded OpenGL canvas
+- [ ] Custom C++ node integration
+- [ ] Package registry design
 - [ ] Box model layout engine (margin, padding, flex)
 - [ ] Text rendering (FreeType + SDF)
 - [ ] `border-radius` shader (SDF-based)
