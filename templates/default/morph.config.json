@@ -1,0 +1,12 @@
+{
+  "name": "my-app",
+  "entry": "src/index.html",
+  "output": "dist/",
+  "window": {
+    "width": 800,
+    "height": 600,
+    "title": "My App"
+  },
+  "dependencies": {},
+  "cpp_sources": []
+}

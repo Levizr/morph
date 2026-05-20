@@ -1,0 +1,28 @@
+"""Known CSS properties and their default values."""
+
+KNOWN_PROPERTIES: dict[str, str] = {
+    "width":            "auto",
+    "height":           "auto",
+    "min-width":        "0",
+    "min-height":       "0",
+    "margin":           "0",
+    "margin-top":       "0",
+    "margin-right":     "0",
+    "margin-bottom":    "0",
+    "margin-left":      "0",
+    "padding":          "0",
+    "padding-top":      "0",
+    "padding-right":    "0",
+    "padding-bottom":   "0",
+    "padding-left":     "0",
+    "background-color": "transparent",
+    "color":            "#000000",
+    "border-radius":    "0",
+    "display":          "block",
+    "flex-direction":   "row",
+    "flex":             "0",
+    "gap":              "0",
+    "font-size":        "16px",
+    "font-weight":      "normal",
+    "text-align":       "left",
+}

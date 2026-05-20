@@ -1,0 +1,6 @@
+TextNode* {{ node.node_id }} = new TextNode("{{ node.text_content }}");
+{{ node.node_id }}->style.color = {
+    {{ node.style.color[0] }}f,
+    {{ node.style.color[1] }}f,
+    {{ node.style.color[2] }}f
+};

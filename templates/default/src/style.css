@@ -1,0 +1,10 @@
+/* Global styles for My App */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: sans-serif;
+  margin: 0;
+}

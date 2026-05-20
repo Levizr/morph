@@ -1,0 +1,37 @@
+<morph-window id="main" title="My App" width="800" height="600">
+  <div id="root" style="
+    background-color: #0f0f0f;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    padding: 32px;
+    gap: 16px;
+  ">
+    <h1 style="color: #e8e8f0; font-size: 28px;">Hello, Morph!</h1>
+    <p  style="color: #8888aa; font-size: 14px;">Edit src/index.html to get started.</p>
+    <button
+      style="
+        background-color: #7c6af5;
+        color: #ffffff;
+        width: 140px;
+        height: 40px;
+        border-radius: 8px;
+      "
+      morph-open="about"
+    >
+      About
+    </button>
+  </div>
+</morph-window>
+
+<morph-window id="about" title="About" width="400" height="240" spawn="false">
+  <div style="padding: 24px; background-color: #1a1a2e;">
+    <h2 style="color: #7c6af5;">Morph</h2>
+    <p style="color: #8888aa;">Native OpenGL UIs from HTML, CSS, and JS.</p>
+    <button morph-close="about" style="
+      background-color: #f06449; color: #fff;
+      width: 80px; height: 32px; border-radius: 6px;
+    ">Close</button>
+  </div>
+</morph-window>

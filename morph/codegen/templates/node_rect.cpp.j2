@@ -1,0 +1,11 @@
+RectNode* {{ node.node_id }} = new RectNode(
+    {{ node.x }}f, {{ node.y }}f, {{ node.w }}f, {{ node.h }}f
+);
+{{ node.node_id }}->style.bgColor = {
+    {{ node.style.bg_color[0] }}f,
+    {{ node.style.bg_color[1] }}f,
+    {{ node.style.bg_color[2] }}f
+};
+{% if parent_id %}
+{{ parent_id }}->addChild({{ node.node_id }});
+{% endif %}
