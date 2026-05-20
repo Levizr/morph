@@ -38,7 +38,7 @@ class TokenType(Enum):
 
 
 @dataclass
-class Token:
+class Token: 
     type: TokenType
     value: str
     line: int = 0

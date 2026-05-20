@@ -8,8 +8,8 @@ _CYAN   = "\033[36m"
 _DIM    = "\033[2m"
 
 
-def log_info(msg: str)    -> None: print(f"{_CYAN}[morph]{_RESET} {msg}")
-def log_success(msg: str) -> None: print(f"{_GREEN}[morph]{_RESET} {msg}")
-def log_warn(msg: str)    -> None: print(f"{_YELLOW}[morph]{_RESET} {msg}")
-def log_error(msg: str)   -> None: print(f"{_RED}[morph] Error:{_RESET} {msg}")
-def log_dim(msg: str)     -> None: print(f"{_DIM}[morph]{_RESET} {_DIM}{msg}{_RESET}")
+def log_info(msg: str)    -> None: print(f"{_CYAN}[morph] INFO:{_RESET} {msg}")
+def log_success(msg: str) -> None: print(f"{_GREEN}[morph] SUCCESS:{_RESET} {msg}")
+def log_warn(msg: str)    -> None: print(f"{_YELLOW}[morph] WARN:{_RESET} {msg}")
+def log_error(msg: str)   -> None: print(f"{_RED}[morph] ERRROR:{_RESET} {msg}")
+def log_dim(msg: str)     -> None: print(f"{_DIM}[morph] {_RESET} {_DIM}{msg}{_RESET}")

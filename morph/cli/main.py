@@ -5,7 +5,7 @@ import sys
 def main():
     parser = argparse.ArgumentParser(
         prog="morph",
-        description="Build native OpenGL UIs from HTML/CSS/JS",
+        description="Build native OpenGL Applications from HTML/CSS/JS",
     )
     sub = parser.add_subparsers(dest="command", metavar="command")
 

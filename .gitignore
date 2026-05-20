@@ -7,3 +7,5 @@ build/
 .pytest_cache/
 *.so
 *.dylib
+test.py
+my-app
