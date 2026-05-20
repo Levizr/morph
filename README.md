@@ -301,7 +301,7 @@ my-app/
 |---|---|---|---|
 | Python | 3.10+ | 3.10+ | 3.10+ |
 | Compiler | g++ 11+ | clang++ 13+ | MSVC / MinGW |
-| OpenGL | 4.1+ | 4.1+ | 4.1+ |
+| OpenGL | 3.3+ | 3.3+ | 3.3+ |
 | GLFW | `apt install libglfw3-dev` | `brew install glfw` | bundled |
 
 Run `morph doctor` after installing to verify your environment.
@@ -310,12 +310,12 @@ Run `morph doctor` after installing to verify your environment.
 
 ## Roadmap
 
-- [x] Core pipeline — HTML/CSS parse → IR → C++ emit → compile
-- [x] Dev mode — persistent window, Unix socket hot reload
-- [x] Multi-window & navigation system
-- [x] `<morph-viewport>` embedded OpenGL canvas
-- [x] Custom C++ node integration
-- [x] Package registry design
+- [] Core pipeline — HTML/CSS parse → IR → C++ emit → compile
+- [] Dev mode — persistent window, Unix socket hot reload
+- [] Multi-window & navigation system
+- [] `<morph-viewport>` embedded OpenGL canvas
+- [] Custom C++ node integration
+- [] Package registry design
 - [ ] Box model layout engine (margin, padding, flex)
 - [ ] Text rendering (FreeType + SDF)
 - [ ] `border-radius` shader (SDF-based)
@@ -332,7 +332,7 @@ Run `morph doctor` after installing to verify your environment.
 Morph is in early development. Contributions, ideas, and feedback are very welcome.
 
 ```bash
-git clone https://github.com/yourusername/morph
+git clone https://github.com/levizr/morph
 cd morph
 pip install -e ".[dev]"
 morph doctor
@@ -344,7 +344,7 @@ Areas that need work: layout engine, text rendering, Windows support, and the pa
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+APACHE — see [LICENSE](LICENSE).
 
 ---
 
