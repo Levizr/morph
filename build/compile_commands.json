@@ -1,0 +1,20 @@
+[
+{
+  "directory": "/home/piyush/My_Projects/ProjectMorph/build",
+  "command": "/usr/bin/g++  -I/home/piyush/My_Projects/ProjectMorph/include -I/home/piyush/My_Projects/ProjectMorph/build/generated -isystem /usr/include/freetype2 -g -std=gnu++17 -o CMakeFiles/ProjectMorph.dir/src/main.cpp.o -c /home/piyush/My_Projects/ProjectMorph/src/main.cpp",
+  "file": "/home/piyush/My_Projects/ProjectMorph/src/main.cpp",
+  "output": "CMakeFiles/ProjectMorph.dir/src/main.cpp.o"
+},
+{
+  "directory": "/home/piyush/My_Projects/ProjectMorph/build",
+  "command": "/usr/bin/g++  -I/home/piyush/My_Projects/ProjectMorph/include -I/home/piyush/My_Projects/ProjectMorph/build/generated -isystem /usr/include/freetype2 -g -std=gnu++17 -o CMakeFiles/ProjectMorph.dir/src/common/loadShader.cpp.o -c /home/piyush/My_Projects/ProjectMorph/src/common/loadShader.cpp",
+  "file": "/home/piyush/My_Projects/ProjectMorph/src/common/loadShader.cpp",
+  "output": "CMakeFiles/ProjectMorph.dir/src/common/loadShader.cpp.o"
+},
+{
+  "directory": "/home/piyush/My_Projects/ProjectMorph/build",
+  "command": "/usr/bin/gcc  -I/home/piyush/My_Projects/ProjectMorph/include -I/home/piyush/My_Projects/ProjectMorph/build/generated -isystem /usr/include/freetype2 -g -o CMakeFiles/ProjectMorph.dir/src/glad.c.o -c /home/piyush/My_Projects/ProjectMorph/src/glad.c",
+  "file": "/home/piyush/My_Projects/ProjectMorph/src/glad.c",
+  "output": "CMakeFiles/ProjectMorph.dir/src/glad.c.o"
+}
+]
