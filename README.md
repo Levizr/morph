@@ -235,7 +235,7 @@ morph pkg list
 morph pkg install        # restore from morph.config.json (like npm install)
 ```
 
-Packages are hosted on GitHub and indexed at [morph-ui.dev](https://morph-ui.dev). No central file server — the registry is just a metadata index.
+Packages are hosted on GitHub and indexed at [registry.levizr.com/morph](https://registry.levizr.com/morph). No central file server — the registry is just a metadata index.
 
 **Writing a package** — two files required:
 

@@ -1,3 +1,0 @@
-/home/piyush/My_Projects/ProjectMorph/build/CMakeFiles/ProjectMorph.dir
-/home/piyush/My_Projects/ProjectMorph/build/CMakeFiles/edit_cache.dir
-/home/piyush/My_Projects/ProjectMorph/build/CMakeFiles/rebuild_cache.dir

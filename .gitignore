@@ -70,3 +70,6 @@ Testing/
 
 # Includes
 include
+
+# Devlopemnt Dependencies
+.vscode
