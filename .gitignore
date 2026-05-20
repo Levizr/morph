@@ -69,7 +69,9 @@ Testing/
 .cache/
 
 # Includes
-include
 
 # Devlopemnt Dependencies
 .vscode
+
+__pycache__/
+*.pyc
