@@ -1,9 +1,10 @@
 #pragma once
+#include "vendor/glad/glad.h"
 #include <unordered_map>
 #include <string>
 #include <GLFW/glfw3.h>
 
-class MorphWindow;
+#include "morph_window.h"
 
 class WindowManager {
     std::unordered_map<std::string, MorphWindow*> m_windows;
@@ -23,7 +24,7 @@ public:
     }
 
     void close(const std::string& id) {
-        // TODO: hide window
+        m_windows.clear();
     }
 
     void navigate(const std::string& windowId, const std::string& pageId) {
@@ -32,6 +33,9 @@ public:
 
     bool allClosed() const {
         if (m_windows.empty()) return true;
-        return false;
+        for (const auto& [_, w] : m_windows) {
+            if (!w->shouldClose()) return false;
+        }
+        return true;
     }
 };

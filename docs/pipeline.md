@@ -24,7 +24,7 @@
                                                               ┌─────────────────┴──────────────┐
                                                               ▼                               ▼
                                                       [Dev: IPC Socket]              [Build: C++ Codegen]
-                                                      morph_devrt binary             emitter → g++ → binary
+                                                      morph_devrt binary        node_emitter → g++ → binary
 ```
 
 ## Deep-Dive: IRBuilder
@@ -136,77 +136,57 @@ The builder scans props for `morph-open`, `morph-close`, `morph-navigate` and cr
 | `to_px()` / resolve units | `morph/style/units.py` | `"16px"` → float; supports px, %, em |
 | `TailwindResolver.resolve()` | `morph/style/tailwind.py` | `"bg-red-500"` → `{"background-color": "#ef4444"}` |
 | `CSSParser.parse_string()` | `morph/style/css_parser.py` | raw CSS text → `{selector: {prop: val}}` |
-| `DOMAttributes.parse()` | `morph/dom/attributes.py` | detect morph-open/close/navigate |
 | `IRSerializer.to_dict()` | `morph/ir/serializer.py` | IR → JSON for dev socket |
 
-### Example: What the Pipeline Produces
+## Deep-Dive: C++ Codegen
 
-Given `src/App.mx`:
+### Node Emitter (`morph/codegen/node_emitter.py`)
 
-```html
-<morph-window title="My App" width="800" height="600">
-  <div style={{ backgroundColor: '#0f0f0f', padding: 32, gap: 16 }}>
-    <h1 style={{ color: '#e8e8f0', fontSize: 28 }}>Hello, Morph!</h1>
-    <p style={{ color: '#8888aa', fontSize: 14 }}>Edit src/App.mx to get started.</p>
-  </div>
-</morph-window>
+The `NodeEmitter` recursively walks the IR tree and produces C++ instantiation code:
+
+- **`IRNode`** → `RectNode` or `TextNode` or `ButtonNode` with position/size
+- **`IRStyle`** → `MorphStyle` fields (bgColor, color, borderRadius, fontSize, fontWeight, padding)
+- **Style inheritance** — `color`, `font-size`, `font-weight` cascade from parent to children
+- **Events** → `ButtonNode::onClick` lambda registration
+
+### Feature Set (`morph/codegen/feature_set.py`)
+
+Scans the IR tree and determines which C++ headers must be included:
+
+- `morph_rect.h` for div/span/h1–h6/p
+- `morph_text.h` for text nodes
+- `morph_button.h` for buttons with events
+- `morph_radius.h` for elements with border-radius
+
+### Build Compiler (`morph/build/compiler.py`)
+
+Invokes `g++` with the correct flags:
+
+```
+g++ -std=c++17 -O2 app.cpp /path/to/glad.c -o app \
+  -I runtime -I runtime/vendor \
+  -I/usr/include/freetype2 -I/usr/include/libpng16 \
+  -lglfw -lGL -lX11 -lpthread -ldl -lfreetype
 ```
 
-`morph build` produces this IR dict (LayoutEngine computes positions):
+## C++ Runtime Architecture
 
-```json
-{
-  "type": "app",
-  "windows": [{
-    "id": "node_0001", "title": "My App", "width": 800, "height": 600,
-    "nodes": [{
-      "id": "node_0002", "type": "div",
-      "style": {
-        "bg_color": [0.0588, 0.0588, 0.0588, 1.0],
-        "padding": [32.0, 32.0, 32.0, 32.0],
-        "display": "flex", "flex_dir": "column", "gap": 16.0
-      },
-      "children": [
-        { "id": "node_0003", "type": "h1",
-          "text": "",
-          "style": { "color": [0.91, 0.91, 0.94, 1.0], "font_size": 28.0 },
-          "children": [
-            { "id": "node_0004", "type": "__text__",
-              "text": "Hello, Morph!" }
-          ]
-        },
-        { "id": "node_0005", "type": "p",
-          "style": { "color": [0.53, 0.53, 0.67, 1.0], "font_size": 14.0 },
-          "children": [
-            { "id": "node_0006", "type": "__text__",
-              "text": "Edit src/App.mx to get started." }
-          ]
-        }
-      ]
-    }]
-  }]
-}
-```
+### Renderer (`runtime/core/gl_renderer.h`)
 
-All style fields (margin, border_radius, font_weight, text_align, flex, etc.) are also serialized with defaults where not specified.
+- OpenGL 3.3 core profile
+- Instanced rendering via VAO/VBO/IBO with `glDrawElementsInstanced`
+- Shared unit quad (top-left origin, 0..1 range)
+- Two shader programs: quad (rounded rect SDF) and text (glyph atlas texture)
 
-## Deep-Dive: C++ Codegen (Next Step)
+### Text Rendering
 
-The IR pipeline is complete. The next step is the codegen → compile path:
+- FreeType per-size glyph atlas stored in an `R8` texture
+- Two-pass glyph loading: `FT_LOAD_DEFAULT` for advance metrics, `FT_LOAD_RENDER` for bitmap
+- Space characters get advance without bitmap
+- Per-font-size text batches flushed separately
 
-1. **`IRSerializer.to_dict()`** ✅ converts IR to JSON for dev mode
-2. **`FeatureSet.scan(nodes)`** ✅ determines which C++ headers are needed
-3. **`NodeEmitter.emit_node(node)`** ❌ stub — returns C++ comments, not real code
-4. **`EventEmitter.emit(event)`** ⚠️ partial — basic handlers work
-5. **`Emitter.render(template_name, context)`** ✅ renders Jinja2 templates
-6. **`Compiler.compile(cpp_source)`** ❌ module does not exist
+### Style Inheritance
 
-The Jinja2 templates are complete:
-- `app_main.cpp.j2` — WindowManager setup, event loop
-- `window.cpp.j2` — Window instantiation
-- `node_rect.cpp.j2` — RectNode with style
-- `node_text.cpp.j2` — TextNode
-- `node_custom.cpp.j2` — Custom C++ node
-- `node_viewport.cpp.j2` — ViewportNode with driver
-
-The missing piece is `node_emitter.py` which should map each `IRNode` to the right template and fill in the template variables, and `morph/build/compiler.py` which should invoke g++ to produce the final binary.
+- `color`, `font-size`, `font-weight` cascade from parent to child elements
+- Intermediate containers that don't set a color still pass the inherited color to text children
+- Default bgColor is transparent `(0,0,0,0)` — no white background unless explicitly set

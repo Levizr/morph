@@ -1,7 +1,5 @@
 # C++ Integration
 
-**Status: Target design — C++ pipeline (node emitter + build compiler) not yet implemented.**
-
 ## Custom Nodes
 
 Place `.h` files in `cpp/` and reference them in `morph.config.json`:
@@ -25,33 +23,20 @@ public:
 };
 ```
 
-## Viewports
-
-```html
-<morph-viewport driver="cpp/scene.h" class="SceneRenderer" style="flex:1;" />
-```
-
-```cpp
-#include <morph/viewport_driver.h>
-
-class SceneRenderer : public MorphViewportDriver {
-    void onInit(ViewportContext& ctx) override { /* setup */ }
-    void onDraw(ViewportContext& ctx) override {
-        glBindFramebuffer(GL_FRAMEBUFFER, ctx.fbo);
-        /* your render loop */
-    }
-};
-```
-
 ## Current Implementation
 
 | Component | File | Status |
 |---|---|---|
-| C++ headers (MorphNode, Renderer, Event, WindowManager) | `runtime/core/*.h` | ✅ Declared |
-| Viewport driver interface | `runtime/viewport/viewport_driver.h` | ✅ Declared |
-| Jinja2 codegen templates | `morph/codegen/templates/` | ✅ 6 templates |
-| Node → C++ emitter | `morph/codegen/node_emitter.py` | ❌ Stub (returns comment) |
-| Event emitter | `morph/codegen/event_emitter.py` | ⚠️ Partial |
-| Build compiler (g++ invocation) | (missing) | ❌ Not created |
+| C++ headers (MorphNode, Renderer, Event, WindowManager) | `runtime/core/*.h` | ✅ |
+| OpenGL 3.3 batch renderer (instanced VAO/VBO/IBO) | `runtime/core/gl_renderer.h` | ✅ |
+| Rounded rect SDF shader | embedded in `gl_renderer.h` | ✅ |
+| FreeType text rendering (glyph atlas, batching) | `runtime/core/gl_renderer.h` | ✅ |
+| Font weight support (bold/normal) | `runtime/core/gl_renderer.h` | ✅ |
+| Widget nodes (Rect, Text, Button) | `runtime/widgets/` | ✅ |
+| Node → C++ emitter | `morph/codegen/node_emitter.py` | ✅ |
+| Style inheritance (color, fontSize, fontWeight) | `morph/codegen/node_emitter.py` | ✅ |
+| Event emitter | `morph/codegen/event_emitter.py` | ✅ |
+| Build compiler (g++ invocation) | `morph/build/compiler.py` | ✅ |
+| `morph build` CLI command | `morph/cli/cmd_build.py` | ✅ |
 | `morph_devrt` binary | (missing) | ❌ Not built |
-| C++ implementations (.cpp) | `runtime/` | ❌ Only `.gitkeep` files |
+| Viewport driver interface | `runtime/viewport/viewport_driver.h` | ✅ Declared |

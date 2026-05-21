@@ -25,14 +25,37 @@ class Compiler:
             log_error("Install g++: sudo apt install g++")
             return False
 
+        vendor_dir = os.path.join(runtime_dir, "vendor")
+        glad_c = os.path.join(runtime_dir, "core", "glad.c")
+
+        # Detect FreeType flags via pkg-config
+        ft_cflags = []
+        ft_libs = []
+        try:
+            ft_cflags = subprocess.check_output(
+                ["pkg-config", "--cflags", "freetype2"], text=True
+            ).strip().split()
+        except Exception:
+            ft_cflags = ["-I/usr/include/freetype2"]
+        try:
+            ft_libs = subprocess.check_output(
+                ["pkg-config", "--libs", "freetype2"], text=True
+            ).strip().split()
+        except Exception:
+            ft_libs = ["-lfreetype"]
+
         cmd = [
             self.gpp,
             "-std=c++17",
             "-O2",
             source_path,
+            glad_c,
             "-o", binary_path,
             "-I", runtime_dir,
+            "-I", vendor_dir,
+            *ft_cflags,
             "-lglfw", "-lGL", "-lX11", "-lpthread", "-ldl",
+            *ft_libs,
         ]
 
         log_info(f"Compiling: {' '.join(cmd)}")

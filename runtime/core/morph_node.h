@@ -5,12 +5,13 @@
 #include "event.h"
 
 struct MorphStyle {
-    float bgColor[4] = {1,1,1,1};
+    float bgColor[4] = {0,0,0,0};
     float color[4]   = {0,0,0,1};
     float borderRadius = 0.0f;
     float fontSize     = 16.0f;
     float padding[4]   = {0,0,0,0};
     float margin[4]    = {0,0,0,0};
+    std::string fontWeight = "normal";
 };
 
 class Renderer;

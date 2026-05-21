@@ -128,12 +128,20 @@ Morph's pipeline is under active development. Here's what's working and what's s
 | **Layout engine** — box model (margin, padding), vertical stacking, gap | Complete |
 | **Dev file watcher** — watchdog-based with debounce | Complete |
 | **Unix socket IPC** — sends IR to dev runtime | Complete |
-| **Codegen templates** — Jinja2 templates for C++ output | Complete |
+| **C++ node emitter** — IR → C++ instantiation code from Jinja2 templates | Complete |
+| **Build compiler** — g++ invocation with FreeType/GLFW/OpenGL flags | Complete |
 | **Package registry client** — fetch, install, manifest parsing | Complete |
 | **Color utilities** — hex/rgb parsing and conversion | Complete |
 | **System doctor** — version checks, dependency diagnostics | Complete |
 | **Inline style resolution** — camelCase→kebab, color parsing, unit conversion | Complete |
 | **Event extraction** — `morph-open`, `morph-close`, `morph-navigate` → IREvent | Complete |
+| **OpenGL 3.3 batch renderer** — instanced VAO/VBO/IBO, uniform color + rounded rect SDF | Complete |
+| **FreeType text rendering** — per-size glyph atlas, batch text with kerning | Complete |
+| **Rounded rectangles** — SDF-based border-radius in fragment shader | Complete |
+| **Font weight support** — bold/normal font selection, `font-weight` CSS property | Complete |
+| **Style inheritance** — `color`, `font-size`, `font-weight` cascade from parent | Complete |
+| **Transparent backgrounds** — no white bg behind elements; only render when `background-color` set | Complete |
+| **Event system** — `onClick` callbacks on ButtonNode | Complete |
 
 ### 🚧 In Progress
 
@@ -142,9 +150,7 @@ Morph's pipeline is under active development. Here's what's working and what's s
 | **Layout engine** — flexbox | Partial | Vertical stacking works, `apply_flex()` is stub |
 | **Style resolver** — CSS cascade, specificity, selector matching | Stub | Only inline + Tailwind work via IRBuilder |
 | **JS interpreter** — JS event handler → C++ lambdas | Stub | Only `import` works |
-| **C++ node emitter** — IR → C++ instantiation code | Stub | Templates exist, emitter returns comments |
 | **`morph_devrt` binary** — dev mode renderer | Missing | Binary not yet built |
-| **Build compiler** — g++ invocation + binary output | Missing | Module not created |
 
 ---
 
@@ -157,29 +163,21 @@ Morph's pipeline is under active development. Here's what's working and what's s
 - `border-radius`
 - `display: flex`, `flex-direction`, `flex`, `gap`
 - `font-size` (px, %, em, bare numbers), `font-weight`, `text-align`
-- Unit conversion via `to_px()` with px/%/em support
+- `color` cascades from parent to children (browser-style inheritance)
 
 **HTML Elements**
-- `div`, `span`, `h1`–`h6`, `p`, `button`, `input`
+- `div`, `span`, `h1`–`h6`, `p`, `button`
 - `<morph-window>` — declares a native window
-- `<morph-page>` — navigable page within a window
-- `<morph-viewport>` — raw OpenGL canvas embedded in layout
 
-**Navigation & Windows**
-```html
-<button morph-open="settings">Open Settings</button>
-<button morph-close="settings">Close</button>
-<button morph-navigate="about">Go to About</button>
-```
-
-**JavaScript**
-```js
-// parsed as AST, compiled to C++ lambdas
-import { Icon } from 'morph-icons'
-
-const icon = new Icon('settings', { size: 24, color: '#fff' })
-icon.mount('#toolbar')
-```
+**C++ Runtime**
+- OpenGL 3.3 core profile batch renderer (instanced VAO/VBO/IBO)
+- Rounded rectangles via SDF fragment shader
+- FreeType text rendering with per-size glyph atlas
+- Font weight support (bold / normal with `DejaVuSans-Bold.ttf`)
+- Style inheritance cascade (`color`, `font-size`, `font-weight`)
+- Transparent backgrounds by default (no white rect behind elements)
+- `onClick` event handlers on buttons
+- Window close-button handling, multi-window management
 
 ---
 
@@ -232,10 +230,12 @@ Run `morph doctor` after installing to verify your environment.
 
 ### Next Up (Priority Order)
 - [x] **IRBuilder** — Convert walked AST + CSS + Tailwind into IR nodes ✅
+- [x] **C++ node emitter** — Generate C++ instantiation from IR ✅
+- [x] **`morph build`** — compiler module to invoke g++ and produce binary ✅
+- [x] **Text rendering** — FreeType glyph atlas + batch rendering ✅
+- [x] **`border-radius`** — SDF-based rounded rect shader ✅
 - [ ] **Flexbox layout** — `display: flex` support in layout engine
 - [ ] **CSS style resolver** — Selector matching, cascade, specificity
-- [ ] **C++ node emitter** — Generate actual C++ instantiation from IR
-- [ ] **`morph build`** — compiler module to invoke g++ and produce binary
 - [ ] **`morph_devrt` binary** — Pre-compiled renderer for dev mode
 - [ ] **JS interpreter** — JS expression handling (NewExpression, CallExpression)
 
@@ -243,8 +243,6 @@ Run `morph doctor` after installing to verify your environment.
 - [ ] Multi-window & navigation system
 - [ ] `<morph-viewport>` embedded OpenGL canvas
 - [ ] Custom C++ node integration
-- [ ] Text rendering (FreeType + SDF)
-- [ ] `border-radius` shader (SDF-based)
 - [ ] morph-icons (first-party package)
 - [ ] morph-animate
 - [ ] Windows support
@@ -263,7 +261,7 @@ pip install -e ".[dev]"
 morph doctor
 ```
 
-The most impactful areas right now are the **flexbox layout engine**, **C++ node emitter**, and the **`morph build` compiler module**. See the [Current State](#current-state-early-development) section for a full breakdown.
+The most impactful areas right now are the **flexbox layout engine**, **CSS style resolver**, and the **`morph_devrt` binary**. See the [Current State](#current-state-early-development) section for a full breakdown.
 
 Open an issue before starting on large features so we can align on design.
 

@@ -10,7 +10,7 @@ public:
     TextNode(const std::string& text) : text(text) {}
 
     void draw(Renderer& r) override {
-        r.drawText(text, x, y, style.color);
+        r.drawText(text, x, y, style.color, TextAlign::Left, style.fontSize, style.fontWeight);
         for (auto* child : children)
             child->draw(r);
     }

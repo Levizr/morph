@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 
 @dataclass
 class IRStyle:
-    bg_color:      tuple[float,float,float,float] = (1.0, 1.0, 1.0, 1.0)
+    bg_color:      tuple[float,float,float,float] = (0.0, 0.0, 0.0, 0.0)
     color:         tuple[float,float,float,float] = (0.0, 0.0, 0.0, 1.0)
     width:         float | None = None
     height:        float | None = None

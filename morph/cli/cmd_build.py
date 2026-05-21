@@ -81,7 +81,7 @@ def _deserialize(ir_dict: dict) -> list:
 def _deser_node(d: dict) -> IRNode:
     s = d.get("style", {})
     style = IRStyle(
-        bg_color=tuple(s.get("bg_color", [1, 1, 1, 1])),
+        bg_color=tuple(s.get("bg_color", [0, 0, 0, 0])),
         color=tuple(s.get("color", [0, 0, 0, 1])),
         width=s.get("width"),
         height=s.get("height"),

@@ -2,29 +2,23 @@
 
 ## Common Issues
 
-### `morph build` — "IRBuilder.build() takes 3 positional arguments but 4 were given"
+### `morph build` — Compilation errors
 
-**Cause**: Method signature mismatch between `morph/ir/builder.py` and `morph/dev/pipeline.py`.
+**Cause**: Missing C++ dependencies (FreeType, GLFW) or incorrect paths.
 
-**Fix**: Ensure `IRBuilder.build()` accepts `(self, walked, css_rules, tw_resolver)` — the pipeline passes 3 args. Update the stub if it still has the old 2-arg signature.
+**Fix**: Run `morph doctor` to verify dependencies. The compiler expects FreeType headers at `/usr/include/freetype2` and GLFW/OpenGL libs via pkg-config.
 
 ### `morph build` — Pipeline fails silently
 
 **Cause**: `IRBuilder.build()` returns `[]`. The pipeline produces empty IR, layout does nothing, serialization returns empty data.
 
-**Fix**: Implement `IRBuilder.build()`. See the [pipeline deep-dive](docs/pipeline.md) for detailed requirements.
+**Fix**: Check the `.mx` file for syntax errors. Ensure there's a single exported component with a `<morph-window>` root.
 
 ### `morph dev` — "morph_devrt: command not found"
 
 **Cause**: The dev mode runtime binary (`morph/bin/morph_devrt`) does not exist in the repository.
 
-**Status**: Not yet built. Dev mode is blocked until the C++ dev runtime is compiled.
-
-### `morph build` — ModuleNotFoundError: `morph.build`
-
-**Cause**: The `morph/build/` package doesn't exist. `cmd_build.py` imports `morph.build.compiler` and `morph.build.optimizer` which are not created.
-
-**Fix**: Create `morph/build/compiler.py` and `morph/build/optimizer.py` (or update `cmd_build.py` to not depend on them).
+**Status**: Not yet built. Dev mode is blocked until the C++ dev runtime is compiled. Use `morph build` to compile a standalone binary instead.
 
 ### ImportError: `morph.lexer`
 

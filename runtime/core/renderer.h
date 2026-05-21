@@ -12,7 +12,9 @@ public:
                                   float radius, float color[4]) = 0;
     virtual void drawText(const std::string& text,
                           float x, float y, float color[4],
-                          TextAlign align = TextAlign::Left) = 0;
+                          TextAlign align = TextAlign::Left,
+                          float fontSize = 16,
+                          const std::string& fontWeight = "normal") = 0;
     virtual void drawTexture(unsigned int tex,
                              float x, float y, float w, float h) = 0;
     virtual void drawMesh(const float* verts, const unsigned int* idx,

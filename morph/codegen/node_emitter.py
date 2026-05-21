@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from jinja2 import Environment, FileSystemLoader
 from morph.ir.node import IRNode, IRViewport
+from morph.ir.style import IRStyle
 
 _TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
 
@@ -17,7 +18,8 @@ class NodeEmitter:
             lstrip_blocks=True,
         )
 
-    def emit_node(self, node: IRNode, parent_id: str | None = None) -> str:
+    def emit_node(self, node: IRNode, parent_id: str | None = None,
+                  parent_style: IRStyle | None = None) -> str:
         """Return C++ code for a single node and all its children (recursive)."""
         if isinstance(node, IRViewport):
             return self._emit_viewport(node, parent_id)
@@ -28,7 +30,11 @@ class NodeEmitter:
         # ── Text node ────────────────────────────────────────
         if node.node_type == "__text__":
             lines.append(f"TextNode* {node.node_id} = new TextNode(\"{node.text_content}\");")
-            lines.append(self._set_style(node, indent))
+            lines.append(f"{indent}{node.node_id}->x = {node.x}f;")
+            lines.append(f"{indent}{node.node_id}->y = {node.y}f;")
+            lines.append(f"{indent}{node.node_id}->w = {node.w}f;")
+            lines.append(f"{indent}{node.node_id}->h = {node.h}f;")
+            lines.append(self._set_style(node, indent, parent_style))
             if parent_id:
                 lines.append(f"{parent_id}->addChild({node.node_id});")
             return "\n".join(lines)
@@ -42,7 +48,7 @@ class NodeEmitter:
             lines.append(f"RectNode* {node.node_id} = new RectNode("
                          f"{node.x}f, {node.y}f, {node.w}f, {node.h}f);")
 
-        lines.append(self._set_style(node, indent))
+        lines.append(self._set_style(node, indent, parent_style))
 
         # ── Events ───────────────────────────────────────────
         for event in node.events:
@@ -54,26 +60,50 @@ class NodeEmitter:
         if parent_id:
             lines.append(f"{parent_id}->addChild({node.node_id});")
 
+        # ── Build resolved style for child inheritance ───────
+        s = node.style
+        resolved = IRStyle(
+            color=s.color if s.color != (0, 0, 0, 1) else (
+                parent_style.color if parent_style and parent_style.color != (0, 0, 0, 1) else (0, 0, 0, 1)),
+            font_size=s.font_size if s.font_size != 16.0 else (
+                parent_style.font_size if parent_style and parent_style.font_size != 16.0 else 16.0),
+            font_weight=s.font_weight if s.font_weight != "normal" else (
+                parent_style.font_weight if parent_style and parent_style.font_weight != "normal" else "normal"),
+        )
+
         # ── Recurse children ─────────────────────────────────
         for child in node.children:
-            lines.append(self.emit_node(child, node.node_id))
+            lines.append(self.emit_node(child, node.node_id, resolved))
 
         return "\n".join(lines)
 
-    def _set_style(self, node: IRNode, indent: str) -> str:
+    def _set_style(self, node: IRNode, indent: str,
+                   parent_style: IRStyle | None = None) -> str:
         s = node.style
         lines = []
         prefix = f"{node.node_id}->style"
-        lines.append(f"{prefix}.bgColor[0] = {s.bg_color[0]:.4f}f;")
-        lines.append(f"{prefix}.bgColor[1] = {s.bg_color[1]:.4f}f;")
-        lines.append(f"{prefix}.bgColor[2] = {s.bg_color[2]:.4f}f;")
-        lines.append(f"{prefix}.color[0]   = {s.color[0]:.4f}f;")
-        lines.append(f"{prefix}.color[1]   = {s.color[1]:.4f}f;")
-        lines.append(f"{prefix}.color[2]   = {s.color[2]:.4f}f;")
+        if s.bg_color != (0, 0, 0, 0):
+            lines.append(f"{prefix}.bgColor[0] = {s.bg_color[0]:.4f}f;")
+            lines.append(f"{prefix}.bgColor[1] = {s.bg_color[1]:.4f}f;")
+            lines.append(f"{prefix}.bgColor[2] = {s.bg_color[2]:.4f}f;")
+            lines.append(f"{prefix}.bgColor[3] = {s.bg_color[3]:.4f}f;")
         if s.border_radius > 0:
             lines.append(f"{prefix}.borderRadius = {s.border_radius}f;")
-        if s.font_size != 16.0:
-            lines.append(f"{prefix}.fontSize = {s.font_size}f;")
+        fs = s.font_size if s.font_size != 16.0 else (
+            parent_style.font_size if parent_style and parent_style.font_size != 16.0 else 16.0)
+        if fs != 16.0:
+            lines.append(f"{prefix}.fontSize = {fs}f;")
+        fw = s.font_weight if s.font_weight != "normal" else (
+            parent_style.font_weight if parent_style and parent_style.font_weight != "normal" else "normal")
+        if fw != "normal":
+            lines.append(f"{prefix}.fontWeight = \"{fw}\";")
+        # Color inherits from parent like browser cascade
+        c = s.color if s.color != (0, 0, 0, 1) else (
+            parent_style.color if parent_style and parent_style.color != (0, 0, 0, 1) else (0, 0, 0, 1))
+        if c != (0, 0, 0, 1):
+            lines.append(f"{prefix}.color[0]   = {c[0]:.4f}f;")
+            lines.append(f"{prefix}.color[1]   = {c[1]:.4f}f;")
+            lines.append(f"{prefix}.color[2]   = {c[2]:.4f}f;")
         if s.padding != (0, 0, 0, 0):
             lines.append(f"{prefix}.padding[0] = {s.padding[0]}f;")
             lines.append(f"{prefix}.padding[1] = {s.padding[1]}f;")

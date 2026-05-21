@@ -62,8 +62,8 @@ morph/                        # Python toolchain
 │   └── builtins.py           #   morph JS builtins map
 ├── codegen/                  # C++ code generation
 │   ├── emitter.py            #   Jinja2 rendering engine
-│   ├── node_emitter.py       #   IR node → C++ (STUB)
-│   ├── event_emitter.py      #   event handlers → C++ (partial)
+│   ├── node_emitter.py       #   IR node → C++ (style inheritance, color cascade)
+│   ├── event_emitter.py      #   event handlers → C++ lambdas
 │   ├── feature_set.py        #   scan IR for required C++ headers
 │   └── templates/            #   Jinja2 templates
 ├── dev/                      # Dev mode
@@ -80,9 +80,9 @@ morph/                        # Python toolchain
 ├── config/                   # Project config
 │   ├── schema.py             #   MorphConfig dataclass
 │   └── loader.py             #   morph.config.json reader
-├── build/                    # (DOES NOT EXIST YET)
-│   ├── compiler.py           #   g++ invocation
-│   └── optimizer.py          #   binary optimization
+├── build/                    # Build compiler
+│   ├── compiler.py           #   g++ invocation with FreeType/GLFW flags
+│   └── optimizer.py          #   binary optimization (stub)
 └── utils/                    # Shared utilities
     ├── logger.py             #   colored terminal output
     ├── platform.py           #   OS detection
@@ -94,12 +94,11 @@ tests/                        # Test suite
 └── integration/              #   integration tests
 
 runtime/                      # C++ runtime headers
-├── core/                     #   MorphNode, Renderer, Event, WindowManager
+├── core/                     #   MorphNode, Renderer, GL batch renderer, WindowManager
 ├── viewport/                 #   ViewportDriver interface
 ├── dev/                      #   dev mode IPC (empty)
-├── shaders/                  #   GL shaders (empty)
-├── vendor/                   #   third-party (empty)
-└── widgets/                  #   built-in widgets (empty)
+├── vendor/                   #   GLAD OpenGL loader
+└── widgets/                  #   RectNode, TextNode, ButtonNode
 
 templates/default/            # morph init scaffolding
 my-app/                       # sample project
