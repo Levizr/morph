@@ -42,6 +42,10 @@ class NodeEmitter:
         # ── Button (has click events) ────────────────────────
         if node.node_type == "button":
             lines.append(f"ButtonNode* {node.node_id} = new ButtonNode();")
+            lines.append(f"{indent}{node.node_id}->x = {node.x}f;")
+            lines.append(f"{indent}{node.node_id}->y = {node.y}f;")
+            lines.append(f"{indent}{node.node_id}->w = {node.w}f;")
+            lines.append(f"{indent}{node.node_id}->h = {node.h}f;")
 
         # ── Generic rectangular node ─────────────────────────
         else:

@@ -1,20 +1,62 @@
-// templates/default/src/App.mx
 export default function App() {
+  console.log("Morph app started!");
   return (
     <morph-window title="My App" width={800} height={600}>
       <div style={{
-        backgroundColor: '#0f0f0f',
+        backgroundColor: '#1a1a2e',
         padding: 32,
         display: 'flex',
         flexDirection: 'column',
-        gap: 16
+        gap: 24
       }}>
-        <h1 style={{ color: '#e8e8f0', fontSize: 28 }}>
-          Hello, Morph!
+        <h1 style={{ color: '#e8e8f0', fontSize: 32, fontWeight: 'bold' }}>
+          {console.log("Rendered heading")}Morph Framework
         </h1>
-        <p style={{ color: '#8888aa', fontSize: 14 }}>
-          Edit src/App.mx to get started.
+        <p style={{ color: '#8888cc', fontSize: 14 }}>
+          Edit src/App.mx to get started. Features:
         </p>
+
+        <div style={{
+          backgroundColor: '#16213e',
+          padding: 24,
+          borderRadius: 12,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 16
+        }}>
+          <div style={{
+            backgroundColor: '#0f3460',
+            padding: '12px 16px',
+            borderRadius: 8
+          }}>
+            <p style={{ color: '#e94560', fontSize: 14, fontWeight: 'bold' }}>
+              Bold text with color inheritance
+            </p>
+            <p style={{ color: '#a0a0c0', fontSize: 12 }}>
+              Normal weight text below bold heading
+            </p>
+          </div>
+
+          <div style={{
+            backgroundColor: '#0f3460',
+            padding: '12px 16px',
+            borderRadius: 8
+          }}>
+            <p style={{ color: '#53d769', fontSize: 14, fontWeight: 'bold' }}>
+              Border-radius demo
+            </p>
+            <p style={{ color: '#a0a0c0', fontSize: 12 }}>
+              This card has borderRadius: 8, the outer card has 12
+            </p>
+          </div>
+        </div>
+
+        <button onClick={() => console.log("Button clicked!")}
+                style={{ backgroundColor: '#3b82f6', color: '#fff',
+                         padding: '12px 24px', borderRadius: 8, fontSize: 14,
+                         fontWeight: 'bold' }}>
+          Click me (console.log)
+        </button>
       </div>
     </morph-window>
   )

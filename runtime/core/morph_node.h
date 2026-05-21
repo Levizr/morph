@@ -25,9 +25,24 @@ public:
 
     virtual void layout(float parentW, float parentH) {}
     virtual void draw(Renderer& r) = 0;
-    virtual void onEvent(MorphEvent& e) {}
+    virtual bool onEvent(MorphEvent& e) { return false; }
     virtual void onHover(bool state) {}
 
     void addChild(MorphNode* child) { children.push_back(child); }
+
+    // Dispatch event to deepest child containing (ex, ey); bubble up
+    // Returns true if event was handled (stops bubble)
+    bool dispatchEvent(MorphEvent& e, float ex, float ey) {
+        for (auto it = children.rbegin(); it != children.rend(); ++it) {
+            auto* c = *it;
+            if (ex >= c->x && ex <= c->x + c->w &&
+                ey >= c->y && ey <= c->y + c->h) {
+                if (c->dispatchEvent(e, ex, ey))
+                    return true;
+            }
+        }
+        return onEvent(e);
+    }
+
     virtual ~MorphNode() {}
 };

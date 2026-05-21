@@ -5,6 +5,7 @@
 #include <vector>
 #include "morph_node.h"
 #include "gl_renderer.h"
+#include "event.h"
 
 class MorphWindow {
     std::string m_title;
@@ -23,6 +24,20 @@ class MorphWindow {
     }
 
 public:
+    static void mouseButtonCb(GLFWwindow* win, int btn, int act, int mods) {
+        auto* self = (MorphWindow*)glfwGetWindowUserPointer(win);
+        if (!self || !self->m_root || act != GLFW_PRESS) return;
+        double mx, my;
+        glfwGetCursorPos(win, &mx, &my);
+        // fprintf(stderr, "[click] btn=%d (%.0f, %.0f)\n", btn, mx, my);
+        MorphEvent e;
+        e.type = EventType::Click;
+        e.button = btn;
+        e.x = (float)mx;
+        e.y = (float)my;
+        self->m_root->dispatchEvent(e, (float)mx, (float)my);
+    }
+
     MorphWindow(const std::string& title, int width, int height, bool visible = true)
         : m_title(title), m_width(width), m_height(height), m_visible(visible) {
         glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
@@ -33,6 +48,7 @@ public:
             glfwMakeContextCurrent(m_handle);
             gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress));
             glfwSetWindowUserPointer(m_handle, this);
+            glfwSetMouseButtonCallback(m_handle, mouseButtonCb);
             glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
         }
     }

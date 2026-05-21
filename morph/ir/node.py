@@ -30,6 +30,7 @@ class IRWindow:
     visible: bool = True
     modal: bool = False
     nodes: list[IRNode] = field(default_factory=list)
+    startup_logs: list[str] = field(default_factory=list)
 
 
 @dataclass

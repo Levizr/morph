@@ -8,9 +8,12 @@ class ButtonNode : public MorphNode {
 public:
     std::function<void()> onClick;
 
-    void onEvent(MorphEvent& e) override {
-        if (e.type == EventType::Click && onClick)
+    bool onEvent(MorphEvent& e) override {
+        if (e.type == EventType::Click && onClick) {
             onClick();
+            return true;
+        }
+        return false;
     }
 
     void draw(Renderer& r) override {

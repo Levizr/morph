@@ -16,12 +16,13 @@ class IRSerializer:
 
     def _window(self, w: IRWindow) -> dict:
         return {
-            "id":      w.window_id,
-            "title":   w.title,
-            "width":   w.width,
-            "height":  w.height,
-            "visible": w.visible,
-            "nodes":   [self._node(n) for n in w.nodes],
+            "id":           w.window_id,
+            "title":        w.title,
+            "width":        w.width,
+            "height":       w.height,
+            "visible":      w.visible,
+            "nodes":        [self._node(n) for n in w.nodes],
+            "startup_logs": w.startup_logs,
         }
 
     def _node(self, n) -> dict:

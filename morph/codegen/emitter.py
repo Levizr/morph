@@ -44,6 +44,12 @@ class Emitter:
                     win_code.append(code)
                     win_code.append("")
 
+            if win.startup_logs:
+                win_code.append("")
+                for msg in win.startup_logs:
+                    escaped = msg.replace("\\", "\\\\").replace('"', '\\"')
+                    win_code.append(f'    fprintf(stderr, "{escaped}\\n");')
+
             window_code.append("\n".join(win_code))
 
         tmpl = self.env.get_template("app_main.cpp.j2")

@@ -56,25 +56,30 @@ class JSXWalker:
     def _extract_components(self, root: Node) -> list[dict]:
         components = []
 
-        # function App() { return (...) }
-        for node in self._find_all(root, "function_declaration"):
-            comp = self._parse_function_component(node)
-            if comp:
-                components.append(comp)
-
         # export default function App() { ... }
+        seen = set()
         for node in self._find_all(root, "export_statement"):
             for fn in self._find_all(node, "function_declaration"):
                 comp = self._parse_function_component(fn)
                 if comp:
                     comp["exported"] = True
                     components.append(comp)
+                    seen.add(id(fn))
+
+        # Non-exported function App() { return (...) }
+        for node in self._find_all(root, "function_declaration"):
+            if id(node) in seen:
+                continue
+            comp = self._parse_function_component(node)
+            if comp:
+                components.append(comp)
         return components
 
     def _parse_function_component(self, node: Node) -> dict | None:
         name = ""
         params = []
         jsx_root = None
+        block_node = None
 
         for child in node.children:
             if child.type == "identifier":
@@ -82,17 +87,72 @@ class JSXWalker:
             elif child.type == "formal_parameters":
                 params = self._extract_params(child)
             elif child.type == "statement_block":
+                block_node = child
                 jsx_root = self._find_jsx_in_block(child)
 
         if not name or jsx_root is None:
             return None
 
+        body_logs = self._extract_body_logs(block_node) if block_node else []
+
         return {
-            "name":     name,
-            "params":   params,
-            "jsx":      self._parse_jsx_element(jsx_root),
-            "exported": False,
+            "name":       name,
+            "params":     params,
+            "jsx":        self._parse_jsx_element(jsx_root),
+            "body_logs":  body_logs,
+            "exported":   False,
         }
+
+    def _extract_body_logs(self, block_node: Node) -> list[str]:
+        """Find console.log('...') calls before the return statement,
+        including inside JSX expressions in the return value."""
+        logs = []
+        for child in block_node.children:
+            if child.type == "return_statement":
+                for expr in self._find_all(child, "jsx_expression"):
+                    for node in self._find_all(expr, "call_expression"):
+                        if self._is_inside(node, "arrow_function"):
+                            continue
+                        fn_parts, args = self._parse_call_expr(node)
+                        if fn_parts == ["console", "log"] and args:
+                            for arg in args.children:
+                                if arg.type == "string":
+                                    logs.append(arg.text.decode().strip("'\""))
+                                    break
+                break
+            for node in self._find_all(child, "call_expression"):
+                if self._is_inside(node, "arrow_function"):
+                    continue
+                fn_parts, args = self._parse_call_expr(node)
+                if fn_parts == ["console", "log"] and args:
+                    for arg in args.children:
+                        if arg.type == "string":
+                            logs.append(arg.text.decode().strip("'\""))
+                            break
+        return logs
+
+    def _is_inside(self, node: Node, ancestor_type: str) -> bool:
+        p = node.parent
+        while p:
+            if p.type == ancestor_type:
+                return True
+            p = p.parent
+        return False
+
+    @staticmethod
+    def _parse_call_expr(node: Node) -> tuple[list[str], Node | None]:
+        fn_parts = []
+        args = None
+        for child in node.children:
+            if child.type == "member_expression":
+                parts = []
+                for p in child.children:
+                    if p.type in ("identifier", "property_identifier"):
+                        parts.append(p.text.decode())
+                fn_parts = parts
+            elif child.type == "arguments":
+                args = child
+        return fn_parts, args
 
     # ── Params (props destructuring) ──────────────────────────
 

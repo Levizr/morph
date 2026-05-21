@@ -73,6 +73,7 @@ def _deserialize(ir_dict: dict) -> list:
             height=w.get("height", 600),
             visible=w.get("visible", True),
             nodes=[_deser_node(n) for n in w.get("nodes", [])],
+            startup_logs=w.get("startup_logs", []),
         )
         windows.append(win)
     return windows

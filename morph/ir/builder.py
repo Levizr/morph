@@ -89,6 +89,7 @@ class IRBuilder:
                 ir_windows.append(IRWindow(
                     window_id=window_id,
                     nodes=window_nodes,
+                    startup_logs=comp.get("body_logs", []),
                     **config,
                 ))
 
