@@ -15,6 +15,9 @@ public:
                           TextAlign align = TextAlign::Left,
                           float fontSize = 16,
                           const std::string& fontWeight = "normal") = 0;
+    virtual float measureTextWidth(const std::string& text,
+                                    float fontSize,
+                                    const std::string& fontWeight = "normal") = 0;
     virtual void drawTexture(unsigned int tex,
                              float x, float y, float w, float h) = 0;
     virtual void drawMesh(const float* verts, const unsigned int* idx,

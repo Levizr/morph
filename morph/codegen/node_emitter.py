@@ -113,6 +113,17 @@ class NodeEmitter:
             lines.append(f"{prefix}.padding[1] = {s.padding[1]}f;")
             lines.append(f"{prefix}.padding[2] = {s.padding[2]}f;")
             lines.append(f"{prefix}.padding[3] = {s.padding[3]}f;")
+        if s.margin != (0, 0, 0, 0):
+            lines.append(f"{prefix}.margin[0] = {s.margin[0]}f;")
+            lines.append(f"{prefix}.margin[1] = {s.margin[1]}f;")
+            lines.append(f"{prefix}.margin[2] = {s.margin[2]}f;")
+            lines.append(f"{prefix}.margin[3] = {s.margin[3]}f;")
+        if s.gap > 0:
+            lines.append(f"{prefix}.gap = {s.gap}f;")
+        if s.width is not None:
+            lines.append(f"{prefix}.explicitWidth = {s.width}f;")
+        if s.height is not None:
+            lines.append(f"{prefix}.explicitHeight = {s.height}f;")
         return "\n".join(f"{indent}{l}" for l in lines)
 
     def _emit_event(self, event, node_id: str, indent: str) -> str:

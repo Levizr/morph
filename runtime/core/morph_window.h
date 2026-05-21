@@ -38,6 +38,13 @@ public:
         self->m_root->dispatchEvent(e, (float)mx, (float)my);
     }
 
+    static void windowSizeCb(GLFWwindow* win, int width, int height) {
+        auto* self = (MorphWindow*)glfwGetWindowUserPointer(win);
+        if (!self) return;
+        self->m_width = width;
+        self->m_height = height;
+    }
+
     MorphWindow(const std::string& title, int width, int height, bool visible = true)
         : m_title(title), m_width(width), m_height(height), m_visible(visible) {
         glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
@@ -49,6 +56,7 @@ public:
             gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress));
             glfwSetWindowUserPointer(m_handle, this);
             glfwSetMouseButtonCallback(m_handle, mouseButtonCb);
+            glfwSetWindowSizeCallback(m_handle, windowSizeCb);
             glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
         }
     }
@@ -68,7 +76,7 @@ public:
         m_renderer.clear();
 
         if (m_root) {
-            m_root->layout(m_width, m_height);
+            m_root->layout(0.0f, 0.0f, (float)m_width, (float)m_height);
             m_root->draw(m_renderer);
         }
 
