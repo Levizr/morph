@@ -163,6 +163,16 @@ class IRBuilder:
                 action = attr_key.split("-")[1]
                 events.append(IREvent(trigger="click", action=action, target=target))
 
+        # onClick with console.log
+        onclick = props.get("onClick")
+        if isinstance(onclick, dict) and "__fn__" in onclick:
+            body = onclick["__fn__"]
+            import re
+            m = re.search(r'console\.log\(([^)]+)\)', body)
+            if m:
+                msg = m.group(1).strip().strip('"\'')
+                events.append(IREvent(trigger="click", action="log", target=msg))
+
         return IRNode(
             node_id=node_id,
             node_type=tag,
