@@ -6,7 +6,7 @@ dist/
 .morph/css-cache/
 .vscode
 .morph/packages/
-build/
+/build/
 .pytest_cache/
 *.so
 *.dylib

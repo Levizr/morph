@@ -1,6 +1,7 @@
 #pragma once
 #include <unordered_map>
 #include <string>
+#include <GLFW/glfw3.h>
 
 class MorphWindow;
 
@@ -17,9 +18,20 @@ public:
         m_windows[id] = w;
     }
 
-    void open(const std::string& id);
-    void close(const std::string& id);
-    void navigate(const std::string& windowId, const std::string& pageId);
+    void open(const std::string& id) {
+        // TODO: show window
+    }
 
-    bool allClosed() const;
+    void close(const std::string& id) {
+        // TODO: hide window
+    }
+
+    void navigate(const std::string& windowId, const std::string& pageId) {
+        // TODO: page navigation
+    }
+
+    bool allClosed() const {
+        if (m_windows.empty()) return true;
+        return false;
+    }
 };
