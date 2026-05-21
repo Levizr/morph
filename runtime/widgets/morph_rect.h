@@ -14,5 +14,7 @@ public:
             r.drawRoundedRect(x, y, w, h, style.borderRadius, style.bgColor);
         else
             r.drawRect(x, y, w, h, style.bgColor);
+        for (auto* child : children)
+            child->draw(r);
     }
 };

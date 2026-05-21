@@ -15,5 +15,7 @@ public:
 
     void draw(Renderer& r) override {
         r.drawRoundedRect(x, y, w, h, 6.0f, style.bgColor);
+        for (auto* child : children)
+            child->draw(r);
     }
 };

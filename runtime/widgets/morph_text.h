@@ -11,5 +11,7 @@ public:
 
     void draw(Renderer& r) override {
         r.drawText(text, x, y, style.color);
+        for (auto* child : children)
+            child->draw(r);
     }
 };
