@@ -17,12 +17,12 @@ The most impactful areas right now:
 
 | Area | Difficulty | Impact | Guide |
 |---|---|---|---|
-| **IRBuilder** (`morph/ir/builder.py`) | Medium | Critical — unlocks the entire pipeline | [Pipeline Deep-Dive](docs/pipeline.md) |
-| **Layout Engine** (`morph/layout/`) | Medium | Enables flexbox + complex layouts | [Development Guide](docs/development.md) |
-| **Style Resolver** (`morph/style/resolver.py`) | Medium | CSS cascade + specificity | [Development Guide](docs/development.md) |
 | **C++ Node Emitter** (`morph/codegen/node_emitter.py`) | Medium | Generates actual C++ from IR | [Pipeline Deep-Dive](docs/pipeline.md) |
-| **JS Interpreter** (`morph/js/interpreter.py`) | Hard | JS expressions → C++ lambdas | [Development Guide](docs/development.md) |
+| **Flexbox Layout** (`morph/layout/flex.py`) | Medium | Enables flexbox + complex layouts | [Development Guide](docs/development.md) |
 | **Build Compiler** (`morph/build/` — new module) | Medium | g++ invocation + binary output | [Pipeline Deep-Dive](docs/pipeline.md) |
+| **Style Resolver** (`morph/style/resolver.py`) | Medium | CSS cascade + specificity | [Development Guide](docs/development.md) |
+| **JS Interpreter** (`morph/js/interpreter.py`) | Hard | JS expressions → C++ lambdas | [Development Guide](docs/development.md) |
+| **`morph_devrt` binary** (`runtime/`) | Hard | Dev mode renderer | — |
 | **Tests** | Easy | Increase coverage | [Testing Guide](docs/testing.md) |
 | **Bug fixes** | Varies | Any open issue | — |
 
@@ -45,4 +45,4 @@ The most impactful areas right now:
 
 ## Project Board
 
-See the [Current State](../README.md#current-state-early-development) section in the README for a full breakdown of what's implemented, stubbed, and missing.
+See the [Current State](./README.md#current-state-early-development) section in the README for a full breakdown of what's implemented, stubbed, and missing.

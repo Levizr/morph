@@ -69,7 +69,6 @@ class JSXWalker:
                 if comp:
                     comp["exported"] = True
                     components.append(comp)
-
         return components
 
     def _parse_function_component(self, node: Node) -> dict | None:
@@ -164,7 +163,6 @@ class JSXWalker:
                 "children": children,
                 "self_closing": False,
             }
-
         return {}
 
     def _get_jsx_tag(self, node: Node) -> str:
@@ -191,12 +189,11 @@ class JSXWalker:
                         name = part.text.decode()
                     elif part.type == "string":
                         value = part.text.decode().strip("'\"")
-                    elif part.type == "jsx_expression_container":
+                    elif part.type in ("jsx_expression", "jsx_expression_container"):
                         value = self._unwrap_jsx_expr(part)
 
                 if name:
                     props[name] = value
-
         return props
 
     def _unwrap_jsx_expr(self, node: Node):
@@ -224,11 +221,15 @@ class JSXWalker:
             if child.type == "pair":
                 key = val = ""
                 for part in child.children:
-                    if part.type in ("property_identifier", "string"):
+                    if part.type == "property_identifier":
                         if not key:
                             key = part.text.decode().strip("'\"")
-                    elif part.type in ("string", "number",
-                                       "template_string", "identifier"):
+                    elif part.type == "string":
+                        if not key:
+                            key = part.text.decode().strip("'\"")
+                        else:
+                            val = part.text.decode().strip("'\"")
+                    elif part.type in ("number", "template_string", "identifier"):
                         val = part.text.decode().strip("'\"")
                 if key and val:
                     # camelCase → kebab-case

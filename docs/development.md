@@ -40,7 +40,7 @@ morph/                        # Python toolchain
 │   ├── sheet.py              #   StyleRule/StyleSheet dataclasses
 │   └── units.py              #   unit conversion (px, %, em)
 ├── ir/                       # Intermediate Representation
-│   ├── builder.py            #   walked AST → IR (CRITICAL STUB)
+│   ├── builder.py            #   walked AST → IR (implemented)
 │   ├── node.py               #   IRNode/IRWindow/IRPage/IRViewport
 │   ├── style.py              #   IRStyle dataclass
 │   ├── event.py              #   IREvent dataclass
@@ -156,4 +156,4 @@ Add the class to the `STATIC_MAP` dict in `morph/style/tailwind.py`. Follow the 
 - **`morph doctor`** — verify system dependencies
 - **`python -m pytest tests/ -v -k <test_name>`** — run specific test
 - **Pipeline logs** — errors are printed via `morph/utils/logger.py` with colored output
-- **No IR output?** — `IRBuilder.build()` returns `[]` — this is the main blocker
+- **No IR output?** — Check `morph/ir/builder.py` for errors in the style resolution or node building logic

@@ -12,7 +12,7 @@
 | 2 | `parser/jsx_walker.py` | AST | `{imports, components}` dict | ✅ |
 | 3 | `style/css_parser.py` | CSS files / URLs | `{selector: {prop: val}}` dict | ✅ |
 | 4 | `style/tailwind.py` | class strings | resolved CSS dicts | ✅ |
-| 5 | `ir/builder.py` | walked + CSS + Tailwind | `list[IRWindow]` | ❌ stub |
+| 5 | `ir/builder.py` | walked + CSS + Tailwind | `list[IRWindow]` | ✅ |
 | 6 | `layout/engine.py` | `list[IRWindow]` | computed positions | ⚠️ basic |
 | 7 | `codegen/` | `list[IRWindow]` | C++ source files | ⚠️ partial |
 | 8 | (missing) | C++ source | native binary | ❌ not built |
@@ -22,7 +22,7 @@
 - `parser/` — tree-sitter AST building + JSX walking (no hand-written lexer)
 - `dom/` — DOM node dataclasses + tree operations
 - `style/` — CSS parsing, Tailwind resolution, cascade + specificity (stub)
-- `ir/` — language-agnostic node tree + serializer
+- `ir/` — language-agnostic node tree + builder + serializer
 - `layout/` — box model math (basic vertical stacking; flexbox stub)
 - `js/` — AST walking + intent extraction (partial; interpreter stub)
 - `codegen/` — IR → C++ via Jinja2 templates (templates done, emitter stub)

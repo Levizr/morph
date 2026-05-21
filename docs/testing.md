@@ -46,12 +46,12 @@ tests/
 | `TailwindResolver` | `test_tailwind.py` | Static classes, arbitrary values, unknown classes skipped |
 | `ColorUtils` | `test_color_utils.py` | Hex, shorthand, named colors, parse_color |
 
-### ⚠️ Trivially Tested
+### ⚠️ Needs Better Tests
 
 | Module | Test File | What It Actually Checks |
 |---|---|---|
-| `IRBuilder` | `test_ir_builder.py` | Empty input returns `[]` (because build() is a stub) |
-| `LayoutEngine` | `test_layout.py` | Empty windows doesn't crash |
+| `IRBuilder` | `test_ir_builder.py` | Empty input returns `[]` (needs tests for inline styles, Tailwind, events, etc.) |
+| `LayoutEngine` | `test_layout.py` | Empty windows doesn't crash (needs position/size assertions) |
 
 ### ❌ Not Tested
 
@@ -96,13 +96,15 @@ def test_valid_mx_parses_without_error():
 
 The most valuable tests right now:
 
-1. **`IRBuilder.build()`** — Once implemented, test:
+1. **`IRBuilder.build()`** — Now implemented, needs tests for:
    - Empty component tree → empty list
    - Single div → single IRNode with correct type
-   - Inline styles → correct IRStyle values
+   - Inline styles → correct IRStyle values (color parsing, unit conversion)
    - Tailwind classes → resolved to CSS properties
    - `morph-open` attribute → IREvent created
    - `morph-window` → IRWindow with config
+   - CSS cascade order (inline > Tailwind > tag rules)
+   - Style shorthand parsing (padding: 4 values → 4 sides)
 
 2. **`LayoutEngine`** — Test:
    - Single node at origin
@@ -110,7 +112,7 @@ The most valuable tests right now:
    - Margin/padding affects position
    - Flex layout (when implemented)
 
-3. **`StyleResolver`** — Test:
+3. **`StyleResolver`** — When implemented, test:
    - Tag selector matching (`h1` matches `<h1>`)
    - Class selector matching (`.foo` matches `<div class="foo">`)
    - Specificity ordering

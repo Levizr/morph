@@ -1,7 +1,7 @@
 import json
 import urllib.request
 
-REGISTRY_BASE = "https://registry.morph-ui.dev"
+REGISTRY_BASE = "https://registry.levizr.com/morph"
 
 
 class RegistryClient:

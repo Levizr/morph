@@ -50,7 +50,7 @@ public:
 | Component | Status |
 |---|---|
 | `morph pkg add <name>` — download + extract | ✅ |
-| Registry fetch (registry.morph-ui.dev) | ✅ |
+| Registry fetch (registry.levizr.com/morph) | ✅ |
 | Manifest parsing (`morph.pkg.json`) | ✅ |
 | `morph pkg list` — show installed | ⚠️ Stub |
 | `morph pkg install` — restore from config | ⚠️ Stub |

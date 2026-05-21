@@ -52,7 +52,8 @@ def run(config) -> dict | None:
 
         # 4. Build IR
         ir = IRBuilder(config).build(walked, css_rules, _tw_resolver)
-
+        import json
+        print(json.dumps(IRSerializer().to_dict(ir), indent=2))
         # 5. Layout
         LayoutEngine().compute(ir)
 

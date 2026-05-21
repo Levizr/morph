@@ -1,5 +1,4 @@
 import json
-from dataclasses import asdict
 from morph.ir.node import IRWindow
 
 
@@ -26,18 +25,30 @@ class IRSerializer:
         }
 
     def _node(self, n) -> dict:
+        s = n.style
         return {
-            "id":           n.node_id,
-            "type":         n.node_type,
+            "id":      n.node_id,
+            "type":    n.node_type,
             "x": n.x, "y": n.y,
             "w": n.w, "h": n.h,
-            "text":         n.text_content,
-            "style":        {
-                "bg_color":      list(n.style.bg_color),
-                "color":         list(n.style.color),
-                "border_radius": n.style.border_radius,
+            "text":    n.text_content,
+            "style": {
+                "bg_color":      list(s.bg_color),
+                "color":         list(s.color),
+                "width":         s.width,
+                "height":        s.height,
+                "margin":        list(s.margin),
+                "padding":       list(s.padding),
+                "border_radius": s.border_radius,
+                "font_size":     s.font_size,
+                "font_weight":   s.font_weight,
+                "text_align":    s.text_align,
+                "display":       s.display,
+                "flex_dir":      s.flex_dir,
+                "flex":          s.flex,
+                "gap":           s.gap,
             },
-            "children":     [self._node(c) for c in n.children],
-            "events":       [{"trigger": e.trigger, "action": e.action,
-                              "target": e.target} for e in n.events],
+            "children": [self._node(c) for c in n.children],
+            "events":   [{"trigger": e.trigger, "action": e.action,
+                          "target": e.target} for e in n.events],
         }

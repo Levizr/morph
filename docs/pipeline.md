@@ -27,9 +27,9 @@
                                                       morph_devrt binary             emitter → g++ → binary
 ```
 
-## Deep-Dive: IRBuilder (The Critical Stub)
+## Deep-Dive: IRBuilder
 
-This is the most important unimplemented component. Here's what it needs to do:
+This is the heart of the compiler — now fully implemented. Here's what it does:
 
 ### Input
 
@@ -85,46 +85,48 @@ def build(
 }
 ```
 
-### What build() Must Do
+### What build() Does (Implementation)
 
-#### Step 1: Walk Components
+Located at `morph/ir/builder.py`. Key design:
 
-Iterate over `walked["components"]`. For each component:
+#### Style Resolution Order
 
-1. Create an `IRWindow` (top-level component becomes a window)
-2. Walk the JSX tree recursively
+The builder implements a basic CSS cascade: **inline > Tailwind > CSS rules > defaults**
 
-#### Step 2: Resolve Styles for Each Element
+1. **Tag selectors**: Matches element tag against `css_rules` keys (e.g. `h1` → `css_rules["h1"]`)
+2. **Class selectors**: Splits `className`/`class` prop, matches against `.classname` keys in `css_rules`
+3. **Tailwind classes**: Each class token passed to `TailwindResolver.resolve()` which returns a CSS dict
+4. **Inline styles**: Parsed from `props["style"]` dict (from JSX walker), already camelCase→kebab'd
 
-For each JSX element:
+All layers are merged via `dict.update()` with later sources overriding earlier ones.
 
-1. **Tag-based CSS**: Match element tag against `css_rules` keys (e.g. `h1` → `css_rules["h1"]`)
-2. **Class-based CSS**: If element has `props["class"]` or `props["className"]`, split into classes and match each against `css_rules` (e.g. `.toolbar`)
-3. **Tailwind classes**: Split class string, pass each token to `tw_resolver.resolve()` which returns a CSS dict
-4. **Inline styles**: Parse `props["style"]` string or dict into CSS properties
-5. **Merge**: Inline > Tailwind > class CSS > tag CSS (basic cascade)
-6. **Convert to IRStyle**: Map CSS string values to typed `IRStyle` fields:
-   - `"#fff"` / `"white"` → `parse_color()` → `IRStyle.bg_color`
-   - `"16px"` → `to_px()` → `IRStyle.padding`
-   - `"true"` / `"1"` / `"flex"` → boolean flags
+#### CSS → IRStyle Conversion
 
-#### Step 3: Build IRNode Tree
+The `_CSS_TO_IR` mapping handles field name differences:
 
-For each JSX element:
+| CSS property | IRStyle field | Conversion |
+|---|---|---|
+| `background-color` | `bg_color` | `parse_color()` → RGBA tuple |
+| `color` | `color` | `parse_color()` → RGBA tuple |
+| `padding`, `margin` | `padding`, `margin` | `_parse_side_value()` → 4-float tuple |
+| `width`, `height` | `width`, `height` | `to_px()` → float or None |
+| `border-radius` | `border_radius` | `to_px()` → float |
+| `font-size` | `font_size` | `to_px()` → float |
+| `gap`, `flex` | `gap`, `flex` | `to_px()` → float |
+| `display` | `display` | string (e.g. `"flex"`, `"block"`) |
+| `flex-direction` | `flex_dir` | string (e.g. `"row"`, `"column"`) |
+| `font-weight`, `text-align` | `font_weight`, `text_align` | string |
 
-1. Create `IRNode` with:
-   - `node_id` from `_next_id()`
-   - `node_type` from tag (`"div"`, `"h1"`, `"button"`, `"morph-window"`, etc.)
-   - `style` from resolved `IRStyle`
-   - `children` recursively built
-2. For `morph-window` elements, wrap in `IRWindow`
-3. For event attributes (`morph-open`, `morph-close`, `morph-navigate`), create `IREvent` objects
+#### Event Extraction
 
-#### Step 4: Handle Special Elements
+The builder scans props for `morph-open`, `morph-close`, `morph-navigate` and creates `IREvent(trigger="click", action=..., target=...)` for each.
 
-- **`<morph-window>`** → Create `IRWindow`, move attributes to window config
-- **`<morph-viewport>`** → Create `IRViewport`, attach driver class
-- **`<morph-page>`** → Create `IRPage`
+#### Special Elements
+
+- **`<morph-window>`** → `IRWindow` with window config (title, width, height)
+- **`<morph-viewport>`**, **`<morph-page>`** → detected but handled generically (IRViewport/IRPage creation not yet fully wired)
+
+### Example: What the Pipeline Produces
 
 ### Reference: Utility Functions Available
 
@@ -137,58 +139,69 @@ For each JSX element:
 | `DOMAttributes.parse()` | `morph/dom/attributes.py` | detect morph-open/close/navigate |
 | `IRSerializer.to_dict()` | `morph/ir/serializer.py` | IR → JSON for dev socket |
 
-### Example: What a Working Pipeline Should Produce
+### Example: What the Pipeline Produces
 
-Given this `.mx` file:
+Given `src/App.mx`:
 
 ```html
-<morph-window title="Demo" width="800" height="600">
-  <h1 class="title" style="color: #333;">Hello</h1>
-  <button morph-open="modal">Open</button>
+<morph-window title="My App" width="800" height="600">
+  <div style={{ backgroundColor: '#0f0f0f', padding: 32, gap: 16 }}>
+    <h1 style={{ color: '#e8e8f0', fontSize: 28 }}>Hello, Morph!</h1>
+    <p style={{ color: '#8888aa', fontSize: 14 }}>Edit src/App.mx to get started.</p>
+  </div>
 </morph-window>
 ```
 
-`IRBuilder.build()` should return:
+`morph build` produces this IR dict (LayoutEngine computes positions):
 
-```python
-[
-    IRWindow(
-        config={"title": "Demo", "width": 800, "height": 600},
-        nodes=[
-            IRNode(
-                node_id="node_0001",
-                node_type="h1",
-                style=IRStyle(color=(0.2, 0.2, 0.2, 1.0), ...),
-                children=[
-                    IRNode(node_id="node_0002", node_type="__text__",
-                           text="Hello")
-                ],
-            ),
-            IRNode(
-                node_id="node_0003",
-                node_type="button",
-                style=IRStyle(bg_color=(0.5, 0.5, 0.5, 1.0), ...),
-                events=[
-                    IREvent(trigger="click", action="open", target="modal")
-                ],
-            ),
-        ],
-    ),
-]
+```json
+{
+  "type": "app",
+  "windows": [{
+    "id": "node_0001", "title": "My App", "width": 800, "height": 600,
+    "nodes": [{
+      "id": "node_0002", "type": "div",
+      "style": {
+        "bg_color": [0.0588, 0.0588, 0.0588, 1.0],
+        "padding": [32.0, 32.0, 32.0, 32.0],
+        "display": "flex", "flex_dir": "column", "gap": 16.0
+      },
+      "children": [
+        { "id": "node_0003", "type": "h1",
+          "text": "",
+          "style": { "color": [0.91, 0.91, 0.94, 1.0], "font_size": 28.0 },
+          "children": [
+            { "id": "node_0004", "type": "__text__",
+              "text": "Hello, Morph!" }
+          ]
+        },
+        { "id": "node_0005", "type": "p",
+          "style": { "color": [0.53, 0.53, 0.67, 1.0], "font_size": 14.0 },
+          "children": [
+            { "id": "node_0006", "type": "__text__",
+              "text": "Edit src/App.mx to get started." }
+          ]
+        }
+      ]
+    }]
+  }]
+}
 ```
 
-## Deep-Dive: C++ Codegen (Post-IRBuilder)
+All style fields (margin, border_radius, font_weight, text_align, flex, etc.) are also serialized with defaults where not specified.
 
-Once `IRBuilder.build()` returns real data, the codegen path is:
+## Deep-Dive: C++ Codegen (Next Step)
 
-1. **`IRSerializer.to_dict()`** converts IR to JSON for dev mode
-2. **`FeatureSet.scan(nodes)`** determines which C++ headers are needed
-3. **`NodeEmitter.emit_node(node)`** generates C++ instantiation for each node
-4. **`EventEmitter.emit(event)`** generates event handler lambdas
-5. **`Emitter.render(template_name, context)`** renders Jinja2 templates
-6. **`Compiler.compile(cpp_source)`** (not yet built) invokes g++
+The IR pipeline is complete. The next step is the codegen → compile path:
 
-The Jinja2 templates are already complete:
+1. **`IRSerializer.to_dict()`** ✅ converts IR to JSON for dev mode
+2. **`FeatureSet.scan(nodes)`** ✅ determines which C++ headers are needed
+3. **`NodeEmitter.emit_node(node)`** ❌ stub — returns C++ comments, not real code
+4. **`EventEmitter.emit(event)`** ⚠️ partial — basic handlers work
+5. **`Emitter.render(template_name, context)`** ✅ renders Jinja2 templates
+6. **`Compiler.compile(cpp_source)`** ❌ module does not exist
+
+The Jinja2 templates are complete:
 - `app_main.cpp.j2` — WindowManager setup, event loop
 - `window.cpp.j2` — Window instantiation
 - `node_rect.cpp.j2` — RectNode with style
@@ -196,4 +209,4 @@ The Jinja2 templates are already complete:
 - `node_custom.cpp.j2` — Custom C++ node
 - `node_viewport.cpp.j2` — ViewportNode with driver
 
-The missing piece is `node_emitter.py` which should map each `IRNode` to the right template and fill in the template variables.
+The missing piece is `node_emitter.py` which should map each `IRNode` to the right template and fill in the template variables, and `morph/build/compiler.py` which should invoke g++ to produce the final binary.

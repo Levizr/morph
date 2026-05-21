@@ -1,11 +1,53 @@
 from __future__ import annotations
 
-from morph.ir.node import IRNode, IRWindow, IRPage, IRViewport
+from morph.ir.node import IRNode, IRWindow
+from morph.ir.style import IRStyle
+from morph.ir.event import IREvent
 from morph.style.tailwind import TailwindResolver
+from morph.utils.color import parse_color
+from morph.style.units import to_px
+
+# CSS property name → IRStyle field name
+_CSS_TO_IR: dict[str, str] = {
+    "background-color": "bg_color",
+    "color":            "color",
+    "width":            "width",
+    "height":           "height",
+    "margin":           "margin",
+    "padding":          "padding",
+    "border-radius":    "border_radius",
+    "font-size":        "font_size",
+    "font-weight":      "font_weight",
+    "text-align":       "text_align",
+    "display":          "display",
+    "flex-direction":   "flex_dir",
+    "flex":             "flex",
+    "gap":              "gap",
+}
+
+_SIDES = {
+    "margin":  "margin",
+    "padding": "padding",
+}
+
+
+def _parse_side_value(key: str, val: str) -> tuple[float, float, float, float]:
+    """Parse a CSS shorthand like '10px 20px' or a single value into 4 sides."""
+    parts = val.split()
+    nums = [to_px(p) for p in parts]
+    if len(nums) == 1:
+        return (nums[0], nums[0], nums[0], nums[0])
+    if len(nums) == 2:
+        return (nums[0], nums[1], nums[0], nums[1])
+    if len(nums) == 3:
+        return (nums[0], nums[1], nums[2], nums[1])
+    if len(nums) == 4:
+        return (nums[0], nums[1], nums[2], nums[3])
+    return (0.0, 0.0, 0.0, 0.0)
 
 
 class IRBuilder:
-    """Converts a resolved DOMTree + JS intents into an IR tree."""
+    """Converts a walked AST + CSS rules + Tailwind into an IR tree."""
 
     def __init__(self, config=None):
         self.config = config
@@ -17,13 +59,193 @@ class IRBuilder:
         css_rules: dict,
         tw_resolver: TailwindResolver,
     ) -> list[IRWindow]:
-        # TODO: walk walked tree, apply CSS + Tailwind, build IRWindows + IRNodes
-        import json
-        print(json.dumps(walked, indent=2))
-        print(css_rules)
-        print(tw_resolver)
-        return []
+        ir_windows = []
+        for comp in walked.get("components", []):
+            if not comp.get("exported", False):
+                continue
+
+            jsx = comp.get("jsx", {})
+            tag = jsx.get("tag")
+
+            if tag == "morph-window":
+                window_id = self._next_id()
+                props = jsx.get("props", {})
+
+                # ── Resolve Tailwind classes on window itself ──
+                tw_styles = _resolve_tw(props, tw_resolver)
+
+                config = {
+                    "title":  props.get("title",  str(getattr(self.config, "name", "Untitled"))),
+                    "width":  _int_prop(props, "width",  tw_styles, 800),
+                    "height": _int_prop(props, "height", tw_styles, 600),
+                }
+
+                window_nodes = []
+                for child in jsx.get("children", []):
+                    node = self._build_node(child, css_rules, tw_resolver)
+                    if node:
+                        window_nodes.append(node)
+
+                ir_windows.append(IRWindow(
+                    window_id=window_id,
+                    nodes=window_nodes,
+                    **config,
+                ))
+
+        return ir_windows
+
+    def _build_node(
+        self,
+        jsx_node: dict,
+        css_rules: dict,
+        tw_resolver: TailwindResolver,
+    ) -> IRNode | None:
+        tag = jsx_node.get("tag")
+        if not tag:
+            return None
+
+        node_id = self._next_id()
+        props = jsx_node.get("props", {})
+
+        # ── Text node ────────────────────────────────────────
+        if tag == "__text__":
+            return IRNode(
+                node_id=node_id,
+                node_type="__text__",
+                text_content=jsx_node.get("text", ""),
+                style=IRStyle(),
+                children=[],
+                events=[],
+            )
+
+        # ── Resolve CSS cascade ──────────────────────────────
+        inline_raw = props.get("style", {})
+        if isinstance(inline_raw, str):
+            inline_raw = {}
+        class_names = _get_classes(props)
+        tw_styles = _resolve_tw(props, tw_resolver)
+
+        # Merge: inline > Tailwind > CSS rules > defaults
+        merged = {}
+        for rule_key in css_rules:
+            if _selector_matches(tag, rule_key, class_names):
+                merged.update(css_rules[rule_key])
+        merged.update(tw_styles)
+        merged.update(inline_raw)
+
+        # ── Convert merged CSS → IRStyle fields ──────────────
+        ir_kw = {}
+        for css_key, css_val in merged.items():
+            ir_field = _CSS_TO_IR.get(css_key)
+            if ir_field is None:
+                continue
+            val = _convert_value(ir_field, css_val)
+            if val is not None:
+                ir_kw[ir_field] = val
+
+        try:
+            node_style = IRStyle(**ir_kw)
+        except TypeError:
+            node_style = IRStyle()
+
+        # ── Children ─────────────────────────────────────────
+        children_nodes = []
+        for child in jsx_node.get("children", []):
+            child_node = self._build_node(child, css_rules, tw_resolver)
+            if child_node:
+                children_nodes.append(child_node)
+
+        # ── Events ───────────────────────────────────────────
+        events = []
+        for attr_key in ("morph-open", "morph-close", "morph-navigate"):
+            target = props.get(attr_key)
+            if target:
+                action = attr_key.split("-")[1]
+                events.append(IREvent(trigger="click", action=action, target=target))
+
+        return IRNode(
+            node_id=node_id,
+            node_type=tag,
+            style=node_style,
+            children=children_nodes,
+            events=events,
+        )
 
     def _next_id(self) -> str:
         self._counter += 1
         return f"node_{self._counter:04d}"
+
+
+# ── Helpers ────────────────────────────────────────────────────
+
+
+def _get_classes(props: dict) -> list[str]:
+    raw = props.get("className") or props.get("class") or ""
+    if isinstance(raw, str):
+        return raw.split()
+    if isinstance(raw, dict) and "__ref__" in raw:
+        return []
+    return []
+
+
+def _resolve_tw(props: dict, tw: TailwindResolver) -> dict:
+    """Resolve Tailwind classes from className prop into a CSS dict."""
+    classes = _get_classes(props)
+    merged = {}
+    for cls in classes:
+        result = tw.resolve(cls)
+        if result:
+            merged.update(result)
+    return merged
+
+
+def _selector_matches(tag: str, rule_key: str, classes: list[str]) -> bool:
+    """Simple tag / class selector matching."""
+    key = rule_key.strip()
+    if key.startswith("."):
+        return key[1:] in classes
+    if key.startswith("#"):
+        return False  # id matching not needed yet
+    return key == tag
+
+
+def _int_prop(props: dict, key: str, tw_styles: dict, fallback: int) -> int:
+    raw = props.get(key)
+    if raw is not None:
+        try:
+            return int(raw)
+        except (ValueError, TypeError):
+            pass
+    tw = tw_styles.get(key)
+    if tw is not None:
+        try:
+            return int(tw)
+        except (ValueError, TypeError):
+            pass
+    return fallback
+
+
+def _convert_value(field: str, raw: str | float | int) -> float | str | tuple | None:
+    """Convert a raw CSS string/float to the type expected by IRStyle."""
+    if isinstance(raw, (int, float)):
+        raw = str(raw)
+
+    if not isinstance(raw, str):
+        raw = str(raw)
+
+    if field in ("bg_color", "color"):
+        return parse_color(raw)
+
+    if field in ("width", "height", "border_radius", "font_size", "flex", "gap"):
+        try:
+            return to_px(raw)
+        except (ValueError, TypeError):
+            return None
+
+    if field in ("margin", "padding"):
+        return _parse_side_value(field, raw)
+
+    if field in ("font_weight", "text_align", "display", "flex_dir"):
+        return raw
+
+    return None

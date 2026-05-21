@@ -98,12 +98,14 @@ morph build
 Morph is a **compiler**, not an interpreter. Your source files never ship — only the compiled binary does.
 
 ```
-src/App.mx ──► MorphParser ──► JSXWalker ──► IRBuilder ──► LayoutEngine ──► C++ Codegen ──► g++ ──► native binary
+src/App.mx ──► MorphParser ──► JSXWalker ──► IRBuilder ──► LayoutEngine ──► IR dict ──► C++ Codegen ──► g++ ──► native binary
+                                                                                        │
+                                                                                 [Dev: Unix Socket]
 ```
 
 **Python** handles the entire toolchain — `.mx` parsing via tree-sitter, IR building, layout math, and Jinja2-based C++ code generation. **C++** handles the runtime — OpenGL rendering, window management, and event handling. The final binary contains zero Python and zero Node.
 
-In **dev mode**, a pre-compiled renderer (`morph_devrt`) receives updated IR over a Unix socket on every file save. The window never closes — only the node tree swaps.
+In **dev mode**, the pipeline produces an IR dict that is sent over a Unix socket to a pre-compiled renderer (`morph_devrt`) on every file save. The window never closes — only the node tree swaps.
 
 ---
 
@@ -118,26 +120,29 @@ Morph's pipeline is under active development. Here's what's working and what's s
 | **`.mx` file parsing** — tree-sitter-based JSX, imports, props | Complete |
 | **CSS parsing** — local files, remote URLs, MD5-cached | Complete |
 | **Tailwind CSS** — 500 common utility classes + arbitrary values | Complete |
-| **CLI** — `init`, `dev`, `build`, `pkg`, `doctor`, `cache` | Complete |
+| **IRBuilder** — walked AST → IR with inline CSS, Tailwind, color/unit conversion | Complete |
+| **CLI** — `init` (interactive wizard), `dev`, `build`, `pkg`, `doctor` (advanced), `cache` | Complete |
 | **Config** — `morph.config.json` load/save | Complete |
-| **IR data models** — `IRNode`, `IRWindow`, `IRPage`, `IRViewport` | Complete |
+| **IR data models** — `IRNode`, `IRWindow`, `IRPage`, `IRViewport`, `IRStyle`, `IREvent` | Complete |
 | **IR serializer** — JSON-safe dict for dev socket | Complete |
+| **Layout engine** — box model (margin, padding), vertical stacking, gap | Complete |
 | **Dev file watcher** — watchdog-based with debounce | Complete |
 | **Unix socket IPC** — sends IR to dev runtime | Complete |
 | **Codegen templates** — Jinja2 templates for C++ output | Complete |
 | **Package registry client** — fetch, install, manifest parsing | Complete |
 | **Color utilities** — hex/rgb parsing and conversion | Complete |
-| **System doctor** — dependency checks (Python, g++, GLFW, Node) | Complete |
+| **System doctor** — version checks, dependency diagnostics | Complete |
+| **Inline style resolution** — camelCase→kebab, color parsing, unit conversion | Complete |
+| **Event extraction** — `morph-open`, `morph-close`, `morph-navigate` → IREvent | Complete |
 
 ### 🚧 In Progress
 
 | Component | Status | Notes |
 |---|---|---|
-| **IRBuilder** — walked AST → IR with CSS/Tailwind resolution | **Critical stub** | Core compiler step — returns `[]` |
-| **Layout engine** — box model + vertical stacking | Partial | Flexbox not implemented |
-| **Style resolver** — CSS cascade, specificity, selector matching | Stub | Only inline styles work |
+| **Layout engine** — flexbox | Partial | Vertical stacking works, `apply_flex()` is stub |
+| **Style resolver** — CSS cascade, specificity, selector matching | Stub | Only inline + Tailwind work via IRBuilder |
 | **JS interpreter** — JS event handler → C++ lambdas | Stub | Only `import` works |
-| **C++ node emitter** — IR → C++ instantiation code | Stub | Templates exist, emitter is todo |
+| **C++ node emitter** — IR → C++ instantiation code | Stub | Templates exist, emitter returns comments |
 | **`morph_devrt` binary** — dev mode renderer | Missing | Binary not yet built |
 | **Build compiler** — g++ invocation + binary output | Missing | Module not created |
 
@@ -145,13 +150,14 @@ Morph's pipeline is under active development. Here's what's working and what's s
 
 ## Features
 
-**CSS Properties**
-- `width`, `height`, `min-width`, `min-height`
-- `margin`, `padding` (all sides)
-- `background-color`, `color`
+**CSS Properties** — all resolved from inline styles, CSS rules, and Tailwind classes
+- `width`, `height`
+- `margin`, `padding` (shorthand: 1-4 values → all sides)
+- `background-color`, `color` (hex, rgb, named)
 - `border-radius`
 - `display: flex`, `flex-direction`, `flex`, `gap`
-- `font-size`, `font-weight`, `text-align`
+- `font-size` (px, %, em, bare numbers), `font-weight`, `text-align`
+- Unit conversion via `to_px()` with px/%/em support
 
 **HTML Elements**
 - `div`, `span`, `h1`–`h6`, `p`, `button`, `input`
@@ -225,13 +231,13 @@ Run `morph doctor` after installing to verify your environment.
 ## Roadmap
 
 ### Next Up (Priority Order)
-- [ ] **IRBuilder** — Convert walked AST + CSS + Tailwind into IR nodes (the critical path)
-- [ ] **Style resolver** — CSS selector matching, cascade, specificity
+- [x] **IRBuilder** — Convert walked AST + CSS + Tailwind into IR nodes ✅
 - [ ] **Flexbox layout** — `display: flex` support in layout engine
-- [ ] **JS interpreter** — JS expression handling (NewExpression, CallExpression)
+- [ ] **CSS style resolver** — Selector matching, cascade, specificity
 - [ ] **C++ node emitter** — Generate actual C++ instantiation from IR
 - [ ] **`morph build`** — compiler module to invoke g++ and produce binary
 - [ ] **`morph_devrt` binary** — Pre-compiled renderer for dev mode
+- [ ] **JS interpreter** — JS expression handling (NewExpression, CallExpression)
 
 ### Future
 - [ ] Multi-window & navigation system
@@ -257,7 +263,7 @@ pip install -e ".[dev]"
 morph doctor
 ```
 
-The most impactful contribution right now is implementing `IRBuilder.build()` in `morph/ir/builder.py` — it's the heart of the compiler and the main blocker for the entire pipeline. See the [Current State](#current-state-early-development) section for a full breakdown of what needs work.
+The most impactful areas right now are the **flexbox layout engine**, **C++ node emitter**, and the **`morph build` compiler module**. See the [Current State](#current-state-early-development) section for a full breakdown.
 
 Open an issue before starting on large features so we can align on design.
 

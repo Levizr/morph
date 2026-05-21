@@ -4,6 +4,7 @@ __pycache__/
 dist/
 .morph/
 .morph/css-cache/
+.vscode
 .morph/packages/
 build/
 .pytest_cache/
