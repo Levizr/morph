@@ -1,5 +1,7 @@
 # Writing a Morph Package
 
+**Status: Package CLI (`morph pkg add/list/install`) works. JS/C++ integration pipeline is stubbed — packages can be downloaded but not yet compiled into the binary.**
+
 ## Required Files
 
 ```
@@ -42,3 +44,16 @@ public:
     void draw(Renderer& r) override { ... }
 };
 ```
+
+## Current Implementation
+
+| Component | Status |
+|---|---|
+| `morph pkg add <name>` — download + extract | ✅ |
+| Registry fetch (registry.morph-ui.dev) | ✅ |
+| Manifest parsing (`morph.pkg.json`) | ✅ |
+| `morph pkg list` — show installed | ⚠️ Stub |
+| `morph pkg install` — restore from config | ⚠️ Stub |
+| `morph pkg remove` | ⚠️ Stub |
+| Dependency resolver (versions, topological sort) | ⚠️ Stub |
+| JS → C++ bridge at build time | ❌ Not implemented |

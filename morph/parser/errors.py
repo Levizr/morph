@@ -11,7 +11,9 @@ class UnexpectedTokenError(MorphParseError):
 
 class MissingAttributeError(MorphParseError):
     def __init__(self, attr, tag):
-        super().__init__(f"Missing required attribute '{attr}' on <{tag}>")
+        super().__init__(
+            f"Missing required attribute '{attr}' on <{tag}>"
+        )
 
 
 class UnsupportedPropertyError(MorphParseError):

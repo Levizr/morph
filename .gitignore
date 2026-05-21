@@ -3,9 +3,12 @@ __pycache__/
 *.egg-info/
 dist/
 .morph/
+.morph/css-cache/
+.morph/packages/
 build/
 .pytest_cache/
 *.so
 *.dylib
-test.py
+
 my-app
+test.py

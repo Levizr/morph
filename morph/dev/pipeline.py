@@ -1,36 +1,62 @@
-from morph.lexer import HTMLLexer, CSSLexer, JSLexer
-from morph.parser import HTMLParser, CSSParser, JSParser
-from morph.style.resolver import StyleResolver
+from __future__ import annotations
+from pathlib import Path
+
+from morph.parser.morph_parser import MorphParser
+from morph.parser.jsx_walker import JSXWalker
+from morph.style.css_parser import CSSParser
+from morph.style.css_fetcher import CSSFetcher
+from morph.style.tailwind import TailwindResolver
 from morph.ir.builder import IRBuilder
 from morph.ir.serializer import IRSerializer
 from morph.layout.engine import LayoutEngine
-from morph.utils.logger import log_info, log_error
+from morph.utils.logger import log_error
+
+# ── Module-level singletons — dev mode mein reuse hote hain ──
+_tw_resolver: TailwindResolver | None = None
+_fetcher = CSSFetcher()
+_css_parser = CSSParser()
 
 
 def run(config) -> dict | None:
-    """Full source → IR dict. Returns None on failure."""
+    """
+    Full .mx source → IR dict pipeline.
+    Returns serialized IR dict on success, None on failure.
+    """
+    global _tw_resolver
+    if _tw_resolver is None:
+        _tw_resolver = TailwindResolver(project_root=".")
+
     try:
-        import pathlib
-        entry   = pathlib.Path(config.entry)
-        css_f   = pathlib.Path("src/style.css")
-        js_f    = pathlib.Path("src/app.js")
+        source = Path(config.entry).read_text(encoding="utf-8")
 
-        html_src = entry.read_text()
-        css_src  = css_f.read_text()  if css_f.exists()  else ""
-        js_src   = js_f.read_text()   if js_f.exists()   else ""
+        # 1. Parse .mx → AST  (syntax errors yahan throw honge)
+        ast = MorphParser().parse(source)
 
-        html_tok = HTMLLexer().tokenize(html_src)
-        css_tok  = CSSLexer().tokenize(css_src)
-        js_tok   = JSLexer().tokenize(js_src)
+        # 2. Walk AST → components + imports
+        walked = JSXWalker().walk(ast)
 
-        dom      = HTMLParser().parse(html_tok)
-        sheet    = CSSParser().parse(css_tok)
-        js_ir    = JSParser().parse(js_tok)
+        # 3. CSS resolve karo
+        css_rules: dict = {}
+        for imp in walked.get("imports", []):
+            if imp["type"] == "css_local":
+                path = Path(config.entry).parent / imp["path"]
+                if path.exists():
+                    rules = _css_parser.parse_file(str(path))
+                    css_rules.update(rules)
 
-        StyleResolver(sheet).resolve(dom)
-        ir       = IRBuilder(config).build(dom, js_ir)
+            elif imp["type"] == "css_url":
+                css_text = _fetcher.fetch(imp["url"])
+                if css_text:
+                    rules = _css_parser.parse_string(css_text)
+                    css_rules.update(rules)
+
+        # 4. Build IR
+        ir = IRBuilder(config).build(walked, css_rules, _tw_resolver)
+
+        # 5. Layout
         LayoutEngine().compute(ir)
 
+        # 6. Serialize → JSON-safe dict (dev socket ke liye)
         return IRSerializer().to_dict(ir)
 
     except Exception as e:

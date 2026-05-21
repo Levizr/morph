@@ -1,6 +1,6 @@
 {
   "name": "my-app",
-  "entry": "src/index.html",
+  "entry": "src/App.mx",
   "output": "dist/",
   "window": {
     "width": 800,

@@ -3,14 +3,20 @@ import time
 from morph.config.loader import load_config
 from morph.dev import pipeline
 from morph.codegen.emitter import Emitter
-from morph.build.compiler import Compiler
-from morph.build.optimizer import report_size
-from morph.utils.logger import log_info, log_error
+from morph.utils.logger import log_info, log_error, log_step, log_success, log_banner
 
 
-def run() -> None:
+def run(args=None) -> None:
     config = load_config()
-    log_info("Building production binary...")
+
+    if args and getattr(args, "entry", None):
+        config.entry = args.entry
+    if args and getattr(args, "output", None):
+        config.output = args.output
+
+    log_banner("Production Build")
+
+    log_step("Building production binary")
     start = time.time()
 
     ir_dict = pipeline.run(config)
@@ -18,13 +24,11 @@ def run() -> None:
         log_error("Pipeline failed")
         return
 
+    log_step("Generating C++ code")
     # TODO: deserialize ir_dict back to IRWindow list for emitter
     # Emitter().emit(windows, out_path="dist/app.cpp")
-    # Compiler("prod").compile("dist/app.cpp", "dist/app")
 
     elapsed = time.time() - start
-    out = os.path.join(config.output, "app")
-    if os.path.exists(out):
-        log_info(f"Done in {elapsed:.2f}s → dist/app ({report_size(out)})")
-    else:
-        log_info(f"Codegen complete in {elapsed:.2f}s (compile step TODO)")
+    out_path = os.path.join(config.output, "app")
+    log_success(f"Codegen complete in {elapsed:.2f}s")
+    log_info(f"Output: {out_path} (compile step TODO)")

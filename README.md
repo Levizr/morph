@@ -4,14 +4,14 @@
 
 ```
 ███╗   ███╗ ██████╗ ██████╗ ██████╗ ██╗  ██╗
-████╗ ████║██╔═══██╗██╔══██╗██╔══██╗██║  ██║
+████╗ █████║██╔═══██╗██╔══██╗██╔══██╗██║  ██║
 ██╔████╔██║██║   ██║██████╔╝██████╔╝███████║
 ██║╚██╔╝██║██║   ██║██╔══██╗██╔═══╝ ██╔══██║
 ██║ ╚═╝ ██║╚██████╔╝██║  ██║██║     ██║  ██║
 ╚═╝     ╚═╝ ╚═════╝ ╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝
 ```
 
-**Build native OpenGL UIs with HTML, CSS, and JavaScript.**
+**Build native OpenGL Applicationswith HTML, CSS, and JavaScript.**
 
 No browser. No Electron. No WebView. Just a lightweight native binary.
 
@@ -31,22 +31,22 @@ No browser. No Electron. No WebView. Just a lightweight native binary.
 
 ## What is Morph?
 
-Morph is a UI framework that compiles HTML, CSS, and JavaScript directly into OpenGL draw calls. You write familiar web syntax — Morph produces a lean, native binary with zero browser overhead.
+Morph is a UI framework that compiles `.mx` files (JSX-like syntax with CSS and JavaScript) directly into native OpenGL binaries. You write familiar web syntax — Morph produces a lean, native binary with zero browser overhead.
 
 ```html
-<!-- src/index.html -->
+<!-- src/App.mx -->
 <morph-window title="My App" width="800" height="600">
-  <div id="toolbar" style="height: 48px; background: #1a1a2e;">
-    <button morph-open="settings">⚙ Settings</button>
+  <div style="height: 48px; background: #1a1a2e;">
+    <button morph-open="settings">Settings</button>
   </div>
 
-  <morph-viewport driver="cpp/scene.h" class="SceneRenderer" style="flex: 1;" />
+  <h1 style="color: #e0e0e0;">Hello from Morph</h1>
 </morph-window>
 ```
 
 ```bash
-morph dev      # live window, hot reload in ~10ms
-morph build    # optimized native binary → dist/app
+morph dev      # live window, hot reload via Unix socket
+morph build    # optimized native binary
 ```
 
 ---
@@ -83,12 +83,12 @@ cd my-app
 morph dev
 ```
 
-A native window opens. Edit `src/index.html`, `src/style.css`, or `src/app.js` — the window updates instantly without restarting.
+A native window opens. Edit `src/App.mx` — the window updates instantly without restarting.
 
 **4. Ship**
 ```bash
 morph build
-# → dist/app  (native binary, no runtime required)
+# builds native binary
 ```
 
 ---
@@ -98,20 +98,54 @@ morph build
 Morph is a **compiler**, not an interpreter. Your source files never ship — only the compiled binary does.
 
 ```
-src/index.html ─┐
-src/style.css  ─┼─► Python Parser ─► MorphIR ─► C++ Codegen ─► g++ ─► dist/app
-src/app.js     ─┘
+src/App.mx ──► MorphParser ──► JSXWalker ──► IRBuilder ──► LayoutEngine ──► C++ Codegen ──► g++ ──► native binary
 ```
 
-**Python** handles the entire toolchain — parsing, IR building, layout math, and Jinja2-based C++ code generation. **C++** handles the runtime — OpenGL rendering, window management, and event handling. The final binary contains zero Python and zero Node.
+**Python** handles the entire toolchain — `.mx` parsing via tree-sitter, IR building, layout math, and Jinja2-based C++ code generation. **C++** handles the runtime — OpenGL rendering, window management, and event handling. The final binary contains zero Python and zero Node.
 
-In **dev mode**, a pre-compiled generic renderer (`morph_devrt`) stays alive and receives updated IR over a Unix socket on every file save. The window never closes — only the node tree swaps.
+In **dev mode**, a pre-compiled renderer (`morph_devrt`) receives updated IR over a Unix socket on every file save. The window never closes — only the node tree swaps.
+
+---
+
+## Current State (Early Development)
+
+Morph's pipeline is under active development. Here's what's working and what's still being built:
+
+### ✅ Working
+
+| Component | Status |
+|---|---|
+| **`.mx` file parsing** — tree-sitter-based JSX, imports, props | Complete |
+| **CSS parsing** — local files, remote URLs, MD5-cached | Complete |
+| **Tailwind CSS** — 500 common utility classes + arbitrary values | Complete |
+| **CLI** — `init`, `dev`, `build`, `pkg`, `doctor`, `cache` | Complete |
+| **Config** — `morph.config.json` load/save | Complete |
+| **IR data models** — `IRNode`, `IRWindow`, `IRPage`, `IRViewport` | Complete |
+| **IR serializer** — JSON-safe dict for dev socket | Complete |
+| **Dev file watcher** — watchdog-based with debounce | Complete |
+| **Unix socket IPC** — sends IR to dev runtime | Complete |
+| **Codegen templates** — Jinja2 templates for C++ output | Complete |
+| **Package registry client** — fetch, install, manifest parsing | Complete |
+| **Color utilities** — hex/rgb parsing and conversion | Complete |
+| **System doctor** — dependency checks (Python, g++, GLFW, Node) | Complete |
+
+### 🚧 In Progress
+
+| Component | Status | Notes |
+|---|---|---|
+| **IRBuilder** — walked AST → IR with CSS/Tailwind resolution | **Critical stub** | Core compiler step — returns `[]` |
+| **Layout engine** — box model + vertical stacking | Partial | Flexbox not implemented |
+| **Style resolver** — CSS cascade, specificity, selector matching | Stub | Only inline styles work |
+| **JS interpreter** — JS event handler → C++ lambdas | Stub | Only `import` works |
+| **C++ node emitter** — IR → C++ instantiation code | Stub | Templates exist, emitter is todo |
+| **`morph_devrt` binary** — dev mode renderer | Missing | Binary not yet built |
+| **Build compiler** — g++ invocation + binary output | Missing | Module not created |
 
 ---
 
 ## Features
 
-**CSS Properties (current)**
+**CSS Properties**
 - `width`, `height`, `min-width`, `min-height`
 - `margin`, `padding` (all sides)
 - `background-color`, `color`
@@ -134,128 +168,11 @@ In **dev mode**, a pre-compiled generic renderer (`morph_devrt`) stays alive and
 
 **JavaScript**
 ```js
-// app.js — parsed as AST, compiled to C++ lambdas
+// parsed as AST, compiled to C++ lambdas
 import { Icon } from 'morph-icons'
 
 const icon = new Icon('settings', { size: 24, color: '#fff' })
 icon.mount('#toolbar')
-```
-
----
-
-## Custom C++ Nodes
-
-Drop into C++ whenever you need full control.
-
-```cpp
-// cpp/my_button.h
-#include <morph/morph_node.h>
-
-class MyButton : public MorphNode {
-    std::string m_label;
-
-public:
-    MyButton(const std::string& label) : m_label(label) {}
-
-    void draw(Renderer& r) override {
-        r.drawRoundedRect(x, y, w, h, 8.0f, style.bgColor);
-        r.drawText(m_label, x + w/2, y + h/2, style.color, TextAlign::Center);
-    }
-
-    // @morph-expose — callable from JS
-    void setLabel(const std::string& label) { m_label = label; }
-};
-```
-
-Register in `morph.config.json`:
-```json
-{
-  "cpp_sources": ["cpp/my_button.h"]
-}
-```
-
-Use in HTML:
-```html
-<my-button style="width: 120px; height: 40px;">Click me</my-button>
-```
-
----
-
-## Viewports — Embedded OpenGL Canvas
-
-Build game editors, video editors, CAD tools, or any application that needs a raw OpenGL canvas inside a Morph UI layout.
-
-```html
-<morph-viewport
-  id="scene"
-  driver="cpp/scene_renderer.h"
-  class="SceneRenderer"
-  style="flex: 1;"
-/>
-```
-
-```cpp
-// cpp/scene_renderer.h
-#include <morph/viewport_driver.h>
-
-class SceneRenderer : public MorphViewportDriver {
-    Camera m_camera;
-
-    void onInit(ViewportContext& ctx) override {
-        // full OpenGL setup — load shaders, meshes, etc.
-    }
-
-    void onDraw(ViewportContext& ctx) override {
-        glBindFramebuffer(GL_FRAMEBUFFER, ctx.fbo);
-        // your render loop here
-    }
-
-    void onMouseMove(float x, float y, ViewportContext& ctx) override {
-        m_camera.orbit(x, y);
-    }
-
-    // @morph-expose
-    void loadMesh(const std::string& path) { /* ... */ }
-};
-```
-
-Call from JS:
-```js
-document.querySelector('#scene').call('loadMesh', 'assets/robot.obj')
-```
-
----
-
-## Package System
-
-```bash
-morph pkg add morph-icons
-morph pkg add morph-charts
-morph pkg list
-morph pkg install        # restore from morph.config.json (like npm install)
-```
-
-Packages are hosted on GitHub and indexed at [registry.levizr.com/morph](https://registry.levizr.com/morph). No central file server — the registry is just a metadata index.
-
-**Writing a package** — two files required:
-
-```
-my-package/
-├── morph.pkg.json
-├── js/index.js          ← JS API with @morph-component annotations
-└── runtime/renderer.h   ← C++ header
-```
-
-```json
-// morph.pkg.json
-{
-  "name": "my-package",
-  "version": "1.0.0",
-  "type": "morph-native",
-  "js_entry": "js/index.js",
-  "runtime_headers": ["runtime/renderer.h"],
-  "github": "you/my-package"
-}
 ```
 
 ---
@@ -265,30 +182,27 @@ my-package/
 ```
 my-app/
 ├── src/
-│   ├── index.html       ← entry point
-│   ├── style.css
-│   └── app.js
-├── cpp/                 ← optional custom C++ nodes
+│   ├── App.mx            ← entry point (JSX + CSS + JS)
+│   └── components/       ← reusable .mx components
+├── cpp/                  ← optional custom C++ nodes
 │   └── my_widget.h
-├── assets/              ← fonts, textures, etc.
-├── morph.config.json    ← project config + dependencies
+├── assets/               ← fonts, textures, etc.
+├── morph.config.json     ← project config + dependencies
 └── dist/
-    └── app              ← compiled binary (gitignored)
+    └── app               ← compiled binary (gitignored)
 ```
 
 `morph.config.json`:
 ```json
 {
   "name": "my-app",
-  "entry": "src/index.html",
+  "entry": "src/App.mx",
   "window": {
     "width": 1024,
     "height": 768,
     "title": "My App"
   },
-  "dependencies": {
-    "morph-icons": "1.0.0"
-  },
+  "dependencies": {},
   "cpp_sources": []
 }
 ```
@@ -310,20 +224,25 @@ Run `morph doctor` after installing to verify your environment.
 
 ## Roadmap
 
-- [ ] Core pipeline — HTML/CSS parse → IR → C++ emit → compile
-- [ ] Dev mode — persistent window, Unix socket hot reload
+### Next Up (Priority Order)
+- [ ] **IRBuilder** — Convert walked AST + CSS + Tailwind into IR nodes (the critical path)
+- [ ] **Style resolver** — CSS selector matching, cascade, specificity
+- [ ] **Flexbox layout** — `display: flex` support in layout engine
+- [ ] **JS interpreter** — JS expression handling (NewExpression, CallExpression)
+- [ ] **C++ node emitter** — Generate actual C++ instantiation from IR
+- [ ] **`morph build`** — compiler module to invoke g++ and produce binary
+- [ ] **`morph_devrt` binary** — Pre-compiled renderer for dev mode
+
+### Future
 - [ ] Multi-window & navigation system
 - [ ] `<morph-viewport>` embedded OpenGL canvas
 - [ ] Custom C++ node integration
-- [ ] Package registry design
-- [ ] Box model layout engine (margin, padding, flex)
 - [ ] Text rendering (FreeType + SDF)
 - [ ] `border-radius` shader (SDF-based)
-- [ ] `morph pkg` CLI — install, remove, search
 - [ ] morph-icons (first-party package)
 - [ ] morph-animate
 - [ ] Windows support
-- [ ] VSCode extension (syntax highlighting for `.morph` components)
+- [ ] VSCode extension (syntax highlighting for `.mx` files)
 
 ---
 
@@ -338,7 +257,9 @@ pip install -e ".[dev]"
 morph doctor
 ```
 
-Areas that need work: layout engine, text rendering, Windows support, and the package registry website. Open an issue before starting on large features so we can align on design.
+The most impactful contribution right now is implementing `IRBuilder.build()` in `morph/ir/builder.py` — it's the heart of the compiler and the main blocker for the entire pipeline. See the [Current State](#current-state-early-development) section for a full breakdown of what needs work.
+
+Open an issue before starting on large features so we can align on design.
 
 ---
 

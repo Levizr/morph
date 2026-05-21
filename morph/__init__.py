@@ -1,20 +1,31 @@
-from morph.lexer import HTMLLexer, CSSLexer, JSLexer
-from morph.parser import HTMLParser, CSSParser, JSParser
-from morph.dom.tree import DOMTree
-from morph.dom.query import find_by_id, find_by_tag, query_selector
-from morph.style.resolver import StyleResolver
-from morph.ir.builder import IRBuilder
-from morph.layout.engine import LayoutEngine
-from morph.codegen.emitter import Emitter
-from morph.config.loader import load_config
+"""Morph UI Framework — Build native OpenGL UIs from .mx files."""
 
 __version__ = "0.1.0"
+
+
+def __getattr__(name):
+    """Lazy imports so CLI (--help, doctor, etc.) works without tree-sitter."""
+    import importlib
+    _LAZY = {
+        "MorphParser":     "morph.parser.morph_parser",
+        "JSXWalker":       "morph.parser.jsx_walker",
+        "CSSParser":       "morph.style.css_parser",
+        "CSSFetcher":      "morph.style.css_fetcher",
+        "TailwindResolver":"morph.style.tailwind",
+        "IRBuilder":       "morph.ir.builder",
+        "LayoutEngine":    "morph.layout.engine",
+        "Emitter":         "morph.codegen.emitter",
+        "load_config":     "morph.config.loader",
+    }
+    if name in _LAZY:
+        module = importlib.import_module(_LAZY[name])
+        return getattr(module, name)
+    raise AttributeError(f"module 'morph' has no attribute {name!r}")
+
+
 __all__ = [
-    "HTMLLexer", "CSSLexer", "JSLexer",
-    "HTMLParser", "CSSParser", "JSParser",
-    "DOMTree",
-    "find_by_id", "find_by_tag", "query_selector",
-    "StyleResolver",
+    "MorphParser", "JSXWalker",
+    "CSSParser", "CSSFetcher", "TailwindResolver",
     "IRBuilder",
     "LayoutEngine",
     "Emitter",

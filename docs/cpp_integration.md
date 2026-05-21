@@ -1,5 +1,7 @@
 # C++ Integration
 
+**Status: Target design — C++ pipeline (node emitter + build compiler) not yet implemented.**
+
 ## Custom Nodes
 
 Place `.h` files in `cpp/` and reference them in `morph.config.json`:
@@ -8,7 +10,7 @@ Place `.h` files in `cpp/` and reference them in `morph.config.json`:
 { "cpp_sources": ["cpp/my_widget.h"] }
 ```
 
-Inherit from `MorphNode`:
+Inherit from `MorphNode` (header at `runtime/core/morph_node.h`):
 
 ```cpp
 #include <morph/morph_node.h>
@@ -40,3 +42,16 @@ class SceneRenderer : public MorphViewportDriver {
     }
 };
 ```
+
+## Current Implementation
+
+| Component | File | Status |
+|---|---|---|
+| C++ headers (MorphNode, Renderer, Event, WindowManager) | `runtime/core/*.h` | ✅ Declared |
+| Viewport driver interface | `runtime/viewport/viewport_driver.h` | ✅ Declared |
+| Jinja2 codegen templates | `morph/codegen/templates/` | ✅ 6 templates |
+| Node → C++ emitter | `morph/codegen/node_emitter.py` | ❌ Stub (returns comment) |
+| Event emitter | `morph/codegen/event_emitter.py` | ⚠️ Partial |
+| Build compiler (g++ invocation) | (missing) | ❌ Not created |
+| `morph_devrt` binary | (missing) | ❌ Not built |
+| C++ implementations (.cpp) | `runtime/` | ❌ Only `.gitkeep` files |

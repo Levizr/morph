@@ -1,0 +1,8 @@
+{
+  "files.associations": {
+    "*.mx": "javascriptreact"
+  },
+  "emmet.includeLanguages": {
+    "morph": "javascriptreact"
+  }
+}

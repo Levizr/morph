@@ -1,0 +1,21 @@
+// templates/default/src/App.mx
+export default function App() {
+  return (
+    <morph-window title="My App" width={800} height={600}>
+      <div style={{
+        backgroundColor: '#0f0f0f',
+        padding: 32,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 16
+      }}>
+        <h1 style={{ color: '#e8e8f0', fontSize: 28 }}>
+          Hello, Morph!
+        </h1>
+        <p style={{ color: '#8888aa', fontSize: 14 }}>
+          Edit src/App.mx to get started.
+        </p>
+      </div>
+    </morph-window>
+  )
+}
