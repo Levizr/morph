@@ -26,13 +26,27 @@ class MorphWindow {
 public:
     static void mouseButtonCb(GLFWwindow* win, int btn, int act, int mods) {
         auto* self = (MorphWindow*)glfwGetWindowUserPointer(win);
-        if (!self || !self->m_root || act != GLFW_PRESS) return;
+        if (!self || !self->m_root) return;
         double mx, my;
         glfwGetCursorPos(win, &mx, &my);
-        // fprintf(stderr, "[click] btn=%d (%.0f, %.0f)\n", btn, mx, my);
         MorphEvent e;
-        e.type = EventType::Click;
+        e.type = (act == GLFW_PRESS) ? EventType::MouseDown : EventType::MouseUp;
         e.button = btn;
+        e.x = (float)mx;
+        e.y = (float)my;
+        self->m_root->dispatchEvent(e, (float)mx, (float)my);
+        // Also dispatch Click on press
+        if (act == GLFW_PRESS) {
+            e.type = EventType::Click;
+            self->m_root->dispatchEvent(e, (float)mx, (float)my);
+        }
+    }
+
+    static void cursorPosCb(GLFWwindow* win, double mx, double my) {
+        auto* self = (MorphWindow*)glfwGetWindowUserPointer(win);
+        if (!self || !self->m_root) return;
+        MorphEvent e;
+        e.type = EventType::MouseMove;
         e.x = (float)mx;
         e.y = (float)my;
         self->m_root->dispatchEvent(e, (float)mx, (float)my);
@@ -43,6 +57,20 @@ public:
         if (!self) return;
         self->m_width = width;
         self->m_height = height;
+    }
+
+    static void scrollCb(GLFWwindow* win, double dx, double dy) {
+        auto* self = (MorphWindow*)glfwGetWindowUserPointer(win);
+        if (!self || !self->m_root) return;
+        double mx, my;
+        glfwGetCursorPos(win, &mx, &my);
+        MorphEvent e;
+        e.type = EventType::Scroll;
+        e.scroll = (float)dy;
+        e.x = (float)mx;
+        e.y = (float)my;
+        // Dispatch from root so scroll bubbles down to the hovered scroll container
+        self->m_root->dispatchEvent(e, (float)mx, (float)my);
     }
 
     MorphWindow(const std::string& title, int width, int height, bool visible = true)
@@ -56,6 +84,8 @@ public:
             gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress));
             glfwSetWindowUserPointer(m_handle, this);
             glfwSetMouseButtonCallback(m_handle, mouseButtonCb);
+            glfwSetCursorPosCallback(m_handle, cursorPosCb);
+            glfwSetScrollCallback(m_handle, scrollCb);
             glfwSetWindowSizeCallback(m_handle, windowSizeCb);
             glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
         }
@@ -70,6 +100,7 @@ public:
         glfwMakeContextCurrent(m_handle);
 
         glViewport(0, 0, m_width, m_height);
+        m_renderer.setFBHeight(m_height);
 
         float proj[16];
         ortho(proj, 0.0f, (float)m_width, (float)m_height, 0.0f, -1.0f, 1.0f);

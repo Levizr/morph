@@ -22,7 +22,9 @@ export default function App() {
           borderRadius: 12,
           display: 'flex',
           flexDirection: 'column',
-          gap: 16
+          overflow: 'auto',
+          height: 160,
+          gap: 12
         }}>
           <div style={{
             backgroundColor: '#0f3460',
@@ -30,23 +32,46 @@ export default function App() {
             borderRadius: 8
           }}>
             <p style={{ color: '#e94560', fontSize: 14, fontWeight: 'bold' }}>
-              Bold text with color inheritance
+              Scrollable container
             </p>
             <p style={{ color: '#a0a0c0', fontSize: 12 }}>
-              Normal weight text below bold heading
+              This container has overflow auto and a fixed height. Scroll with mouse wheel or drag the scrollbar.
             </p>
           </div>
-
           <div style={{
             backgroundColor: '#0f3460',
             padding: '12px 16px',
             borderRadius: 8
           }}>
             <p style={{ color: '#53d769', fontSize: 14, fontWeight: 'bold' }}>
-              Border-radius demo
+              Item 2 border-radius + font-weight
             </p>
             <p style={{ color: '#a0a0c0', fontSize: 12 }}>
-              This card has borderRadius: 8, the outer card has 12
+              Bold headings with normal weight body text, rounded corners on all cards.
+            </p>
+          </div>
+          <div style={{
+            backgroundColor: '#0f3460',
+            padding: '12px 16px',
+            borderRadius: 8
+          }}>
+            <p style={{ color: '#f1c40f', fontSize: 14, fontWeight: 'bold' }}>
+              Item 3 console.log anywhere
+            </p>
+            <p style={{ color: '#a0a0c0', fontSize: 12 }}>
+              Body, JSX expressions, and onClick handlers.
+            </p>
+          </div>
+          <div style={{
+            backgroundColor: '#0f3460',
+            padding: '12px 16px',
+            borderRadius: 8
+          }}>
+            <p style={{ color: '#9b59b6', fontSize: 14, fontWeight: 'bold' }}>
+              Item 4 Runtime layout + resize
+            </p>
+            <p style={{ color: '#a0a0c0', fontSize: 12 }}>
+              Window resize reflows everything. Text wraps to container width.
             </p>
           </div>
         </div>

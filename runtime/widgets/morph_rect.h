@@ -14,7 +14,37 @@ public:
             r.drawRoundedRect(x, y, w, h, style.borderRadius, style.bgColor);
         else
             r.drawRect(x, y, w, h, style.bgColor);
-        for (auto* child : children)
-            child->draw(r);
+
+        if (scrollEnabled && contentH > h) {
+            r.beginClip(x, y, w, h);
+            r.pushScrollOffset(0, -scrollY);
+            for (auto* child : children) {
+                float childVisY = child->y - scrollY;
+                if (childVisY + child->h > y && childVisY < y + h)
+                    child->draw(r);
+            }
+            r.popScrollOffset(0, -scrollY);
+            r.endClip();
+            drawScrollbar(r);
+        } else {
+            for (auto* child : children)
+                child->draw(r);
+        }
+    }
+
+    void drawScrollbar(Renderer& r) {
+        float sw = style.scrollbarWidth;
+        float trackX = x + w - sw;
+        float trackH = h;
+        r.drawRect(trackX, y, sw, trackH, style.scrollbarTrackColor);
+
+        float thumbH = (h / contentH) * h;
+        float thumbY = y + (scrollY / (contentH - h)) * (h - thumbH);
+        if (thumbY < y) thumbY = y;
+        if (thumbY + thumbH > y + h) thumbY = y + h - thumbH;
+        float radius = style.scrollbarBorderRadius;
+        if (radius > thumbH * 0.5f) radius = thumbH * 0.5f;
+        if (radius < 0.5f) radius = 0.5f;
+        r.drawRoundedRect(trackX, thumbY, sw, thumbH, radius, style.scrollbarThumbColor);
     }
 };

@@ -9,20 +9,25 @@ from morph.style.units import to_px
 
 # CSS property name → IRStyle field name
 _CSS_TO_IR: dict[str, str] = {
-    "background-color": "bg_color",
-    "color":            "color",
-    "width":            "width",
-    "height":           "height",
-    "margin":           "margin",
-    "padding":          "padding",
-    "border-radius":    "border_radius",
-    "font-size":        "font_size",
-    "font-weight":      "font_weight",
-    "text-align":       "text_align",
-    "display":          "display",
-    "flex-direction":   "flex_dir",
-    "flex":             "flex",
-    "gap":              "gap",
+    "background-color":         "bg_color",
+    "color":                    "color",
+    "width":                    "width",
+    "height":                   "height",
+    "margin":                   "margin",
+    "padding":                  "padding",
+    "border-radius":            "border_radius",
+    "font-size":                "font_size",
+    "font-weight":              "font_weight",
+    "text-align":               "text_align",
+    "display":                  "display",
+    "flex-direction":           "flex_dir",
+    "flex":                     "flex",
+    "gap":                      "gap",
+    "overflow":                 "overflow",
+    "scrollbar-width":           "scrollbar_width",
+    "scrollbar-track-color":     "scrollbar_track_color",
+    "scrollbar-thumb-color":     "scrollbar_thumb_color",
+    "scrollbar-border-radius":   "scrollbar_border_radius",
 }
 
 _SIDES = {
@@ -256,7 +261,16 @@ def _convert_value(field: str, raw: str | float | int) -> float | str | tuple | 
     if field in ("margin", "padding"):
         return _parse_side_value(field, raw)
 
-    if field in ("font_weight", "text_align", "display", "flex_dir"):
+    if field in ("font_weight", "text_align", "display", "flex_dir", "overflow"):
         return raw
+
+    if field in ("scrollbar_width", "scrollbar_border_radius"):
+        try:
+            return to_px(raw)
+        except (ValueError, TypeError):
+            return None
+
+    if field in ("scrollbar_track_color", "scrollbar_thumb_color"):
+        return parse_color(raw)
 
     return None

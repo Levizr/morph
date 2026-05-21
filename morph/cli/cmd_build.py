@@ -96,6 +96,11 @@ def _deser_node(d: dict) -> IRNode:
         flex_dir=s.get("flex_dir", "row"),
         flex=s.get("flex", 0.0),
         gap=s.get("gap", 0.0),
+        overflow=s.get("overflow", "visible"),
+        scrollbar_width=s.get("scrollbar_width", 8.0),
+        scrollbar_track_color=tuple(s.get("scrollbar_track_color", [0.85, 0.85, 0.85, 0.4])),
+        scrollbar_thumb_color=tuple(s.get("scrollbar_thumb_color", [0.5, 0.5, 0.5, 0.6])),
+        scrollbar_border_radius=s.get("scrollbar_border_radius", 4.0),
     )
     node = IRNode(
         node_id=d.get("id", ""),

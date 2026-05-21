@@ -17,3 +17,8 @@ class IRStyle:
     flex_dir:      str   = "row"
     flex:          float = 0.0
     gap:           float = 0.0
+    overflow:      str   = "visible"
+    scrollbar_width:            float = 8.0
+    scrollbar_track_color:      tuple[float,float,float,float] = (0.85, 0.85, 0.85, 0.4)
+    scrollbar_thumb_color:      tuple[float,float,float,float] = (0.5, 0.5, 0.5, 0.6)
+    scrollbar_border_radius:    float = 4.0

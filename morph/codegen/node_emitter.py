@@ -124,6 +124,24 @@ class NodeEmitter:
             lines.append(f"{prefix}.explicitWidth = {s.width}f;")
         if s.height is not None:
             lines.append(f"{prefix}.explicitHeight = {s.height}f;")
+        if s.overflow != "visible":
+            lines.append(f"{prefix}.overflow = \"{s.overflow}\";")
+        if s.scrollbar_width != 8.0:
+            lines.append(f"{prefix}.scrollbarWidth = {s.scrollbar_width}f;")
+        if s.scrollbar_track_color != (0.85, 0.85, 0.85, 0.4):
+            tc = s.scrollbar_track_color
+            lines.append(f"{prefix}.scrollbarTrackColor[0] = {tc[0]:.4f}f;")
+            lines.append(f"{prefix}.scrollbarTrackColor[1] = {tc[1]:.4f}f;")
+            lines.append(f"{prefix}.scrollbarTrackColor[2] = {tc[2]:.4f}f;")
+            lines.append(f"{prefix}.scrollbarTrackColor[3] = {tc[3]:.4f}f;")
+        if s.scrollbar_thumb_color != (0.5, 0.5, 0.5, 0.6):
+            tc = s.scrollbar_thumb_color
+            lines.append(f"{prefix}.scrollbarThumbColor[0] = {tc[0]:.4f}f;")
+            lines.append(f"{prefix}.scrollbarThumbColor[1] = {tc[1]:.4f}f;")
+            lines.append(f"{prefix}.scrollbarThumbColor[2] = {tc[2]:.4f}f;")
+            lines.append(f"{prefix}.scrollbarThumbColor[3] = {tc[3]:.4f}f;")
+        if s.scrollbar_border_radius != 4.0:
+            lines.append(f"{prefix}.scrollbarBorderRadius = {s.scrollbar_border_radius}f;")
         return "\n".join(f"{indent}{l}" for l in lines)
 
     def _emit_event(self, event, node_id: str, indent: str) -> str:

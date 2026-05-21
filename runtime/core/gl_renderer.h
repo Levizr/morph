@@ -402,13 +402,24 @@ public:
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     }
 
+    void beginClip(float x, float y, float w, float h) override {
+        float cx = x + m_scrollX;
+        float cy = y + m_scrollY;
+        glEnable(GL_SCISSOR_TEST);
+        glScissor((GLint)cx, m_fbHeight - (GLint)(cy + h), (GLsizei)w, (GLsizei)h);
+    }
+
+    void endClip() override {
+        glDisable(GL_SCISSOR_TEST);
+    }
+
     void drawRect(float x, float y, float w, float h, float color[4]) override {
-        m_batch.push_back({x, y, w, h, color[0], color[1], color[2], color[3], 0.0f});
+        m_batch.push_back({x + m_scrollX, y + m_scrollY, w, h, color[0], color[1], color[2], color[3], 0.0f});
     }
 
     void drawRoundedRect(float x, float y, float w, float h,
                          float radius, float color[4]) override {
-        m_batch.push_back({x, y, w, h, color[0], color[1], color[2], color[3], radius});
+        m_batch.push_back({x + m_scrollX, y + m_scrollY, w, h, color[0], color[1], color[2], color[3], radius});
     }
 
     float measureTextWidth(const std::string& text,
@@ -435,9 +446,9 @@ public:
         std::string key = atlasKey(fs, fontWeight);
         auto& atlas = getOrCreateAtlas(fs, fontWeight);
 
-        float penX = x;
-        // Use font ascender for baseline (fontSize estimate if no metrics)
-        float penY = y + fontSize;
+        float penX = x + m_scrollX;
+        // Apply scroll offset to Y; use font ascender for baseline
+        float penY = y + m_scrollY + fontSize;
 
         // Pre-compute width for alignment
         float totalW = 0;
