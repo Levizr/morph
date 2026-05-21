@@ -13,7 +13,7 @@ export default function App() {
           {console.log("Rendered heading")}Morph Framework
         </h1>
         <p style={{ color: '#8888cc', fontSize: 14 }}>
-          Edit src/App.mx to get started. Features:
+          Edit src/App.mx to get started. Text automatically wraps when it exceeds container width, just like a browser.
         </p>
 
         <div style={{

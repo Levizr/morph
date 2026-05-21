@@ -411,6 +411,20 @@ public:
         m_batch.push_back({x, y, w, h, color[0], color[1], color[2], color[3], radius});
     }
 
+    float measureTextWidth(const std::string& text,
+                           float fontSize,
+                           const std::string& fontWeight) override {
+        if (text.empty() || fontSize < 1) return 0;
+        int fs = (int)fontSize;
+        auto& atlas = getOrCreateAtlas(fs, fontWeight);
+        float w = 0;
+        for (char c : text) {
+            auto it = atlas.glyphs.find(c);
+            if (it != atlas.glyphs.end()) w += it->second.ax;
+        }
+        return w;
+    }
+
     void drawText(const std::string& text, float x, float y,
                   float color[4], TextAlign align,
                   float fontSize,

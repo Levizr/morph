@@ -26,7 +26,8 @@ public:
     std::vector<MorphNode*> children;
     bool focused = false;
 
-    virtual void layout(float px, float py, float parentW, float parentH) {
+    virtual void layout(float px, float py, float parentW, float parentH,
+                        Renderer* r = nullptr) {
         float ml = style.margin[3], mr = style.margin[1];
         float mt = style.margin[0], mb = style.margin[2];
 
@@ -52,7 +53,7 @@ public:
         float cy = y + pt;
 
         for (auto* child : children) {
-            child->layout(cx, cy, cw, 0.0f);
+            child->layout(cx, cy, cw, 0.0f, r);
             cy += child->h + style.gap;
         }
 
