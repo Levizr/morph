@@ -83,13 +83,30 @@ public:
     void draw(Renderer& r) override {
         float lh = style.fontSize * 1.4f;
         float py = y;
-        // If no wrapping lines computed (unlikely), fall through
         for (auto& line : lines) {
-            r.drawText(line, x, py, style.color, TextAlign::Left,
+            float lx = x;
+            if (style.textAlign == "center") {
+                float tw = r.measureTextWidth(line, style.fontSize, style.fontWeight);
+                if (tw < w) lx = x + (w - tw) * 0.5f;
+            } else if (style.textAlign == "right") {
+                float tw = r.measureTextWidth(line, style.fontSize, style.fontWeight);
+                lx = x + w - tw;
+            }
+            r.drawText(line, lx, py, style.color, TextAlign::Left,
                        style.fontSize, style.fontWeight);
             py += lh;
         }
         for (auto* child : children)
             child->draw(r);
+    }
+
+    float contentWidth(Renderer* r) override {
+        if (style.explicitWidth >= 0.0f) return style.explicitWidth;
+        if (r) {
+            float tw = r->measureTextWidth(text, style.fontSize, style.fontWeight);
+            float pl = style.padding[3], pr = style.padding[1];
+            return tw + pl + pr;
+        }
+        return MorphNode::contentWidth(r);
     }
 };

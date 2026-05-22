@@ -73,6 +73,9 @@ class NodeEmitter:
                 parent_style.font_size if parent_style and parent_style.font_size != 16.0 else 16.0),
             font_weight=s.font_weight if s.font_weight != "normal" else (
                 parent_style.font_weight if parent_style and parent_style.font_weight != "normal" else "normal"),
+            text_align=s.text_align if s.text_align != "left" else (
+                parent_style.text_align if parent_style and parent_style.text_align != "left" else "left"),
+            max_width=s.max_width,
         )
 
         # ── Recurse children ─────────────────────────────────
@@ -124,8 +127,36 @@ class NodeEmitter:
             lines.append(f"{prefix}.explicitWidth = {s.width}f;")
         if s.height is not None:
             lines.append(f"{prefix}.explicitHeight = {s.height}f;")
+        if s.max_width is not None:
+            lines.append(f"{prefix}.maxWidth = {s.max_width}f;")
         if s.overflow != "visible":
             lines.append(f"{prefix}.overflow = \"{s.overflow}\";")
+        if s.display != "block":
+            lines.append(f"{prefix}.display = \"{s.display}\";")
+        if s.display == "flex" and s.flex_dir != "column":
+            lines.append(f"{prefix}.flexDirection = \"{s.flex_dir}\";")
+        if s.position != "static":
+            lines.append(f"{prefix}.position = \"{s.position}\";")
+        if s.left is not None:
+            lines.append(f"{prefix}.left = {s.left}f;")
+        if s.right is not None:
+            lines.append(f"{prefix}.right = {s.right}f;")
+        if s.top is not None:
+            lines.append(f"{prefix}.top = {s.top}f;")
+        if s.bottom is not None:
+            lines.append(f"{prefix}.bottom = {s.bottom}f;")
+        if s.justify_content != "flex-start":
+            lines.append(f"{prefix}.justifyContent = \"{s.justify_content}\";")
+        if s.align_items != "stretch":
+            lines.append(f"{prefix}.alignItems = \"{s.align_items}\";")
+        ta = s.text_align if s.text_align != "left" else (
+            parent_style.text_align if parent_style and parent_style.text_align != "left" else "left")
+        if ta != "left":
+            lines.append(f"{prefix}.textAlign = \"{ta}\";")
+        if s.flex_wrap != "nowrap":
+            lines.append(f"{prefix}.flexWrap = \"{s.flex_wrap}\";")
+        if s.cursor != "default":
+            lines.append(f"{prefix}.cursor = \"{s.cursor}\";")
         if s.scrollbar_width != 8.0:
             lines.append(f"{prefix}.scrollbarWidth = {s.scrollbar_width}f;")
         if s.scrollbar_track_color != (0.85, 0.85, 0.85, 0.4):

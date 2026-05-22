@@ -11,7 +11,7 @@
 ╚═╝     ╚═╝ ╚═════╝ ╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝
 ```
 
-**Build native OpenGL Applicationswith HTML, CSS, and JavaScript.**
+**Build native OpenGL Applications with HTML, CSS, and JavaScript.**
 
 No browser. No Electron. No WebView. Just a lightweight native binary.
 
@@ -109,9 +109,7 @@ In **dev mode**, the pipeline produces an IR dict that is sent over a Unix socke
 
 ---
 
-## Current State (Early Development)
-
-Morph's pipeline is under active development. Here's what's working and what's still being built:
+## Current State (v0.0.2 — Early Development)
 
 ### ✅ Working
 
@@ -121,49 +119,54 @@ Morph's pipeline is under active development. Here's what's working and what's s
 | **CSS parsing** — local files, remote URLs, MD5-cached | Complete |
 | **Tailwind CSS** — 500 common utility classes + arbitrary values | Complete |
 | **IRBuilder** — walked AST → IR with inline CSS, Tailwind, color/unit conversion | Complete |
-| **CLI** — `init` (interactive wizard), `dev`, `build`, `pkg`, `doctor` (advanced), `cache` | Complete |
+| **CLI** — `init` (interactive wizard), `dev`, `build`, `pkg`, `doctor`, `cache` | Complete |
 | **Config** — `morph.config.json` load/save | Complete |
 | **IR data models** — `IRNode`, `IRWindow`, `IRPage`, `IRViewport`, `IRStyle`, `IREvent` | Complete |
-| **IR serializer** — JSON-safe dict for dev socket | Complete |
-| **Layout engine** — box model (margin, padding), vertical stacking, gap | Complete |
+| **IR serializer/deserializer** — JSON-safe dict for dev socket | Complete |
+| **Layout engine** — box model (margin, padding), vertical stacking, gap, flexbox | Complete |
 | **Dev file watcher** — watchdog-based with debounce | Complete |
 | **Unix socket IPC** — sends IR to dev runtime | Complete |
 | **C++ node emitter** — IR → C++ instantiation code from Jinja2 templates | Complete |
-| **Build compiler** — g++ invocation with FreeType/GLFW/OpenGL flags | Complete |
+| **Build compiler** — g++ invocation with conditional FreeType/GLFW/OpenGL flags | Complete |
 | **Package registry client** — fetch, install, manifest parsing | Complete |
-| **Color utilities** — hex/rgb parsing and conversion | Complete |
-| **System doctor** — version checks, dependency diagnostics | Complete |
-| **Inline style resolution** — camelCase→kebab, color parsing, unit conversion | Complete |
-| **Event extraction** — `morph-open`, `morph-close`, `morph-navigate` → IREvent | Complete |
 | **OpenGL 3.3 batch renderer** — instanced VAO/VBO/IBO, uniform color + rounded rect SDF | Complete |
 | **FreeType text rendering** — per-size glyph atlas, batch text with kerning | Complete |
 | **Rounded rectangles** — SDF-based border-radius in fragment shader | Complete |
 | **Font weight support** — bold/normal font selection, `font-weight` CSS property | Complete |
-| **Style inheritance** — `color`, `font-size`, `font-weight` cascade from parent | Complete |
-| **Transparent backgrounds** — no white bg behind elements; only render when `background-color` set | Complete |
-| **Event system** — `onClick` callbacks on ButtonNode | Complete |
+| **Style inheritance** — `color`, `font-size`, `font-weight`, `text-align` cascade from parent | Complete |
+| **Transparent backgrounds** — only render when `background-color` set | Complete |
+| **Event system** — `onClick`, `MouseDown`, `MouseUp`, `MouseMove` events | Complete |
+| **Scrollbar** — browser-like drag, wheel, track-click, nested containers | Complete |
+| **Viewport culling** — skip off-screen children in draw + event dispatch | Complete |
+| **Feature-based compilation** — `#define MORPH_FEATURE_*` guards, linker GC | Complete |
+| **Flexbox** — `justify-content`, `align-items`, two-pass layout, content-based sizing | Complete |
+| **`text-align`** — left, center, right with correct container-relative centering | Complete |
+| **`max-width`** — layout constraint for responsive sizing | Complete |
+| **Margin/padding side properties** — `margin-top`, `padding-left`, etc. | Complete |
+| **Cursor support** — `cursor: pointer` (hand), `cursor: text` (I-beam) | Complete |
 
 ### 🚧 In Progress
 
 | Component | Status | Notes |
 |---|---|---|
-| **Layout engine** — flexbox | Partial | Vertical stacking works, `apply_flex()` is stub |
 | **Style resolver** — CSS cascade, specificity, selector matching | Stub | Only inline + Tailwind work via IRBuilder |
-| **JS interpreter** — JS event handler → C++ lambdas | Stub | Only `import` works |
+| **JS interpreter** — JS event handler → C++ lambdas | Stub | Only `console.log` works |
 | **`morph_devrt` binary** — dev mode renderer | Missing | Binary not yet built |
 
 ---
 
 ## Features
 
-**CSS Properties** — all resolved from inline styles, CSS rules, and Tailwind classes
-- `width`, `height`
-- `margin`, `padding` (shorthand: 1-4 values → all sides)
+**CSS Properties** (resolved from inline styles, CSS rules, and Tailwind classes)
+- `width`, `height`, `max-width`
+- `margin`, `padding` + individual side properties (`margin-top`, `padding-left`, etc.)
 - `background-color`, `color` (hex, rgb, named)
 - `border-radius`
-- `display: flex`, `flex-direction`, `flex`, `gap`
+- `display: flex`, `flex-direction`, `justify-content`, `align-items`, `flex-wrap`, `gap`
+- `position`, `left`, `right`, `top`, `bottom`
+- `overflow`, `cursor`
 - `font-size` (px, %, em, bare numbers), `font-weight`, `text-align`
-- `color` cascades from parent to children (browser-style inheritance)
+- `color`, `font-size`, `font-weight`, `text-align` cascade from parent to children
 
 **HTML Elements**
 - `div`, `span`, `h1`–`h6`, `p`, `button`
@@ -171,13 +174,16 @@ Morph's pipeline is under active development. Here's what's working and what's s
 
 **C++ Runtime**
 - OpenGL 3.3 core profile batch renderer (instanced VAO/VBO/IBO)
-- Rounded rectangles via SDF fragment shader
-- FreeType text rendering with per-size glyph atlas
+- Rounded rectangles via SDF fragment shader (radius auto-clamped)
+- FreeType text rendering with per-size glyph atlas and word-wrap
 - Font weight support (bold / normal with `DejaVuSans-Bold.ttf`)
-- Style inheritance cascade (`color`, `font-size`, `font-weight`)
-- Transparent backgrounds by default (no white rect behind elements)
-- `onClick` event handlers on buttons
-- Window close-button handling, multi-window management
+- Style inheritance cascade (`color`, `font-size`, `font-weight`, `text-align`)
+- Transparent backgrounds by default
+- `onClick`, `MouseDown`, `MouseUp`, `MouseMove` event dispatch
+- Scrollbar with drag, wheel, track-click; nested scroll containers
+- Viewport culling for draw + events
+- Feature-based dead code elimination
+- `cursor: pointer` and `cursor: text` via GLFW standard cursors
 
 ---
 
@@ -228,16 +234,13 @@ Run `morph doctor` after installing to verify your environment.
 
 ## Roadmap
 
-### Next Up (Priority Order)
-- [x] **IRBuilder** — Convert walked AST + CSS + Tailwind into IR nodes ✅
-- [x] **C++ node emitter** — Generate C++ instantiation from IR ✅
-- [x] **`morph build`** — compiler module to invoke g++ and produce binary ✅
-- [x] **Text rendering** — FreeType glyph atlas + batch rendering ✅
-- [x] **`border-radius`** — SDF-based rounded rect shader ✅
-- [ ] **Flexbox layout** — `display: flex` support in layout engine
+### v0.1.0 (Next Up)
 - [ ] **CSS style resolver** — Selector matching, cascade, specificity
 - [ ] **`morph_devrt` binary** — Pre-compiled renderer for dev mode
-- [ ] **JS interpreter** — JS expression handling (NewExpression, CallExpression)
+- [ ] **JS interpreter** — Full JS expression handling (CallExpression, BinaryExpression)
+- [ ] **`flex-wrap`** — Row overflow wrapping
+- [ ] **`position: relative` / `fixed`** — Offset and viewport-relative positioning
+- [ ] **`border` support** — `border-width`, `border-color`, `border-style`
 
 ### Future
 - [ ] Multi-window & navigation system
@@ -261,7 +264,7 @@ pip install -e ".[dev]"
 morph doctor
 ```
 
-The most impactful areas right now are the **flexbox layout engine**, **CSS style resolver**, and the **`morph_devrt` binary**. See the [Current State](#current-state-early-development) section for a full breakdown.
+The most impactful areas right now are the **CSS style resolver**, **`morph_devrt` binary**, and **JS interpreter**. See the [Current State](#current-state-v002--early-development) section for a full breakdown.
 
 Open an issue before starting on large features so we can align on design.
 

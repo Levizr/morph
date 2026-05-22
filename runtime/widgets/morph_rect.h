@@ -10,11 +10,14 @@ public:
     }
 
     void draw(Renderer& r) override {
-        if (style.borderRadius > 0.0f)
+#ifdef MORPH_FEATURE_RADIUS
+        if (style.borderRadius > 0.0f) {
             r.drawRoundedRect(x, y, w, h, style.borderRadius, style.bgColor);
-        else
+        } else
+#endif
             r.drawRect(x, y, w, h, style.bgColor);
 
+#ifdef MORPH_FEATURE_SCROLL
         if (scrollEnabled && contentH > h) {
             r.beginClip(x, y, w, h);
             r.pushScrollOffset(0, -scrollY);
@@ -26,12 +29,15 @@ public:
             r.popScrollOffset(0, -scrollY);
             r.endClip();
             drawScrollbar(r);
-        } else {
+        } else
+#endif
+        {
             for (auto* child : children)
                 child->draw(r);
         }
     }
 
+#ifdef MORPH_FEATURE_SCROLL
     void drawScrollbar(Renderer& r) {
         float sw = style.scrollbarWidth;
         float trackX = x + w - sw;
@@ -47,4 +53,5 @@ public:
         if (radius < 0.5f) radius = 0.5f;
         r.drawRoundedRect(trackX, thumbY, sw, thumbH, radius, style.scrollbarThumbColor);
     }
+#endif
 };

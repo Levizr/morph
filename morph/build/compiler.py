@@ -12,7 +12,8 @@ class Compiler:
     def __init__(self):
         self.gpp = shutil.which("g++") or shutil.which("clang++") or "g++"
 
-    def compile(self, source_path: str, binary_path: str) -> bool:
+    def compile(self, source_path: str, binary_path: str,
+                needs_freetype: bool = True) -> bool:
         if not os.path.exists(source_path):
             log_error(f"Source not found: {source_path}")
             return False
@@ -28,35 +29,34 @@ class Compiler:
         vendor_dir = os.path.join(runtime_dir, "vendor")
         glad_c = os.path.join(runtime_dir, "core", "glad.c")
 
-        # Detect FreeType flags via pkg-config
-        ft_cflags = []
-        ft_libs = []
-        try:
-            ft_cflags = subprocess.check_output(
-                ["pkg-config", "--cflags", "freetype2"], text=True
-            ).strip().split()
-        except Exception:
-            ft_cflags = ["-I/usr/include/freetype2"]
-        try:
-            ft_libs = subprocess.check_output(
-                ["pkg-config", "--libs", "freetype2"], text=True
-            ).strip().split()
-        except Exception:
-            ft_libs = ["-lfreetype"]
-
         cmd = [
             self.gpp,
             "-std=c++17",
             "-O2",
+            "-ffunction-sections", "-fdata-sections",
             source_path,
             glad_c,
             "-o", binary_path,
             "-I", runtime_dir,
             "-I", vendor_dir,
-            *ft_cflags,
+            "-Wl,--gc-sections",
             "-lglfw", "-lGL", "-lX11", "-lpthread", "-ldl",
-            *ft_libs,
         ]
+
+        if needs_freetype:
+            try:
+                ft_cflags = subprocess.check_output(
+                    ["pkg-config", "--cflags", "freetype2"], text=True
+                ).strip().split()
+            except Exception:
+                ft_cflags = ["-I/usr/include/freetype2"]
+            try:
+                ft_libs = subprocess.check_output(
+                    ["pkg-config", "--libs", "freetype2"], text=True
+                ).strip().split()
+            except Exception:
+                ft_libs = ["-lfreetype"]
+            cmd.extend([*ft_cflags, *ft_libs])
 
         log_info(f"Compiling: {' '.join(cmd)}")
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)

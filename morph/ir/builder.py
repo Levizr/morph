@@ -14,25 +14,38 @@ _CSS_TO_IR: dict[str, str] = {
     "width":                    "width",
     "height":                   "height",
     "margin":                   "margin",
+    "margin-top":               "margin_top_side",
+    "margin-bottom":            "margin_bottom_side",
+    "margin-left":              "margin_left_side",
+    "margin-right":             "margin_right_side",
     "padding":                  "padding",
+    "padding-top":              "padding_top_side",
+    "padding-bottom":           "padding_bottom_side",
+    "padding-left":             "padding_left_side",
+    "padding-right":            "padding_right_side",
     "border-radius":            "border_radius",
     "font-size":                "font_size",
     "font-weight":              "font_weight",
     "text-align":               "text_align",
+    "max-width":                "max_width",
     "display":                  "display",
     "flex-direction":           "flex_dir",
     "flex":                     "flex",
     "gap":                      "gap",
     "overflow":                 "overflow",
+    "position":                 "position",
+    "left":                     "left",
+    "right":                    "right",
+    "top":                      "top",
+    "bottom":                   "bottom",
+    "justify-content":          "justify_content",
+    "align-items":              "align_items",
+    "flex-wrap":                "flex_wrap",
+    "cursor":                   "cursor",
     "scrollbar-width":           "scrollbar_width",
     "scrollbar-track-color":     "scrollbar_track_color",
     "scrollbar-thumb-color":     "scrollbar_thumb_color",
     "scrollbar-border-radius":   "scrollbar_border_radius",
-}
-
-_SIDES = {
-    "margin":  "margin",
-    "padding": "padding",
 }
 
 
@@ -149,6 +162,20 @@ class IRBuilder:
             if val is not None:
                 ir_kw[ir_field] = val
 
+        # Merge individual side properties into margin/padding tuples
+        for base in ("margin", "padding"):
+            # tuple index: 0=top, 1=right, 2=bottom, 3=left
+            for side_field, idx in (("_top_side", 0), ("_right_side", 1), ("_bottom_side", 2), ("_left_side", 3)):
+                val = ir_kw.pop(base + side_field, None)
+                if val is not None:
+                    cur = ir_kw.get(base)
+                    if cur is None:
+                        tup = [0.0, 0.0, 0.0, 0.0]
+                    else:
+                        tup = list(cur)
+                    tup[idx] = val
+                    ir_kw[base] = tuple(tup)
+
         try:
             node_style = IRStyle(**ir_kw)
         except TypeError:
@@ -252,7 +279,7 @@ def _convert_value(field: str, raw: str | float | int) -> float | str | tuple | 
     if field in ("bg_color", "color"):
         return parse_color(raw)
 
-    if field in ("width", "height", "border_radius", "font_size", "flex", "gap"):
+    if field in ("width", "height", "border_radius", "font_size", "flex", "gap", "max_width"):
         try:
             return to_px(raw)
         except (ValueError, TypeError):
@@ -261,8 +288,23 @@ def _convert_value(field: str, raw: str | float | int) -> float | str | tuple | 
     if field in ("margin", "padding"):
         return _parse_side_value(field, raw)
 
-    if field in ("font_weight", "text_align", "display", "flex_dir", "overflow"):
+    if field in ("margin_top_side", "margin_bottom_side", "margin_left_side", "margin_right_side",
+                 "padding_top_side", "padding_bottom_side", "padding_left_side", "padding_right_side"):
+        try:
+            return to_px(raw)
+        except (ValueError, TypeError):
+            return None
+
+    if field in ("font_weight", "text_align", "display", "flex_dir",
+                 "overflow", "position", "justify_content", "align_items",
+                 "flex_wrap", "cursor"):
         return raw
+
+    if field in ("left", "right", "top", "bottom"):
+        try:
+            return to_px(raw)
+        except (ValueError, TypeError):
+            return None
 
     if field in ("scrollbar_width", "scrollbar_border_radius"):
         try:

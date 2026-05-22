@@ -40,6 +40,10 @@ def run(args=None) -> None:
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, "app.cpp")
 
+    from morph.codegen.feature_set import FeatureSet
+    features = FeatureSet()
+    features.scan(windows)
+
     emitter = Emitter()
     emitter.emit(windows, out_path)
 
@@ -53,7 +57,8 @@ def run(args=None) -> None:
     from morph.build.compiler import Compiler
     compiler = Compiler()
     binary_path = os.path.join(out_dir, "app")
-    ok = compiler.compile(out_path, binary_path)
+    ok = compiler.compile(out_path, binary_path,
+                          needs_freetype=features.needs_freetype())
 
     if ok:
         bin_size = os.path.getsize(binary_path) if os.path.exists(binary_path) else 0
@@ -92,11 +97,21 @@ def _deser_node(d: dict) -> IRNode:
         font_size=s.get("font_size", 16.0),
         font_weight=s.get("font_weight", "normal"),
         text_align=s.get("text_align", "left"),
+        max_width=s.get("max_width"),
         display=s.get("display", "block"),
         flex_dir=s.get("flex_dir", "row"),
         flex=s.get("flex", 0.0),
         gap=s.get("gap", 0.0),
         overflow=s.get("overflow", "visible"),
+        position=s.get("position", "static"),
+        left=s.get("left"),
+        right=s.get("right"),
+        top=s.get("top"),
+        bottom=s.get("bottom"),
+        justify_content=s.get("justify_content", "flex-start"),
+        align_items=s.get("align_items", "stretch"),
+        flex_wrap=s.get("flex_wrap", "nowrap"),
+        cursor=s.get("cursor", "default"),
         scrollbar_width=s.get("scrollbar_width", 8.0),
         scrollbar_track_color=tuple(s.get("scrollbar_track_color", [0.85, 0.85, 0.85, 0.4])),
         scrollbar_thumb_color=tuple(s.get("scrollbar_thumb_color", [0.5, 0.5, 0.5, 0.6])),

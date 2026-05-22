@@ -16,13 +16,12 @@ morph doctor
 The most impactful areas right now:
 
 | Area | Difficulty | Impact | Guide |
-|---|---|---|---|
+|---|---|---|---|---|
 | **C++ Node Emitter** (`morph/codegen/node_emitter.py`) | Medium | Generates actual C++ from IR | [Pipeline Deep-Dive](docs/pipeline.md) |
-| **Flexbox Layout** (`morph/layout/flex.py`) | Medium | Enables flexbox + complex layouts | [Development Guide](docs/development.md) |
-| **Build Compiler** (`morph/build/` — new module) | Medium | g++ invocation + binary output | [Pipeline Deep-Dive](docs/pipeline.md) |
-| **Style Resolver** (`morph/style/resolver.py`) | Medium | CSS cascade + specificity | [Development Guide](docs/development.md) |
+| **CSS Style Resolver** (`morph/style/resolver.py`) | Medium | CSS cascade + specificity | [Development Guide](docs/development.md) |
 | **JS Interpreter** (`morph/js/interpreter.py`) | Hard | JS expressions → C++ lambdas | [Development Guide](docs/development.md) |
 | **`morph_devrt` binary** (`runtime/`) | Hard | Dev mode renderer | — |
+| **`flex-wrap` / `position: relative` / `border`** | Medium | Layout and rendering features | [Development Guide](docs/development.md) |
 | **Tests** | Easy | Increase coverage | [Testing Guide](docs/testing.md) |
 | **Bug fixes** | Varies | Any open issue | — |
 

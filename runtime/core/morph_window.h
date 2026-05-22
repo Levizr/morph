@@ -14,6 +14,8 @@ class MorphWindow {
     GLFWwindow* m_handle = nullptr;
     MorphNode* m_root = nullptr;
     GLRenderer m_renderer;
+    GLFWcursor* m_handCursor = nullptr;
+    GLFWcursor* m_textCursor = nullptr;
 
     static void ortho(float* m, float l, float r, float b, float t, float n, float f) {
         // column-major 4x4 orthographic projection matrix
@@ -50,6 +52,16 @@ public:
         e.x = (float)mx;
         e.y = (float)my;
         self->m_root->dispatchEvent(e, (float)mx, (float)my);
+
+        // Update cursor based on hovered element
+        auto* target = self->m_root->hitTest((float)mx, (float)my);
+        if (target && target->style.cursor == "pointer") {
+            glfwSetCursor(win, self->m_handCursor);
+        } else if (target && target->style.cursor == "text") {
+            glfwSetCursor(win, self->m_textCursor);
+        } else {
+            glfwSetCursor(win, nullptr);
+        }
     }
 
     static void windowSizeCb(GLFWwindow* win, int width, int height) {
@@ -88,6 +100,8 @@ public:
             glfwSetScrollCallback(m_handle, scrollCb);
             glfwSetWindowSizeCallback(m_handle, windowSizeCb);
             glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+            m_handCursor = glfwCreateStandardCursor(GLFW_HAND_CURSOR);
+            m_textCursor = glfwCreateStandardCursor(GLFW_IBEAM_CURSOR);
         }
     }
 
@@ -116,6 +130,8 @@ public:
     }
 
     ~MorphWindow() {
+        if (m_handCursor) glfwDestroyCursor(m_handCursor);
+        if (m_textCursor) glfwDestroyCursor(m_textCursor);
         if (m_handle) glfwDestroyWindow(m_handle);
     }
 };

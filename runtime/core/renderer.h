@@ -9,15 +9,15 @@ public:
     virtual void drawRect(float x, float y, float w, float h,
                           float color[4]) = 0;
     virtual void drawRoundedRect(float x, float y, float w, float h,
-                                  float radius, float color[4]) = 0;
+                                  float radius, float color[4]) {}
     virtual void drawText(const std::string& text,
                           float x, float y, float color[4],
                           TextAlign align = TextAlign::Left,
                           float fontSize = 16,
-                          const std::string& fontWeight = "normal") = 0;
+                          const std::string& fontWeight = "normal") {}
     virtual float measureTextWidth(const std::string& text,
                                     float fontSize,
-                                    const std::string& fontWeight = "normal") = 0;
+                                    const std::string& fontWeight = "normal") { return 0; }
     virtual void beginClip(float x, float y, float w, float h) {}
     virtual void endClip() {}
 

@@ -57,6 +57,7 @@ class Emitter:
             windows=windows,
             window_code="\n".join(window_code),
             headers=features.required_headers(),
+            defines=features.required_defines(),
             dev_mode=(mode == "dev"),
         )
 

@@ -17,6 +17,16 @@ class IRStyle:
     flex_dir:      str   = "row"
     flex:          float = 0.0
     gap:           float = 0.0
+    max_width:     float | None = None
+    position:      str   = "static"
+    left:          float | None = None
+    right:         float | None = None
+    top:           float | None = None
+    bottom:        float | None = None
+    justify_content: str = "flex-start"
+    align_items:     str = "stretch"
+    flex_wrap:       str = "nowrap"
+    cursor:          str = "default"
     overflow:      str   = "visible"
     scrollbar_width:            float = 8.0
     scrollbar_track_color:      tuple[float,float,float,float] = (0.85, 0.85, 0.85, 0.4)

@@ -5,9 +5,12 @@
 #include <cstring>
 #include <cstdio>
 #include <unordered_map>
+#include "renderer.h"
+
+#ifdef MORPH_FEATURE_TEXT
 #include <ft2build.h>
 #include FT_FREETYPE_H
-#include "renderer.h"
+#endif
 
 // ── GLSL shaders ─────────────────────────────────────────────
 
@@ -53,6 +56,7 @@ void main() {
 }
 )glsl";
 
+#ifdef MORPH_FEATURE_TEXT
 // ── Text shader ──────────────────────────────────────────────
 
 static const char* kTextVertSrc = R"glsl(
@@ -93,6 +97,7 @@ void main() {
 
 static const char* kDefaultFont     = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
 static const char* kDefaultFontBold = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf";
+#endif
 
 // ── Shared unit quad (top-left origin, 0..1) ─────────────────
 
@@ -117,6 +122,7 @@ class GLRenderer : public Renderer {
         float radius;
     };
 
+#ifdef MORPH_FEATURE_TEXT
     struct TextInstance {
         float x, y, w, h;
         float u1, v1, u2, v2;
@@ -136,6 +142,7 @@ class GLRenderer : public Renderer {
         int fontSize = 0;
         std::unordered_map<GLchar, GlyphInfo> glyphs;
     };
+#endif
 
     // Quad batch
     GLuint m_vao = 0, m_vbo = 0, m_ibo = 0, m_instVBO = 0;
@@ -144,6 +151,7 @@ class GLRenderer : public Renderer {
     bool m_ready = false;
     std::vector<Instance> m_batch;
 
+#ifdef MORPH_FEATURE_TEXT
     // Text batch
     GLuint m_textVAO = 0, m_textVBO = 0, m_textIBO = 0, m_textInstVBO = 0;
     GLuint m_textShader = 0;
@@ -152,6 +160,7 @@ class GLRenderer : public Renderer {
     std::unordered_map<std::string, std::vector<TextInstance>> m_textBatches;
     FT_Library m_ft = nullptr;
     std::unordered_map<std::string, FontAtlas> m_atlases;
+#endif
 
     static GLuint compileShader(GLenum type, const char* src) {
         GLuint s = glCreateShader(type);
@@ -220,6 +229,7 @@ class GLRenderer : public Renderer {
         glBindVertexArray(0);
     }
 
+#ifdef MORPH_FEATURE_TEXT
     void createTextBuffers() {
         glGenVertexArrays(1, &m_textVAO);
         glBindVertexArray(m_textVAO);
@@ -358,6 +368,7 @@ class GLRenderer : public Renderer {
         m_atlases[key] = atlas;
         return m_atlases[key];
     }
+#endif
 
 public:
     GLRenderer() = default;
@@ -368,31 +379,38 @@ public:
         if (m_ibo) glDeleteBuffers(1, &m_ibo);
         if (m_instVBO) glDeleteBuffers(1, &m_instVBO);
         if (m_shader) glDeleteProgram(m_shader);
+#ifdef MORPH_FEATURE_TEXT
         if (m_textVAO) glDeleteVertexArrays(1, &m_textVAO);
         if (m_textInstVBO) glDeleteBuffers(1, &m_textInstVBO);
         if (m_textShader) glDeleteProgram(m_textShader);
         for (auto& [_, a] : m_atlases)
             if (a.texture) glDeleteTextures(1, &a.texture);
         if (m_ft) FT_Done_FreeType(m_ft);
+#endif
     }
 
     bool ensureReady() {
         if (m_ready) return true;
 
-        if (FT_Init_FreeType(&m_ft)) {
-            fprintf(stderr, "[GLRenderer] failed to init FreeType\n");
-        }
-
         createProgram(kQuadVertSrc, kQuadFragSrc, m_shader, m_uProj);
         createQuadBuffers();
 
+#ifdef MORPH_FEATURE_TEXT
+        if (FT_Init_FreeType(&m_ft)) {
+            fprintf(stderr, "[GLRenderer] failed to init FreeType\n");
+        }
         createProgram(kTextVertSrc, kTextFragSrc, m_textShader, m_textUProj);
         m_textUAtlas = glGetUniformLocation(m_textShader, "uAtlas");
         createTextBuffers();
+#endif
         glClearColor(1,1,1,1);
 
         m_ready = true;
+#ifdef MORPH_FEATURE_TEXT
         return m_shader != 0 && m_textShader != 0;
+#else
+        return m_shader != 0;
+#endif
     }
 
     void clear() override {
@@ -417,11 +435,17 @@ public:
         m_batch.push_back({x + m_scrollX, y + m_scrollY, w, h, color[0], color[1], color[2], color[3], 0.0f});
     }
 
+#ifdef MORPH_FEATURE_RADIUS
     void drawRoundedRect(float x, float y, float w, float h,
                          float radius, float color[4]) override {
-        m_batch.push_back({x + m_scrollX, y + m_scrollY, w, h, color[0], color[1], color[2], color[3], radius});
+        float r = radius;
+        float maxR = std::min(w, h) * 0.5f;
+        if (r > maxR) r = maxR;
+        m_batch.push_back({x + m_scrollX, y + m_scrollY, w, h, color[0], color[1], color[2], color[3], r});
     }
+#endif
 
+#ifdef MORPH_FEATURE_TEXT
     float measureTextWidth(const std::string& text,
                            float fontSize,
                            const std::string& fontWeight) override {
@@ -481,6 +505,7 @@ public:
             penX += g.ax;
         }
     }
+#endif
 
     void drawTexture(unsigned int tex, float x, float y,
                      float w, float h) override {
@@ -512,6 +537,7 @@ public:
             m_batch.clear();
         }
 
+#ifdef MORPH_FEATURE_TEXT
         // ── Draw text (per-font batch) ───────────────────────
         if (!m_textBatches.empty()) {
             glUseProgram(m_textShader);
@@ -537,6 +563,7 @@ public:
             }
             m_textBatches.clear();
         }
+#endif
 
         glBindVertexArray(0);
     }

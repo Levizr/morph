@@ -1,6 +1,6 @@
 """Morph UI Framework — Build native OpenGL UIs from .mx files."""
 
-__version__ = "0.1.0"
+__version__ = "0.0.2"
 
 
 def __getattr__(name):
