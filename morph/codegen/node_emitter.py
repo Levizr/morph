@@ -29,7 +29,8 @@ class NodeEmitter:
 
         # ── Text node ────────────────────────────────────────
         if node.node_type == "__text__":
-            lines.append(f"TextNode* {node.node_id} = new TextNode(\"{node.text_content}\");")
+            escaped = node.text_content.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\t", "\\t").replace("\r", "\\r")
+            lines.append(f"TextNode* {node.node_id} = new TextNode(\"{escaped}\");")
             lines.append(f"{indent}{node.node_id}->x = {node.x}f;")
             lines.append(f"{indent}{node.node_id}->y = {node.y}f;")
             lines.append(f"{indent}{node.node_id}->w = {node.w}f;")
