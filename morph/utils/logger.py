@@ -73,5 +73,5 @@ def print_logo() -> None:
         f"  {_CYAN}{_BOLD}╚═╝     ╚═╝ ╚═════╝ ╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝{_RESET}\n"
     )
     print(logo)
-    print(f"  {_DIM}Build native OpenGL Applicationswith HTML, CSS, and JavaScript{_RESET}")
+    print(f"  {_DIM}Build native OpenGL Applications with HTML, CSS, and JavaScript{_RESET}")
     print(f"  {_DIM}No browser. No Electron. No WebView.{_RESET}\n")

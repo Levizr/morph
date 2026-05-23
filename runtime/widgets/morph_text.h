@@ -16,6 +16,11 @@ public:
         MorphNode::layout(px, py, parentW, parentH, r);
 
         if (r && w > 0.0f) {
+            // Constrain wrap width by maxWidth
+            float wrapW = w;
+            if (style.maxWidth > 0.0f && wrapW > style.maxWidth)
+                wrapW = style.maxWidth;
+
             // Split by newlines first, then word-wrap each paragraph
             lines.clear();
             size_t paraStart = 0;
@@ -23,11 +28,11 @@ public:
                 size_t paraEnd = text.find('\n', paraStart);
                 if (paraEnd == std::string::npos) paraEnd = text.size();
                 std::string para = text.substr(paraStart, paraEnd - paraStart);
-                wrapParagraph(para, r);
+                wrapParagraph(para, r, wrapW);
                 paraStart = paraEnd + 1;
             }
             if (lines.empty() && !text.empty())
-                wrapParagraph(text, r);
+                wrapParagraph(text, r, wrapW);
             if (lines.empty())
                 lines.push_back(text);
 
@@ -39,8 +44,7 @@ public:
         }
     }
 
-    void wrapParagraph(const std::string& para, Renderer* r) {
-        float lineW = w;
+    void wrapParagraph(const std::string& para, Renderer* r, float lineW) {
         float tw = r->measureTextWidth(para, style.fontSize, style.fontWeight);
         if (tw <= lineW) {
             lines.push_back(para);

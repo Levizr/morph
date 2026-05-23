@@ -277,9 +277,29 @@ public:
     virtual bool onEvent(MorphEvent& e) { return false; }
     virtual void onHover(bool state) {}
 
-    // Content-based width (for flex row children). Returns -1 if unknown.
+    // Content-based width (for flex / non-stretch children). Returns -1 if unknown.
     virtual float contentWidth(Renderer* r) {
         if (style.explicitWidth >= 0.0f) return style.explicitWidth;
+
+        bool isRow = (style.display == "flex" && style.flexDirection == "row");
+
+        if (isRow) {
+            // For rows, total width = sum of children widths + gaps + margins
+            float total = 0.0f;
+            int count = 0;
+            for (auto* c : children) {
+                float cw = c->contentWidth(r);
+                if (cw < 0.0f) return -1.0f;
+                float cml = c->style.margin[3], cmr = c->style.margin[1];
+                total += cw + cml + cmr;
+                count++;
+            }
+            if (count > 1) total += (count - 1) * style.gap;
+            float pl = style.padding[3], pr = style.padding[1];
+            return total + pl + pr;
+        }
+
+        // For columns, content width = max of children content widths
         float maxCW = -1.0f;
         for (auto* c : children) {
             float cw = c->contentWidth(r);

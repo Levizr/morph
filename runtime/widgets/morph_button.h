@@ -17,7 +17,8 @@ public:
     }
 
     void draw(Renderer& r) override {
-        r.drawRoundedRect(x, y, w, h, 6.0f, style.bgColor);
+        float rad = style.borderRadius > 0.0f ? style.borderRadius : 6.0f;
+        r.drawRoundedRect(x, y, w, h, rad, style.bgColor);
 #ifdef MORPH_FEATURE_SCROLL
         if (scrollEnabled && contentH > h) {
             r.beginClip(x, y, w, h);
