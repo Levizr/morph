@@ -4,6 +4,7 @@
 #include <vector>
 #include <cstring>
 #include <cstdio>
+#include <cmath>
 #include <unordered_map>
 #include "renderer.h"
 
@@ -358,8 +359,8 @@ class GLRenderer : public Renderer {
         glBindTexture(GL_TEXTURE_2D, atlas.texture);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, texW, texH, 0,
                      GL_RED, GL_UNSIGNED_BYTE, data.data());
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         atlas.w = texW;
@@ -474,6 +475,10 @@ public:
         // Apply scroll offset to Y; use font ascender for baseline
         float penY = y + m_scrollY + fontSize;
 
+        // Snap to pixel grid for crisp text
+        penX = std::round(penX);
+        penY = std::round(penY);
+
         // Pre-compute width for alignment
         float totalW = 0;
         for (size_t i = 0; i < text.size(); i++) {
@@ -491,8 +496,8 @@ public:
             if (it == atlas.glyphs.end()) continue;
             auto& g = it->second;
 
-            float qx = penX + g.bx;
-            float qy = penY - g.by;
+            float qx = std::round(penX + g.bx);
+            float qy = std::round(penY - g.by);
             float qw = g.gw;
             float qh = g.gh;
 
