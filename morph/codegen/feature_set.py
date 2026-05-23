@@ -26,6 +26,8 @@ class FeatureSet:
                     self.features.add("position")
                 if node.style.display == "flex":
                     self.features.add("flex")
+                if node.style.cursor not in ("default", "", None):
+                    self.features.add("cursor")
                 if node.events:
                     self.features.add("event")
                 if isinstance(node, IRViewport):
@@ -61,6 +63,8 @@ class FeatureSet:
             defines.append("MORPH_FEATURE_POSITION")
         if "flex" in self.features:
             defines.append("MORPH_FEATURE_FLEX")
+        if "cursor" in self.features:
+            defines.append("MORPH_FEATURE_CURSOR")
         return defines
 
     def needs_freetype(self) -> bool:

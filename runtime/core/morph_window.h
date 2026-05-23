@@ -14,8 +14,10 @@ class MorphWindow {
     GLFWwindow* m_handle = nullptr;
     MorphNode* m_root = nullptr;
     GLRenderer m_renderer;
+#ifdef MORPH_FEATURE_CURSOR
     GLFWcursor* m_handCursor = nullptr;
     GLFWcursor* m_textCursor = nullptr;
+#endif
 
     static void ortho(float* m, float l, float r, float b, float t, float n, float f) {
         // column-major 4x4 orthographic projection matrix
@@ -53,15 +55,24 @@ public:
         e.y = (float)my;
         self->m_root->dispatchEvent(e, (float)mx, (float)my);
 
-        // Update cursor based on hovered element
+        // Update cursor based on hovered element (walks up parent chain for inheritance)
+#ifdef MORPH_FEATURE_CURSOR
         auto* target = self->m_root->hitTest((float)mx, (float)my);
-        if (target && target->style.cursor == "pointer") {
+        const std::string* cur = nullptr;
+        for (auto* n = target; n; n = n->parent) {
+            if (n->style.cursor != "default") {
+                cur = &n->style.cursor;
+                break;
+            }
+        }
+        if (cur && *cur == "pointer") {
             glfwSetCursor(win, self->m_handCursor);
-        } else if (target && target->style.cursor == "text") {
+        } else if (cur && *cur == "text") {
             glfwSetCursor(win, self->m_textCursor);
         } else {
             glfwSetCursor(win, nullptr);
         }
+#endif
     }
 
     static void windowSizeCb(GLFWwindow* win, int width, int height) {
@@ -100,8 +111,10 @@ public:
             glfwSetScrollCallback(m_handle, scrollCb);
             glfwSetWindowSizeCallback(m_handle, windowSizeCb);
             glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+#ifdef MORPH_FEATURE_CURSOR
             m_handCursor = glfwCreateStandardCursor(GLFW_HAND_CURSOR);
             m_textCursor = glfwCreateStandardCursor(GLFW_IBEAM_CURSOR);
+#endif
         }
     }
 
@@ -130,8 +143,10 @@ public:
     }
 
     ~MorphWindow() {
+#ifdef MORPH_FEATURE_CURSOR
         if (m_handCursor) glfwDestroyCursor(m_handCursor);
         if (m_textCursor) glfwDestroyCursor(m_textCursor);
+#endif
         if (m_handle) glfwDestroyWindow(m_handle);
     }
 };

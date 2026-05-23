@@ -49,6 +49,7 @@ class MorphNode {
 public:
     float x = 0, y = 0, w = 0, h = 0;
     MorphStyle style;
+    MorphNode* parent = nullptr;
     std::vector<MorphNode*> children;
     bool focused = false;
 
@@ -327,7 +328,7 @@ public:
         return this;
     }
 
-    void addChild(MorphNode* child) { children.push_back(child); }
+    void addChild(MorphNode* child) { children.push_back(child); child->parent = this; }
 
     // Dispatch event to deepest child containing (ex, ey); bubble up
     // Returns true if event was handled (stops bubble)
