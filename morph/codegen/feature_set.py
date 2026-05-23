@@ -10,24 +10,43 @@ class FeatureSet:
     def scan(self, windows: list[IRWindow]) -> None:
         for win in windows:
             for node in self._walk(win.nodes):
+                s = node.style
                 if node.node_type == "__text__":
                     self.features.add("text")
                 if node.node_type == "button":
                     self.features.add("button")
+                    self.features.add("radius")
                 if node.node_type == "input":
                     self.features.add("input")
-                if node.style.border_radius > 0:
+                if s.border_radius > 0:
                     self.features.add("radius")
-                if node.style.font_weight not in ("normal", ""):
+                if s.font_weight not in ("normal", ""):
                     self.features.add("bold")
-                if node.style.overflow in ("auto", "scroll"):
+                if s.overflow in ("auto", "scroll"):
                     self.features.add("scroll")
-                if node.style.position != "static":
+                # Detect scrollbar customization as scroll feature
+                if (s.scrollbar_width != 8.0 or
+                    s.scrollbar_track_color != (0.85, 0.85, 0.85, 0.4) or
+                    s.scrollbar_thumb_color != (0.5, 0.5, 0.5, 0.6) or
+                    s.scrollbar_border_radius != 4.0):
+                    self.features.add("scroll")
+                if s.position != "static":
                     self.features.add("position")
-                if node.style.display == "flex":
+                # Detect position offsets as position feature even if position is static
+                if s.left is not None or s.right is not None or s.top is not None or s.bottom is not None:
+                    self.features.add("position")
+                if s.display == "flex":
                     self.features.add("flex")
-                if node.style.cursor not in ("default", "", None):
+                # Detect gap as flex feature (meaningful only with flex layout)
+                if s.gap > 0:
+                    self.features.add("flex")
+                # Flex-related fields imply flex feature
+                if s.justify_content != "flex-start" or s.align_items != "stretch" or s.flex_wrap != "nowrap":
+                    self.features.add("flex")
+                if s.cursor not in ("default", "", None):
                     self.features.add("cursor")
+                if s.border_width > 0 or s.border_style not in ("", "none"):
+                    self.features.add("border")
                 if node.events:
                     self.features.add("event")
                 if isinstance(node, IRViewport):
@@ -63,6 +82,8 @@ class FeatureSet:
             defines.append("MORPH_FEATURE_FLEX")
         if "cursor" in self.features:
             defines.append("MORPH_FEATURE_CURSOR")
+        if "border" in self.features:
+            defines.append("MORPH_FEATURE_BORDER")
         return defines
 
     def needs_freetype(self) -> bool:

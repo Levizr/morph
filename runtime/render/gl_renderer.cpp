@@ -30,6 +30,14 @@ void GLRenderer::createQuadBuffers() {
     glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, sizeof(Instance), (void*)offsetof(Instance, radius));
     glVertexAttribDivisor(3, 1);
 
+    glEnableVertexAttribArray(4);
+    glVertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE, sizeof(Instance), (void*)offsetof(Instance, borderWidth));
+    glVertexAttribDivisor(4, 1);
+
+    glEnableVertexAttribArray(5);
+    glVertexAttribPointer(5, 4, GL_FLOAT, GL_FALSE, sizeof(Instance), (void*)offsetof(Instance, br));
+    glVertexAttribDivisor(5, 1);
+
     glBindVertexArray(0);
 }
 
@@ -221,6 +229,8 @@ void GLRenderer::endClip() {
 
 void GLRenderer::flush(const float proj[16]) {
     if (!ensureReady()) return;
+
+    memcpy(m_proj, proj, sizeof(m_proj));
 
     if (!m_batch.empty()) {
         glUseProgram(m_shader);

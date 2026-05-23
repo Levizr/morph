@@ -8,15 +8,27 @@ from morph.ir.style import IRStyle
 _TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
 
 
-class NodeEmitter:
-    """Generates C++ instantiation code for an IR node tree."""
+def fmt(v: float) -> str:
+    """Format a float for C++ literal — always includes a decimal point."""
+    s = f"{v:.1f}"
+    return s.rstrip("0").rstrip(".") + ".0f" if "." not in s else s + "f"
 
-    def __init__(self):
+
+class NodeEmitter:
+    """Generates C++ instantiation code for an IR node tree.
+
+    Only emits style fields whose associated feature is enabled in the
+    feature set — ensures zero references to struct members that don't
+    exist when the corresponding feature define is absent.
+    """
+
+    def __init__(self, features: set[str] | None = None):
         self.env = Environment(
             loader=FileSystemLoader(_TEMPLATES_DIR),
             trim_blocks=True,
             lstrip_blocks=True,
         )
+        self.features = features or set()
 
     def emit_node(self, node: IRNode, parent_id: str | None = None,
                   parent_style: IRStyle | None = None) -> str:
@@ -27,45 +39,38 @@ class NodeEmitter:
         lines = []
         indent = "    "
 
-        # ── Text node ────────────────────────────────────────
         if node.node_type == "__text__":
             escaped = node.text_content.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\t", "\\t").replace("\r", "\\r")
             lines.append(f"TextNode* {node.node_id} = new TextNode(\"{escaped}\");")
-            lines.append(f"{indent}{node.node_id}->x = {node.x}f;")
-            lines.append(f"{indent}{node.node_id}->y = {node.y}f;")
-            lines.append(f"{indent}{node.node_id}->w = {node.w}f;")
-            lines.append(f"{indent}{node.node_id}->h = {node.h}f;")
+            lines.append(f"{indent}{node.node_id}->x = {fmt(node.x)};")
+            lines.append(f"{indent}{node.node_id}->y = {fmt(node.y)};")
+            lines.append(f"{indent}{node.node_id}->w = {fmt(node.w)};")
+            lines.append(f"{indent}{node.node_id}->h = {fmt(node.h)};")
             lines.append(self._set_style(node, indent, parent_style))
             if parent_id:
                 lines.append(f"{parent_id}->addChild({node.node_id});")
             return "\n".join(lines)
 
-        # ── Button (has click events) ────────────────────────
         if node.node_type == "button":
             lines.append(f"ButtonNode* {node.node_id} = new ButtonNode();")
-            lines.append(f"{indent}{node.node_id}->x = {node.x}f;")
-            lines.append(f"{indent}{node.node_id}->y = {node.y}f;")
-            lines.append(f"{indent}{node.node_id}->w = {node.w}f;")
-            lines.append(f"{indent}{node.node_id}->h = {node.h}f;")
-
-        # ── Generic rectangular node ─────────────────────────
+            lines.append(f"{indent}{node.node_id}->x = {fmt(node.x)};")
+            lines.append(f"{indent}{node.node_id}->y = {fmt(node.y)};")
+            lines.append(f"{indent}{node.node_id}->w = {fmt(node.w)};")
+            lines.append(f"{indent}{node.node_id}->h = {fmt(node.h)};")
         else:
             lines.append(f"RectNode* {node.node_id} = new RectNode("
-                         f"{node.x}f, {node.y}f, {node.w}f, {node.h}f);")
+                         f"{fmt(node.x)}, {fmt(node.y)}, {fmt(node.w)}, {fmt(node.h)});")
 
         lines.append(self._set_style(node, indent, parent_style))
 
-        # ── Events ───────────────────────────────────────────
         for event in node.events:
             lines.append(self._emit_event(event, node.node_id, indent))
 
         lines.append("")
 
-        # ── Attach to parent ─────────────────────────────────
         if parent_id:
             lines.append(f"{parent_id}->addChild({node.node_id});")
 
-        # ── Build resolved style for child inheritance ───────
         s = node.style
         resolved = IRStyle(
             color=s.color if s.color != (0, 0, 0, 1) else (
@@ -79,7 +84,6 @@ class NodeEmitter:
             max_width=s.max_width,
         )
 
-        # ── Recurse children ─────────────────────────────────
         for child in node.children:
             lines.append(self.emit_node(child, node.node_id, resolved))
 
@@ -90,22 +94,23 @@ class NodeEmitter:
         s = node.style
         lines = []
         prefix = f"{node.node_id}->style"
+
+        # ── Always-available fields (StyleBase) ──
         if s.bg_color != (0, 0, 0, 0):
             lines.append(f"{prefix}.bgColor[0] = {s.bg_color[0]:.4f}f;")
             lines.append(f"{prefix}.bgColor[1] = {s.bg_color[1]:.4f}f;")
             lines.append(f"{prefix}.bgColor[2] = {s.bg_color[2]:.4f}f;")
             lines.append(f"{prefix}.bgColor[3] = {s.bg_color[3]:.4f}f;")
         if s.border_radius > 0:
-            lines.append(f"{prefix}.borderRadius = {s.border_radius}f;")
+            lines.append(f"{prefix}.borderRadius = {fmt(s.border_radius)};")
         fs = s.font_size if s.font_size != 16.0 else (
             parent_style.font_size if parent_style and parent_style.font_size != 16.0 else 16.0)
         if fs != 16.0:
-            lines.append(f"{prefix}.fontSize = {fs}f;")
+            lines.append(f"{prefix}.fontSize = {fmt(fs)};")
         fw = s.font_weight if s.font_weight != "normal" else (
             parent_style.font_weight if parent_style and parent_style.font_weight != "normal" else "normal")
         if fw != "normal":
             lines.append(f"{prefix}.fontWeight = \"{fw}\";")
-        # Color inherits from parent like browser cascade
         c = s.color if s.color != (0, 0, 0, 1) else (
             parent_style.color if parent_style and parent_style.color != (0, 0, 0, 1) else (0, 0, 0, 1))
         if c != (0, 0, 0, 1):
@@ -113,67 +118,95 @@ class NodeEmitter:
             lines.append(f"{prefix}.color[1]   = {c[1]:.4f}f;")
             lines.append(f"{prefix}.color[2]   = {c[2]:.4f}f;")
         if s.padding != (0, 0, 0, 0):
-            lines.append(f"{prefix}.padding[0] = {s.padding[0]}f;")
-            lines.append(f"{prefix}.padding[1] = {s.padding[1]}f;")
-            lines.append(f"{prefix}.padding[2] = {s.padding[2]}f;")
-            lines.append(f"{prefix}.padding[3] = {s.padding[3]}f;")
+            lines.append(f"{prefix}.padding[0] = {fmt(s.padding[0])};")
+            lines.append(f"{prefix}.padding[1] = {fmt(s.padding[1])};")
+            lines.append(f"{prefix}.padding[2] = {fmt(s.padding[2])};")
+            lines.append(f"{prefix}.padding[3] = {fmt(s.padding[3])};")
         if s.margin != (0, 0, 0, 0):
-            lines.append(f"{prefix}.margin[0] = {s.margin[0]}f;")
-            lines.append(f"{prefix}.margin[1] = {s.margin[1]}f;")
-            lines.append(f"{prefix}.margin[2] = {s.margin[2]}f;")
-            lines.append(f"{prefix}.margin[3] = {s.margin[3]}f;")
-        if s.gap > 0:
-            lines.append(f"{prefix}.gap = {s.gap}f;")
+            lines.append(f"{prefix}.margin[0] = {fmt(s.margin[0])};")
+            lines.append(f"{prefix}.margin[1] = {fmt(s.margin[1])};")
+            lines.append(f"{prefix}.margin[2] = {fmt(s.margin[2])};")
+            lines.append(f"{prefix}.margin[3] = {fmt(s.margin[3])};")
         if s.width is not None:
-            lines.append(f"{prefix}.explicitWidth = {s.width}f;")
+            lines.append(f"{prefix}.explicitWidth = {fmt(s.width)};")
         if s.height is not None:
-            lines.append(f"{prefix}.explicitHeight = {s.height}f;")
+            lines.append(f"{prefix}.explicitHeight = {fmt(s.height)};")
         if s.max_width is not None:
-            lines.append(f"{prefix}.maxWidth = {s.max_width}f;")
+            lines.append(f"{prefix}.maxWidth = {fmt(s.max_width)};")
         if s.overflow != "visible":
             lines.append(f"{prefix}.overflow = \"{s.overflow}\";")
         if s.display != "block":
             lines.append(f"{prefix}.display = \"{s.display}\";")
-        if s.display == "flex" and s.flex_dir != "column":
-            lines.append(f"{prefix}.flexDirection = \"{s.flex_dir}\";")
         if s.position != "static":
             lines.append(f"{prefix}.position = \"{s.position}\";")
-        if s.left is not None:
-            lines.append(f"{prefix}.left = {s.left}f;")
-        if s.right is not None:
-            lines.append(f"{prefix}.right = {s.right}f;")
-        if s.top is not None:
-            lines.append(f"{prefix}.top = {s.top}f;")
-        if s.bottom is not None:
-            lines.append(f"{prefix}.bottom = {s.bottom}f;")
-        if s.justify_content != "flex-start":
-            lines.append(f"{prefix}.justifyContent = \"{s.justify_content}\";")
-        if s.align_items != "stretch":
-            lines.append(f"{prefix}.alignItems = \"{s.align_items}\";")
+        if s.box_sizing != "content-box":
+            lines.append(f"{prefix}.boxSizing = \"{s.box_sizing}\";")
         ta = s.text_align if s.text_align != "left" else (
             parent_style.text_align if parent_style and parent_style.text_align != "left" else "left")
         if ta != "left":
             lines.append(f"{prefix}.textAlign = \"{ta}\";")
-        if s.flex_wrap != "nowrap":
-            lines.append(f"{prefix}.flexWrap = \"{s.flex_wrap}\";")
-        if s.cursor != "default":
-            lines.append(f"{prefix}.cursor = \"{s.cursor}\";")
-        if s.scrollbar_width != 8.0:
-            lines.append(f"{prefix}.scrollbarWidth = {s.scrollbar_width}f;")
-        if s.scrollbar_track_color != (0.85, 0.85, 0.85, 0.4):
-            tc = s.scrollbar_track_color
-            lines.append(f"{prefix}.scrollbarTrackColor[0] = {tc[0]:.4f}f;")
-            lines.append(f"{prefix}.scrollbarTrackColor[1] = {tc[1]:.4f}f;")
-            lines.append(f"{prefix}.scrollbarTrackColor[2] = {tc[2]:.4f}f;")
-            lines.append(f"{prefix}.scrollbarTrackColor[3] = {tc[3]:.4f}f;")
-        if s.scrollbar_thumb_color != (0.5, 0.5, 0.5, 0.6):
-            tc = s.scrollbar_thumb_color
-            lines.append(f"{prefix}.scrollbarThumbColor[0] = {tc[0]:.4f}f;")
-            lines.append(f"{prefix}.scrollbarThumbColor[1] = {tc[1]:.4f}f;")
-            lines.append(f"{prefix}.scrollbarThumbColor[2] = {tc[2]:.4f}f;")
-            lines.append(f"{prefix}.scrollbarThumbColor[3] = {tc[3]:.4f}f;")
-        if s.scrollbar_border_radius != 4.0:
-            lines.append(f"{prefix}.scrollbarBorderRadius = {s.scrollbar_border_radius}f;")
+
+        # ── Feature: FLEX ──
+        if "flex" in self.features:
+            if s.display == "flex" and s.flex_dir != "column":
+                lines.append(f"{prefix}.flexDirection = \"{s.flex_dir}\";")
+            if s.gap > 0:
+                lines.append(f"{prefix}.gap = {fmt(s.gap)};")
+            if s.justify_content != "flex-start":
+                lines.append(f"{prefix}.justifyContent = \"{s.justify_content}\";")
+            if s.align_items != "stretch":
+                lines.append(f"{prefix}.alignItems = \"{s.align_items}\";")
+            if s.flex_wrap != "nowrap":
+                lines.append(f"{prefix}.flexWrap = \"{s.flex_wrap}\";")
+
+        # ── Feature: POSITION ──
+        if "position" in self.features:
+            if s.left is not None:
+                lines.append(f"{prefix}.left = {fmt(s.left)};")
+            if s.right is not None:
+                lines.append(f"{prefix}.right = {fmt(s.right)};")
+            if s.top is not None:
+                lines.append(f"{prefix}.top = {fmt(s.top)};")
+            if s.bottom is not None:
+                lines.append(f"{prefix}.bottom = {fmt(s.bottom)};")
+
+        # ── Feature: CURSOR ──
+        if "cursor" in self.features:
+            if s.cursor != "default":
+                lines.append(f"{prefix}.cursor = \"{s.cursor}\";")
+
+        # ── Feature: BORDER ──
+        if "border" in self.features:
+            if s.border_width > 0:
+                lines.append(f"{prefix}.borderWidth = {fmt(s.border_width)};")
+            if s.border_color != (0.0, 0.0, 0.0, 1.0):
+                bc = s.border_color
+                lines.append(f"{prefix}.borderColor[0] = {bc[0]:.4f}f;")
+                lines.append(f"{prefix}.borderColor[1] = {bc[1]:.4f}f;")
+                lines.append(f"{prefix}.borderColor[2] = {bc[2]:.4f}f;")
+                lines.append(f"{prefix}.borderColor[3] = {bc[3]:.4f}f;")
+            if s.border_style not in ("", "none"):
+                lines.append(f"{prefix}.borderStyle = \"{s.border_style}\";")
+
+        # ── Feature: SCROLL ──
+        if "scroll" in self.features:
+            if s.scrollbar_width != 8.0:
+                lines.append(f"{prefix}.scrollbarWidth = {fmt(s.scrollbar_width)};")
+            if s.scrollbar_track_color != (0.85, 0.85, 0.85, 0.4):
+                tc = s.scrollbar_track_color
+                lines.append(f"{prefix}.scrollbarTrackColor[0] = {tc[0]:.4f}f;")
+                lines.append(f"{prefix}.scrollbarTrackColor[1] = {tc[1]:.4f}f;")
+                lines.append(f"{prefix}.scrollbarTrackColor[2] = {tc[2]:.4f}f;")
+                lines.append(f"{prefix}.scrollbarTrackColor[3] = {tc[3]:.4f}f;")
+            if s.scrollbar_thumb_color != (0.5, 0.5, 0.5, 0.6):
+                tc = s.scrollbar_thumb_color
+                lines.append(f"{prefix}.scrollbarThumbColor[0] = {tc[0]:.4f}f;")
+                lines.append(f"{prefix}.scrollbarThumbColor[1] = {tc[1]:.4f}f;")
+                lines.append(f"{prefix}.scrollbarThumbColor[2] = {tc[2]:.4f}f;")
+                lines.append(f"{prefix}.scrollbarThumbColor[3] = {tc[3]:.4f}f;")
+            if s.scrollbar_border_radius != 4.0:
+                lines.append(f"{prefix}.scrollbarBorderRadius = {fmt(s.scrollbar_border_radius)};")
+
         return "\n".join(f"{indent}{l}" for l in lines)
 
     def _emit_event(self, event, node_id: str, indent: str) -> str:

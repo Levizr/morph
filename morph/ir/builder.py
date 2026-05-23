@@ -46,6 +46,10 @@ _CSS_TO_IR: dict[str, str] = {
     "scrollbar-track-color":     "scrollbar_track_color",
     "scrollbar-thumb-color":     "scrollbar_thumb_color",
     "scrollbar-border-radius":   "scrollbar_border_radius",
+    "border-width":              "border_width",
+    "border-color":              "border_color",
+    "border-style":              "border_style",
+    "box-sizing":                "box_sizing",
 }
 
 
@@ -155,6 +159,20 @@ class IRBuilder:
         # ── Convert merged CSS → IRStyle fields ──────────────
         ir_kw = {}
         for css_key, css_val in merged.items():
+            if css_key == "border":
+                # Expand border shorthand: <width> <style> <color>
+                parts = css_val.split()
+                for p in parts:
+                    if p in ("solid", "dashed", "dotted", "none"):
+                        ir_kw["border_style"] = p
+                    elif p.startswith("#") or p.startswith("rgb") or p in ("transparent",):
+                        ir_kw["border_color"] = parse_color(p)
+                    else:
+                        try:
+                            ir_kw["border_width"] = to_px(p)
+                        except (ValueError, TypeError):
+                            pass
+                continue
             ir_field = _CSS_TO_IR.get(css_key)
             if ir_field is None:
                 continue
@@ -297,7 +315,7 @@ def _convert_value(field: str, raw: str | float | int) -> float | str | tuple | 
 
     if field in ("font_weight", "text_align", "display", "flex_dir",
                  "overflow", "position", "justify_content", "align_items",
-                 "flex_wrap", "cursor"):
+                 "flex_wrap", "cursor", "box_sizing"):
         return raw
 
     if field in ("left", "right", "top", "bottom"):
@@ -306,13 +324,16 @@ def _convert_value(field: str, raw: str | float | int) -> float | str | tuple | 
         except (ValueError, TypeError):
             return None
 
-    if field in ("scrollbar_width", "scrollbar_border_radius"):
+    if field in ("scrollbar_width", "scrollbar_border_radius", "border_width"):
         try:
             return to_px(raw)
         except (ValueError, TypeError):
             return None
 
-    if field in ("scrollbar_track_color", "scrollbar_thumb_color"):
+    if field in ("scrollbar_track_color", "scrollbar_thumb_color", "border_color"):
         return parse_color(raw)
+
+    if field == "border_style":
+        return raw
 
     return None

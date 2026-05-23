@@ -30,6 +30,7 @@ CSS_REGISTRY = {
     "overflow":               {"feature": None,  "type": "keyword"},
     "display":                {"feature": None,  "type": "keyword",
                                "values": {"flex": {"enables": ["flex-direction", "justify-content", "align-items", "gap", "flex-wrap"]}}},
+    "box-sizing":             {"feature": None,  "type": "keyword"},
     "flex-direction":         {"feature": "flex", "type": "keyword"},
     "position":               {"feature": None,  "type": "keyword",
                                "values": {"absolute": {"enables": ["left", "right", "top", "bottom"]},
@@ -55,6 +56,12 @@ CSS_REGISTRY = {
 
     # ── Interaction ────────────────────────────────────────
     "cursor":                 {"feature": "cursor", "type": "keyword"},
+
+    # ── Border ─────────────────────────────────────────────
+    "border-width":           {"feature": "border", "type": "px"},
+    "border-color":           {"feature": "border", "type": "color"},
+    "border-style":           {"feature": "border", "type": "keyword"},
+    "border":                 {"feature": "border", "type": "shorthand"},
 }
 
 

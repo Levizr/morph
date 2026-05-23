@@ -117,6 +117,10 @@ def _deser_node(d: dict) -> IRNode:
         scrollbar_track_color=tuple(s.get("scrollbar_track_color", [0.85, 0.85, 0.85, 0.4])),
         scrollbar_thumb_color=tuple(s.get("scrollbar_thumb_color", [0.5, 0.5, 0.5, 0.6])),
         scrollbar_border_radius=s.get("scrollbar_border_radius", 4.0),
+        border_width=s.get("border_width", 0.0),
+        border_color=tuple(s.get("border_color", [0, 0, 0, 1])),
+        border_style=s.get("border_style", "none"),
+        box_sizing=s.get("box_sizing", "content-box"),
     )
     node = IRNode(
         node_id=d.get("id", ""),

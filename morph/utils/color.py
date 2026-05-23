@@ -18,7 +18,9 @@ def rgb_to_float(r: int, g: int, b: int,
 
 
 def parse_color(value: str) -> tuple[float, float, float, float]:
-    value = value.strip()
+    value = value.strip().lower()
+    if value == "transparent":
+        return (0.0, 0.0, 0.0, 0.0)
     if value.startswith("#"):
         return hex_to_float(value)
     if value.startswith("rgb"):

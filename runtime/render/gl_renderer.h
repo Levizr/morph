@@ -21,6 +21,8 @@ public:
         float x, y, w, h;
         float r, g, b, a;
         float radius;
+        float borderWidth;
+        float br, bg, bb, ba;
     };
 
 #ifdef MORPH_FEATURE_TEXT
@@ -52,6 +54,7 @@ private:
     GLint m_uProj = -1;
     bool m_ready = false;
     std::vector<Instance> m_batch;
+    float m_proj[16] = {};
 
 #ifdef MORPH_FEATURE_TEXT
     // Text batch
@@ -82,18 +85,40 @@ public:
     void endClip() override;
 
     void drawRect(float x, float y, float w, float h, float color[4]) override {
-        m_batch.push_back({x + m_scrollX, y + m_scrollY, w, h, color[0], color[1], color[2], color[3], 0.0f});
+        m_batch.push_back({x + m_scrollX, y + m_scrollY, w, h,
+                           color[0], color[1], color[2], color[3],
+                           0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f});
     }
 
 #ifdef MORPH_FEATURE_RADIUS
     void drawRoundedRect(float x, float y, float w, float h,
                          float radius, float color[4]) override {
-        float r = radius;
-        float maxR = std::min(w, h) * 0.5f;
-        if (r > maxR) r = maxR;
-        m_batch.push_back({x + m_scrollX, y + m_scrollY, w, h, color[0], color[1], color[2], color[3], r});
+        m_batch.push_back({x + m_scrollX, y + m_scrollY, w, h,
+                           color[0], color[1], color[2], color[3],
+                           radius, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f});
     }
 #endif
+
+    void drawBorderedRect(float x, float y, float w, float h,
+                          float color[4], float borderWidth,
+                          float borderColor[4]) override {
+        m_batch.push_back({x + m_scrollX, y + m_scrollY, w, h,
+                           color[0], color[1], color[2], color[3],
+                           0.0f, borderWidth,
+                           borderColor[0], borderColor[1],
+                           borderColor[2], borderColor[3]});
+    }
+
+    void drawBorderedRoundedRect(float x, float y, float w, float h,
+                                 float radius, float color[4],
+                                 float borderWidth,
+                                 float borderColor[4]) override {
+        m_batch.push_back({x + m_scrollX, y + m_scrollY, w, h,
+                           color[0], color[1], color[2], color[3],
+                           radius, borderWidth,
+                           borderColor[0], borderColor[1],
+                           borderColor[2], borderColor[3]});
+    }
 
 #ifdef MORPH_FEATURE_TEXT
     float measureTextWidth(const std::string& text, float fontSize,

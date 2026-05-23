@@ -18,7 +18,21 @@ public:
 
     void draw(Renderer& r) override {
         float rad = style.borderRadius > 0.0f ? style.borderRadius : 6.0f;
-        r.drawRoundedRect(x, y, w, h, rad, style.bgColor);
+#ifdef MORPH_FEATURE_BORDER
+        if (style.borderWidth > 0.0f && style.borderStyle == "solid") {
+            float bw = style.borderWidth;
+            bool inner = (style.boxSizing == "border-box");
+            if (inner)
+                r.drawBorderedRoundedRect(x, y, w, h, rad, style.bgColor,
+                                          bw, style.borderColor);
+            else
+                r.drawBorderedRoundedRect(x - bw, y - bw,
+                                          w + 2.0f * bw, h + 2.0f * bw,
+                                          rad, style.bgColor,
+                                          bw, style.borderColor);
+        } else
+#endif
+            r.drawRoundedRect(x, y, w, h, rad, style.bgColor);
 #ifdef MORPH_FEATURE_SCROLL
         if (scrollEnabled && contentH > h) {
             r.beginClip(x, y, w, h);

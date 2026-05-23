@@ -10,6 +10,21 @@ public:
     }
 
     void draw(Renderer& r) override {
+#ifdef MORPH_FEATURE_BORDER
+        if (style.borderWidth > 0.0f && style.borderStyle == "solid") {
+            float bw = style.borderWidth;
+            bool inner = (style.boxSizing == "border-box");
+            if (inner) {
+                r.drawBorderedRoundedRect(x, y, w, h, style.borderRadius,
+                                          style.bgColor, bw, style.borderColor);
+            } else {
+                r.drawBorderedRoundedRect(x - bw, y - bw,
+                                          w + 2.0f * bw, h + 2.0f * bw,
+                                          style.borderRadius,
+                                          style.bgColor, bw, style.borderColor);
+            }
+        } else
+#endif
 #ifdef MORPH_FEATURE_RADIUS
         if (style.borderRadius > 0.0f) {
             r.drawRoundedRect(x, y, w, h, style.borderRadius, style.bgColor);
@@ -43,7 +58,6 @@ public:
         float trackX = x + w - sw;
         float trackH = h;
         r.drawRect(trackX, y, sw, trackH, style.scrollbarTrackColor);
-
         float thumbH = (h / contentH) * h;
         float thumbY = y + (scrollY / (contentH - h)) * (h - thumbH);
         if (thumbY < y) thumbY = y;

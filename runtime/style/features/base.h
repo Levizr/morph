@@ -17,4 +17,5 @@ struct StyleBase {
     std::string display = "block";
     std::string position = "static";
     std::string textAlign = "left";
+    std::string boxSizing = "content-box";
 };

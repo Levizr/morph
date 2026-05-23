@@ -10,11 +10,15 @@ layout(location = 0) in vec2 aPos;
 layout(location = 1) in vec4 aInst0;
 layout(location = 2) in vec4 aInst1;
 layout(location = 3) in float aRadius;
+layout(location = 4) in float aBorderWidth;
+layout(location = 5) in vec4 aBorderColor;
 uniform mat4 uProj;
 out vec4 vColor;
 out vec2 vUV;
 out vec2 vSize;
 out float vRadius;
+out float vBorderWidth;
+out vec4 vBorderColor;
 void main() {
     vec2 pos = aInst0.xy + aPos * aInst0.zw;
     gl_Position = uProj * vec4(pos, 0.0, 1.0);
@@ -22,6 +26,8 @@ void main() {
     vUV = aPos;
     vSize = aInst0.zw;
     vRadius = aRadius;
+    vBorderWidth = aBorderWidth;
+    vBorderColor = aBorderColor;
 }
 )glsl";
 
@@ -31,13 +37,36 @@ in vec4 vColor;
 in vec2 vUV;
 in vec2 vSize;
 in float vRadius;
+in float vBorderWidth;
+in vec4 vBorderColor;
 out vec4 FragColor;
 void main() {
     vec2 halfSize = vSize * 0.5;
-    vec2 d = abs(vUV * vSize - halfSize) - halfSize + vRadius;
-    float dist = length(max(d, 0.0)) - vRadius;
-    float alpha = 1.0 - smoothstep(0.0, fwidth(dist), max(dist, 0.0));
-    FragColor = vec4(vColor.rgb, vColor.a * alpha);
+    vec2 p = vUV * vSize - halfSize;
+    float rad = max(vRadius, 0.001);
+
+    // Outer rounded rect SDF
+    vec2 d_outer = abs(p) - halfSize + rad;
+    float dist_outer = length(max(d_outer, 0.0)) - rad;
+    float alpha_outer = 1.0 - smoothstep(0.0, fwidth(dist_outer), max(dist_outer, 0.0));
+
+    vec4 color;
+    if (vBorderWidth > 0.0) {
+        // Inner rounded rect SDF (inset by borderWidth)
+        vec2 innerHalfSize = halfSize - vBorderWidth;
+        float innerRad = max(rad - vBorderWidth, 0.001);
+        vec2 d_inner = abs(p) - innerHalfSize + innerRad;
+        float dist_inner = length(max(d_inner, 0.0)) - innerRad;
+        float alpha_inner = 1.0 - smoothstep(0.0, fwidth(dist_inner), max(dist_inner, 0.0));
+
+        // Ring = outer - inner; interior = inner
+        color = mix(vBorderColor, vColor, alpha_inner);
+        color.a = mix(vBorderColor.a, vColor.a, alpha_inner) * alpha_outer;
+    } else {
+        color = vec4(vColor.rgb, vColor.a * alpha_outer);
+    }
+
+    FragColor = color;
 }
 )glsl";
 

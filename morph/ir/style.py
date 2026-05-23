@@ -32,3 +32,7 @@ class IRStyle:
     scrollbar_track_color:      tuple[float,float,float,float] = (0.85, 0.85, 0.85, 0.4)
     scrollbar_thumb_color:      tuple[float,float,float,float] = (0.5, 0.5, 0.5, 0.6)
     scrollbar_border_radius:    float = 4.0
+    border_width:               float = 0.0
+    border_color:               tuple[float,float,float,float] = (0.0, 0.0, 0.0, 1.0)
+    border_style:               str   = "none"
+    box_sizing:                 str   = "content-box"

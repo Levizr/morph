@@ -10,6 +10,13 @@ public:
                           float color[4]) = 0;
     virtual void drawRoundedRect(float x, float y, float w, float h,
                                   float radius, float color[4]) {}
+    virtual void drawBorderedRect(float x, float y, float w, float h,
+                                  float color[4], float borderWidth,
+                                  float borderColor[4]) {}
+    virtual void drawBorderedRoundedRect(float x, float y, float w, float h,
+                                         float radius, float color[4],
+                                         float borderWidth,
+                                         float borderColor[4]) {}
     virtual void drawText(const std::string& text,
                           float x, float y, float color[4],
                           TextAlign align = TextAlign::Left,

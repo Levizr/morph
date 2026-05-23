@@ -12,6 +12,9 @@
 #ifdef MORPH_FEATURE_CURSOR
 #include "features/cursor.h"
 #endif
+#ifdef MORPH_FEATURE_BORDER
+#include "features/border.h"
+#endif
 
 struct MorphStyle : StyleBase
 #ifdef MORPH_FEATURE_FLEX
@@ -25,5 +28,8 @@ struct MorphStyle : StyleBase
 #endif
 #ifdef MORPH_FEATURE_CURSOR
     , CursorStyle
+#endif
+#ifdef MORPH_FEATURE_BORDER
+    , BorderStyle
 #endif
 {};

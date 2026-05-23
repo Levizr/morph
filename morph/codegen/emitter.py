@@ -24,6 +24,7 @@ class Emitter:
              mode: str = "prod") -> None:
         features = FeatureSet()
         features.scan(windows)
+        self.node_emitter.features = features.features
 
         # ── Generate node C++ code for each window ──────────
         window_code = []
