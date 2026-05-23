@@ -1,5 +1,5 @@
 #pragma once
-#include "../core/morph_node.h"
+#include "../core/node.h"
 
 class InputNode : public MorphNode {
     // TODO: text input handling

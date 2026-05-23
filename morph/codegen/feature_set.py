@@ -34,9 +34,7 @@ class FeatureSet:
                     self.features.add("viewport")
 
     def required_headers(self) -> list[str]:
-        headers: list[str] = []
-        # MorphRect is always needed (every div/text container is a RectNode)
-        headers.append("widgets/morph_rect.h")
+        headers: list[str] = ["widgets/morph_rect.h"]
         if "text" in self.features:
             headers.append("widgets/morph_text.h")
         if "button" in self.features:

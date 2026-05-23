@@ -4,7 +4,7 @@
 #include <string>
 #include <GLFW/glfw3.h>
 
-#include "morph_window.h"
+#include "window.h"
 
 class WindowManager {
     std::unordered_map<std::string, MorphWindow*> m_windows;

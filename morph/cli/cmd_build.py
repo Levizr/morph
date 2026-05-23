@@ -58,7 +58,8 @@ def run(args=None) -> None:
     compiler = Compiler()
     binary_path = os.path.join(out_dir, "app")
     ok = compiler.compile(out_path, binary_path,
-                          needs_freetype=features.needs_freetype())
+                          needs_freetype=features.needs_freetype(),
+                          defines=features.required_defines())
 
     if ok:
         bin_size = os.path.getsize(binary_path) if os.path.exists(binary_path) else 0

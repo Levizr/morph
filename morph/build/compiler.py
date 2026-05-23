@@ -13,7 +13,8 @@ class Compiler:
         self.gpp = shutil.which("g++") or shutil.which("clang++") or "g++"
 
     def compile(self, source_path: str, binary_path: str,
-                needs_freetype: bool = True) -> bool:
+                needs_freetype: bool = True,
+                defines: list[str] | None = None) -> bool:
         if not os.path.exists(source_path):
             log_error(f"Source not found: {source_path}")
             return False
@@ -29,12 +30,20 @@ class Compiler:
         vendor_dir = os.path.join(runtime_dir, "vendor")
         glad_c = os.path.join(runtime_dir, "core", "glad.c")
 
+        # Runtime source files (compiled separately for incremental builds)
+        runtime_sources = [
+            os.path.join(runtime_dir, "core", "node.cpp"),
+            os.path.join(runtime_dir, "core", "window.cpp"),
+            os.path.join(runtime_dir, "render", "gl_renderer.cpp"),
+        ]
+
         cmd = [
             self.gpp,
             "-std=c++17",
             "-O2",
             "-ffunction-sections", "-fdata-sections",
             source_path,
+            *runtime_sources,
             glad_c,
             "-o", binary_path,
             "-I", runtime_dir,
@@ -42,6 +51,11 @@ class Compiler:
             "-Wl,--gc-sections",
             "-lglfw", "-lGL", "-lX11", "-lpthread", "-ldl",
         ]
+
+        # Feature defines (visible to all translation units)
+        if defines:
+            for d in defines:
+                cmd.append(f"-D{d}")
 
         if needs_freetype:
             try:

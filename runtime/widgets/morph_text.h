@@ -1,7 +1,7 @@
 #pragma once
 #include <string>
 #include <vector>
-#include "../core/morph_node.h"
+#include "../core/node.h"
 #include "../core/renderer.h"
 
 class TextNode : public MorphNode {

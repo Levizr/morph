@@ -1,5 +1,5 @@
 #pragma once
-#include "../core/morph_node.h"
+#include "../core/node.h"
 #include "viewport_driver.h"
 
 class ViewportNode : public MorphNode {

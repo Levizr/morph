@@ -7,8 +7,9 @@
 #define MORPH_DEV
 {% endif %}
 #include "core/window_manager.h"
-#include "core/morph_window.h"
+#include "core/window.h"
 #include "core/renderer.h"
+#include "style/style.h"
 {% for header in headers %}
 #include "{{ header }}"
 {% endfor %}
