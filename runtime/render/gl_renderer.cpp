@@ -189,6 +189,7 @@ bool GLRenderer::ensureReady() {
     if (m_ready) return true;
 
     createProgram(kQuadVertSrc, kQuadFragSrc, m_shader, m_uProj);
+    m_uStencilMode = glGetUniformLocation(m_shader, "uStencilMode");
     createQuadBuffers();
 
 #ifdef MORPH_FEATURE_TEXT
@@ -213,7 +214,7 @@ void GLRenderer::clear() {
     if (!ensureReady()) return;
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 }
 
 void GLRenderer::beginClip(float x, float y, float w, float h) {
@@ -227,6 +228,47 @@ void GLRenderer::endClip() {
     glDisable(GL_SCISSOR_TEST);
 }
 
+void GLRenderer::beginRoundedClip(float x, float y, float w, float h, float radius) {
+    flush(m_proj);
+
+    // Enable stencil, write 1 where the rounded shape covers
+    glEnable(GL_STENCIL_TEST);
+    glStencilFunc(GL_ALWAYS, 1, 0xFF);
+    glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+    glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+    glDepthMask(GL_FALSE);
+
+    glUseProgram(m_shader);
+    glUniformMatrix4fv(m_uProj, 1, GL_FALSE, m_proj);
+    glUniform1i(m_uStencilMode, 1);
+
+    Instance inst = {x + m_scrollX, y + m_scrollY, w, h,
+                     1.0f, 1.0f, 1.0f, 1.0f,
+                     radius, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    glBindVertexArray(m_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_instVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(Instance), &inst, GL_DYNAMIC_DRAW);
+    glDrawElementsInstanced(GL_TRIANGLES, 6, GL_UNSIGNED_INT, (void*)0, 1);
+
+    glUniform1i(m_uStencilMode, 0);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glDepthMask(GL_TRUE);
+
+    glStencilFunc(GL_EQUAL, 1, 0xFF);
+    glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+
+    m_stencilClipDepth++;
+}
+
+void GLRenderer::endRoundedClip() {
+    flush(m_proj);
+    m_stencilClipDepth--;
+    if (m_stencilClipDepth <= 0) {
+        glDisable(GL_STENCIL_TEST);
+        m_stencilClipDepth = 0;
+    }
+}
+
 void GLRenderer::flush(const float proj[16]) {
     if (!ensureReady()) return;
 
@@ -235,6 +277,7 @@ void GLRenderer::flush(const float proj[16]) {
     if (!m_batch.empty()) {
         glUseProgram(m_shader);
         glUniformMatrix4fv(m_uProj, 1, GL_FALSE, proj);
+        glUniform1i(m_uStencilMode, 0);
         glBindVertexArray(m_vao);
 
         glBindBuffer(GL_ARRAY_BUFFER, m_instVBO);

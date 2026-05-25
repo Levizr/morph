@@ -39,11 +39,25 @@ class Emitter:
             win_code.append(f'wm.registerWindow("{win.window_id}", {var});')
             win_code.append("")
 
-            for node in win.nodes:
-                code = self.node_emitter.emit_node(node, var)
-                if code:
-                    win_code.append(code)
-                    win_code.append("")
+            if len(win.nodes) == 1:
+                for node in win.nodes:
+                    code = self.node_emitter.emit_node(node, var)
+                    if code:
+                        win_code.append(code)
+                        win_code.append("")
+            else:
+                # Multiple top-level nodes — wrap in a container so only one addChild()
+                root_id = f"winRoot_{win.window_id}"
+                win_code.append(
+                    f"RectNode* {root_id} = new RectNode(0.0f, 0.0f, "
+                    f"{float(win.width):.1f}f, 0.0f);"
+                )
+                win_code.append(f"{var}->addChild({root_id});")
+                for node in win.nodes:
+                    code = self.node_emitter.emit_node(node, root_id)
+                    if code:
+                        win_code.append(code)
+                        win_code.append("")
 
             if win.startup_logs:
                 win_code.append("")

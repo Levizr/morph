@@ -10,11 +10,11 @@ public:
     }
 
     void draw(Renderer& r) override {
+        // ── 1. Draw self background + border ──────────────────────
 #ifdef MORPH_FEATURE_BORDER
         if (style.borderWidth > 0.0f && style.borderStyle == "solid") {
             float bw = style.borderWidth;
-            bool inner = (style.boxSizing == "border-box");
-            if (inner) {
+            if (style.boxSizing == "border-box") {
                 r.drawBorderedRoundedRect(x, y, w, h, style.borderRadius,
                                           style.bgColor, bw, style.borderColor);
             } else {
@@ -32,24 +32,47 @@ public:
 #endif
             r.drawRect(x, y, w, h, style.bgColor);
 
+        // ── 2. Children (clipped when overflow is non-visible) ────
+        bool overflowClipped = (style.overflow == "hidden" ||
+                                style.overflow == "scroll" ||
+                                style.overflow == "auto");
+        bool needRectClip = overflowClipped;
+        bool needRadiusClip = style.borderRadius > 0.0f && overflowClipped;
 #ifdef MORPH_FEATURE_SCROLL
-        if (scrollEnabled && contentH > h) {
-            r.beginClip(x, y, w, h);
+        bool scrolling = scrollEnabled && contentH > h;
+#else
+        bool scrolling = false;
+#endif
+
+        if (needRectClip || needRadiusClip) {
+            if (needRectClip) r.beginClip(x, y, w, h);
+            if (needRadiusClip) r.beginRoundedClip(x, y, w, h, style.borderRadius);
+
             r.pushScrollOffset(0, -scrollY);
             for (auto* child : children) {
-                float childVisY = child->y - scrollY;
-                if (childVisY + child->h > y && childVisY < y + h)
+                if (scrolling) {
+                    float childVisY = child->y - scrollY;
+                    if (childVisY + child->h > y && childVisY < y + h)
+                        child->draw(r);
+                } else {
                     child->draw(r);
+                }
             }
             r.popScrollOffset(0, -scrollY);
-            r.endClip();
-            drawScrollbar(r);
-        } else
-#endif
-        {
+
+            if (needRadiusClip) r.endRoundedClip();
+            if (needRectClip) r.endClip();
+        } else {
             for (auto* child : children)
                 child->draw(r);
         }
+
+        // ── 3. Scrollbar ──────────────────────────────────────────
+#ifdef MORPH_FEATURE_SCROLL
+        if (scrolling) {
+            drawScrollbar(r);
+        }
+#endif
     }
 
 #ifdef MORPH_FEATURE_SCROLL

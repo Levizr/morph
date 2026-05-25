@@ -27,6 +27,8 @@ public:
                                     const std::string& fontWeight = "normal") { return 0; }
     virtual void beginClip(float x, float y, float w, float h) {}
     virtual void endClip() {}
+    virtual void beginRoundedClip(float x, float y, float w, float h, float radius) {}
+    virtual void endRoundedClip() {}
 
     virtual void drawTexture(unsigned int tex,
                              float x, float y, float w, float h) = 0;

@@ -35,6 +35,19 @@ class FeatureSet:
                 # Detect position offsets as position feature even if position is static
                 if s.left is not None or s.right is not None or s.top is not None or s.bottom is not None:
                     self.features.add("position")
+                # ── Layout feature detection ──
+                if s.display == "none":
+                    self.features.add("display_none")
+                if s.display == "inline":
+                    self.features.add("inline")
+                if any(m != 0 for m in s.margin):
+                    self.features.add("margin_collapse")
+                if (s.min_width is not None or s.max_width is not None or
+                    s.min_height is not None or s.max_height is not None):
+                    self.features.add("min_max")
+                if s.box_sizing != "content-box":
+                    self.features.add("border_box")
+
                 if s.display == "flex":
                     self.features.add("flex")
                 # Detect gap as flex feature (meaningful only with flex layout)
@@ -84,6 +97,17 @@ class FeatureSet:
             defines.append("MORPH_FEATURE_CURSOR")
         if "border" in self.features:
             defines.append("MORPH_FEATURE_BORDER")
+        # ── Layout feature defines ──
+        if "display_none" in self.features:
+            defines.append("MORPH_FEATURE_DISPLAY_NONE")
+        if "inline" in self.features:
+            defines.append("MORPH_FEATURE_INLINE")
+        if "margin_collapse" in self.features:
+            defines.append("MORPH_FEATURE_MARGIN_COLLAPSE")
+        if "min_max" in self.features:
+            defines.append("MORPH_FEATURE_MIN_MAX")
+        if "border_box" in self.features:
+            defines.append("MORPH_FEATURE_BORDER_BOX")
         return defines
 
     def needs_freetype(self) -> bool:

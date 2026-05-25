@@ -10,7 +10,10 @@ struct StyleBase {
     float margin[4]    = {0,0,0,0};
     float explicitWidth  = -1.0f;
     float explicitHeight = -1.0f;
-    float maxWidth = -1.0f;
+    float minWidth  = -1.0f;
+    float maxWidth  = -1.0f;
+    float minHeight = -1.0f;
+    float maxHeight = -1.0f;
 
     std::string fontWeight = "normal";
     std::string overflow = "visible";

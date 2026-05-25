@@ -106,6 +106,7 @@ void MorphWindow::render() {
     m_renderer.clear();
     if (m_root) {
         m_root->layout(0.0f, 0.0f, (float)m_width, (float)m_height, &m_renderer);
+        m_renderer.setProjection(proj);
         m_root->draw(m_renderer);
     }
     m_renderer.flush(proj);

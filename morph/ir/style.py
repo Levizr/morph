@@ -6,7 +6,11 @@ class IRStyle:
     bg_color:      tuple[float,float,float,float] = (0.0, 0.0, 0.0, 0.0)
     color:         tuple[float,float,float,float] = (0.0, 0.0, 0.0, 1.0)
     width:         float | None = None
+    min_width:     float | None = None
+    max_width:     float | None = None
     height:        float | None = None
+    min_height:    float | None = None
+    max_height:    float | None = None
     margin:        tuple[float,float,float,float] = (0,0,0,0)  # T R B L
     padding:       tuple[float,float,float,float] = (0,0,0,0)
     border_radius: float = 0.0
@@ -17,7 +21,6 @@ class IRStyle:
     flex_dir:      str   = "row"
     flex:          float = 0.0
     gap:           float = 0.0
-    max_width:     float | None = None
     position:      str   = "static"
     left:          float | None = None
     right:         float | None = None

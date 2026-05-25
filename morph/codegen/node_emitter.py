@@ -131,8 +131,14 @@ class NodeEmitter:
             lines.append(f"{prefix}.explicitWidth = {fmt(s.width)};")
         if s.height is not None:
             lines.append(f"{prefix}.explicitHeight = {fmt(s.height)};")
+        if s.min_width is not None:
+            lines.append(f"{prefix}.minWidth = {fmt(s.min_width)};")
         if s.max_width is not None:
             lines.append(f"{prefix}.maxWidth = {fmt(s.max_width)};")
+        if s.min_height is not None:
+            lines.append(f"{prefix}.minHeight = {fmt(s.min_height)};")
+        if s.max_height is not None:
+            lines.append(f"{prefix}.maxHeight = {fmt(s.max_height)};")
         if s.overflow != "visible":
             lines.append(f"{prefix}.overflow = \"{s.overflow}\";")
         if s.display != "block":

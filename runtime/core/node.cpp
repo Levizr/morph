@@ -5,8 +5,14 @@
 static bool borderAffectsLayout(const MorphStyle& s) {
     return s.borderWidth > 0.0f && s.borderStyle == "solid" && s.boxSizing != "border-box";
 }
+static float borderLayoutBonus(const MorphStyle& s) {
+    return borderAffectsLayout(s) ? s.borderWidth * 2.0f : 0.0f;
+}
 #endif
 
+// ────────────────────────────────────────────────────────────────────────────
+//   Main layout entry: two-pass width⤵ → height⤴ with feature-gating
+// ────────────────────────────────────────────────────────────────────────────
 void MorphNode::layout(float px, float py, float parentW, float parentH,
                        Renderer* r) {
 #ifdef MORPH_FEATURE_POSITION
@@ -21,34 +27,72 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
         x = px + ml;
         y = py + mt;
         w = style.explicitWidth >= 0.0f ? style.explicitWidth : parentW - ml - mr;
+        if (w < 0.0f) w = 0.0f;
         h = style.explicitHeight >= 0.0f ? style.explicitHeight : 0.0f;
     }
 
+
+
+#ifdef MORPH_FEATURE_MIN_MAX
+    if (style.minWidth > 0.0f && w < style.minWidth) w = style.minWidth;
+    if (style.maxWidth > 0.0f && w > style.maxWidth) w = style.maxWidth;
+    if (style.minHeight > 0.0f && h < style.minHeight) h = style.minHeight;
+    if (style.maxHeight > 0.0f && h > style.maxHeight) h = style.maxHeight;
+#endif
+
+    // ── Content box (padding + border aware; border is handled by draw()) ──
     float pl = style.padding[3], pr = style.padding[1];
     float pt = style.padding[0], pb = style.padding[2];
 
+#ifdef MORPH_FEATURE_BORDER
+    float bw = style.borderWidth;
+    float bb = borderLayoutBonus(style);       // extra layout space border takes
+#else
+    float bw = 0.0f;
+    float bb = 0.0f;
+#endif
+
+    // Children get content width inside padding (border extends outside for content-box)
     float cw = w - pl - pr;
-    if (cw < 0) cw = 0;
-    if (style.maxWidth > 0.0f && cw > style.maxWidth) cw = style.maxWidth;
+    if (cw < 0.0f) cw = 0.0f;
     float ch = h - pt - pb;
-    if (ch < 0) ch = 0;
+    if (ch < 0.0f) ch = 0.0f;
     float cx = x + pl;
     float cy = y + pt;
 
-    // Separate normal vs absolute children
+#ifdef MORPH_FEATURE_DISPLAY_NONE
+    if (style.display == "none") {
+        w = 0.0f; h = 0.0f;
+        for (auto* c : children)
+            c->layout(0.0f, 0.0f, 0.0f, 0.0f, r);
+        contentH = 0.0f;
+        scrollEnabled = false;
+        return;
+    }
+#endif
+
+    // Separate children by position & display
     std::vector<MorphNode*> normal;
     std::vector<MorphNode*> absChildren;
     for (auto* c : children) {
 #ifdef MORPH_FEATURE_POSITION
-        if (c->style.position == "absolute")
+        if (c->style.position == "absolute") {
             absChildren.push_back(c);
-        else
+            continue;
+        }
 #endif
-            normal.push_back(c);
+#ifdef MORPH_FEATURE_DISPLAY_NONE
+        if (c->style.display == "none") {
+            c->layout(0.0f, 0.0f, 0.0f, 0.0f, r);
+            continue;
+        }
+#endif
+        normal.push_back(c);
     }
 
     float maxBottom = 0.0f;
     float maxRight  = 0.0f;
+
 #ifdef MORPH_FEATURE_FLEX
     bool isRow = (style.display == "flex" && style.flexDirection == "row");
     bool isCol = !isRow;
@@ -59,166 +103,262 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
     int count = (int)normal.size();
 
 #ifdef MORPH_FEATURE_FLEX
-    // ── Pass 1: measure children (temp position 0,0) ──
-    struct ChildInfo { MorphNode* node; float w, h, mt, mb, ml, mr; };
-    std::vector<ChildInfo> info;
-    float totalMain = 0.0f;
+    // ── Flex layout (two-pass) ─────────────────────────────────
+    if (style.display == "flex") {
+        struct ChildInfo { MorphNode* node; float w, h, mt, mb, ml, mr; };
+        std::vector<ChildInfo> info;
+        float totalMain = 0.0f;
 
-    for (auto* c : normal) {
-        c->layout(0.0f, 0.0f, cw, 0.0f, r);
+        // Pass 1: measure children
+        for (auto* c : normal) {
+            c->layout(0.0f, 0.0f, cw, 0.0f, r);
 
-        // For row children without explicit width, prefer content-based width
-        if (isRow && c->style.explicitWidth < 0.0f) {
-            float cwVal = c->contentWidth(r);
-            if (cwVal > 0.0f) c->w = cwVal;
+            if (isRow && c->style.explicitWidth < 0.0f) {
+                float cwVal = c->contentWidth(r);
+                if (cwVal > 0.0f) c->w = cwVal;
+            }
+
+            float cmt = c->style.margin[0], cmb = c->style.margin[2];
+            float cml = c->style.margin[3], cmr = c->style.margin[1];
+            float childDim = isCol ? c->h : c->w;
+            childDim += borderLayoutBonus(c->style);
+            totalMain += childDim + (isCol ? cmt + cmb : cml + cmr);
+            info.push_back({c, c->w, c->h, cmt, cmb, cml, cmr});
         }
 
-        float cmt = c->style.margin[0], cmb = c->style.margin[2];
-        float cml = c->style.margin[3], cmr = c->style.margin[1];
-        float childDim = isCol ? c->h : c->w;
-#ifdef MORPH_FEATURE_BORDER
-        if (borderAffectsLayout(c->style))
-            childDim += c->style.borderWidth * 2.0f;
-#endif
-        totalMain += childDim + (isCol ? cmt + cmb : cml + cmr);
-        info.push_back({c, c->w, c->h, cmt, cmb, cml, cmr});
-    }
+        float gapTotal = (count > 1) ? (count - 1) * style.gap : 0.0f;
 
-    float gapTotal = (count > 1) ? (count - 1) * style.gap : 0.0f;
+        // Pass 2: position each child
+        float mainStart = isCol ? cy : cx;
+        float mainSize  = isCol ? ch : cw;
+        float cross     = isCol ? cx : cy;
+        float crossSize = isCol ? cw : ch;
 
-    // ── Pass 2: position each child and re-layout at final position ──
-    float mainStart = isCol ? cy : cx;
-    float mainSize  = isCol ? ch : cw;
-    float cross     = isCol ? cx : cy;
-    float crossSize = isCol ? cw : ch;
-
-    if (mainSize > totalMain + gapTotal) {
-        if (style.justifyContent == "center") {
-            mainStart += (mainSize - totalMain - gapTotal) * 0.5f;
-        } else if (style.justifyContent == "flex-end") {
-            mainStart += mainSize - totalMain - gapTotal;
-        }
-    }
-
-    float cursor = mainStart;
-    bool isFlex = (style.display == "flex");
-    for (size_t i = 0; i < normal.size(); i++) {
-        auto& ci = info[i];
-        float childMain = isCol ? ci.h : ci.w;
-        float crossDim  = isCol ? ci.w : ci.h;
-
-        float posMain = cursor + (isCol ? ci.mt : ci.ml);
-#ifdef MORPH_FEATURE_BORDER
-        // Shift child forward by borderWidth so visual rect starts at cursor position
-        // (border extends backward by bw from the content origin)
-        if (borderAffectsLayout(ci.node->style))
-            posMain += ci.node->style.borderWidth;
-#endif
-        float posCross = cross + (isCol ? ci.ml : ci.mt);
-
-        if (isFlex && crossSize > crossDim) {
-            if (style.alignItems == "center") {
-                posCross = cross + (crossSize - crossDim) * 0.5f;
-            } else if (style.alignItems == "flex-end") {
-                posCross = cross + crossSize - crossDim;
-                posCross -= (isCol ? ci.mr : ci.mb);
+        if (mainSize > totalMain + gapTotal) {
+            if (style.justifyContent == "center") {
+                mainStart += (mainSize - totalMain - gapTotal) * 0.5f;
+            } else if (style.justifyContent == "flex-end") {
+                mainStart += mainSize - totalMain - gapTotal;
             }
         }
 
-        float childX = isCol ? posCross : posMain;
-        float childY = isCol ? posMain : posCross;
+        float cursor = mainStart;
+        for (size_t i = 0; i < normal.size(); i++) {
+            auto& ci = info[i];
+            float childMain = isCol ? ci.h : ci.w;
+            float crossDim  = isCol ? ci.w : ci.h;
 
-        float childPW, childPH;
-        if (isCol) {
-            childPW = (isFlex && style.alignItems == "stretch") ? cw : crossDim;
-            childPH = childMain;
-        } else {
-            childPW = childMain;
-            childPH = (isFlex && style.alignItems == "stretch") ? ch : crossDim;
-        }
+            float posMain = cursor + (isCol ? ci.mt : ci.ml);
+            posMain += borderLayoutBonus(ci.node->style) * 0.5f;
+            float posCross = cross + (isCol ? ci.ml : ci.mt);
 
-        // Content-based sizing for non-stretch flex children
-        if (isFlex && style.alignItems != "stretch" && ci.node->style.explicitWidth < 0.0f) {
-            if (isCol) {
+            if (crossSize > crossDim) {
+                if (style.alignItems == "center") {
+                    posCross = cross + (crossSize - crossDim) * 0.5f;
+                } else if (style.alignItems == "flex-end") {
+                    posCross = cross + crossSize - crossDim;
+                    posCross -= (isCol ? ci.mr : ci.mb);
+                }
+            }
+
+            float childX = isCol ? posCross : posMain;
+            float childY = isCol ? posMain : posCross;
+            float childPW = isCol ? ((style.alignItems == "stretch") ? cw : crossDim) : childMain;
+            float childPH = isCol ? childMain : ((style.alignItems == "stretch") ? ch : crossDim);
+
+            // Content-based sizing for non-stretch flex children
+            if (style.alignItems != "stretch" && ci.node->style.explicitWidth < 0.0f && isCol) {
                 float cwVal = ci.node->contentWidth(r);
                 if (cwVal > 0.0f && cwVal < childPW) {
                     crossDim = cwVal;
                     childPW = cwVal;
                     if (crossSize > crossDim) {
-                        if (style.alignItems == "center") {
+                        if (style.alignItems == "center")
                             posCross = cross + (crossSize - crossDim) * 0.5f;
-                        } else if (style.alignItems == "flex-end") {
+                        else if (style.alignItems == "flex-end")
                             posCross = cross + crossSize - crossDim;
-                            posCross -= (isCol ? ci.mr : ci.mb);
-                        }
+                        childX = isCol ? posCross : posMain;
+                        childY = isCol ? posMain : posCross;
                     }
-                    childX = isCol ? posCross : posMain;
-                    childY = isCol ? posMain : posCross;
                 }
             }
+
+            ci.node->layout(childX, childY, childPW, childPH, r);
+
+            // Stretch alignment: fill available cross dimension
+            if (style.alignItems == "stretch" && ci.node->style.explicitHeight < 0.0f) {
+                if (isCol && cw > crossDim)
+                    ci.node->w = cw - borderLayoutBonus(ci.node->style);
+                else if (isRow && ch > crossDim)
+                    ci.node->h = ch - borderLayoutBonus(ci.node->style);
+            }
+
+            float outerH = ci.node->h + borderLayoutBonus(ci.node->style);
+            float outerW = ci.node->w + borderLayoutBonus(ci.node->style);
+            cursor += (isCol ? outerH + ci.mt + ci.mb : outerW + ci.ml + ci.mr) + style.gap;
+            float cb = ci.node->y + outerH + ci.mb;
+            if (cb > maxBottom) maxBottom = cb;
+            if (isRow) {
+                float rb = ci.node->x + outerW + ci.mr;
+                if (rb > maxRight) maxRight = rb;
+            }
         }
+        goto after_children;
+    }
+#endif // MORPH_FEATURE_FLEX
 
-        ci.node->layout(childX, childY, childPW, childPH, r);
+    // ────────────────────────────────────────────────────────────
+    //   Block / Inline layout (non-flex) — order-preserving
+    // ────────────────────────────────────────────────────────────
+    {
+        float curY = cy;
+#ifdef MORPH_FEATURE_MARGIN_COLLAPSE
+        float prevMb = 0.0f;
+#endif
+#ifdef MORPH_FEATURE_INLINE
+        std::vector<MorphNode*> currentInline;
 
-        // Stretch alignment: fill available cross dimension
-        if (isFlex && style.alignItems == "stretch" && ci.node->style.explicitHeight < 0.0f) {
-            if (isCol && cw > crossDim) {
-#ifdef MORPH_FEATURE_BORDER
-                if (borderAffectsLayout(ci.node->style))
-                    ci.node->w = cw - ci.node->style.borderWidth * 2.0f;
-                else
+        // Lambda to flush accumulated inline group in document order
+        auto flushInline = [&]() {
+            if (currentInline.empty()) return;
+
+            // Measure all inline children
+            struct InlineItem { MorphNode* node; float w, h; };
+            std::vector<InlineItem> items;
+            for (auto* c : currentInline) {
+                c->layout(0.0f, 0.0f, cw, 0.0f, r);
+                float iw = 0.0f;
+                if (c->style.explicitWidth >= 0.0f) {
+                    iw = c->style.explicitWidth;
+                } else if (c->contentWidth(r) > 0.0f) {
+                    iw = c->contentWidth(r);
+                }
+                if (iw <= 0.0f) iw = cw;
+                float ih = (c->h > 0.0f) ? c->h : (c->style.fontSize * 1.4f);
+                items.push_back({c, iw, ih});
+            }
+
+            // Wrap into lines
+            float lineX = cx;
+            float lineY = curY;
+            float lineH = 0.0f;
+            size_t lineStart = 0;
+
+            auto positionItems = [&](size_t end) {
+                float alignX = cx;
+                float lineW = lineX - cx;
+                if (lineStart > 0 || currentInline[0]->style.textAlign == "center" || currentInline[0]->style.textAlign == "right") {
+                    if (currentInline[0]->style.textAlign == "center")
+                        alignX = cx + (cw - lineW) * 0.5f;
+                    else if (currentInline[0]->style.textAlign == "right")
+                        alignX = cx + cw - lineW;
+                }
+                float itemX = alignX;
+                for (size_t j = lineStart; j < end; j++) {
+                    auto& p = items[j];
+                    float pml = p.node->style.margin[3];
+                    p.node->x = itemX + pml;
+                    p.node->y = lineY;
+                    p.node->w = p.w;
+                    p.node->h = p.h;
+                    for (auto* child : p.node->children) {
+                        child->x = p.node->x + p.node->style.padding[3]
+                                 + child->style.margin[3];
+                        child->y = p.node->y + p.node->style.padding[0]
+                                 + child->style.margin[0];
+                        float childW = p.node->w
+                                     - p.node->style.padding[3]
+                                     - p.node->style.padding[1]
+                                     - child->style.margin[3]
+                                     - child->style.margin[1];
+                        if (childW < 0) childW = 0;
+                        child->w = childW;
+                    }
+                    itemX += pml + p.w + p.node->style.margin[1];
+                }
+            };
+
+            for (size_t i = 0; i < items.size(); i++) {
+                auto& it = items[i];
+                float ml = it.node->style.margin[3];
+                float mr = it.node->style.margin[1];
+                float need = ml + it.w + mr;
+
+                if (i > lineStart && lineX + need > cx + cw) {
+                    positionItems(i);
+                    lineY += lineH;
+                    lineX = cx;
+                    lineH = 0.0f;
+                    lineStart = i;
+                }
+
+                lineX += need;
+                if (it.h > lineH) lineH = it.h;
+            }
+
+            // Flush last line
+            positionItems(items.size());
+            float groupBottom = lineY + lineH;
+            if (groupBottom > maxBottom) maxBottom = groupBottom;
+            curY = groupBottom;
+            prevMb = 0.0f;
+
+            currentInline.clear();
+        };
+
+        // ── Single pass over children preserving document order ──
+        for (auto* c : normal) {
+            if (c->style.display == "inline") {
+                currentInline.push_back(c);
+            } else {
+                // Flush any pending inline group before this block
+                flushInline();
+
+                // Layout block child with margin collapsing
+                float cmt = c->style.margin[0];
+                float cmb = c->style.margin[2];
+
+#ifdef MORPH_FEATURE_MARGIN_COLLAPSE
+                float collapsedMt = (prevMb > cmt) ? prevMb : cmt;
+                float py = (curY - prevMb) + collapsedMt - cmt;
+                c->layout(cx, py, cw, ch, r);
+                prevMb = cmb;
+#else
+                c->layout(cx, curY + cmt, cw, ch, r);
 #endif
-                    ci.node->w = cw;
-            } else if (isRow && ch > crossDim) {
-#ifdef MORPH_FEATURE_BORDER
-                if (borderAffectsLayout(ci.node->style))
-                    ci.node->h = ch - ci.node->style.borderWidth * 2.0f;
-                else
-#endif
-                    ci.node->h = ch;
+
+                curY = c->y + c->h + cmb;
+                float bottom = c->y + c->h + cmb;
+                if (bottom > maxBottom) maxBottom = bottom;
             }
         }
 
-        float outerH = ci.node->h;
-        float outerW = ci.node->w;
-#ifdef MORPH_FEATURE_BORDER
-        if (borderAffectsLayout(ci.node->style)) {
-            outerH += ci.node->style.borderWidth * 2.0f;
-            outerW += ci.node->style.borderWidth * 2.0f;
-        }
-#endif
-        cursor += (isCol ? outerH + ci.mt + ci.mb : outerW + ci.ml + ci.mr) + style.gap;
-        float cb = ci.node->y + outerH + ci.mb;
-        if (cb > maxBottom) maxBottom = cb;
-        if (isRow) {
-            float rb = ci.node->x + outerW + ci.mr;
-            if (rb > maxRight) maxRight = rb;
-        }
-    }
+        // Flush final inline group
+        flushInline();
+
+#else  // !MORPH_FEATURE_INLINE
+        // ── Simple block-only layout ──
+        for (auto* c : normal) {
+            float cmt = c->style.margin[0];
+            float cmb = c->style.margin[2];
+
+#ifdef MORPH_FEATURE_MARGIN_COLLAPSE
+            float collapsedMt = (prevMb > cmt) ? prevMb : cmt;
+            float py = (curY - prevMb) + collapsedMt - cmt;
+            c->layout(cx, py, cw, ch, r);
+            prevMb = cmb;
 #else
-    // ── Simple stack (no flex) ──
-    float curY = cy;
-    for (auto* c : normal) {
-        c->layout(0.0f, 0.0f, cw, 0.0f, r);
-        float cmt = c->style.margin[0], cmb = c->style.margin[2];
-        c->y = curY + cmt;
-#ifdef MORPH_FEATURE_BORDER
-        if (borderAffectsLayout(c->style))
-            c->y += c->style.borderWidth;
+            c->layout(cx, curY + cmt, cw, ch, r);
 #endif
-        c->x = cx + c->style.margin[3];
-        float pw = cw;
-        c->layout(c->x, c->y, pw, 0.0f, r);
-        float outerH = c->h;
-#ifdef MORPH_FEATURE_BORDER
-        if (borderAffectsLayout(c->style))
-            outerH += c->style.borderWidth * 2.0f;
-#endif
-        curY += outerH + cmt + cmb;
-        float cb = c->y + outerH + cmb;
-        if (cb > maxBottom) maxBottom = cb;
+
+            curY = c->y + c->h + cmb;
+            float bottom = c->y + c->h + cmb;
+            if (bottom > maxBottom) maxBottom = bottom;
+        }
+#endif // MORPH_FEATURE_INLINE
     }
-#endif
+
+after_children:
 
     // ── Layout absolute children ───────────────────────
     for (auto* c : absChildren) {
@@ -249,19 +389,25 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
         c->layout(ax, ay, aw, ah, r);
     }
 
-    // Auto-height
+    // ── Auto-height ──
     if (style.explicitHeight < 0.0f) {
-        float autoH = maxBottom - y + pb;
-        if (autoH < 0) autoH = 0;
+        float autoH = maxBottom - y + pb + bw;
+        if (autoH < 0.0f) autoH = 0.0f;
         if (autoH > h) h = autoH;
     }
 
-    // Auto-width in row mode
+    // ── Auto-width in row mode ──
 #ifdef MORPH_FEATURE_FLEX
-    if (style.explicitWidth < 0.0f && isRow && maxRight > cx + cw) {
-        float autoW = maxRight - x + pr;
+    if (style.display == "flex" && style.explicitWidth < 0.0f && isRow && maxRight > cx + cw) {
+        float autoW = maxRight - x + pr + bw;
         if (autoW > w) w = autoW;
     }
+#endif
+
+    // ── Post-layout min/max height clamp ──
+#ifdef MORPH_FEATURE_MIN_MAX
+    if (style.minHeight > 0.0f && h < style.minHeight) h = style.minHeight;
+    if (style.maxHeight > 0.0f && h > style.maxHeight) h = style.maxHeight;
 #endif
 
     // Clamp auto-height to parent viewport when overflow is auto/scroll
@@ -272,7 +418,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
     }
 
     // Compute scroll state
-    contentH = maxBottom - y + pb;
+    contentH = maxBottom - y + pb + bw;
     if (contentH < h) contentH = h;
     scrollEnabled = (style.overflow == "scroll") ||
                     (style.overflow == "auto" && contentH > h);
@@ -285,10 +431,9 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 float MorphNode::contentWidth(Renderer* r) {
     if (style.explicitWidth >= 0.0f) return style.explicitWidth;
 
+    // Row-mode flex: sum of child content widths + margins + gap
 #ifdef MORPH_FEATURE_FLEX
-    bool isRow = (style.display == "flex" && style.flexDirection == "row");
-
-    if (isRow) {
+    if (style.display == "flex" && style.flexDirection == "row") {
         float total = 0.0f;
         int count = 0;
         for (auto* c : children) {
@@ -304,8 +449,30 @@ float MorphNode::contentWidth(Renderer* r) {
     }
 #endif
 
+    // Inline children: sum of widths of a single line (no wrapping)
+#ifdef MORPH_FEATURE_INLINE
+    {
+        float totalInline = 0.0f;
+        for (auto* c : children) {
+            if (c->style.display == "inline") {
+                float cw = c->contentWidth(r);
+                if (cw > 0.0f)
+                    totalInline += cw + c->style.margin[3] + c->style.margin[1];
+            }
+        }
+        if (totalInline > 0.0f) {
+            float pl = style.padding[3], pr = style.padding[1];
+            return totalInline + pl + pr;
+        }
+    }
+#endif
+
+    // Block children: widest content (default)
     float maxCW = -1.0f;
     for (auto* c : children) {
+#ifdef MORPH_FEATURE_DISPLAY_NONE
+        if (c->style.display == "none") continue;
+#endif
         float cw = c->contentWidth(r);
         if (cw > maxCW) maxCW = cw;
     }

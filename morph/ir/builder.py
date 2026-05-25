@@ -7,12 +7,30 @@ from morph.style.tailwind import TailwindResolver
 from morph.utils.color import parse_color
 from morph.style.units import to_px
 
+# User-agent default styles for HTML tags (lowest priority — overridden by everything)
+_UA_DEFAULTS: dict[str, dict[str, str]] = {
+    "h1": {"font-size": "32px",    "font-weight": "bold", "margin": "21.44px 0"},
+    "h2": {"font-size": "24px",    "font-weight": "bold", "margin": "19.92px 0"},
+    "h3": {"font-size": "18.72px", "font-weight": "bold", "margin": "18.72px 0"},
+    "h4": {"font-size": "16px",    "font-weight": "bold", "margin": "21.28px 0"},
+    "h5": {"font-size": "13.28px", "font-weight": "bold", "margin": "22.18px 0"},
+    "h6": {"font-size": "10.72px", "font-weight": "bold", "margin": "24.97px 0"},
+    "p":   {"margin": "16px 0"},
+    "strong": {"font-weight": "bold"},
+    "span": {"display": "inline"},
+    "a":    {"display": "inline", "color": "#0000ee", "cursor": "pointer"},
+}
+
 # CSS property name → IRStyle field name
 _CSS_TO_IR: dict[str, str] = {
     "background-color":         "bg_color",
     "color":                    "color",
     "width":                    "width",
+    "min-width":                "min_width",
+    "max-width":                "max_width",
     "height":                   "height",
+    "min-height":               "min_height",
+    "max-height":               "max_height",
     "margin":                   "margin",
     "margin-top":               "margin_top_side",
     "margin-bottom":            "margin_bottom_side",
@@ -148,8 +166,9 @@ class IRBuilder:
         class_names = _get_classes(props)
         tw_styles = _resolve_tw(props, tw_resolver)
 
-        # Merge: inline > Tailwind > CSS rules > defaults
+        # Merge: inline > Tailwind > CSS rules > UA defaults > system defaults
         merged = {}
+        merged.update(_UA_DEFAULTS.get(tag, {}))
         for rule_key in css_rules:
             if _selector_matches(tag, rule_key, class_names):
                 merged.update(css_rules[rule_key])
@@ -297,7 +316,8 @@ def _convert_value(field: str, raw: str | float | int) -> float | str | tuple | 
     if field in ("bg_color", "color"):
         return parse_color(raw)
 
-    if field in ("width", "height", "border_radius", "font_size", "flex", "gap", "max_width"):
+    if field in ("width", "height", "min_width", "max_width", "min_height", "max_height",
+                 "border_radius", "font_size", "flex", "gap"):
         try:
             return to_px(raw)
         except (ValueError, TypeError):

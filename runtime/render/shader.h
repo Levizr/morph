@@ -39,6 +39,7 @@ in vec2 vSize;
 in float vRadius;
 in float vBorderWidth;
 in vec4 vBorderColor;
+uniform bool uStencilMode;
 out vec4 FragColor;
 void main() {
     vec2 halfSize = vSize * 0.5;
@@ -49,6 +50,14 @@ void main() {
     vec2 d_outer = abs(p) - halfSize + rad;
     float dist_outer = length(max(d_outer, 0.0)) - rad;
     float alpha_outer = 1.0 - smoothstep(0.0, fwidth(dist_outer), max(dist_outer, 0.0));
+
+    // Stencil mode: discard fragments outside the rounded shape so they
+    // don't write to the stencil buffer.
+    if (uStencilMode) {
+        if (alpha_outer < 0.5) discard;
+        FragColor = vec4(1.0);
+        return;
+    }
 
     vec4 color;
     if (vBorderWidth > 0.0) {

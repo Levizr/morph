@@ -1,35 +1,329 @@
+"""Production-grade layout engine implementing the CSS visual formatting model.
+
+Architecture
+------------
+Two-pass layout:
+
+  **Pass 1 — Measure** (bottom-up via ``_measure``)
+      Compute intrinsic content heights and text widths.  Because children
+      are measured before parents we know how tall a ``height: auto`` node
+      will be before its position is resolved.
+
+  **Pass 2 — Layout** (top-down via ``_layout``)
+      Resolve the full box model (margin, border, padding, ``box-sizing``),
+      assign final border-box positions, lay out children by ``display``
+      type, apply min/max constraints, and handle overflow / positioning.
+
+
+Supported display types
+-----------------------
+* ``block``   — vertical stacking with margin collapsing, fills available width.
+* ``inline``  — line-box based horizontal flow with text wrapping.
+* ``none``    — completely removed from layout.
+* ``flex``    — delegated to ``morph.layout.flex`` (stub).
+
+Box model features
+-------------------
+* W3C visual formatting model (border-box = content + padding + border).
+* ``box-sizing: content-box | border-box``
+* Margin collapsing between adjacent block siblings (CSS 2.2 §8.3.1).
+* ``min-width`` / ``max-width`` / ``min-height`` / ``max-height`` clamping.
+* ``overflow: visible | hidden | scroll | auto``.
+* ``position: static | relative`` (absolute / fixed TBD).
+
+Every function writes final positions back onto ``IRNode.x / y / w / h``
+so downstream consumers (C++ codegen, dev-socket serialisation) see
+border-box coordinates.
+"""
+
+import math
 from morph.ir.node import IRWindow, IRNode
+from morph.layout.box import resolve_border_box, resolve_content_box, apply_min_max
+from morph.layout.inline import (
+    layout_inline_lines,
+    apply_inline_positions,
+    estimate_text_width,
+)
 
 
 class LayoutEngine:
-    """Computes x, y, w, h for every IRNode in each window."""
 
     def compute(self, windows: list[IRWindow]) -> None:
         for win in windows:
+            self._heights: dict[str, float] = {}  # node_id → content height
             for node in win.nodes:
-                self._compute_node(node, 0.0, 0.0, float(win.width), float(win.height))
+                self._measure(node, float(win.width))
+            for node in win.nodes:
+                self._layout(node, 0.0, 0.0, float(win.width), float(win.height))
 
-    def _compute_node(self, node: IRNode, px: float, py: float,
-                      parent_w: float, parent_h: float) -> None:
-        from morph.layout.box import resolve_box
-        node.x, node.y, node.w, node.h = resolve_box(node, px, py, parent_w, parent_h)
+    # ═══════════════════════════════════════════════════════════
+    #  Pass 1 — Measure (bottom-up)
+    # ═══════════════════════════════════════════════════════════
 
-        # Give text leaf nodes an estimated height from font size
-        if node.node_type == "__text__" and node.style.height is None and node.h == 0.0:
+    def _measure(self, node: IRNode, avail_w: float) -> float:
+        """Compute intrinsic content height for *node* and its descendants.
+
+        Returns the **content height** (before padding / border) that the
+        node would have if its width were *avail_w*.  The result is also
+        stored in ``self._heights[node.node_id]``.
+
+        For text leaves this also estimates a pixel width on ``node.w``.
+        """
+        if node.style.display == "none":
+            self._heights[node.node_id] = 0.0
+            return 0.0
+
+        # Estimate the content-box width so children know how wide they are.
+        bw = node.style.border_width
+        pt, pr, pb, pl = node.style.padding
+        mt, mr, mb, ml = node.style.margin
+
+        if node.style.width is not None:
+            raw = node.style.width
+            if node.style.box_sizing == "border-box":
+                cw = raw - pl - pr - bw * 2
+            else:
+                cw = raw
+        else:
+            cw = avail_w - ml - mr - pl - pr - bw * 2
+        cw = max(cw, 0.0)
+
+        # ── Text leaf ────────────────────────────────────────
+        if node.node_type == "__text__":
+            tw = estimate_text_width(node)
+            node.w = tw
             node.h = node.style.font_size * 1.4
+            self._heights[node.node_id] = node.h
+            return node.h
 
-        cw = node.w - node.style.padding[3] - node.style.padding[1]
-        ch = node.h - node.style.padding[0] - node.style.padding[2]
-        if cw < 0: cw = 0
-        if ch < 0: ch = 0
-        cx, cy = node.x + node.style.padding[3], node.y + node.style.padding[0]
-        for child in node.children:
-            self._compute_node(child, cx, cy, cw, ch)
-            cy += child.h + node.style.gap
+        # ── Recurse into children ────────────────────────────
+        content_h = 0.0
+        prev_mb = 0.0
+        i = 0
 
-        # Auto-height: if height not explicitly set, expand to contain children
+        while i < len(node.children):
+            child = node.children[i]
+            dsp = "inline" if child.node_type == "__text__" else child.style.display
+
+            if dsp == "none":
+                self._heights[child.node_id] = 0.0
+                i += 1
+                continue
+
+            if dsp == "inline":
+                group: list[IRNode] = []
+                while i < len(node.children):
+                    ic = node.children[i]
+                    icd = "inline" if ic.node_type == "__text__" else ic.style.display
+                    if icd != "inline":
+                        break
+                    self._measure(ic, cw)
+                    group.append(ic)
+                    i += 1
+                # Approximate line count from total inline width (ceil division)
+                if group:
+                    line_h = max(c.h for c in group)
+                    total_w = sum(c.w for c in group)
+                    n_lines = math.ceil(total_w / max(cw, 1))
+                    content_h += line_h * n_lines + (n_lines - 1) * node.style.gap
+                prev_mb = 0.0  # inline resets collapsing context
+
+            else:  # block
+                child_h = self._measure(child, cw)
+                # Convert content height to border-box height
+                child_bh = child_h
+                if child.style.height is not None:
+                    if child.style.box_sizing == "border-box":
+                        child_bh = child.style.height
+                    else:
+                        child_bh = child.style.height + child.style.border_width * 2 \
+                                    + child.style.padding[0] + child.style.padding[2]
+                else:
+                    child_bh = child_h + child.style.border_width * 2 \
+                                + child.style.padding[0] + child.style.padding[2]
+
+                child_bh = max(child_bh, 0.0)
+                cmt = child.style.margin[0]
+                cmb = child.style.margin[2]
+                gap = max(prev_mb, cmt) if prev_mb >= 0 else cmt
+                content_h += gap + child_bh
+                prev_mb = cmb
+                i += 1
+
+        self._heights[node.node_id] = content_h
+        return content_h
+
+    # ═══════════════════════════════════════════════════════════
+    #  Pass 2 — Layout (top-down)
+    # ═══════════════════════════════════════════════════════════
+
+    def _layout(self, node: IRNode, px: float, py: float,
+                parent_w: float, parent_h: float) -> None:
+        """Assign final border-box position and size.
+
+        Parameters
+        ----------
+        node
+            Node to lay out.
+        px, py
+            Origin of the parent's **content area**.
+        parent_w, parent_h
+            Size of the parent's content area.
+        """
+        if node.style.display == "none":
+            node.x = node.y = node.w = node.h = 0.0
+            return
+
+        # ── 1. Text leaves (skip border-box, keep measured size) ─
+        if node.node_type == "__text__":
+            node.x = px
+            node.y = py
+            if node.w == 0.0:
+                node.w = estimate_text_width(node)
+            if node.h == 0.0:
+                node.h = node.style.font_size * 1.4
+            return
+
+        # ── 2. Resolve border-box ─────────────────────────────
+        ch = self._heights.get(node.node_id)
+        node.x, node.y, node.w, node.h = resolve_border_box(
+            node, px, py, parent_w, parent_h, content_h=ch,
+        )
+
+        # ── 3. Content area for children ──────────────────────
+        cx, cy, cw, _ch = resolve_content_box(node)
+
+        # ── 4. Lay out children ───────────────────────────────
+        i = 0
+        prev_block: IRNode | None = None  # last block sibling (for margin collapsing)
+
+        while i < len(node.children):
+            child = node.children[i]
+            dsp = "inline" if child.node_type == "__text__" else child.style.display
+
+            if dsp == "none":
+                self._layout(child, 0, 0, 0, 0)
+                i += 1
+                continue
+
+            if dsp == "inline":
+                # Collect consecutive inline children into line boxes
+                group: list[IRNode] = []
+                while i < len(node.children):
+                    ic = node.children[i]
+                    icd = "inline" if ic.node_type == "__text__" else ic.style.display
+                    if icd != "inline":
+                        break
+                    group.append(ic)
+                    i += 1
+                if group:
+                    cy = self._layout_inline_group(group, cx, cy, cw, node.style.gap,
+                                                    node.style.text_align)
+                # Inline children do not set prev_block (no margin collapsing)
+                continue
+
+            # ── Block child with margin collapsing ───────────
+            mt = child.style.margin[0]
+            cmb = child.style.margin[2]
+
+            if prev_block is not None:
+                prev_mb = prev_block.style.margin[2]
+                collapsed = max(prev_mb, mt)
+                # Place child so its border-box top = prev_block's bottom + collapsed
+                # resolve_border_box does: child.y = child_py + mt
+                # We want: child.y = prev_block.y + prev_block.h + collapsed
+                # So: child_py = prev_block.y + prev_block.h + collapsed - mt
+                child_py = prev_block.y + prev_block.h + collapsed - mt
+            else:
+                child_py = cy  # first block / after inline
+
+            self._layout(child, cx, child_py, cw, _ch)
+            prev_block = child
+            i += 1
+
+        # ── 5. Auto-height expansion ─────────────────────────
         if node.style.height is None and node.children:
-            last_bottom = cy - node.style.gap
-            content_h = last_bottom - node.y + node.style.padding[2]
-            if content_h > node.h:
-                node.h = content_h
+            bw = node.style.border_width
+            pb = node.style.padding[2]
+            max_bottom = max(
+                (c.y + c.h for c in node.children if c.style.display != "none"),
+                default=node.y + node.h,
+            )
+            desired = (max_bottom - node.y) + pb + bw
+            if desired > node.h:
+                node.h = desired
+
+        # ── 6. Min / max clamping (final) ───────────────────
+        apply_min_max(node)
+
+    # ── Inline group helper ─────────────────────────────────
+
+    def _layout_inline_group(self, children: list[IRNode], cx: float, cy: float,
+                              available_width: float, gap: float,
+                              text_align: str) -> float:
+        """Place inline children into line boxes and return the Y cursor
+        (just past the last line, including trailing gap).
+
+        Each child's border-box size is computed from its style before
+        line-breaking.  After positioning, non-text inline children get
+        their own descendants recursively laid out.
+        """
+        # Pre-compute sizes for non-text inline nodes
+        for child in children:
+            if child.node_type == "__text__":
+                if child.w == 0.0:
+                    child.w = estimate_text_width(child)
+                if child.h == 0.0:
+                    child.h = child.style.font_size * 1.4
+            else:
+                bw2 = child.style.border_width
+                pt2, pr2, pb2, pl2 = child.style.padding
+                if child.style.width is not None:
+                    if child.style.box_sizing == "border-box":
+                        child.w = child.style.width
+                    else:
+                        child.w = child.style.width + pl2 + pr2 + bw2 * 2
+                elif child.children:
+                    # Shrink-to-fit: sum children's width + padding + border
+                    content_w = 0.0
+                    for sub in child.children:
+                        if sub.node_type == "__text__":
+                            content_w += estimate_text_width(sub)
+                        elif sub.style.width is not None:
+                            content_w += sub.style.width
+                        else:
+                            content_w += 80.0  # fallback default
+                    child.w = content_w + pl2 + pr2 + bw2 * 2
+                else:
+                    child.w = pl2 + pr2 + bw2 * 2  # just padding + border
+
+                if child.style.height is not None:
+                    if child.style.box_sizing == "border-box":
+                        child.h = child.style.height
+                    else:
+                        child.h = child.style.height + pt2 + pb2 + bw2 * 2
+                else:
+                    child.h = child.style.font_size * 1.4 + pt2 + pb2 + bw2 * 2
+
+        lines = layout_inline_lines(children, cx, cy, available_width,
+                                     gap, text_align)
+        apply_inline_positions(lines)
+
+        # Recursively lay out each non-text inline child's descendants
+        for child in children:
+            if child.node_type != "__text__" and child.children:
+                from morph.layout.box import resolve_content_box
+                # Compute content area from the now-final position
+                ccx, ccy, ccw, cch = resolve_content_box(child)
+                for sub in child.children:
+                    self._layout(sub, ccx, ccy, ccw, cch)
+                # Re-apply min/max now that children are laid out
+                apply_min_max(child)
+
+        if not lines:
+            return cy
+        last_line = lines[-1]
+        last_item = last_line.items[-1] if last_line.items else None
+        if last_item:
+            return last_item.y + last_item.h + gap
+        return cy

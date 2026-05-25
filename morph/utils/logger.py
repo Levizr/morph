@@ -1,5 +1,8 @@
 """Colored terminal output for [morph] prefix messages."""
 
+from __future__ import annotations
+from morph.parser.errors import MorphParseError
+
 _RESET   = "\033[0m"
 _BOLD    = "\033[1m"
 _DIM     = "\033[2m"
@@ -33,6 +36,44 @@ def log_info(msg: str)        -> None: print(f"{_CYAN}  ◆{_RESET}  {msg}")
 def log_success(msg: str)     -> None: print(f"{_GREEN}  ✓{_RESET}  {msg}")
 def log_warn(msg: str)        -> None: print(f"{_YELLOW}  ⚠{_RESET}  {msg}")
 def log_error(msg: str)       -> None: print(f"{_RED}  ✗{_RESET}  {msg}")
+
+def log_parse_error(error: MorphParseError) -> None:
+    """Display a parse error with file location, code context, and colors."""
+    file_path = error.file_path
+    source_lines = error.source_lines
+    line = error.line
+    col = error.col
+
+    loc = str(file_path) if file_path else ""
+    if line:
+        loc += f":{line}"
+        if col:
+            loc += f":{col}"
+
+    print(f"\n  {_RED}{_BOLD}error{_RESET}{_DIM}:{_RESET} {_BOLD}{str(error)}{_RESET}")
+    if loc:
+        print(f"  {_DIM}──>{_RESET} {_CYAN}{loc}{_RESET}")
+
+    if source_lines and line > 0:
+        ctx = 2
+        start = max(0, line - 1 - ctx)
+        end = min(len(source_lines), line + ctx)
+
+        print(f"   {_DIM}──┐{_RESET}")
+        for i in range(start, end):
+            line_num = i + 1
+            prefix = f"{_RED}{_BOLD}>{_RESET}" if line_num == line else " "
+            gutter = f"{_DIM}{line_num:4}{_RESET}"
+            code_line = source_lines[i].rstrip()
+            print(f"   {prefix} {gutter} {_DIM}│{_RESET} {code_line}")
+            if line_num == line and col:
+                indent = max(0, col - 1)
+                width = max(1, len(code_line) - indent)
+                if width > 20:
+                    width = 20
+                pointer = " " * indent + _RED + "^" * width + _RESET
+                print(f"     {_DIM}   │{_RESET} {pointer}")
+        print(f"   {_DIM}──┘{_RESET}")
 def log_dim(msg: str)         -> None: print(f"{_DIM}  · {msg}{_RESET}")
 def log_step(msg: str)        -> None: print(f"\n{_BOLD}{_BLUE}  →{_RESET} {_BOLD}{msg}{_RESET}")
 def log_header(msg: str)      -> None: print(f"\n{_BOLD}{_WHITE}{msg}{_RESET}")

@@ -1,5 +1,16 @@
 class MorphParseError(Exception):
-    """Base class for all Morph parse errors."""
+    """Parse error with file location and source context for rich terminal display."""
+
+    def __init__(self, message: str,
+                 file_path: str | None = None,
+                 line: int = 0,
+                 col: int = 0,
+                 source_lines: list[str] | None = None):
+        self.file_path = file_path
+        self.line = line
+        self.col = col
+        self.source_lines = source_lines
+        super().__init__(message)
 
 
 class UnexpectedTokenError(MorphParseError):

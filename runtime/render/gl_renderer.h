@@ -52,6 +52,8 @@ private:
     GLuint m_vao = 0, m_vbo = 0, m_ibo = 0, m_instVBO = 0;
     GLuint m_shader = 0;
     GLint m_uProj = -1;
+    GLint m_uStencilMode = -1;
+    int m_stencilClipDepth = 0;
     bool m_ready = false;
     std::vector<Instance> m_batch;
     float m_proj[16] = {};
@@ -80,9 +82,13 @@ public:
     ~GLRenderer();
     bool ensureReady();
 
+    void setProjection(const float proj[16]) { memcpy(m_proj, proj, sizeof(m_proj)); }
+
     void clear() override;
     void beginClip(float x, float y, float w, float h) override;
     void endClip() override;
+    void beginRoundedClip(float x, float y, float w, float h, float radius) override;
+    void endRoundedClip() override;
 
     void drawRect(float x, float y, float w, float h, float color[4]) override {
         m_batch.push_back({x + m_scrollX, y + m_scrollY, w, h,

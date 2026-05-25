@@ -45,8 +45,9 @@ public:
     }
 
     void wrapParagraph(const std::string& para, Renderer* r, float lineW) {
+        float epsilon = 0.5f;
         float tw = r->measureTextWidth(para, style.fontSize, style.fontWeight);
-        if (tw <= lineW) {
+        if (tw <= lineW + epsilon) {
             lines.push_back(para);
             return;
         }
@@ -65,7 +66,7 @@ public:
                 size_t nextSpace = para.find(' ', fitEnd + 1);
                 if (nextSpace == std::string::npos) nextSpace = para.size();
                 std::string candidate = para.substr(start, nextSpace - start);
-                if (r->measureTextWidth(candidate, style.fontSize, style.fontWeight) <= lineW) {
+                if (r->measureTextWidth(candidate, style.fontSize, style.fontWeight) <= lineW + epsilon) {
                     fitEnd = nextSpace;
                 } else {
                     break;

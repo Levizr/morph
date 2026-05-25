@@ -216,6 +216,10 @@ class JSXWalker:
                     text = child.text.decode().strip()
                     if text:
                         children.append({"tag": "__text__", "text": text})
+                elif child.type == "ERROR":
+                    text = child.text.decode().strip()
+                    if text:
+                        children.append({"tag": "__text__", "text": text})
 
             return {
                 "tag":      self._get_jsx_tag(opening) if opening else "",
