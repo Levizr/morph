@@ -1,5 +1,36 @@
 #include "gl_renderer.h"
 
+#ifdef MORPH_FEATURE_IMAGE
+void GLRenderer::createImageBuffers() {
+    glGenVertexArrays(1, &m_imageVAO);
+    glBindVertexArray(m_imageVAO);
+
+    glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, (void*)0);
+    glEnableVertexAttribArray(0);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_ibo);
+
+    glGenBuffers(1, &m_imageInstVBO);
+    glBindBuffer(GL_ARRAY_BUFFER, m_imageInstVBO);
+    glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_DYNAMIC_DRAW);
+
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(ImageInstance), (void*)offsetof(ImageInstance, x));
+    glVertexAttribDivisor(1, 1);
+
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, sizeof(ImageInstance), (void*)offsetof(ImageInstance, u1));
+    glVertexAttribDivisor(2, 1);
+
+    glEnableVertexAttribArray(3);
+    glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, sizeof(ImageInstance), (void*)offsetof(ImageInstance, tintR));
+    glVertexAttribDivisor(3, 1);
+
+    glBindVertexArray(0);
+}
+#endif
+
 void GLRenderer::createQuadBuffers() {
     glGenVertexArrays(1, &m_vao);
     glBindVertexArray(m_vao);
@@ -37,6 +68,10 @@ void GLRenderer::createQuadBuffers() {
     glEnableVertexAttribArray(5);
     glVertexAttribPointer(5, 4, GL_FLOAT, GL_FALSE, sizeof(Instance), (void*)offsetof(Instance, br));
     glVertexAttribDivisor(5, 1);
+
+    glEnableVertexAttribArray(6);
+    glVertexAttribPointer(6, 1, GL_FLOAT, GL_FALSE, sizeof(Instance), (void*)offsetof(Instance, borderOnly));
+    glVertexAttribDivisor(6, 1);
 
     glBindVertexArray(0);
 }
@@ -183,6 +218,13 @@ GLRenderer::~GLRenderer() {
         if (a.texture) glDeleteTextures(1, &a.texture);
     if (m_ft) FT_Done_FreeType(m_ft);
 #endif
+#ifdef MORPH_FEATURE_IMAGE
+    if (m_imageVAO) glDeleteVertexArrays(1, &m_imageVAO);
+    if (m_imageInstVBO) glDeleteBuffers(1, &m_imageInstVBO);
+    if (m_imageShader) glDeleteProgram(m_imageShader);
+    for (auto& [_, pair] : m_textureCache)
+        if (pair.first) glDeleteTextures(1, &pair.first);
+#endif
 }
 
 bool GLRenderer::ensureReady() {
@@ -201,10 +243,21 @@ bool GLRenderer::ensureReady() {
     createTextBuffers();
 #endif
 
+#ifdef MORPH_FEATURE_IMAGE
+    createProgram(kImageVertSrc, kImageFragSrc, m_imageShader, m_imageUProj);
+    m_imageUTexture = glGetUniformLocation(m_imageShader, "uTexture");
+    m_imageUStencil = glGetUniformLocation(m_imageShader, "uStencilMode");
+    createImageBuffers();
+#endif
+
     glClearColor(1,1,1,1);
     m_ready = true;
-#ifdef MORPH_FEATURE_TEXT
+#if defined(MORPH_FEATURE_TEXT) && defined(MORPH_FEATURE_IMAGE)
+    return m_shader != 0 && m_textShader != 0 && m_imageShader != 0;
+#elif defined(MORPH_FEATURE_TEXT)
     return m_shader != 0 && m_textShader != 0;
+#elif defined(MORPH_FEATURE_IMAGE)
+    return m_shader != 0 && m_imageShader != 0;
 #else
     return m_shader != 0;
 #endif
@@ -244,7 +297,7 @@ void GLRenderer::beginRoundedClip(float x, float y, float w, float h, float radi
 
     Instance inst = {x + m_scrollX, y + m_scrollY, w, h,
                      1.0f, 1.0f, 1.0f, 1.0f,
-                     radius, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+                     radius, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
     glBindVertexArray(m_vao);
     glBindBuffer(GL_ARRAY_BUFFER, m_instVBO);
     glBufferData(GL_ARRAY_BUFFER, sizeof(Instance), &inst, GL_DYNAMIC_DRAW);
@@ -314,6 +367,47 @@ void GLRenderer::flush(const float proj[16]) {
         m_textBatches.clear();
     }
 #endif
+
+#ifdef MORPH_FEATURE_IMAGE
+    if (!m_imageBatches.empty()) {
+        glUseProgram(m_imageShader);
+        glUniformMatrix4fv(m_imageUProj, 1, GL_FALSE, proj);
+        glUniform1i(m_imageUTexture, 0);
+        glUniform1i(m_imageUStencil, 0);
+        glBindVertexArray(m_imageVAO);
+
+        for (auto& [texId, batch] : m_imageBatches) {
+            if (batch.empty() || !texId) continue;
+
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, texId);
+
+            glBindBuffer(GL_ARRAY_BUFFER, m_imageInstVBO);
+            glBufferData(GL_ARRAY_BUFFER, batch.size() * sizeof(ImageInstance),
+                         batch.data(), GL_DYNAMIC_DRAW);
+
+            glDrawElementsInstanced(GL_TRIANGLES, 6, GL_UNSIGNED_INT,
+                                    (void*)0, (GLsizei)batch.size());
+        }
+        m_imageBatches.clear();
+    }
+#endif
+
+    // Border ring batch — drawn last so it's on top of everything
+    if (!m_borderBatch.empty()) {
+        glUseProgram(m_shader);
+        glUniformMatrix4fv(m_uProj, 1, GL_FALSE, proj);
+        glUniform1i(m_uStencilMode, 0);
+        glBindVertexArray(m_vao);
+
+        glBindBuffer(GL_ARRAY_BUFFER, m_instVBO);
+        glBufferData(GL_ARRAY_BUFFER, m_borderBatch.size() * sizeof(Instance),
+                     m_borderBatch.data(), GL_DYNAMIC_DRAW);
+
+        glDrawElementsInstanced(GL_TRIANGLES, 6, GL_UNSIGNED_INT,
+                                (void*)0, (GLsizei)m_borderBatch.size());
+        m_borderBatch.clear();
+    }
 
     glBindVertexArray(0);
 }

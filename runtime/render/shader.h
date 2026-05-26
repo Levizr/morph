@@ -12,6 +12,7 @@ layout(location = 2) in vec4 aInst1;
 layout(location = 3) in float aRadius;
 layout(location = 4) in float aBorderWidth;
 layout(location = 5) in vec4 aBorderColor;
+layout(location = 6) in float aBorderOnly;
 uniform mat4 uProj;
 out vec4 vColor;
 out vec2 vUV;
@@ -19,6 +20,7 @@ out vec2 vSize;
 out float vRadius;
 out float vBorderWidth;
 out vec4 vBorderColor;
+out float vBorderOnly;
 void main() {
     vec2 pos = aInst0.xy + aPos * aInst0.zw;
     gl_Position = uProj * vec4(pos, 0.0, 1.0);
@@ -28,6 +30,7 @@ void main() {
     vRadius = aRadius;
     vBorderWidth = aBorderWidth;
     vBorderColor = aBorderColor;
+    vBorderOnly = aBorderOnly;
 }
 )glsl";
 
@@ -39,12 +42,13 @@ in vec2 vSize;
 in float vRadius;
 in float vBorderWidth;
 in vec4 vBorderColor;
+in float vBorderOnly;
 uniform bool uStencilMode;
 out vec4 FragColor;
 void main() {
     vec2 halfSize = vSize * 0.5;
     vec2 p = vUV * vSize - halfSize;
-    float rad = max(vRadius, 0.001);
+    float rad = clamp(vRadius, 0.001, 100.0);
 
     // Outer rounded rect SDF
     vec2 d_outer = abs(p) - halfSize + rad;
@@ -68,9 +72,15 @@ void main() {
         float dist_inner = length(max(d_inner, 0.0)) - innerRad;
         float alpha_inner = 1.0 - smoothstep(0.0, fwidth(dist_inner), max(dist_inner, 0.0));
 
-        // Ring = outer - inner; interior = inner
-        color = mix(vBorderColor, vColor, alpha_inner);
-        color.a = mix(vBorderColor.a, vColor.a, alpha_inner) * alpha_outer;
+        if (vBorderOnly > 0.5) {
+            // Border-only: just the ring
+            float ringAlpha = alpha_outer * (1.0 - alpha_inner);
+            color = vec4(vBorderColor.rgb, vBorderColor.a * ringAlpha);
+        } else {
+            // Fill + border
+            color = mix(vBorderColor, vColor, alpha_inner);
+            color.a = mix(vBorderColor.a, vColor.a, alpha_inner) * alpha_outer;
+        }
     } else {
         color = vec4(vColor.rgb, vColor.a * alpha_outer);
     }
@@ -106,6 +116,43 @@ out vec4 FragColor;
 void main() {
     float alpha = texture(uAtlas, vUV).r;
     FragColor = vec4(vColor.rgb, vColor.a * alpha);
+}
+)glsl";
+#endif
+
+#ifdef MORPH_FEATURE_IMAGE
+static const char* kImageVertSrc = R"glsl(
+#version 330 core
+layout(location = 0) in vec2 aPos;
+layout(location = 1) in vec4 aInst0;
+layout(location = 2) in vec4 aInst1;
+layout(location = 3) in vec4 aInst2;
+uniform mat4 uProj;
+out vec2 vUV;
+out vec4 vTint;
+void main() {
+    vec2 pos = aInst0.xy + aPos * aInst0.zw;
+    gl_Position = uProj * vec4(pos, 0.0, 1.0);
+    vUV = mix(aInst1.xy, aInst1.zw, aPos);
+    vTint = aInst2;
+}
+)glsl";
+
+static const char* kImageFragSrc = R"glsl(
+#version 330 core
+in vec2 vUV;
+in vec4 vTint;
+uniform sampler2D uTexture;
+uniform bool uStencilMode;
+out vec4 FragColor;
+void main() {
+    vec4 texel = texture(uTexture, vUV);
+    if (uStencilMode) {
+        if (texel.a < 0.5) discard;
+        FragColor = vec4(1.0);
+        return;
+    }
+    FragColor = texel * vTint;
 }
 )glsl";
 #endif

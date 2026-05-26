@@ -5,6 +5,7 @@
 #include "../widgets/morph_rect.h"
 #include "../widgets/morph_text.h"
 #include "../widgets/morph_button.h"
+#include "../widgets/morph_image.h"
 
 static void deleteNodeTree(MorphNode* node) {
     if (!node) return;
@@ -155,6 +156,14 @@ static MorphNode* deserializeNode(const JsonValue& val,
         node = new TextNode(text);
     } else if (type == "button") {
         node = new RectNode(0, 0, 0, 0);
+    } else if (type == "img") {
+        std::string src, alt;
+        if (val.has("attrs") && val["attrs"].type() == JsonType::Object) {
+            auto& a = val["attrs"];
+            if (a.has("src") && !a["src"].isNull()) src = a["src"].asString();
+            if (a.has("alt") && !a["alt"].isNull()) alt = a["alt"].asString();
+        }
+        node = new ImageNode(src, alt);
     } else {
         node = new RectNode(0, 0, 0, 0);
     }

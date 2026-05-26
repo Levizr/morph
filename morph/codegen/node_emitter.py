@@ -57,6 +57,16 @@ class NodeEmitter:
             lines.append(f"{indent}{node.node_id}->y = {fmt(node.y)};")
             lines.append(f"{indent}{node.node_id}->w = {fmt(node.w)};")
             lines.append(f"{indent}{node.node_id}->h = {fmt(node.h)};")
+        elif node.node_type == "img":
+            src = node.attrs.get("src", "")
+            alt = node.attrs.get("alt", "")
+            escaped_src = src.replace("\\", "\\\\").replace("\"", "\\\"")
+            escaped_alt = alt.replace("\\", "\\\\").replace("\"", "\\\"")
+            lines.append(f"ImageNode* {node.node_id} = new ImageNode(\"{escaped_src}\", \"{escaped_alt}\");")
+            lines.append(f"{indent}{node.node_id}->x = {fmt(node.x)};")
+            lines.append(f"{indent}{node.node_id}->y = {fmt(node.y)};")
+            lines.append(f"{indent}{node.node_id}->w = {fmt(node.w)};")
+            lines.append(f"{indent}{node.node_id}->h = {fmt(node.h)};")
         else:
             lines.append(f"RectNode* {node.node_id} = new RectNode("
                          f"{fmt(node.x)}, {fmt(node.y)}, {fmt(node.w)}, {fmt(node.h)});")

@@ -8,11 +8,19 @@
 - **Color swatches** — Small colored squares next to color and background values; opaque colors shown as hex (`#334155`), semi-transparent as `rgba(R,G,B,A)`
 - **Mouse callback support** — Click "Inspect Element" button to toggle inspect mode
 - **`MorphNode::type` field** — Stores element tag name ("div", "button", etc.) displayed in DevTools badge
+- **`<img>` tag support** — Full image pipeline: `ImageNode` with lazy texture load, intrinsic aspect-ratio layout, `stb_image` decoder (PNG, JPEG, WebP, GIF, BMP, TGA, PSD, HDR, PNM, PIC), per-texture-ID batched rendering (unlimited images), `border-radius` stencil clipping on images
+- **Image texture cache** — Shared GPU textures keyed by `src` path, zero duplicate memory
+- **`width`/`height` HTML attributes on `<img>`** — Converted to CSS with correct cascade priority (inline > attributes > Tailwind > CSS rules > UA defaults)
+- **`border` CSS shorthand** — `border: "2px solid #fff"` expanded to individual `border-width`/`border-style`/`border-color` in `builder.py`
+- **Global border ring batch** — Borders now render via a separate `m_borderBatch` (flushed last, on top of everything). SDF shader supports `borderOnly` mode: renders just the ring (no fill) with proper rounded inner/outer corners. Every element (`div`, `button`, `img`, etc.) uses the same `drawBorderRing` path for consistent rendering.
+- **`drawBorderRing` API** — New method on `Renderer` base class; takes position, radius, border-width, border-color. Used by `RectNode`, `ButtonNode`, and `ImageNode`.
+- **Border on `<img/>`** — Images now get borders via the global SDF ring pipeline, not widget-specific quad hacks. Border ring is on top of the image texture (correct z-order).
 
 ### Fixed
 - **Empty div rendering** — Auto-height formula initialized `maxBottom = 0` instead of `cy`; empty divs with padding had zero height. Fixed at `runtime/core/node.cpp:124`.
 - **Overlay color blending** — Changed from overlapping filled quads to non-overlapping rings, each box fills only its exclusive area with no alpha bleed
 - **DevTools panel layout** — Consistent 2-column alignment (label at `px+14`, value at `px+85`); swatch at far right; no text/swatch overlap
+- **Radius clamp in shader** — `border-radius > 100px` caused no rendering due to SDF degeneration; clamped to `[0.001, 100.0]` in the SDF shader to prevent artifacts
 
 ## [0.0.3] - 2026-05-26
 

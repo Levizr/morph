@@ -32,6 +32,11 @@ public:
 
     virtual void drawTexture(unsigned int tex,
                              float x, float y, float w, float h) = 0;
+    virtual void drawBorderRing(float x, float y, float w, float h,
+                                float radius, float borderWidth,
+                                float borderColor[4]) {}
+    virtual unsigned int loadTexture(const std::string& path,
+                                     int& outW, int& outH) { return 0; }
     virtual void drawMesh(const float* verts, const unsigned int* idx,
                           int count, float color[4],
                           float x, float y, float size) = 0;

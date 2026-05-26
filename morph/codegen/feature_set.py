@@ -18,6 +18,8 @@ class FeatureSet:
                     self.features.add("radius")
                 if node.node_type == "input":
                     self.features.add("input")
+                if node.node_type == "img":
+                    self.features.add("image")
                 if s.border_radius > 0:
                     self.features.add("radius")
                 if s.font_weight not in ("normal", ""):
@@ -77,6 +79,8 @@ class FeatureSet:
             headers.append("core/event.h")
         if "viewport" in self.features:
             headers.append("viewport/viewport_node.h")
+        if "image" in self.features:
+            headers.append("widgets/morph_image.h")
         return headers
 
     def required_defines(self) -> list[str]:
@@ -108,6 +112,8 @@ class FeatureSet:
             defines.append("MORPH_FEATURE_MIN_MAX")
         if "border_box" in self.features:
             defines.append("MORPH_FEATURE_BORDER_BOX")
+        if "image" in self.features:
+            defines.append("MORPH_FEATURE_IMAGE")
         return defines
 
     def needs_freetype(self) -> bool:

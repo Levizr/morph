@@ -7,6 +7,10 @@
 #include "../core/renderer.h"
 #include "shader.h"
 
+#ifdef MORPH_FEATURE_IMAGE
+#include "../vendor/stb_image.h"
+#endif
+
 #ifdef MORPH_FEATURE_TEXT
 #include <ft2build.h>
 #include FT_FREETYPE_H
@@ -23,7 +27,10 @@ public:
         float radius;
         float borderWidth;
         float br, bg, bb, ba;
+        float borderOnly;
     };
+
+    std::vector<Instance> m_borderBatch;
 
 #ifdef MORPH_FEATURE_TEXT
     struct TextInstance {
@@ -47,6 +54,14 @@ public:
     };
 #endif
 
+#ifdef MORPH_FEATURE_IMAGE
+    struct ImageInstance {
+        float x, y, w, h;
+        float u1, v1, u2, v2;
+        float tintR, tintG, tintB, tintA;
+    };
+#endif
+
 private:
     // Quad batch
     GLuint m_vao = 0, m_vbo = 0, m_ibo = 0, m_instVBO = 0;
@@ -67,6 +82,15 @@ private:
     std::unordered_map<std::string, std::vector<TextInstance>> m_textBatches;
     FT_Library m_ft = nullptr;
     std::unordered_map<std::string, FontAtlas> m_atlases;
+#endif
+
+#ifdef MORPH_FEATURE_IMAGE
+    GLuint m_imageVAO = 0, m_imageVBO = 0, m_imageIBO = 0, m_imageInstVBO = 0;
+    GLuint m_imageShader = 0;
+    GLint m_imageUProj = -1, m_imageUTexture = -1, m_imageUStencil = -1;
+    std::unordered_map<GLuint, std::vector<ImageInstance>> m_imageBatches;
+    std::unordered_map<std::string, std::pair<GLuint, int>> m_textureCache; // src -> (texId, refCount)
+    void createImageBuffers();
 #endif
 
     void createQuadBuffers();
@@ -93,7 +117,7 @@ public:
     void drawRect(float x, float y, float w, float h, float color[4]) override {
         m_batch.push_back({x + m_scrollX, y + m_scrollY, w, h,
                            color[0], color[1], color[2], color[3],
-                           0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f});
+                           0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f});
     }
 
 #ifdef MORPH_FEATURE_RADIUS
@@ -101,29 +125,52 @@ public:
                          float radius, float color[4]) override {
         m_batch.push_back({x + m_scrollX, y + m_scrollY, w, h,
                            color[0], color[1], color[2], color[3],
-                           radius, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f});
+                           radius, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f});
     }
 #endif
 
     void drawBorderedRect(float x, float y, float w, float h,
                           float color[4], float borderWidth,
                           float borderColor[4]) override {
+        // Fill
         m_batch.push_back({x + m_scrollX, y + m_scrollY, w, h,
                            color[0], color[1], color[2], color[3],
-                           0.0f, borderWidth,
-                           borderColor[0], borderColor[1],
-                           borderColor[2], borderColor[3]});
+                           0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f});
+        // Border ring
+        m_borderBatch.push_back({x + m_scrollX, y + m_scrollY, w, h,
+                                 0.0f, 0.0f, 0.0f, 0.0f,
+                                 0.0f, borderWidth,
+                                 borderColor[0], borderColor[1],
+                                 borderColor[2], borderColor[3],
+                                 1.0f});
     }
 
     void drawBorderedRoundedRect(float x, float y, float w, float h,
                                  float radius, float color[4],
                                  float borderWidth,
                                  float borderColor[4]) override {
+        // Fill
         m_batch.push_back({x + m_scrollX, y + m_scrollY, w, h,
                            color[0], color[1], color[2], color[3],
-                           radius, borderWidth,
-                           borderColor[0], borderColor[1],
-                           borderColor[2], borderColor[3]});
+                           radius, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f});
+        // Border ring
+        m_borderBatch.push_back({x + m_scrollX, y + m_scrollY, w, h,
+                                 0.0f, 0.0f, 0.0f, 0.0f,
+                                 radius, borderWidth,
+                                 borderColor[0], borderColor[1],
+                                 borderColor[2], borderColor[3],
+                                 1.0f});
+    }
+
+    void drawBorderRing(float x, float y, float w, float h,
+                        float radius, float borderWidth,
+                        float borderColor[4]) override {
+        m_borderBatch.push_back({x + m_scrollX, y + m_scrollY, w, h,
+                                 0.0f, 0.0f, 0.0f, 0.0f,
+                                 radius, borderWidth,
+                                 borderColor[0], borderColor[1],
+                                 borderColor[2], borderColor[3],
+                                 1.0f});
     }
 
 #ifdef MORPH_FEATURE_TEXT
@@ -177,7 +224,46 @@ public:
 #endif
 
     void drawTexture(unsigned int tex, float x, float y, float w, float h) override {
+#ifdef MORPH_FEATURE_IMAGE
+        m_imageBatches[tex].push_back({x + m_scrollX, y + m_scrollY, w, h,
+                                       0.0f, 0.0f, 1.0f, 1.0f,
+                                       1.0f, 1.0f, 1.0f, 1.0f});
+#else
         (void)tex; (void)x; (void)y; (void)w; (void)h;
+#endif
+    }
+
+    unsigned int loadTexture(const std::string& path, int& outW, int& outH) override {
+#ifdef MORPH_FEATURE_IMAGE
+        auto it = m_textureCache.find(path);
+        if (it != m_textureCache.end()) {
+            outW = it->second.second >> 16;
+            outH = it->second.second & 0xFFFF;
+            return it->second.first;
+        }
+        int n = 0;
+        unsigned char* data = stbi_load(path.c_str(), &outW, &outH, &n, 4);
+        if (!data) {
+            fprintf(stderr, "[GLRenderer] failed to load: %s\n", path.c_str());
+            return 0;
+        }
+        GLuint tex = 0;
+        glGenTextures(1, &tex);
+        glBindTexture(GL_TEXTURE_2D, tex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, outW, outH, 0,
+                     GL_RGBA, GL_UNSIGNED_BYTE, data);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        stbi_image_free(data);
+        int dims = (outW << 16) | (outH & 0xFFFF);
+        m_textureCache[path] = {tex, dims};
+        return tex;
+#else
+        (void)path; (void)outW; (void)outH;
+        return 0;
+#endif
     }
 
     void drawMesh(const float* verts, const unsigned int* idx,

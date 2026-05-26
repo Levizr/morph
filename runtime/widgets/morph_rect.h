@@ -37,7 +37,7 @@ public:
                                 style.overflow == "scroll" ||
                                 style.overflow == "auto");
         bool needRectClip = overflowClipped;
-        bool needRadiusClip = style.borderRadius > 0.0f && overflowClipped;
+        bool needRadiusClip = style.borderRadius > 0.0f;
 #ifdef MORPH_FEATURE_SCROLL
         bool scrolling = scrollEnabled && contentH > h;
 #else

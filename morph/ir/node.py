@@ -12,6 +12,7 @@ class IRNode:
     children: list[IRNode] = field(default_factory=list)
     events: list[IREvent] = field(default_factory=list)
     text_content: str = ""
+    attrs: dict[str, str] = field(default_factory=dict)
     parent_id: str | None = None
 
     # computed by LayoutEngine

@@ -33,6 +33,7 @@ class IRSerializer:
             "x": n.x, "y": n.y,
             "w": n.w, "h": n.h,
             "text":    n.text_content,
+            "attrs":   n.attrs,
             "style": {
                 "bg_color":      list(s.bg_color),
                 "color":         list(s.color),

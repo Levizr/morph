@@ -19,6 +19,7 @@ _UA_DEFAULTS: dict[str, dict[str, str]] = {
     "strong": {"font-weight": "bold"},
     "span": {"display": "inline"},
     "a":    {"display": "inline", "color": "#0000ee", "cursor": "pointer"},
+    "img":  {"display": "inline-block"},
 }
 
 # CSS property name → IRStyle field name
@@ -166,14 +167,22 @@ class IRBuilder:
         class_names = _get_classes(props)
         tw_styles = _resolve_tw(props, tw_resolver)
 
-        # Merge: inline > Tailwind > CSS rules > UA defaults > system defaults
+        # Merge: inline > HTML attrs > Tailwind > CSS rules > UA defaults
         merged = {}
         merged.update(_UA_DEFAULTS.get(tag, {}))
         for rule_key in css_rules:
             if _selector_matches(tag, rule_key, class_names):
                 merged.update(css_rules[rule_key])
         merged.update(tw_styles)
-        merged.update(inline_raw)
+        # HTML attributes like width="400" height="300" → CSS properties
+        for attr in ('width', 'height'):
+            val = props.get(attr)
+            if val is not None:
+                try:
+                    merged[attr] = str(int(val)) + 'px'
+                except (ValueError, TypeError):
+                    pass
+        merged.update(inline_raw)  # inline style overrides everything
 
         # ── Convert merged CSS → IRStyle fields ──────────────
         ir_kw = {}
@@ -225,6 +234,13 @@ class IRBuilder:
             if child_node:
                 children_nodes.append(child_node)
 
+        # ── Tag attributes (src, alt, etc.) ──────────────────
+        attrs = {}
+        for attr_key in ("src", "alt", "href", "target"):
+            val = props.get(attr_key)
+            if val is not None and isinstance(val, str):
+                attrs[attr_key] = val
+
         # ── Events ───────────────────────────────────────────
         events = []
         for attr_key in ("morph-open", "morph-close", "morph-navigate"):
@@ -249,6 +265,7 @@ class IRBuilder:
             style=node_style,
             children=children_nodes,
             events=events,
+            attrs=attrs,
         )
 
     def _next_id(self) -> str:

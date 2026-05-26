@@ -29,6 +29,7 @@ set(RUNTIME_SOURCES
     ${RUNTIME_DIR}/core/window.cpp
     ${RUNTIME_DIR}/render/gl_renderer.cpp
     ${RUNTIME_DIR}/core/glad.c
+    ${VENDOR_DIR}/stb_image.c
 )
 
 add_executable(morph_devrt ${DEV_SOURCES} ${RUNTIME_SOURCES})
@@ -54,6 +55,7 @@ target_compile_definitions(morph_devrt PRIVATE
     MORPH_FEATURE_MARGIN_COLLAPSE
     MORPH_FEATURE_MIN_MAX
     MORPH_FEATURE_BORDER_BOX
+    MORPH_FEATURE_IMAGE
 )
 
 target_link_libraries(morph_devrt PRIVATE

@@ -132,6 +132,7 @@ def _deser_node(d: dict) -> IRNode:
         text_content=d.get("text", ""),
         style=style,
         children=[_deser_node(c) for c in d.get("children", [])],
+        attrs=d.get("attrs", {}),
         events=[
             IREvent(trigger=e.get("trigger", ""), action=e.get("action", ""),
                     target=e.get("target", ""))

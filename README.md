@@ -145,7 +145,8 @@ In **dev mode**, the pipeline produces an IR dict that is sent over a Unix socke
 | **Margin/padding side properties** — `margin-top`, `padding-left`, etc. | Complete |
 | **Cursor support** — `cursor: pointer` (hand), `cursor: text` (I-beam) | Complete |
 | **`morph_devrt` binary** — dev mode C++ renderer, Unix socket IPC, hot reload | Complete |
-| **Border rendering** — `border-width`, `border-color`, `border-style` with SDF shader | Complete |
+| **Border rendering** — `border-width`, `border-color`, `border-style` with SDF shader on all elements (div, button, img); border ring batch on top of everything | Complete |
+| **Image rendering** — `stb_image`-backed: PNG, JPEG, WebP, GIF, BMP, TGA, PSD, HDR, PNM, PIC; per-texture batching, border-radius clipping | Complete |
 | **Box-sizing** — `content-box` and `border-box` CSS property | Complete |
 | **Dev mode auto-build** — CMake integration, automatic binary rebuild on missing | Complete |
 | **Window config hot reload** — title update on save, node tree swap without restart | Complete |
@@ -178,12 +179,13 @@ In **dev mode**, the pipeline produces an IR dict that is sent over a Unix socke
 
 **HTML Elements**
 - `div`, `span`, `h1`–`h6`, `p`, `button`
+- `<img>` — supports PNG, JPEG, WebP, GIF, BMP, TGA, PSD, HDR, PNM, PIC via stb_image; intrinsic aspect ratio; `width`/`height` attributes; `border-radius` clipping
 - `<morph-window>` — declares a native window
 
 **C++ Runtime**
 - OpenGL 3.3 core profile batch renderer (instanced VAO/VBO/IBO)
 - Rounded rectangles via SDF fragment shader (radius auto-clamped)
-- Border rendering — `border-width`, `border-color`, `border-style` via SDF shader
+- Border rendering — `border-width`, `border-color`, `border-style` via SDF shader on all elements (`div`, `button`, `img`, etc.); border ring batch flushed on top of everything
 - `box-sizing: content-box` / `border-box` layout modes
 - FreeType text rendering with per-size glyph atlas and word-wrap
 - Font weight support (bold / normal with `DejaVuSans-Bold.ttf`)
@@ -193,6 +195,7 @@ In **dev mode**, the pipeline produces an IR dict that is sent over a Unix socke
 - Scrollbar with drag, wheel, track-click; nested scroll containers
 - Viewport culling for draw + events
 - Feature-based dead code elimination
+- Image rendering — stb_image-backed texture loading (PNG/JPEG/WebP/GIF/BMP/TGA/PSD/HDR/PNM/PIC); per-texture-ID batched draw calls; `border-radius` stencil clipping on images
 - `cursor: pointer` and `cursor: text` via GLFW standard cursors
 
 **DevTools (`morph_devrt` only)**

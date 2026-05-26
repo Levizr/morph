@@ -28,7 +28,8 @@ class Compiler:
             return False
 
         vendor_dir = os.path.join(runtime_dir, "vendor")
-        glad_c = os.path.join(runtime_dir, "core", "glad.c")
+        glad_c   = os.path.join(runtime_dir, "core", "glad.c")
+        stb_c    = os.path.join(vendor_dir, "stb_image.c")
 
         # Runtime source files (compiled separately for incremental builds)
         runtime_sources = [
@@ -44,7 +45,7 @@ class Compiler:
             "-ffunction-sections", "-fdata-sections",
             source_path,
             *runtime_sources,
-            glad_c,
+            glad_c, stb_c,
             "-o", binary_path,
             "-I", runtime_dir,
             "-I", vendor_dir,
