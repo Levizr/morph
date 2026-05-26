@@ -94,10 +94,28 @@ private:
         float colPadding[4] = {0.0f, 0.8f, 0.2f, 0.20f};
         float colContent[4] = {0.2f, 0.4f, 1.0f, 0.18f};
 
-        r.drawRect(mdx, mdy, mdw, mdh, colMargin);
-        r.drawRect(bx, by, bwdt, bhgt, colBorder);
-        r.drawRect(pdx, pdy, pdw, pdh, colPadding);
-        r.drawRect(cx, cy, cw, ch, colContent);
+        auto drawRing = [&](float ox, float oy, float ow, float oh,
+                            float top, float right, float bottom, float left,
+                            float col[4]) {
+            if (ow < 0.01f || oh < 0.01f) return;
+            if (top > 0.0f)    r.drawRect(ox, oy, ow, top, col);
+            if (bottom > 0.0f) r.drawRect(ox, oy + oh - bottom, ow, bottom, col);
+            float innerH = oh - top - bottom;
+            if (innerH > 0.0f && left > 0.0f)
+                r.drawRect(ox, oy + top, left, innerH, col);
+            if (innerH > 0.0f && right > 0.0f)
+                r.drawRect(ox + ow - right, oy + top, right, innerH, col);
+        };
+
+        // Margin ring (outside border)
+        drawRing(mdx, mdy, mdw, mdh, mt, mr, mb, ml, colMargin);
+        // Border ring (between border edge and padding edge)
+        drawRing(bx, by, bwdt, bhgt, bw, bw, bw, bw, colBorder);
+        // Padding ring (between padding edge and content edge)
+        drawRing(pdx, pdy, pdw, pdh, pt, pr, pb, pl, colPadding);
+        // Content (innermost fill)
+        if (cw > 0.01f && ch > 0.01f)
+            r.drawRect(cx, cy, cw, ch, colContent);
     }
 
     // drawText treats y as "top of text area" — baseline = y + fontSize.
