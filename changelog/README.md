@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.0.4] - 2026-05-26
+
+### Added
+- **DevTools panel** — Press `F12` to toggle; element inspect via `F2` or click button; box-model overlay with non-overlapping colored rings (margin/orange, border/yellow, padding/green, content/blue)
+- **Element info panel** — Shows tag name badge, size, position, margin/padding (T/R/B/L), display, overflow, box-sizing, color/background with hex swatches, font-size, font-weight, text-align
+- **Color swatches** — Small colored squares next to color and background values; opaque colors shown as hex (`#334155`), semi-transparent as `rgba(R,G,B,A)`
+- **Mouse callback support** — Click "Inspect Element" button to toggle inspect mode
+- **`MorphNode::type` field** — Stores element tag name ("div", "button", etc.) displayed in DevTools badge
+
+### Fixed
+- **Empty div rendering** — Auto-height formula initialized `maxBottom = 0` instead of `cy`; empty divs with padding had zero height. Fixed at `runtime/core/node.cpp:124`.
+- **Overlay color blending** — Changed from overlapping filled quads to non-overlapping rings, each box fills only its exclusive area with no alpha bleed
+- **DevTools panel layout** — Consistent 2-column alignment (label at `px+14`, value at `px+85`); swatch at far right; no text/swatch overlap
+
 ## [0.0.3] - 2026-05-26
 
 ### Added
