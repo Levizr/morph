@@ -21,7 +21,7 @@ class SourceWatcher:
 
 
 class _Handler(FileSystemEventHandler):
-    EXTS = {".html", ".css", ".js"}
+    EXTS = {".mx", ".html", ".css", ".js"}
 
     def __init__(self, callback, debounce: float):
         self._cb = callback

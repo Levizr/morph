@@ -1,37 +1,80 @@
 #include "node.h"
 #include "renderer.h"
 
-#ifdef MORPH_FEATURE_BORDER
-static bool borderAffectsLayout(const MorphStyle& s) {
-    return s.borderWidth > 0.0f && s.borderStyle == "solid" && s.boxSizing != "border-box";
-}
-static float borderLayoutBonus(const MorphStyle& s) {
-    return borderAffectsLayout(s) ? s.borderWidth * 2.0f : 0.0f;
-}
+// ── W3C box-model helpers ────────────────────────────────────
+//  Horizontal sizing bonus: content-box → pl+pr+bw*2, border-box → 0.
+static float hBonus(const MorphStyle& s) {
+#ifdef MORPH_FEATURE_BORDER_BOX
+    if (s.boxSizing == "border-box") return 0.0f;
 #endif
+    float pl = s.padding[3], pr = s.padding[1];
+#ifdef MORPH_FEATURE_BORDER
+    return pl + pr + s.borderWidth * 2.0f;
+#else
+    return pl + pr;
+#endif
+}
+
+//  Vertical sizing bonus: content-box → pt+pb+bw*2, border-box → 0.
+static float vBonus(const MorphStyle& s) {
+#ifdef MORPH_FEATURE_BORDER_BOX
+    if (s.boxSizing == "border-box") return 0.0f;
+#endif
+    float pt = s.padding[0], pb = s.padding[2];
+#ifdef MORPH_FEATURE_BORDER
+    return pt + pb + s.borderWidth * 2.0f;
+#else
+    return pt + pb;
+#endif
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 //   Main layout entry: two-pass width⤵ → height⤴ with feature-gating
 // ────────────────────────────────────────────────────────────────────────────
 void MorphNode::layout(float px, float py, float parentW, float parentH,
                        Renderer* r) {
-#ifdef MORPH_FEATURE_POSITION
-    if (style.position == "absolute") {
-        w = style.explicitWidth >= 0.0f ? style.explicitWidth : 0.0f;
-        h = style.explicitHeight >= 0.0f ? style.explicitHeight : 0.0f;
-    } else
+    float ml = style.margin[3], mr = style.margin[1];
+    float mt = style.margin[0], mb = style.margin[2];
+    float pl = style.padding[3], pr = style.padding[1];
+    float pt = style.padding[0], pb = style.padding[2];
+
+#ifdef MORPH_FEATURE_BORDER
+    float bw = style.borderWidth;
+#else
+    float bw = 0.0f;
 #endif
-    {
-        float ml = style.margin[3], mr = style.margin[1];
-        float mt = style.margin[0], mb = style.margin[2];
-        x = px + ml;
-        y = py + mt;
-        w = style.explicitWidth >= 0.0f ? style.explicitWidth : parentW - ml - mr;
-        if (w < 0.0f) w = 0.0f;
-        h = style.explicitHeight >= 0.0f ? style.explicitHeight : 0.0f;
+
+    x = px + ml;
+    y = py + mt;
+
+    // ── Width (border-box total) ──
+    if (style.explicitWidth >= 0.0f) {
+#ifdef MORPH_FEATURE_BORDER_BOX
+        if (style.boxSizing == "border-box") {
+            w = style.explicitWidth;
+        } else
+#endif
+        {
+            w = style.explicitWidth + pl + pr + bw * 2.0f;
+        }
+    } else {
+        w = parentW - ml - mr;
     }
+    if (w < 0.0f) w = 0.0f;
 
-
+    // ── Height (border-box total) ──
+    if (style.explicitHeight >= 0.0f) {
+#ifdef MORPH_FEATURE_BORDER_BOX
+        if (style.boxSizing == "border-box") {
+            h = style.explicitHeight;
+        } else
+#endif
+        {
+            h = style.explicitHeight + pt + pb + bw * 2.0f;
+        }
+    } else {
+        h = 0.0f;  // auto-height below
+    }
 
 #ifdef MORPH_FEATURE_MIN_MAX
     if (style.minWidth > 0.0f && w < style.minWidth) w = style.minWidth;
@@ -40,25 +83,13 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
     if (style.maxHeight > 0.0f && h > style.maxHeight) h = style.maxHeight;
 #endif
 
-    // ── Content box (padding + border aware; border is handled by draw()) ──
-    float pl = style.padding[3], pr = style.padding[1];
-    float pt = style.padding[0], pb = style.padding[2];
-
-#ifdef MORPH_FEATURE_BORDER
-    float bw = style.borderWidth;
-    float bb = borderLayoutBonus(style);       // extra layout space border takes
-#else
-    float bw = 0.0f;
-    float bb = 0.0f;
-#endif
-
-    // Children get content width inside padding (border extends outside for content-box)
-    float cw = w - pl - pr;
+    // ── Content area (inside padding + border) ──
+    float cw = w - pl - pr - bw * 2.0f;
     if (cw < 0.0f) cw = 0.0f;
-    float ch = h - pt - pb;
+    float ch = h - pt - pb - bw * 2.0f;
     if (ch < 0.0f) ch = 0.0f;
-    float cx = x + pl;
-    float cy = y + pt;
+    float cx = x + bw + pl;
+    float cy = y + bw + pt;
 
 #ifdef MORPH_FEATURE_DISPLAY_NONE
     if (style.display == "none") {
@@ -121,7 +152,6 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
             float cmt = c->style.margin[0], cmb = c->style.margin[2];
             float cml = c->style.margin[3], cmr = c->style.margin[1];
             float childDim = isCol ? c->h : c->w;
-            childDim += borderLayoutBonus(c->style);
             totalMain += childDim + (isCol ? cmt + cmb : cml + cmr);
             info.push_back({c, c->w, c->h, cmt, cmb, cml, cmr});
         }
@@ -149,7 +179,6 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
             float crossDim  = isCol ? ci.w : ci.h;
 
             float posMain = cursor + (isCol ? ci.mt : ci.ml);
-            posMain += borderLayoutBonus(ci.node->style) * 0.5f;
             float posCross = cross + (isCol ? ci.ml : ci.mt);
 
             if (crossSize > crossDim) {
@@ -185,16 +214,22 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 
             ci.node->layout(childX, childY, childPW, childPH, r);
 
-            // Stretch alignment: fill available cross dimension
-            if (style.alignItems == "stretch" && ci.node->style.explicitHeight < 0.0f) {
-                if (isCol && cw > crossDim)
-                    ci.node->w = cw - borderLayoutBonus(ci.node->style);
-                else if (isRow && ch > crossDim)
-                    ci.node->h = ch - borderLayoutBonus(ci.node->style);
+            // Stretch alignment: item fills the cross-axis line size
+            if (style.alignItems == "stretch" && ci.node->style.explicitWidth < 0.0f && isCol) {
+                float availW = cw - ci.ml - ci.mr;
+                if (availW < 0.0f) availW = 0.0f;
+                if (availW > ci.node->w)
+                    ci.node->w = availW;
+            }
+            if (style.alignItems == "stretch" && ci.node->style.explicitHeight < 0.0f && isRow) {
+                float availH = ch - ci.mt - ci.mb;
+                if (availH < 0.0f) availH = 0.0f;
+                if (availH > ci.node->h)
+                    ci.node->h = availH;
             }
 
-            float outerH = ci.node->h + borderLayoutBonus(ci.node->style);
-            float outerW = ci.node->w + borderLayoutBonus(ci.node->style);
+            float outerH = ci.node->h;
+            float outerW = ci.node->w;
             cursor += (isCol ? outerH + ci.mt + ci.mb : outerW + ci.ml + ci.mr) + style.gap;
             float cb = ci.node->y + outerH + ci.mb;
             if (cb > maxBottom) maxBottom = cb;
@@ -229,7 +264,8 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                 c->layout(0.0f, 0.0f, cw, 0.0f, r);
                 float iw = 0.0f;
                 if (c->style.explicitWidth >= 0.0f) {
-                    iw = c->style.explicitWidth;
+                    // layout() already set the correct total width
+                    iw = c->w;
                 } else if (c->contentWidth(r) > 0.0f) {
                     iw = c->contentWidth(r);
                 }
@@ -262,11 +298,16 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                     p.node->w = p.w;
                     p.node->h = p.h;
                     for (auto* child : p.node->children) {
-                        child->x = p.node->x + p.node->style.padding[3]
+                        float cBw = 0.0f;
+#ifdef MORPH_FEATURE_BORDER
+                        cBw = p.node->style.borderWidth;
+#endif
+                        child->x = p.node->x + cBw + p.node->style.padding[3]
                                  + child->style.margin[3];
-                        child->y = p.node->y + p.node->style.padding[0]
+                        child->y = p.node->y + cBw + p.node->style.padding[0]
                                  + child->style.margin[0];
                         float childW = p.node->w
+                                     - cBw * 2.0f
                                      - p.node->style.padding[3]
                                      - p.node->style.padding[1]
                                      - child->style.margin[3]
@@ -362,8 +403,24 @@ after_children:
 
     // ── Layout absolute children ───────────────────────
     for (auto* c : absChildren) {
-        float aw = c->style.explicitWidth >= 0.0f ? c->style.explicitWidth : 0.0f;
-        float ah = c->style.explicitHeight >= 0.0f ? c->style.explicitHeight : 0.0f;
+        float aw = c->style.explicitWidth >= 0.0f
+#ifdef MORPH_FEATURE_BORDER_BOX
+                   ? (c->style.boxSizing == "border-box"
+                      ? c->style.explicitWidth
+                      : c->style.explicitWidth + hBonus(c->style))
+                   : 0.0f;
+#else
+                   ? c->style.explicitWidth + hBonus(c->style) : 0.0f;
+#endif
+        float ah = c->style.explicitHeight >= 0.0f
+#ifdef MORPH_FEATURE_BORDER_BOX
+                   ? (c->style.boxSizing == "border-box"
+                      ? c->style.explicitHeight
+                      : c->style.explicitHeight + vBonus(c->style))
+                   : 0.0f;
+#else
+                   ? c->style.explicitHeight + vBonus(c->style) : 0.0f;
+#endif
 #ifdef MORPH_FEATURE_POSITION
         if (c->style.left > -1e8f && c->style.right > -1e8f)
             aw = cw - c->style.left - c->style.right;
@@ -391,7 +448,7 @@ after_children:
 
     // ── Auto-height ──
     if (style.explicitHeight < 0.0f) {
-        float autoH = maxBottom - y + pb + bw;
+        float autoH = (maxBottom - cy) + pt + pb + bw * 2.0f;
         if (autoH < 0.0f) autoH = 0.0f;
         if (autoH > h) h = autoH;
     }
@@ -418,7 +475,7 @@ after_children:
     }
 
     // Compute scroll state
-    contentH = maxBottom - y + pb + bw;
+    contentH = maxBottom - cy + pt + pb + bw * 2.0f;
     if (contentH < h) contentH = h;
     scrollEnabled = (style.overflow == "scroll") ||
                     (style.overflow == "auto" && contentH > h);
@@ -429,7 +486,22 @@ after_children:
 }
 
 float MorphNode::contentWidth(Renderer* r) {
-    if (style.explicitWidth >= 0.0f) return style.explicitWidth;
+    float pl = style.padding[3], pr = style.padding[1];
+#ifdef MORPH_FEATURE_BORDER
+    float bw = style.borderWidth;
+#else
+    float bw = 0.0f;
+#endif
+
+    // With explicit width, return the total border-box width
+    if (style.explicitWidth >= 0.0f) {
+#ifdef MORPH_FEATURE_BORDER_BOX
+        if (style.boxSizing == "border-box") {
+            return style.explicitWidth;
+        }
+#endif
+        return style.explicitWidth + pl + pr + bw * 2.0f;
+    }
 
     // Row-mode flex: sum of child content widths + margins + gap
 #ifdef MORPH_FEATURE_FLEX
@@ -444,8 +516,7 @@ float MorphNode::contentWidth(Renderer* r) {
             count++;
         }
         if (count > 1) total += (count - 1) * style.gap;
-        float pl = style.padding[3], pr = style.padding[1];
-        return total + pl + pr;
+        return total + pl + pr + bw * 2.0f;
     }
 #endif
 
@@ -461,8 +532,7 @@ float MorphNode::contentWidth(Renderer* r) {
             }
         }
         if (totalInline > 0.0f) {
-            float pl = style.padding[3], pr = style.padding[1];
-            return totalInline + pl + pr;
+            return totalInline + pl + pr + bw * 2.0f;
         }
     }
 #endif
@@ -477,37 +547,18 @@ float MorphNode::contentWidth(Renderer* r) {
         if (cw > maxCW) maxCW = cw;
     }
     if (maxCW > -0.5f) {
-        float pl = style.padding[3], pr = style.padding[1];
-        return maxCW + pl + pr;
+        return maxCW + pl + pr + bw * 2.0f;
     }
     return -1.0f;
 }
 
 MorphNode* MorphNode::hitTest(float ex, float ey) {
-    float hx = x, hy = y, hw = w, hh = h;
-#ifdef MORPH_FEATURE_BORDER
-    if (borderAffectsLayout(style)) {
-        hx -= style.borderWidth;
-        hy -= style.borderWidth;
-        hw += style.borderWidth * 2.0f;
-        hh += style.borderWidth * 2.0f;
-    }
-#endif
-    if (ex < hx || ex > hx + hw || ey < hy || ey > hy + hh) return nullptr;
+    if (ex < x || ex > x + w || ey < y || ey > y + h) return nullptr;
     for (auto it = children.rbegin(); it != children.rend(); ++it) {
         auto* c = *it;
         float cy = c->y - (scrollEnabled ? scrollY : 0);
-        float chx = c->x, chy = cy, chw = c->w, chh = c->h;
-#ifdef MORPH_FEATURE_BORDER
-        if (borderAffectsLayout(c->style)) {
-            chx -= c->style.borderWidth;
-            chy -= c->style.borderWidth;
-            chw += c->style.borderWidth * 2.0f;
-            chh += c->style.borderWidth * 2.0f;
-        }
-#endif
-        if (ex >= chx && ex <= chx + chw &&
-            ey >= chy && ey <= chy + chh) {
+        if (ex >= c->x && ex <= c->x + c->w &&
+            ey >= cy && ey <= cy + c->h) {
             auto* found = c->hitTest(ex, ey + (scrollEnabled ? scrollY : 0));
             if (found) return found;
         }
@@ -516,16 +567,7 @@ MorphNode* MorphNode::hitTest(float ex, float ey) {
 }
 
 bool MorphNode::dispatchEvent(MorphEvent& e, float ex, float ey) {
-    float hx = x, hy = y, hw = w, hh = h;
-#ifdef MORPH_FEATURE_BORDER
-    if (borderAffectsLayout(style)) {
-        hx -= style.borderWidth;
-        hy -= style.borderWidth;
-        hw += style.borderWidth * 2.0f;
-        hh += style.borderWidth * 2.0f;
-    }
-#endif
-    bool inBounds = (ex >= hx && ex <= hx + hw && ey >= hy && ey <= hy + hh);
+    bool inBounds = (ex >= x && ex <= x + w && ey >= y && ey <= y + h);
 
 #ifdef MORPH_FEATURE_SCROLL
     if (scrollEnabled && e.type == EventType::Scroll) {
@@ -578,19 +620,10 @@ bool MorphNode::dispatchEvent(MorphEvent& e, float ex, float ey) {
     for (auto it = children.rbegin(); it != children.rend(); ++it) {
         auto* c = *it;
         float cy = c->y - (scrollEnabled ? scrollY : 0);
-        float chx = c->x, chy = cy, chw = c->w, chh = c->h;
-#ifdef MORPH_FEATURE_BORDER
-        if (borderAffectsLayout(c->style)) {
-            chx -= c->style.borderWidth;
-            chy -= c->style.borderWidth;
-            chw += c->style.borderWidth * 2.0f;
-            chh += c->style.borderWidth * 2.0f;
-        }
-#endif
-        if (ex >= chx && ex <= chx + chw &&
-            ey >= chy && ey <= chy + chh) {
+        if (ex >= c->x && ex <= c->x + c->w &&
+            ey >= cy && ey <= cy + c->h) {
 #ifdef MORPH_FEATURE_SCROLL
-            if (scrollEnabled && (chy + chh <= y || chy >= y + h))
+            if (scrollEnabled && (cy + c->h <= y || cy >= y + h))
                 continue;
 #endif
             if (c->dispatchEvent(e, ex, ey + (scrollEnabled ? scrollY : 0)))

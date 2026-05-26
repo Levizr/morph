@@ -1,4 +1,5 @@
 import time
+import os
 from morph.config.loader import load_config
 from morph.dev import devrt
 from morph.dev.server import IPCClient
@@ -31,14 +32,19 @@ def run(args=None) -> None:
             client.send_ir(ir)
             log_success("Hot reloaded")
         else:
+            log_error("Pipeline returned no IR — check your .mx file for errors")
             client.send_error("Build failed — check terminal")
 
     reload()
 
-    watcher = SourceWatcher("src/", on_change=reload)
+    # Watch the directory containing the entry file (resolved from CWD)
+    entry_abs = os.path.abspath(os.path.join(os.getcwd(), config.entry))
+    watch_dir = os.path.dirname(entry_abs)
+    if not os.path.isdir(watch_dir):
+        watch_dir = os.path.dirname(os.path.abspath(config.entry))
+    watcher = SourceWatcher(watch_dir, on_change=reload)
     watcher.start()
-
-    log_info("Watching src/ — Ctrl+C to stop\n")
+    log_info(f"Watching {watch_dir} — Ctrl+C to stop\n")
     try:
         while True:
             time.sleep(0.5)

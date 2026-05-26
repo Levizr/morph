@@ -144,6 +144,11 @@ In **dev mode**, the pipeline produces an IR dict that is sent over a Unix socke
 | **`max-width`** — layout constraint for responsive sizing | Complete |
 | **Margin/padding side properties** — `margin-top`, `padding-left`, etc. | Complete |
 | **Cursor support** — `cursor: pointer` (hand), `cursor: text` (I-beam) | Complete |
+| **`morph_devrt` binary** — dev mode C++ renderer, Unix socket IPC, hot reload | Complete |
+| **Border rendering** — `border-width`, `border-color`, `border-style` with SDF shader | Complete |
+| **Box-sizing** — `content-box` and `border-box` CSS property | Complete |
+| **Dev mode auto-build** — CMake integration, automatic binary rebuild on missing | Complete |
+| **Window config hot reload** — title update on save, node tree swap without restart | Complete |
 
 ### 🚧 In Progress
 
@@ -151,7 +156,8 @@ In **dev mode**, the pipeline produces an IR dict that is sent over a Unix socke
 |---|---|---|
 | **Style resolver** — CSS cascade, specificity, selector matching | Stub | Only inline + Tailwind work via IRBuilder |
 | **JS interpreter** — JS event handler → C++ lambdas | Stub | Only `console.log` works |
-| **`morph_devrt` binary** — dev mode renderer | Missing | Binary not yet built |
+| **Flexbox `flex-wrap`** — row overflow wrapping | Partial | Content-based sizing works, wrap still in progress |
+| **`position: relative/fixed`** — offset positioning, sticky | Stub | Not yet implemented |
 
 ---
 
@@ -161,7 +167,8 @@ In **dev mode**, the pipeline produces an IR dict that is sent over a Unix socke
 - `width`, `height`, `max-width`
 - `margin`, `padding` + individual side properties (`margin-top`, `padding-left`, etc.)
 - `background-color`, `color` (hex, rgb, named)
-- `border-radius`
+- `border-radius`, `border-width`, `border-color`, `border-style`
+- `box-sizing` — `content-box`, `border-box`
 - `display: flex`, `flex-direction`, `justify-content`, `align-items`, `flex-wrap`, `gap`
 - `position`, `left`, `right`, `top`, `bottom`
 - `overflow`, `cursor`
@@ -175,6 +182,8 @@ In **dev mode**, the pipeline produces an IR dict that is sent over a Unix socke
 **C++ Runtime**
 - OpenGL 3.3 core profile batch renderer (instanced VAO/VBO/IBO)
 - Rounded rectangles via SDF fragment shader (radius auto-clamped)
+- Border rendering — `border-width`, `border-color`, `border-style` via SDF shader
+- `box-sizing: content-box` / `border-box` layout modes
 - FreeType text rendering with per-size glyph atlas and word-wrap
 - Font weight support (bold / normal with `DejaVuSans-Bold.ttf`)
 - Style inheritance cascade (`color`, `font-size`, `font-weight`, `text-align`)
@@ -236,11 +245,10 @@ Run `morph doctor` after installing to verify your environment.
 
 ### v0.1.0 (Next Up)
 - [ ] **CSS style resolver** — Selector matching, cascade, specificity
-- [ ] **`morph_devrt` binary** — Pre-compiled renderer for dev mode
 - [ ] **JS interpreter** — Full JS expression handling (CallExpression, BinaryExpression)
 - [ ] **`flex-wrap`** — Row overflow wrapping
 - [ ] **`position: relative` / `fixed`** — Offset and viewport-relative positioning
-- [ ] **`border` support** — `border-width`, `border-color`, `border-style`
+- [ ] **`margin` collapse** — Collapsing vertical margins between siblings
 
 ### Future
 - [ ] Multi-window & navigation system

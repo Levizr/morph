@@ -96,7 +96,8 @@ tests/                        # Test suite
 runtime/                      # C++ runtime headers
 ├── core/                     #   MorphNode, Renderer, GL batch renderer, WindowManager
 ├── viewport/                 #   ViewportDriver interface
-├── dev/                      #   dev mode IPC (empty)
+├── dev/                      #   Dev mode: Unix socket server, JSON parser, IR deserializer, main.cpp
+├── style/features/           #   Optional style features (outline, shadow, border)
 ├── vendor/                   #   GLAD OpenGL loader
 └── widgets/                  #   RectNode, TextNode, ButtonNode
 

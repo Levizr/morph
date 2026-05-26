@@ -1,6 +1,7 @@
 import socket
 import json
 import os
+import time
 
 
 SOCKET_PATH = "/tmp/morph_dev.sock"
@@ -12,9 +13,20 @@ class IPCClient:
     def __init__(self):
         self.sock: socket.socket | None = None
 
-    def connect(self) -> None:
-        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.sock.connect(SOCKET_PATH)
+    def connect(self, retries: int = 10, delay: float = 0.5) -> None:
+        last_err = None
+        for i in range(retries):
+            try:
+                self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                self.sock.settimeout(5)
+                self.sock.connect(SOCKET_PATH)
+                return
+            except (FileNotFoundError, ConnectionRefusedError, OSError) as e:
+                last_err = e
+                if i < retries - 1:
+                    time.sleep(delay)
+        raise ConnectionError(f"Could not connect to morph_devrt at {SOCKET_PATH} "
+                              f"after {retries} retries: {last_err}")
 
     def send_ir(self, ir: dict) -> None:
         payload = json.dumps(ir).encode() + b"\x00"

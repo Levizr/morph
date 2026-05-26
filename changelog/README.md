@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.0.3] - 2026-05-26
+
+### Added
+- **`morph_devrt` binary** — Pre-compiled C++ dev mode renderer at `morph/bin/morph_devrt`; GLFW window + Unix socket IPC + hot reload
+- **Dev mode auto-build** — `morph dev` builds `morph_devrt` via CMake when binary is missing
+- **Unix socket server** — `DevSocket` in C++ accepts IR JSON from Python side, swaps node tree without restarting window
+- **JSON DOM parser** — Minimal recursive-descent JSON parser for dev runtime (`runtime/dev/json_parser.h`)
+- **IR deserializer** — JSON → `MorphNode` tree with full style inheritance cascade (`runtime/dev/ir_deserializer.h`)
+- **Hot reload** — Node tree swaps mid-frame; `glfwPollEvents()` loop checks socket between frames
+- **Window config hot reload** — `MorphWindow::setTitle()` and `setSize()` methods; title updates on save
+- **Box-sizing support** — `box-sizing: content-box` / `border-box` CSS property in layout engine
+- **Border rendering** — `border-width`, `border-color`, `border-style` with SDF-based shader drawing
+- **`position` property** — Parsing and codegen for `position`, `left`, `right`, `top`, `bottom`
+- **Style inheritance in dev mode** — Deserializer applies `color`, `font-size`, `font-weight`, `text-align` cascade matching codegen output, ensuring pixel-identical dev/build rendering
+
+### Fixed
+- **Style inheritance in dev deserializer** — Raw IR values now resolve against parent style (color, font-size, font-weight, text-align), matching codegen in `node_emitter.py`
+- **Height not reflecting in dev window** — Width/height from IR were parsed but never applied to GLFW window; fixed via `setSize()` (title only in hot reload to preserve dev flow)
+
+### Changed
+- **Dev socket protocol** — Null-terminated JSON messages over Unix domain socket at `/tmp/morph_dev.sock`
+- **Dev mode pipeline** — `cmd_dev.py` launches `morph_devrt` subprocess, connects IPC client, sends IR on file change
+- **`.mx` file watch** — Watcher now detects `.mx` changes; path resolved from `config.entry` instead of hardcoded `src/`
+
 ## [0.0.2] - 2026-05-22
 
 ### Added

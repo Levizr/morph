@@ -35,6 +35,8 @@ public:
     ~MorphWindow();
 
     void addChild(MorphNode* node) { m_root = node; }
+    void setTitle(const std::string& title);
+    void setSize(int width, int height);
     bool shouldClose() const { return m_handle && glfwWindowShouldClose(m_handle); }
     bool isVisible() const { return m_visible && m_handle && !glfwWindowShouldClose(m_handle); }
     void render();

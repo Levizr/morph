@@ -88,6 +88,17 @@ MorphWindow::MorphWindow(const std::string& title, int width, int height, bool v
     }
 }
 
+void MorphWindow::setTitle(const std::string& title) {
+    m_title = title;
+    if (m_handle) glfwSetWindowTitle(m_handle, title.c_str());
+}
+
+void MorphWindow::setSize(int width, int height) {
+    m_width = width;
+    m_height = height;
+    if (m_handle) glfwSetWindowSize(m_handle, width, height);
+}
+
 MorphWindow::~MorphWindow() {
 #ifdef MORPH_FEATURE_CURSOR
     if (m_handCursor) glfwDestroyCursor(m_handCursor);
