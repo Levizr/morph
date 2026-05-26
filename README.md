@@ -109,7 +109,7 @@ In **dev mode**, the pipeline produces an IR dict that is sent over a Unix socke
 
 ---
 
-## Current State (v0.0.2 — Early Development)
+## Current State (v0.0.3 — Early Development)
 
 ### ✅ Working
 
