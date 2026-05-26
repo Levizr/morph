@@ -158,6 +158,7 @@ static MorphNode* deserializeNode(const JsonValue& val,
     } else {
         node = new RectNode(0, 0, 0, 0);
     }
+    node->type = type;
 
     // Apply style from JSON
     if (val.has("style"))

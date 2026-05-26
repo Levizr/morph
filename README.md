@@ -109,7 +109,7 @@ In **dev mode**, the pipeline produces an IR dict that is sent over a Unix socke
 
 ---
 
-## Current State (v0.0.3 — Early Development)
+## Current State (v0.0.4 — Early Development)
 
 ### ✅ Working
 
@@ -149,6 +149,7 @@ In **dev mode**, the pipeline produces an IR dict that is sent over a Unix socke
 | **Box-sizing** — `content-box` and `border-box` CSS property | Complete |
 | **Dev mode auto-build** — CMake integration, automatic binary rebuild on missing | Complete |
 | **Window config hot reload** — title update on save, node tree swap without restart | Complete |
+| **DevTools panel** — F12 toggle, element inspect (F2/click), box-model overlay (margin/border/padding/content), element info panel | Complete |
 
 ### 🚧 In Progress
 
@@ -193,6 +194,13 @@ In **dev mode**, the pipeline produces an IR dict that is sent over a Unix socke
 - Viewport culling for draw + events
 - Feature-based dead code elimination
 - `cursor: pointer` and `cursor: text` via GLFW standard cursors
+
+**DevTools (`morph_devrt` only)**
+- `F12` — Toggle DevTools panel
+- `F2` or click "Inspect Element" — Toggle inspect mode
+- Box-model overlay: margin (orange), border (yellow), padding (green), content (blue)
+- Element info panel: tag name, size, position, margin, padding, display, overflow, box-sizing, color (hex swatch), background (hex swatch), font size, font weight, text align
+- Hot reload preserves DevTools state
 
 ---
 

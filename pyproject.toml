@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "morph-ui"
-version = "0.0.2"
+version = "0.0.4"
 description = "Build native OpenGL Applications with HTML, CSS, and JavaScript"
 requires-python = ">=3.10"
 dependencies = [

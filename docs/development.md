@@ -150,6 +150,51 @@ Add the class to the `STATIC_MAP` dict in `morph/style/tailwind.py`. Follow the 
 "bg-red-500": {"background-color": "#ef4444"},
 ```
 
+## DevTools (`morph_devrt`)
+
+The dev runtime (`morph_devrt`) includes a browser-style DevTools panel for inspecting elements.
+
+### Opening DevTools
+
+- Press **`F12`** to toggle the panel open/closed
+- Press **`F2`** or click the **"Inspect Element"** button to enter inspect mode
+- Hover over elements in the window while inspecting — an overlay highlights the element's box model
+
+### Overlay Colors
+
+The overlay draws translucent colored rectangles around the hovered element:
+
+| Color   | Layer   | Description                    |
+|---------|---------|--------------------------------|
+| Orange  | Margin  | Area outside the border        |
+| Yellow  | Border  | Border area (if any)           |
+| Green   | Padding | Area inside the border         |
+| Blue    | Content | Content area (innermost)       |
+
+### Panel Info
+
+The panel (300px wide, right side) shows:
+
+| Section    | Fields                                                          |
+|------------|-----------------------------------------------------------------|
+| **ELEMENT** | Tag name badge (e.g. `<div>`)                                   |
+| **LAYOUT**  | Size (w × h), Position (x, y), Margin (T/R/B/L), Padding (T/R/B/L) |
+| **DISPLAY** | Display, Overflow, Box Sizing                                   |
+| **STYLE**   | Color (hex swatch), Background (hex swatch), Font Size, Weight, Align |
+
+### Color Values
+
+Colors are displayed as hex (`#334155`) when opaque, or `rgba(R,G,B,A)` when semi-transparent. A color swatch is shown alongside each value.
+
+### State Persistence
+
+- **On hot reload**: DevTools state (open/closed, inspect mode) is preserved. The hovered element reference is cleared since the tree is rebuilt.
+- **On resize**: DevTools panel width is fixed at 300px.
+
+### Implementation
+
+All DevTools code is in `runtime/dev/inspector.h`. The overlay and panel are rendered as GL quads and text via `GLRenderer`. The global `DevTools*` pointer is set in `runtime/dev/main.cpp` for GLFW key/mouse callbacks.
+
 ## Debugging
 
 - **`morph dev`** — runs the full pipeline; check terminal output for errors

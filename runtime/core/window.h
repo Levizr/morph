@@ -1,4 +1,5 @@
 #pragma once
+#include <functional>
 #include "vendor/glad/glad.h"
 #include <GLFW/glfw3.h>
 #include <string>
@@ -37,7 +38,10 @@ public:
     void addChild(MorphNode* node) { m_root = node; }
     void setTitle(const std::string& title);
     void setSize(int width, int height);
+    int width() const { return m_width; }
+    int height() const { return m_height; }
+    GLFWwindow* handle() const { return m_handle; }
     bool shouldClose() const { return m_handle && glfwWindowShouldClose(m_handle); }
     bool isVisible() const { return m_visible && m_handle && !glfwWindowShouldClose(m_handle); }
-    void render();
+    void render(std::function<void(GLRenderer&)> overlayFn = {});
 };

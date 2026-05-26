@@ -121,7 +121,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
         normal.push_back(c);
     }
 
-    float maxBottom = 0.0f;
+    float maxBottom = cy;
     float maxRight  = 0.0f;
 
 #ifdef MORPH_FEATURE_FLEX

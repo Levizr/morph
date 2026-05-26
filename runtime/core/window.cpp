@@ -107,7 +107,7 @@ MorphWindow::~MorphWindow() {
     if (m_handle) glfwDestroyWindow(m_handle);
 }
 
-void MorphWindow::render() {
+void MorphWindow::render(std::function<void(GLRenderer&)> overlayFn) {
     if (!m_handle) return;
     glfwMakeContextCurrent(m_handle);
     glViewport(0, 0, m_width, m_height);
@@ -121,5 +121,9 @@ void MorphWindow::render() {
         m_root->draw(m_renderer);
     }
     m_renderer.flush(proj);
+    if (overlayFn) {
+        overlayFn(m_renderer);
+        m_renderer.flush(proj);
+    }
     glfwSwapBuffers(m_handle);
 }

@@ -15,9 +15,33 @@
 
 #include "dev_socket.h"
 #include "ir_deserializer.h"
+#include "inspector.h"
 
 static volatile bool g_running = true;
 static void signalHandler(int) { g_running = false; }
+
+// ── DevTools (global for GLFW key callback) ────────────────
+static DevTools* g_devtools = nullptr;
+
+static void keyCb(GLFWwindow* win, int key, int, int action, int) {
+    (void)win;
+    if (!g_devtools) return;
+    if (key == GLFW_KEY_F12 && action == GLFW_PRESS) {
+        g_devtools->toggle();
+    }
+    if (key == GLFW_KEY_F2 && action == GLFW_PRESS && g_devtools->open) {
+        g_devtools->toggleInspect();
+    }
+}
+
+static void mouseCb(GLFWwindow* win, int btn, int action, int) {
+    if (!g_devtools || btn != GLFW_MOUSE_BUTTON_LEFT || action != GLFW_PRESS) return;
+    int ww;
+    glfwGetWindowSize(win, &ww, nullptr);
+    double mx, my;
+    glfwGetCursorPos(win, &mx, &my);
+    g_devtools->handleClick((float)mx, (float)my, (float)ww);
+}
 
 int main() {
     signal(SIGINT, signalHandler);
@@ -90,6 +114,12 @@ int main() {
     MorphWindow window(config.title, config.width, config.height, config.visible);
     window.addChild(rootNode);
 
+    // ── DevTools ─────────────────────────────────────────────
+    DevTools devtools;
+    g_devtools = &devtools;
+    glfwSetKeyCallback(window.handle(), keyCb);
+    glfwSetMouseButtonCallback(window.handle(), mouseCb);
+
     // ── Main loop ───────────────────────────────────────────
     fprintf(stderr, "[devrt] entering render loop\n");
 
@@ -126,6 +156,7 @@ int main() {
                 window.addChild(newNode);
                 deleteNodeTree(rootNode);
                 rootNode = newNode;
+                devtools.hoveredNode = nullptr; // tree changed, clear stale ref
                 fprintf(stderr, "[devrt] hot reloaded\n");
             } else {
                 fprintf(stderr, "[devrt] failed to parse IR from client\n");
@@ -139,7 +170,17 @@ int main() {
 
         // Render current frame
         if (window.isVisible()) {
-            window.render();
+            // Track mouse for devtools inspect
+            if (devtools.inspecting) {
+                double mx, my;
+                glfwGetCursorPos(window.handle(), &mx, &my);
+                devtools.mouseX = (float)mx;
+                devtools.mouseY = (float)my;
+                devtools.updateHover(rootNode);
+            }
+            window.render([&](GLRenderer& r) {
+                devtools.render(r, (float)window.width(), (float)window.height());
+            });
         }
     }
 

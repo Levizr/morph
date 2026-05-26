@@ -13,6 +13,7 @@ public:
     MorphNode* parent = nullptr;
     std::vector<MorphNode*> children;
     bool focused = false;
+    std::string type = "div";
 
     // Scroll state (always present — zero overhead when unused)
     float scrollY = 0;
