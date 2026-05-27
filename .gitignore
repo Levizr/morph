@@ -11,6 +11,8 @@ build_dev/
 .pytest_cache/
 *.so
 *.dylib
+venv/
+.venv/
 
 my-app
 test.py
