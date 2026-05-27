@@ -167,6 +167,7 @@ int main() {
                 deleteNodeTree(rootNode);
                 rootNode = newNode;
                 devtools.hoveredNode = nullptr; // tree changed, clear stale ref
+                MorphWindow::clearHoverState(); // clear stale hover pointer
                 window.notifyPendingRender();
                 fprintf(stderr, "[devrt] hot reloaded\n");
             } else {
@@ -188,26 +189,22 @@ int main() {
         // Update animations (advances running animations, marks dirty on change)
         if (rootNode) rootNode->update(dt);
 
-        // Render current frame (only if there's actual work pending)
+        // Render frame — render() internally skips clean nodes
         if (window.isVisible()) {
-            if (window.hasPendingRender()) {
-                // Track mouse for devtools inspect
-                if (devtools.inspecting) {
-                    double mx, my;
-                    glfwGetCursorPos(window.handle(), &mx, &my);
-                    devtools.mouseX = (float)mx;
-                    devtools.mouseY = (float)my;
-                    devtools.updateHover(rootNode);
-                }
-                window.render([&](GLRenderer& r, DirtyStats& ds) {
-                    devtools.render(r, (float)window.width(), (float)window.height(), ds);
-                });
-            } else {
-                // Nothing changed — sleep until next event or ~16ms
-                glfwWaitEventsTimeout(1.0 / 60.0);
+            // Track mouse for devtools inspect
+            if (devtools.inspecting) {
+                double mx, my;
+                glfwGetCursorPos(window.handle(), &mx, &my);
+                devtools.mouseX = (float)mx;
+                devtools.mouseY = (float)my;
+                devtools.updateHover(rootNode);
             }
+            window.render([&](GLRenderer& r, DirtyStats& ds) {
+                devtools.render(r, (float)window.width(), (float)window.height(), ds);
+            });
         } else {
-            glfwWaitEventsTimeout(1.0 / 60.0);
+            // Hidden window — no point spinning, wait for events
+            glfwWaitEvents();
         }
     }
 

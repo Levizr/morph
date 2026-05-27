@@ -135,6 +135,22 @@ void MorphNode::updateAnimations(float dt) {
     }
 }
 
+void MorphNode::onHover(bool state) {
+    // Apply hover style if this node has one
+    if (hoverStyle) {
+        if (state) {
+            style = *hoverStyle;
+        } else {
+            style = m_baseStyle;
+        }
+        markDirty(PaintDirty);
+        markDirty(LayoutDirty);
+    }
+    // Propagate to all ancestors so their :hover rules activate too
+    // (browser behavior: hovering a child applies :hover to all ancestors)
+    if (parent) parent->onHover(state);
+}
+
 void MorphNode::update(float dt) {
     updateAnimations(dt);
     for (auto* c : children) c->update(dt);
@@ -229,6 +245,12 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
     // Auto top/bottom → 0 in normal flow
     if (autoT) mt = 0.0f;
     if (autoB) mb = 0.0f;
+    // Store resolved margins separately for inspection.
+    // style.margin stays as-declared (sentinels for auto) so
+    // downstream code (e.g. flex layout reads child margins
+    // after layout) sees the declared values, not the resolved ones.
+    m_computedMargin[3] = ml; m_computedMargin[1] = mr;
+    m_computedMargin[0] = mt; m_computedMargin[2] = mb;
 
     x = px + ml;
     y = py + mt;
@@ -383,7 +405,17 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                 }
             }
 
+            // Save computed margins from the first layout pass (second call
+            // re-resolves auto margins with parentW == childPW == w, giving 0)
+            float savedCM[4] = {
+                ci.node->m_computedMargin[0], ci.node->m_computedMargin[1],
+                ci.node->m_computedMargin[2], ci.node->m_computedMargin[3]
+            };
             ci.node->layout(childX, childY, childPW, childPH, r);
+            ci.node->m_computedMargin[0] = savedCM[0];
+            ci.node->m_computedMargin[1] = savedCM[1];
+            ci.node->m_computedMargin[2] = savedCM[2];
+            ci.node->m_computedMargin[3] = savedCM[3];
 
             // Stretch alignment: item fills the cross-axis line size
             if (style.alignItems == "stretch" && ci.node->style.explicitWidth < 0.0f && isCol) {
@@ -654,6 +686,13 @@ after_children:
         if (scrollY > contentH - h) scrollY = contentH - h;
         if (scrollY < 0) scrollY = 0;
     }
+
+    // Clear dirty flags so subsequent layoutIfNeeded calls skip this node.
+    // Flex/inline/absolute paths call layout() directly without going through
+    // layoutIfNeeded — without this, children remain LayoutDirty and get a
+    // third re-layout (with wrong parentW) from layoutIfNeeded's iterator.
+    clearDirty(LayoutDirty);
+    clearDirty(StyleDirty);
 }
 
 float MorphNode::contentWidth(Renderer* r) {

@@ -8,16 +8,23 @@
 - Auto-exit dev mode when GLFW window is closed
 - Suppressed GLFW stderr noise from dev runtime
 - Updated CLI commands (dev, doctor) for better UX and diagnostics
+- `MorphNode::layout()` now clears `LayoutDirty`/`StyleDirty` at end — prevents redundant re-layout from `layoutIfNeeded` on nodes already positioned by parent (flex, inline, absolute)
 
 ### Added
 - morph doctor: system dependency checks (FreeType, X11, GLFW, bundled vendor files)
 - .devrt_source_hash tracking for incremental dev runtime rebuilds
 - MANIFEST.in for proper PyPI package data inclusion
 - Package metadata: readme, license, project URLs
+- **Dirty incremental rendering system** — `DirtyFlag` enum (LayoutDirty, StyleDirty, PaintDirty, ScrollDirty, SubtreeDirty); `markDirty()` propagates flags up the tree for correct ancestor invalidation; `layoutIfNeeded()` only processes dirty/subtree-dirty nodes, skipping clean ones; `recordPaintTree()` selectively re-records display lists only for paint-dirty nodes; `executeDisplayList()` replays cached `m_displayList` for all nodes each frame; compile-time `MORPH_FEATURE_DIRTY_RENDERING` gate auto-enabled when scroll, hover, event, or cursor features are detected
+- **`DirtyStats` struct** — tracks `layoutCount`, `paintCount`, `fullTreeCount`, `skippedCount` per frame for diagnostics
+- **DevTools Rendering tab** — new second tab (F12, tabs: Elements / Rendering) showing frame number, total nodes, layout count/skipped/percentage, repainted count/cache hit, layout/paint savings percentages with green/red color coding
+- **CSS `:hover` pseudo-class support** — class-based hover rules from CSS files `.className:hover` resolved at runtime; snap-style swap on mouse enter/leave with `hoverStyle` pointer and `m_baseStyle` snapshot for restoration; supports color, background-color, margin, padding, border, border-radius, font-size, gap, justify-content, align-items, width, height
+- **`m_computedMargin[4]`** — separate field on `MorphNode` stores resolved margin values after each `layout()` call, keeping `style.margin[]` declared values intact for flex positioning code; used by DevTools inspector overlay + panel for correct display
 
 ### Fixed
 - CMake output path for dev runtime binary after project restructure
 - setuptools PEP 639 metadata compatibility (pinned setuptools <70)
+- **Inspector margin panel showing 0** — root cause was `layoutIfNeeded` calling a third `layout()` on children with `parentW = childW = 204px` (child's own width instead of container width), causing auto-margin resolution with zero available horizontal space; fixed by clearing dirty flags at end of `layout()`
 
 ## [0.0.4] - 2026-05-26
 ### Added

@@ -52,6 +52,9 @@ class MorphNode {
 public:
     float x = 0, y = 0, w = 0, h = 0;
     MorphStyle style;
+    float m_computedMargin[4] = {0}; // resolved margins after latest layout()
+    MorphStyle m_baseStyle;   // snapshot of original base style (for hover restore)
+    MorphStyle* hoverStyle = nullptr; // allocated only when :hover rules exist
     MorphNode* parent = nullptr;
     std::vector<MorphNode*> children;
     bool focused = false;
@@ -79,7 +82,7 @@ public:
     virtual void draw(Renderer& r) = 0;
     virtual void update(float dt);
     virtual bool onEvent(MorphEvent& e) { return false; }
-    virtual void onHover(bool state) {}
+    virtual void onHover(bool state);
 
     void startAnimation(AnimProperty prop, float to, float duration, Easing easing = Easing::Linear);
 
@@ -105,5 +108,5 @@ public:
     virtual void recordDisplayList(Renderer& r);
     virtual void executeDisplayList(Renderer& r);
 
-    virtual ~MorphNode() {}
+    virtual ~MorphNode() { delete hoverStyle; }
 };

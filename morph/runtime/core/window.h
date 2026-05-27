@@ -36,6 +36,8 @@ public:
     ~MorphWindow();
 
     void addChild(MorphNode* node) { m_root = node; }
+    void update(float dt) { if (m_root) m_root->update(dt); }
+    static void clearHoverState();
     void setTitle(const std::string& title);
     void setSize(int width, int height);
     int width() const { return m_width; }

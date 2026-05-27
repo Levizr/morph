@@ -178,9 +178,8 @@ def _clean_margin(val):
     return float(val)
 
 
-def _deser_node(d: dict) -> IRNode:
-    s = d.get("style", {})
-    style = IRStyle(
+def _deser_style(s: dict) -> IRStyle:
+    return IRStyle(
         bg_color=tuple(s.get("bg_color", [0, 0, 0, 0])),
         color=tuple(s.get("color", [0, 0, 0, 1])),
         width=s.get("width"),
@@ -216,7 +215,12 @@ def _deser_node(d: dict) -> IRNode:
         border_style=s.get("border_style", "none"),
         box_sizing=s.get("box_sizing", "content-box"),
     )
-    node = IRNode(
+
+
+def _deser_node(d: dict) -> IRNode:
+    hs = d.get("hover_style")
+    hover_style = _deser_style(hs) if hs and isinstance(hs, dict) else None
+    return IRNode(
         node_id=d.get("id", ""),
         node_type=d.get("type", ""),
         x=d.get("x", 0.0),
@@ -224,7 +228,8 @@ def _deser_node(d: dict) -> IRNode:
         w=d.get("w", 0.0),
         h=d.get("h", 0.0),
         text_content=d.get("text", ""),
-        style=style,
+        style=_deser_style(d.get("style", {})),
+        hover_style=hover_style,
         children=[_deser_node(c) for c in d.get("children", [])],
         attrs=d.get("attrs", {}),
         raw_styles=d.get("raw_styles", {}),
@@ -234,7 +239,6 @@ def _deser_node(d: dict) -> IRNode:
             for e in d.get("events", [])
         ],
     )
-    return node
 
 
 _RESET   = "\033[0m"

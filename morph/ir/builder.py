@@ -274,12 +274,20 @@ class IRBuilder:
         merged.update(_UA_DEFAULTS.get(tag, {}))
 
         # Collect matching CSS rules with specificity, then apply in order
-        matched = []
+        matched = []        # non-:hover rules
+        hover_matched = []  # :hover pseudo-class rules
         for rule_key, rule_props in css_rules.items():
-            if matches_selector(rule_key, tag, class_names, node_id_attr, ancestry):
-                spec = calculate_specificity(rule_key)
+            has_hover = ":hover" in rule_key
+            match_key = rule_key.replace(":hover", "").strip() if has_hover else rule_key
+            if not matches_selector(match_key, tag, class_names, node_id_attr, ancestry):
+                continue
+            spec = calculate_specificity(match_key)
+            if has_hover:
+                hover_matched.append((spec, rule_props))
+            else:
                 matched.append((spec, rule_props))
-        matched.sort(key=lambda x: x[0])  # lowest specificity first
+        matched.sort(key=lambda x: x[0])   # lowest specificity first
+        hover_matched.sort(key=lambda x: x[0])
         for _, rule_props in matched:
             merged.update(rule_props)
 
@@ -295,57 +303,19 @@ class IRBuilder:
         merged.update(inline_raw)  # inline style overrides everything
 
         # ── Convert merged CSS → IRStyle fields ──────────────
-        ir_kw: dict[str, any] = {}
-        raw_styles: dict[str, str] = {}
-        for css_key, css_val in merged.items():
-            if css_key == "border":
-                parts = css_val.split()
-                for p in parts:
-                    if p in ("solid", "dashed", "dotted", "none"):
-                        ir_kw["border_style"] = p
-                    elif p.startswith("#") or p.startswith("rgb") or p in ("transparent",):
-                        ir_kw["border_color"] = parse_color(p)
-                    else:
-                        try:
-                            ir_kw["border_width"] = to_px(p)
-                        except (ValueError, TypeError):
-                            pass
-                continue
-            ir_field = _CSS_TO_IR.get(css_key)
-            if ir_field is None:
-                continue
+        ir_kw, raw_styles = self._css_to_ir_kw(merged)
 
-            css_val_stripped = css_val.strip() if isinstance(css_val, str) else ""
-
-            # `auto` for width/height → None (fills available / content-based)
-            if css_val_stripped == "auto" and ir_field in ("width", "height"):
-                continue
-
-            # Values needing layout-time resolution (%, vh, vw) — store raw
-            if needs_layout(css_val) and css_val_stripped != "auto":
-                raw_styles[css_key] = css_val
-                ir_kw[ir_field] = DEFERRED
-                continue
-
-            val = _convert_value(ir_field, css_val)
-            if val is not None:
-                ir_kw[ir_field] = val
-                if css_key == "margin":
-                    ir_kw["margin_auto"] = _parse_margin_auto(css_val)
-
-        # Merge individual side properties into margin/padding tuples
-        for base in ("margin", "padding"):
-            # tuple index: 0=top, 1=right, 2=bottom, 3=left
-            for side_field, idx in (("_top_side", 0), ("_right_side", 1), ("_bottom_side", 2), ("_left_side", 3)):
-                val = ir_kw.pop(base + side_field, None)
-                if val is not None:
-                    cur = ir_kw.get(base)
-                    if cur is None:
-                        tup = [0.0, 0.0, 0.0, 0.0]
-                    else:
-                        tup = list(cur)
-                    tup[idx] = val
-                    ir_kw[base] = tuple(tup)
+        # Build hover style from matching :hover CSS rules
+        hover_style = None
+        if hover_matched:
+            hover_merged = dict(merged)
+            for _, rule_props in hover_matched:
+                hover_merged.update(rule_props)
+            hover_ir_kw, _ = self._css_to_ir_kw(hover_merged, collect_raw=False)
+            try:
+                hover_style = IRStyle(**hover_ir_kw)
+            except TypeError:
+                pass
 
         try:
             node_style = IRStyle(**ir_kw)
@@ -389,6 +359,7 @@ class IRBuilder:
             node_id=node_id,
             node_type=tag,
             style=node_style,
+            hover_style=hover_style,
             children=children_nodes,
             events=events,
             attrs=attrs,
@@ -398,6 +369,61 @@ class IRBuilder:
     def _next_id(self) -> str:
         self._counter += 1
         return f"node_{self._counter:04d}"
+
+    def _css_to_ir_kw(self, css_dict: dict, collect_raw: bool = True) -> tuple[dict, dict]:
+        """Convert CSS property dict → (IRStyle kwargs, raw_styles)."""
+        ir_kw: dict[str, any] = {}
+        raw_styles: dict[str, str] = {}
+        for css_key, css_val in css_dict.items():
+            if css_key == "border":
+                parts = css_val.split()
+                for p in parts:
+                    if p in ("solid", "dashed", "dotted", "none"):
+                        ir_kw["border_style"] = p
+                    elif p.startswith("#") or p.startswith("rgb") or p in ("transparent",):
+                        ir_kw["border_color"] = parse_color(p)
+                    else:
+                        try:
+                            ir_kw["border_width"] = to_px(p)
+                        except (ValueError, TypeError):
+                            pass
+                continue
+            ir_field = _CSS_TO_IR.get(css_key)
+            if ir_field is None:
+                continue
+
+            css_val_stripped = css_val.strip() if isinstance(css_val, str) else ""
+
+            # `auto` for width/height → None (fills available / content-based)
+            if css_val_stripped == "auto" and ir_field in ("width", "height"):
+                continue
+
+            # Values needing layout-time resolution (%, vh, vw) — store raw
+            if collect_raw and needs_layout(css_val) and css_val_stripped != "auto":
+                raw_styles[css_key] = css_val
+                ir_kw[ir_field] = DEFERRED
+                continue
+
+            val = _convert_value(ir_field, css_val)
+            if val is not None:
+                ir_kw[ir_field] = val
+                if css_key == "margin":
+                    ir_kw["margin_auto"] = _parse_margin_auto(css_val)
+
+        # Merge individual side properties into margin/padding tuples
+        for base in ("margin", "padding"):
+            for side_field, idx in (("_top_side", 0), ("_right_side", 1), ("_bottom_side", 2), ("_left_side", 3)):
+                val = ir_kw.pop(base + side_field, None)
+                if val is not None:
+                    cur = ir_kw.get(base)
+                    if cur is None:
+                        tup = [0.0, 0.0, 0.0, 0.0]
+                    else:
+                        tup = list(cur)
+                    tup[idx] = val
+                    ir_kw[base] = tuple(tup)
+
+        return ir_kw, raw_styles
 
 
 # ── Helpers ────────────────────────────────────────────────────

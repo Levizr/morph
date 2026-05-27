@@ -7,10 +7,47 @@ class FeatureSet:
     def __init__(self):
         self.features: set[str] = set()
 
+    def _scan_style(self, s) -> None:
+        if s.border_radius > 0:
+            self.features.add("radius")
+        if s.font_weight not in ("normal", ""):
+            self.features.add("bold")
+        if s.overflow in ("auto", "scroll"):
+            self.features.add("scroll")
+        if (s.scrollbar_width != 8.0 or
+            s.scrollbar_track_color != (0.85, 0.85, 0.85, 0.4) or
+            s.scrollbar_thumb_color != (0.5, 0.5, 0.5, 0.6) or
+            s.scrollbar_border_radius != 4.0):
+            self.features.add("scroll")
+        if s.position != "static":
+            self.features.add("position")
+        if s.left is not None or s.right is not None or s.top is not None or s.bottom is not None:
+            self.features.add("position")
+        if s.display == "none":
+            self.features.add("display_none")
+        if s.display == "inline":
+            self.features.add("inline")
+        if any(m != 0 for m in s.margin):
+            self.features.add("margin_collapse")
+        if (s.min_width is not None or s.max_width is not None or
+            s.min_height is not None or s.max_height is not None):
+            self.features.add("min_max")
+        if s.box_sizing != "content-box":
+            self.features.add("border_box")
+        if s.display == "flex":
+            self.features.add("flex")
+        if s.gap > 0:
+            self.features.add("flex")
+        if s.justify_content != "flex-start" or s.align_items != "stretch" or s.flex_wrap != "nowrap":
+            self.features.add("flex")
+        if s.cursor not in ("default", "", None):
+            self.features.add("cursor")
+        if s.border_width > 0 or s.border_style not in ("", "none"):
+            self.features.add("border")
+
     def scan(self, windows: list[IRWindow]) -> None:
         for win in windows:
             for node in self._walk(win.nodes):
-                s = node.style
                 if node.node_type == "__text__":
                     self.features.add("text")
                 if node.node_type == "button":
@@ -20,55 +57,17 @@ class FeatureSet:
                     self.features.add("input")
                 if node.node_type == "img":
                     self.features.add("image")
-                if s.border_radius > 0:
-                    self.features.add("radius")
-                if s.font_weight not in ("normal", ""):
-                    self.features.add("bold")
-                if s.overflow in ("auto", "scroll"):
-                    self.features.add("scroll")
-                # Detect scrollbar customization as scroll feature
-                if (s.scrollbar_width != 8.0 or
-                    s.scrollbar_track_color != (0.85, 0.85, 0.85, 0.4) or
-                    s.scrollbar_thumb_color != (0.5, 0.5, 0.5, 0.6) or
-                    s.scrollbar_border_radius != 4.0):
-                    self.features.add("scroll")
-                if s.position != "static":
-                    self.features.add("position")
-                # Detect position offsets as position feature even if position is static
-                if s.left is not None or s.right is not None or s.top is not None or s.bottom is not None:
-                    self.features.add("position")
-                # ── Layout feature detection ──
-                if s.display == "none":
-                    self.features.add("display_none")
-                if s.display == "inline":
-                    self.features.add("inline")
-                if any(m != 0 for m in s.margin):
-                    self.features.add("margin_collapse")
-                if (s.min_width is not None or s.max_width is not None or
-                    s.min_height is not None or s.max_height is not None):
-                    self.features.add("min_max")
-                if s.box_sizing != "content-box":
-                    self.features.add("border_box")
-
-                if s.display == "flex":
-                    self.features.add("flex")
-                # Detect gap as flex feature (meaningful only with flex layout)
-                if s.gap > 0:
-                    self.features.add("flex")
-                # Flex-related fields imply flex feature
-                if s.justify_content != "flex-start" or s.align_items != "stretch" or s.flex_wrap != "nowrap":
-                    self.features.add("flex")
-                if s.cursor not in ("default", "", None):
-                    self.features.add("cursor")
-                if s.border_width > 0 or s.border_style not in ("", "none"):
-                    self.features.add("border")
+                self._scan_style(node.style)
+                if node.hover_style is not None:
+                    self.features.add("hover")
+                    self._scan_style(node.hover_style)
                 if node.events:
                     self.features.add("event")
                 if isinstance(node, IRViewport):
                     self.features.add("viewport")
 
         # Dirty rendering: enable if any dynamic behavior detected
-        if any(f in self.features for f in ["scroll", "event", "cursor", "animation"]):
+        if any(f in self.features for f in ["scroll", "event", "cursor", "animation", "hover"]):
             self.features.add("dirty_rendering")
 
     def required_headers(self) -> list[str]:

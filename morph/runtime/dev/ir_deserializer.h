@@ -178,7 +178,31 @@ static MorphNode* deserializeNode(const JsonValue& val,
         applyStyle(node->style, val["style"]);
 
     // Apply style inheritance (same logic as codegen)
-    inheritStyle(node->style, parentStyle);
+    // For text nodes, skip color inheritance — text reads parent's
+    // color at render time to support hover animation.
+    if (type == "__text__") {
+        InheritedStyle noColor = parentStyle;
+        noColor.color[0] = 0; noColor.color[1] = 0;
+        noColor.color[2] = 0; noColor.color[3] = 1;
+        inheritStyle(node->style, noColor);
+        // After noColor inheritance, any non-default color was explicitly set
+        // in CSS/JSON (since noColor prevents parent color inheritance).
+        if (!isDefaultColor(node->style.color))
+            static_cast<TextNode*>(node)->m_colorOverridden = true;
+    } else {
+        inheritStyle(node->style, parentStyle);
+    }
+
+    // Snapshot base style (for hover restore)
+    node->m_baseStyle = node->style;
+
+    // Apply hover style if present
+    if (val.has("hover_style") && val["hover_style"].type() == JsonType::Object) {
+        node->hoverStyle = new MorphStyle();
+        // Copy base as starting point, then override with hover properties
+        *node->hoverStyle = node->style;
+        applyStyle(*node->hoverStyle, val["hover_style"]);
+    }
 
     // Compute resolved style for children
     InheritedStyle resolved = resolvedStyle(node->style, parentStyle);

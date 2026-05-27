@@ -9,6 +9,7 @@ class IRNode:
     node_id: str
     node_type: str                              # div, button, text, ...
     style: IRStyle = field(default_factory=IRStyle)
+    hover_style: IRStyle | None = None          # style applied on :hover
     children: list[IRNode] = field(default_factory=list)
     events: list[IREvent] = field(default_factory=list)
     text_content: str = ""

@@ -7,6 +7,7 @@ class TextNode : public MorphNode {
 public:
     std::string text;
     std::vector<std::string> lines;
+    bool m_colorOverridden = false;
 
     // Display list helpers
     struct TextOp {
@@ -51,7 +52,12 @@ public:
 
     void executeDisplayList(Renderer& r) override {
         for (auto& top : m_textOps) {
-            r.drawText(top.text, top.x, top.y, top.color, top.align,
+            // Inherit parent's animated color when own color isn't explicitly overridden
+            float* effectiveColor = top.color;
+            if (parent && !m_colorOverridden) {
+                effectiveColor = parent->style.color;
+            }
+            r.drawText(top.text, top.x, top.y, effectiveColor, top.align,
                        top.fontSize, top.fontWeight);
         }
         for (auto* child : children)

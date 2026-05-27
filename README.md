@@ -152,10 +152,12 @@ In **dev mode**, the pipeline produces an IR dict that is sent over a Unix socke
 | **Image rendering** — `stb_image`-backed: PNG, JPEG, WebP, GIF, BMP, TGA, PSD, HDR, PNM, PIC; per-texture batching, border-radius clipping | Complete |
 | **Box-sizing** — `content-box` and `border-box` CSS property | Complete |
 | **Dev mode auto-build** — CMake integration, automatic binary rebuild on missing | Complete |
+| **Dirty incremental rendering** — layout/paint dirty flag propagation via `markDirty()`, incremental `layoutIfNeeded()`, selective `recordPaintTree()`, cached `m_displayList` replay via `executeDisplayList()`; compile-time `MORPH_FEATURE_DIRTY_RENDERING` gate, auto-enabled for dynamic features (scroll, hover, events, cursor) | Complete |
 | **Window config hot reload** — title update on save, node tree swap without restart | Complete |
 | **DevTools panel** — F12 toggle, element inspect (F2/click), box-model overlay (margin/border/padding/content), element info panel | Complete |
 | **Nested border-radius clipping** — stencil-based (GL_INCR) so child clips properly intersect ancestor masks | Complete |
 | **Runtime `margin: auto`** — dynamic horizontal centering re-resolved on window resize | Complete |
+| **CSS `:hover` pseudo-class** — class-based hover rules from CSS files; resolved at runtime with snap-style swap; supports color, background-color, margin, padding, border, border-radius, font-size, gap, justify-content, align-items, width, height | Complete |
 | **Dev source hash** — CMake rebuild triggered when shared runtime files (core/, render/, widgets/, style/) change | Complete |
 | **Wayland/X11 fallback error** — clear message when GLFW window creation fails | Complete |
 
@@ -184,6 +186,9 @@ In **dev mode**, the pipeline produces an IR dict that is sent over a Unix socke
 - `font-size` (px, %, em, bare numbers), `font-weight`, `text-align`
 - `color`, `font-size`, `font-weight`, `text-align` cascade from parent to children
 
+**Pseudo-classes**
+- `:hover` — class-based rules from CSS files (e.g. `.btn:hover`); style struct snap-copy on mouse enter/leave with correct restoration; all CSS properties above supported (color, background, margin, padding, border, border-radius, font-size, gap, flex alignment, width, height)
+
 **HTML Elements**
 - `div`, `span`, `h1`–`h6`, `p`, `button`
 - `<img>` — supports PNG, JPEG, WebP, GIF, BMP, TGA, PSD, HDR, PNM, PIC via stb_image; intrinsic aspect ratio; `width`/`height` attributes; `border-radius` clipping
@@ -206,12 +211,16 @@ In **dev mode**, the pipeline produces an IR dict that is sent over a Unix socke
 - Image rendering — stb_image-backed texture loading (PNG/JPEG/WebP/GIF/BMP/TGA/PSD/HDR/PNM/PIC); per-texture-ID batched draw calls (`m_imageBatches: unordered_map<GLuint, vector<ImageInstance>>`); `border-radius` stencil clipping on images
 - Runtime `margin: auto` — sentinel `-1.0f` in style + `marginAuto[4]` flags, re-resolved dynamically on window resize
 - `cursor: pointer` and `cursor: text` via GLFW standard cursors
+- `:hover` pseudo-class — mouse enter/leave detection in `dispatchEvent()`; style struct snap-copy to/from `hoverStyle`; `m_baseStyle` snapshot for correct restoration
+- Dirty incremental rendering — `DirtyFlag` enum (LayoutDirty, StyleDirty, PaintDirty, ScrollDirty, SubtreeDirty); `markDirty()` propagates flags up the tree; `layoutIfNeeded()` skips clean nodes; `recordPaintTree()` only re-records display lists for paint-dirty nodes; `executeDisplayList()` replays cached `m_displayList` for all nodes every frame; `MORPH_FEATURE_DIRTY_RENDERING` compile-time gate; auto-enabled when scroll, hover, events, or cursor features are present
 
 **DevTools (`morph_devrt` only)**
 - `F12` — Toggle DevTools panel
 - `F2` or click "Inspect Element" — Toggle inspect mode
+- Two tabs: **Elements** (inspect + node info) and **Rendering** (pipeline diagnostics)
 - Box-model overlay: margin (orange), border (yellow), padding (green), content (blue)
 - Element info panel: tag name, size, position, margin, padding, display, overflow, box-sizing, color (hex swatch), background (hex swatch), font size, font weight, text align
+- Rendering tab: frame counter, total nodes, layout count / skipped / percentage, repainted count / cache hit rate, layout/paint savings percentages (color-coded green/red)
 - Hot reload preserves DevTools state
 
 ---
@@ -292,7 +301,7 @@ pip install -e ".[dev]"
 morph doctor
 ```
 
-The most impactful areas right now are the **CSS style resolver**, **`morph_devrt` binary**, and **JS interpreter**. See the [Current State](#current-state-v002--early-development) section for a full breakdown.
+The most impactful areas right now are the **CSS style resolver**, **`morph_devrt` binary**, and **JS interpreter**. See the [Current State](#current-state-v005--early-development) section for a full breakdown.
 
 Open an issue before starting on large features so we can align on design.
 

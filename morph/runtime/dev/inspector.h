@@ -79,8 +79,8 @@ private:
         auto* n = hoveredNode;
         if (!n) return;
 
-        float ml = n->style.margin[3], mr = n->style.margin[1];
-        float mt = n->style.margin[0], mb = n->style.margin[2];
+        float ml = n->m_computedMargin[3], mr = n->m_computedMargin[1];
+        float mt = n->m_computedMargin[0], mb = n->m_computedMargin[2];
         float pl = n->style.padding[3], pr = n->style.padding[1];
         float pt = n->style.padding[0], pb = n->style.padding[2];
         float bw = 0.0f;
@@ -352,7 +352,8 @@ private:
 
         drawTextAt(r, "Margin", lblX, y, colLbl, 11.0f, "normal");
         snprintf(buf, sizeof(buf), "T:%.0f R:%.0f B:%.0f L:%.0f",
-                 s.margin[0], s.margin[1], s.margin[2], s.margin[3]);
+                 n->m_computedMargin[0], n->m_computedMargin[1],
+                 n->m_computedMargin[2], n->m_computedMargin[3]);
         drawTextAt(r, buf, valX, y, colVal, 11.0f, "normal");
         y += 18;
 

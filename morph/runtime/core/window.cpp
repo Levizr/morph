@@ -20,6 +20,9 @@ void MorphWindow::mouseButtonCb(GLFWwindow* win, int btn, int act, int mods) {
 
 static MorphNode* s_lastHoverNode = nullptr;
 
+// Called on hot-reload to clear stale hover pointer
+void MorphWindow::clearHoverState() { s_lastHoverNode = nullptr; }
+
 void MorphWindow::cursorPosCb(GLFWwindow* win, double mx, double my) {
     auto* self = (MorphWindow*)glfwGetWindowUserPointer(win);
     if (!self || !self->m_root) return;
@@ -27,14 +30,10 @@ void MorphWindow::cursorPosCb(GLFWwindow* win, double mx, double my) {
     // Hover state tracking
     auto* newHover = self->m_root->hitTest((float)mx, (float)my);
     if (newHover != s_lastHoverNode) {
-        if (s_lastHoverNode) {
+        if (s_lastHoverNode)
             s_lastHoverNode->onHover(false);
-            s_lastHoverNode->markDirty(PaintDirty);
-        }
-        if (newHover) {
+        if (newHover)
             newHover->onHover(true);
-            newHover->markDirty(PaintDirty);
-        }
         s_lastHoverNode = newHover;
     }
 
