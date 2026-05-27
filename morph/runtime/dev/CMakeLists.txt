@@ -58,6 +58,7 @@ target_compile_definitions(morph_devrt PRIVATE
     MORPH_FEATURE_MIN_MAX
     MORPH_FEATURE_BORDER_BOX
     MORPH_FEATURE_IMAGE
+    MORPH_FEATURE_DIRTY_RENDERING
 )
 
 target_link_libraries(morph_devrt PRIVATE

@@ -1,6 +1,5 @@
 #pragma once
 #include "../core/node.h"
-#include "../core/renderer.h"
 
 class ImageNode : public MorphNode {
 public:
@@ -18,6 +17,54 @@ public:
         loaded = true;
         if (src.empty()) return;
         textureId = r.loadTexture(src, imgW, imgH);
+    }
+
+    void recordDisplayList(Renderer& r) override {
+        m_displayList.clear();
+        ensureLoaded(r);
+        if (!textureId || imgW <= 0 || imgH <= 0) return;
+
+        float br = style.borderRadius;
+        if (br > 0.0f) {
+            DrawOp cl; cl.setClip(x, y, w, h, true, br);
+            m_displayList.push_back(cl);
+        }
+
+        DrawOp tex;
+        tex.type = DrawOp::TextureQuad;
+        tex.x = x; tex.y = y; tex.w = w; tex.h = h;
+        tex.texId = textureId;
+        tex.r = tex.g = tex.b = tex.a = 1.0f;
+        m_displayList.push_back(tex);
+
+#ifdef MORPH_FEATURE_BORDER
+        if (style.borderWidth > 0.0f && style.borderStyle == "solid") {
+            DrawOp brr;
+            brr.setBordered(x, y, w, h, br, style.bgColor, style.borderWidth, style.borderColor);
+            brr.type = DrawOp::BorderRing; // draw border ring only
+            m_displayList.push_back(brr);
+        }
+#endif
+
+        if (br > 0.0f) {
+            DrawOp ec; ec.setEndClip(true);
+            m_displayList.push_back(ec);
+        }
+    }
+
+    void executeDisplayList(Renderer& r) override {
+        for (auto& op : m_displayList) {
+            switch (op.type) {
+                case DrawOp::BeginClip: r.beginClip(op.x,op.y,op.w,op.h); break;
+                case DrawOp::EndClip: r.endClip(); break;
+                case DrawOp::BeginRoundedClip: r.beginRoundedClip(op.x,op.y,op.w,op.h,op.data[0]); break;
+                case DrawOp::EndRoundedClip: r.endRoundedClip(); break;
+                case DrawOp::BorderRing: r.drawBorderRing(op.x,op.y,op.w,op.h,op.data[0],op.data[1],&op.br); break;
+                case DrawOp::TextureQuad: r.drawTexture(op.texId, op.x, op.y, op.w, op.h); break;
+                default: break;
+            }
+        }
+        for (auto* c : children) c->executeDisplayList(r);
     }
 
     void draw(Renderer& r) override {

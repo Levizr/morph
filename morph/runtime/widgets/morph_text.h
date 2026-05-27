@@ -2,14 +2,61 @@
 #include <string>
 #include <vector>
 #include "../core/node.h"
-#include "../core/renderer.h"
 
 class TextNode : public MorphNode {
 public:
     std::string text;
     std::vector<std::string> lines;
 
+    // Display list helpers
+    struct TextOp {
+        std::string text;
+        float x, y;
+        float color[4];
+        TextAlign align;
+        float fontSize;
+        std::string fontWeight;
+    };
+    std::vector<TextOp> m_textOps;
+
     TextNode(const std::string& text) : text(text) {}
+
+    void recordDisplayList(Renderer& r) override {
+        m_displayList.clear();
+        m_textOps.clear();
+        float lh = style.fontSize * 1.4f;
+        float py = y;
+        for (auto& line : lines) {
+            float lx = x;
+            if (style.textAlign == "center") {
+                float tw = r.measureTextWidth(line, style.fontSize, style.fontWeight);
+                if (tw < w) lx = x + (w - tw) * 0.5f;
+            } else if (style.textAlign == "right") {
+                float tw = r.measureTextWidth(line, style.fontSize, style.fontWeight);
+                lx = x + w - tw;
+            }
+            TextOp top;
+            top.text = line;
+            top.x = lx;
+            top.y = py;
+            top.color[0] = style.color[0]; top.color[1] = style.color[1];
+            top.color[2] = style.color[2]; top.color[3] = style.color[3];
+            top.align = TextAlign::Left;
+            top.fontSize = style.fontSize;
+            top.fontWeight = style.fontWeight;
+            m_textOps.push_back(top);
+            py += lh;
+        }
+    }
+
+    void executeDisplayList(Renderer& r) override {
+        for (auto& top : m_textOps) {
+            r.drawText(top.text, top.x, top.y, top.color, top.align,
+                       top.fontSize, top.fontWeight);
+        }
+        for (auto* child : children)
+            child->executeDisplayList(r);
+    }
 
     void layout(float px, float py, float parentW, float parentH,
                 Renderer* r = nullptr) override {

@@ -43,5 +43,23 @@ public:
     GLFWwindow* handle() const { return m_handle; }
     bool shouldClose() const { return m_handle && glfwWindowShouldClose(m_handle); }
     bool isVisible() const { return m_visible && m_handle && !glfwWindowShouldClose(m_handle); }
-    void render(std::function<void(GLRenderer&)> overlayFn = {});
+    void render(std::function<void(GLRenderer&, DirtyStats&)> overlayFn = {});
+
+    // Dirty rendering accessors (for devtools)
+    DirtyStats& dirtyStats() { return m_dirtyStats; }
+    GLRenderer& renderer() { return m_renderer; }
+
+private:
+    DirtyStats m_dirtyStats;
+    bool m_prevHadDirty = true;
+    bool m_pendingRender = true;
+
+public:
+    bool hasPendingRender() const {
+        if (m_pendingRender) return true;
+        if (m_root && !m_root->isFullyClean()) return true;
+        return false;
+    }
+    void clearPendingRender() { m_pendingRender = false; }
+    void notifyPendingRender() { m_pendingRender = true; }
 };

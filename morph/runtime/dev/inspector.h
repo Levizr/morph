@@ -8,6 +8,9 @@ struct DevTools {
     bool inspecting = false;
     MorphNode* hoveredNode = nullptr;
     float mouseX = 0.0f, mouseY = 0.0f;
+    int m_activeTab = 0; // 0 = Elements, 1 = Rendering
+    DirtyStats m_lastStats;
+    int m_frameCount = 0;
 
     void toggle() {
         open = !open;
@@ -33,16 +36,29 @@ struct DevTools {
     bool handleClick(float mx, float my, float winW) {
         if (!open) return false;
         float pw = 300.0f, px = winW - pw;
-        float bx = px + 10.0f, by = 48.0f, bw = pw - 20.0f, bh = 30.0f;
-        if (mx >= bx && mx <= bx + bw && my >= by && my <= by + bh) {
-            toggleInspect();
-            return true;
+        // Tab clicks
+        float tabW = pw * 0.5f;
+        float tabY = 40.0f;
+        if (my >= tabY && my <= tabY + 28.0f) {
+            if (mx >= px && mx <= px + tabW) { m_activeTab = 0; return true; }
+            if (mx >= px + tabW && mx <= px + pw) { m_activeTab = 1; return true; }
+            return false;
+        }
+        // Inspect button click (only in Elements tab)
+        if (m_activeTab == 0) {
+            float bx = px + 10.0f, by = 76.0f, bw = pw - 20.0f, bh = 30.0f;
+            if (mx >= bx && mx <= bx + bw && my >= by && my <= by + bh) {
+                toggleInspect();
+                return true;
+            }
         }
         return false;
     }
 
-    void render(GLRenderer& r, float winW, float winH) {
+    void render(GLRenderer& r, float winW, float winH, DirtyStats& ds) {
         if (!open) return;
+        m_frameCount++;
+        m_lastStats = ds;
 
         if (inspecting && hoveredNode)
             drawOverlay(r);
@@ -167,7 +183,31 @@ private:
         float keyHint[4] = {0.35f, 0.35f, 0.42f, 1.0f};
         drawTextAt(r, "F12", px + pw - 40, 12.0f, keyHint, 11.0f, "normal");
 
-        float btnY = 48.0f;
+        // ── Tabs ──
+        float tabY = 40.0f;
+        float tabH = 28.0f;
+        float tabW = pw * 0.5f;
+        float tabActiveBg[4] = {0.15f, 0.15f, 0.18f, 1.0f};
+        float tabInactiveBg[4] = {0.10f, 0.10f, 0.12f, 1.0f};
+        float tabActiveCol[4] = {0.9f, 0.9f, 0.95f, 1.0f};
+        float tabInactiveCol[4] = {0.5f, 0.5f, 0.55f, 1.0f};
+
+        r.drawRect(px, tabY, tabW, tabH, m_activeTab == 0 ? tabActiveBg : tabInactiveBg);
+        drawTextAt(r, "Elements", px + tabW * 0.5f - 28, tabY + 6.0f,
+                   m_activeTab == 0 ? tabActiveCol : tabInactiveCol, 11.0f, "bold");
+        r.drawRect(px + tabW, tabY, tabW, tabH, m_activeTab == 1 ? tabActiveBg : tabInactiveBg);
+        drawTextAt(r, "Rendering", px + tabW + tabW * 0.5f - 30, tabY + 6.0f,
+                   m_activeTab == 1 ? tabActiveCol : tabInactiveCol, 11.0f, "bold");
+
+        float contentY = tabY + tabH + 6.0f;
+        if (m_activeTab == 0)
+            drawElementsTab(r, px, contentY, pw);
+        else
+            drawRenderingTab(r, px, contentY, pw);
+    }
+
+    void drawElementsTab(GLRenderer& r, float px, float y0, float pw) {
+        float btnY = y0;
         float btnBg[4];
         if (inspecting) {
             btnBg[0] = 0.15f; btnBg[1] = 0.35f; btnBg[2] = 0.6f; btnBg[3] = 1.0f;
@@ -187,6 +227,81 @@ private:
             drawTextAt(r, "Hover over an element", px + 14, btnY + 64, hintCol, 11.0f, "normal");
             drawTextAt(r, "to inspect", px + 14, btnY + 80, hintCol, 11.0f, "normal");
         }
+    }
+
+    void drawRenderingTab(GLRenderer& r, float px, float y0, float pw) {
+        float colLbl[4] = {0.5f, 0.5f, 0.6f, 1.0f};
+        float colVal[4] = {0.75f, 0.75f, 0.85f, 1.0f};
+        float colGreen[4] = {0.2f, 0.8f, 0.3f, 1.0f};
+        float colRed[4] = {0.9f, 0.3f, 0.2f, 1.0f};
+        float y = y0;
+        char buf[128];
+        float lblX = px + 14;
+        float valX = px + 120;
+
+        auto& ds = m_lastStats;
+
+        // ── Frame info ──
+        drawSectionHeader(r, px, y, pw, "FRAME");
+        y += 20;
+        drawTextAt(r, "Frame #", lblX, y, colLbl, 11.0f, "normal");
+        snprintf(buf, sizeof(buf), "%d", m_frameCount);
+        drawTextAt(r, buf, valX, y, colVal, 11.0f, "normal");
+        y += 18;
+
+        // ── Tree stats ──
+        drawSectionHeader(r, px, y, pw, "TREE");
+        y += 20;
+        drawTextAt(r, "Total nodes", lblX, y, colLbl, 11.0f, "normal");
+        snprintf(buf, sizeof(buf), "%d", ds.fullTreeCount);
+        drawTextAt(r, buf, valX, y, colVal, 11.0f, "normal");
+        y += 18;
+
+        // ── Layout stats ──
+        drawSectionHeader(r, px, y, pw, "LAYOUT");
+        y += 20;
+        drawTextAt(r, "Laid out", lblX, y, colLbl, 11.0f, "normal");
+        snprintf(buf, sizeof(buf), "%d", ds.layoutCount);
+        drawTextAt(r, buf, valX, y, ds.layoutCount > 0 ? colRed : colGreen, 11.0f, "normal");
+        y += 18;
+        drawTextAt(r, "Skipped", lblX, y, colLbl, 11.0f, "normal");
+        snprintf(buf, sizeof(buf), "%d", ds.skippedCount);
+        drawTextAt(r, buf, valX, y, colGreen, 11.0f, "normal");
+        y += 18;
+        float pct = ds.fullTreeCount > 0 ? (ds.layoutCount * 100.0f / ds.fullTreeCount) : 0;
+        drawTextAt(r, "Layout %", lblX, y, colLbl, 11.0f, "normal");
+        snprintf(buf, sizeof(buf), "%.1f%%", pct);
+        drawTextAt(r, buf, valX, y, colVal, 11.0f, "normal");
+        y += 22;
+
+        // ── Paint stats ──
+        drawSectionHeader(r, px, y, pw, "PAINT");
+        y += 20;
+        drawTextAt(r, "Repainted", lblX, y, colLbl, 11.0f, "normal");
+        snprintf(buf, sizeof(buf), "%d", ds.paintCount);
+        drawTextAt(r, buf, valX, y, ds.paintCount > 0 ? colRed : colGreen, 11.0f, "normal");
+        y += 18;
+        float saved = ds.fullTreeCount - ds.paintCount;
+        drawTextAt(r, "Cache hit", lblX, y, colLbl, 11.0f, "normal");
+        snprintf(buf, sizeof(buf), "%d (%.0f%%)", (int)(saved > 0 ? saved : 0),
+                 ds.fullTreeCount > 0 ? (saved * 100.0f / ds.fullTreeCount) : 0);
+        drawTextAt(r, buf, valX, y, colGreen, 11.0f, "normal");
+        y += 22;
+
+        // ── Savings ──
+        drawSectionHeader(r, px, y, pw, "SAVINGS");
+        y += 20;
+        int savedLayout = ds.fullTreeCount - ds.layoutCount;
+        int savedPaint = ds.fullTreeCount - ds.paintCount;
+        float layoutSavings = ds.fullTreeCount > 0 ? (savedLayout * 100.0f / ds.fullTreeCount) : 0;
+        float paintSavings = ds.fullTreeCount > 0 ? (savedPaint * 100.0f / ds.fullTreeCount) : 0;
+        drawTextAt(r, "Layout saved", lblX, y, colLbl, 11.0f, "normal");
+        snprintf(buf, sizeof(buf), "%.0f%%", layoutSavings);
+        drawTextAt(r, buf, valX, y, layoutSavings > 50 ? colGreen : colRed, 11.0f, "normal");
+        y += 18;
+        drawTextAt(r, "Paint saved", lblX, y, colLbl, 11.0f, "normal");
+        snprintf(buf, sizeof(buf), "%.0f%%", paintSavings);
+        drawTextAt(r, buf, valX, y, paintSavings > 50 ? colGreen : colRed, 11.0f, "normal");
     }
 
     void drawNodeInfo(GLRenderer& r, float px, float y0, float pw) {

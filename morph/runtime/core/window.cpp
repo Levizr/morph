@@ -18,9 +18,26 @@ void MorphWindow::mouseButtonCb(GLFWwindow* win, int btn, int act, int mods) {
     }
 }
 
+static MorphNode* s_lastHoverNode = nullptr;
+
 void MorphWindow::cursorPosCb(GLFWwindow* win, double mx, double my) {
     auto* self = (MorphWindow*)glfwGetWindowUserPointer(win);
     if (!self || !self->m_root) return;
+
+    // Hover state tracking
+    auto* newHover = self->m_root->hitTest((float)mx, (float)my);
+    if (newHover != s_lastHoverNode) {
+        if (s_lastHoverNode) {
+            s_lastHoverNode->onHover(false);
+            s_lastHoverNode->markDirty(PaintDirty);
+        }
+        if (newHover) {
+            newHover->onHover(true);
+            newHover->markDirty(PaintDirty);
+        }
+        s_lastHoverNode = newHover;
+    }
+
     MorphEvent e;
     e.type = EventType::MouseMove;
     e.x = (float)mx;
@@ -28,7 +45,7 @@ void MorphWindow::cursorPosCb(GLFWwindow* win, double mx, double my) {
     self->m_root->dispatchEvent(e, (float)mx, (float)my);
 
 #ifdef MORPH_FEATURE_CURSOR
-    auto* target = self->m_root->hitTest((float)mx, (float)my);
+    auto* target = newHover;
     const std::string* cur = nullptr;
     for (auto* n = target; n; n = n->parent) {
         if (n->style.cursor != "default") {
@@ -50,6 +67,10 @@ void MorphWindow::windowSizeCb(GLFWwindow* win, int width, int height) {
     if (!self) return;
     self->m_width = width;
     self->m_height = height;
+    self->m_pendingRender = true;
+    if (self->m_root) {
+        self->m_root->markDirty(SubtreeDirty);
+    }
 }
 
 void MorphWindow::scrollCb(GLFWwindow* win, double dx, double dy) {
@@ -93,6 +114,10 @@ void MorphWindow::setTitle(const std::string& title) {
     if (m_handle) glfwSetWindowTitle(m_handle, title.c_str());
 }
 
+// Forward declarations for dirty rendering helpers
+static int countNodes(MorphNode* n);
+static void recordPaintTree(MorphNode* n, Renderer& r, DirtyStats& stats);
+
 void MorphWindow::setSize(int width, int height) {
     m_width = width;
     m_height = height;
@@ -107,23 +132,71 @@ MorphWindow::~MorphWindow() {
     if (m_handle) glfwDestroyWindow(m_handle);
 }
 
-void MorphWindow::render(std::function<void(GLRenderer&)> overlayFn) {
+void MorphWindow::render(std::function<void(GLRenderer&, DirtyStats&)> overlayFn) {
     if (!m_handle) return;
     glfwMakeContextCurrent(m_handle);
     glViewport(0, 0, m_width, m_height);
     m_renderer.setFBHeight(m_height);
     float proj[16];
     ortho(proj, 0.0f, (float)m_width, (float)m_height, 0.0f, -1.0f, 1.0f);
-    m_renderer.clear();
+
+    m_dirtyStats.reset();
+
     if (m_root) {
+#ifdef MORPH_FEATURE_DIRTY_RENDERING
+        // Ensure renderer is ready (FreeType init, shaders) before layout,
+        // since layout may call measureTextWidth which needs font atlases
+        m_renderer.ensureReady();
+
+        // Phase 1: Incremental layout (only dirty nodes)
+        m_root->layoutIfNeeded(0.0f, 0.0f, (float)m_width, (float)m_height,
+                               &m_renderer, &m_dirtyStats);
+        m_dirtyStats.fullTreeCount = countNodes(m_root);
+
+        // Phase 2: Record display lists for paint-dirty nodes
+        recordPaintTree(m_root, m_renderer, m_dirtyStats);
+
+        // Phase 3: Clear + render
+        m_renderer.clear();
+        m_renderer.setProjection(proj);
+
+        // Phase 4: Execute display lists (all nodes)
+        m_root->executeDisplayList(m_renderer);
+#else
+        // Legacy: full rebuild every frame
+        m_renderer.ensureReady();
         m_root->layout(0.0f, 0.0f, (float)m_width, (float)m_height, &m_renderer);
         m_renderer.setProjection(proj);
         m_root->draw(m_renderer);
+#endif
     }
+
     m_renderer.flush(proj);
     if (overlayFn) {
-        overlayFn(m_renderer);
+        overlayFn(m_renderer, m_dirtyStats);
         m_renderer.flush(proj);
     }
     glfwSwapBuffers(m_handle);
+
+#ifdef MORPH_FEATURE_DIRTY_RENDERING
+    m_prevHadDirty = !m_root || !m_root->isFullyClean();
+#endif
+    m_pendingRender = false;
+}
+
+static int countNodes(MorphNode* n) {
+    int c = 1;
+    for (auto* child : n->children) c += countNodes(child);
+    return c;
+}
+
+static void recordPaintTree(MorphNode* n, Renderer& r, DirtyStats& stats) {
+    if (n->isDirty(PaintDirty) || n->isDirty(ScrollDirty) || n->isDirty(StyleDirty)) {
+        stats.paintCount++;
+        n->recordDisplayList(r);
+        n->clearDirty(PaintDirty);
+        n->clearDirty(ScrollDirty);
+    }
+    for (auto* child : n->children)
+        recordPaintTree(child, r, stats);
 }

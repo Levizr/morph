@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <csignal>
 #include <unistd.h>
+#include <chrono>
 
 #include "vendor/glad/glad.h"
 #include <GLFW/glfw3.h>
@@ -130,8 +131,10 @@ int main() {
     // ── Main loop ───────────────────────────────────────────
     fprintf(stderr, "[devrt] entering render loop\n");
 
+    auto lastFrameTime = std::chrono::steady_clock::now();
+
     while (g_running && !window.shouldClose()) {
-        // Poll GLFW events (covers mouse, keyboard, resize)
+        // Process all pending GLFW events (non-blocking)
         glfwPollEvents();
 
         // Check for new IR from socket
@@ -164,6 +167,7 @@ int main() {
                 deleteNodeTree(rootNode);
                 rootNode = newNode;
                 devtools.hoveredNode = nullptr; // tree changed, clear stale ref
+                window.notifyPendingRender();
                 fprintf(stderr, "[devrt] hot reloaded\n");
             } else {
                 fprintf(stderr, "[devrt] failed to parse IR from client\n");
@@ -175,19 +179,35 @@ int main() {
             sock.acceptClient();
         }
 
-        // Render current frame
+        // Delta time for animations
+        auto now = std::chrono::steady_clock::now();
+        float dt = std::chrono::duration<float>(now - lastFrameTime).count();
+        if (dt > 0.1f) dt = 0.1f; // cap to prevent spiral of death
+        lastFrameTime = now;
+
+        // Update animations (advances running animations, marks dirty on change)
+        if (rootNode) rootNode->update(dt);
+
+        // Render current frame (only if there's actual work pending)
         if (window.isVisible()) {
-            // Track mouse for devtools inspect
-            if (devtools.inspecting) {
-                double mx, my;
-                glfwGetCursorPos(window.handle(), &mx, &my);
-                devtools.mouseX = (float)mx;
-                devtools.mouseY = (float)my;
-                devtools.updateHover(rootNode);
+            if (window.hasPendingRender()) {
+                // Track mouse for devtools inspect
+                if (devtools.inspecting) {
+                    double mx, my;
+                    glfwGetCursorPos(window.handle(), &mx, &my);
+                    devtools.mouseX = (float)mx;
+                    devtools.mouseY = (float)my;
+                    devtools.updateHover(rootNode);
+                }
+                window.render([&](GLRenderer& r, DirtyStats& ds) {
+                    devtools.render(r, (float)window.width(), (float)window.height(), ds);
+                });
+            } else {
+                // Nothing changed — sleep until next event or ~16ms
+                glfwWaitEventsTimeout(1.0 / 60.0);
             }
-            window.render([&](GLRenderer& r) {
-                devtools.render(r, (float)window.width(), (float)window.height());
-            });
+        } else {
+            glfwWaitEventsTimeout(1.0 / 60.0);
         }
     }
 

@@ -67,6 +67,10 @@ class FeatureSet:
                 if isinstance(node, IRViewport):
                     self.features.add("viewport")
 
+        # Dirty rendering: enable if any dynamic behavior detected
+        if any(f in self.features for f in ["scroll", "event", "cursor", "animation"]):
+            self.features.add("dirty_rendering")
+
     def required_headers(self) -> list[str]:
         headers: list[str] = ["widgets/morph_rect.h"]
         if "text" in self.features:
@@ -114,6 +118,8 @@ class FeatureSet:
             defines.append("MORPH_FEATURE_BORDER_BOX")
         if "image" in self.features:
             defines.append("MORPH_FEATURE_IMAGE")
+        if "dirty_rendering" in self.features or "scroll" in self.features:
+            defines.append("MORPH_FEATURE_DIRTY_RENDERING")
         return defines
 
     def needs_freetype(self) -> bool:

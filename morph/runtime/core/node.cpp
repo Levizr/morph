@@ -2,6 +2,155 @@
 #include "renderer.h"
 #include <cmath>
 
+// ── Dirty flag propagation ───────────────────────────────────
+void MorphNode::markDirty(DirtyFlag f) {
+    if (f == Clean) return;
+    m_dirtyFlags |= f;
+    // Propagate layout/subtree dirtiness up the tree
+    if ((f == LayoutDirty || f == SubtreeDirty) && parent && !parent->isDirty(SubtreeDirty)) {
+        parent->markDirty(SubtreeDirty);
+    }
+    if (f == PaintDirty && parent && !parent->isDirty(PaintDirty)) {
+        parent->markDirty(PaintDirty);
+    }
+}
+
+void MorphNode::layoutIfNeeded(float px, float py, float parentW, float parentH,
+                                Renderer* r, DirtyStats* stats, bool force) {
+    bool selfDirty = isDirty(LayoutDirty) || isDirty(StyleDirty);
+    bool subtreeDirty = isDirty(SubtreeDirty);
+    bool needsLayout = selfDirty || subtreeDirty || force;
+
+    if (!needsLayout && stats) stats->skippedCount++;
+
+    if (needsLayout) {
+        if (stats) {
+            stats->layoutCount++;
+            if (selfDirty && !subtreeDirty)
+                stats->paintCount++; // pure layout
+        }
+        layout(px, py, parentW, parentH, r);
+        clearDirty(LayoutDirty);
+        clearDirty(StyleDirty);
+        // After layout, mark self as needing a display list re-record
+        markDirty(PaintDirty);
+    }
+
+    for (auto* c : children) {
+        float cw = c->w > 0 ? c->w : (parentW - c->x + px);
+        float ch = c->h > 0 ? c->h : (parentH - c->y + py);
+        // Propagate force down so entire dirty subtree re-layouts
+        c->layoutIfNeeded(c->x, c->y, cw, ch, r, stats, force || subtreeDirty);
+    }
+    if (needsLayout) clearDirty(SubtreeDirty);
+}
+
+// ── Animation helpers ─────────────────────────────────────────
+static float applyEasing(float t, Easing e) {
+    switch (e) {
+        case Easing::Linear:   return t;
+        case Easing::EaseIn:   return t * t;
+        case Easing::EaseOut:  return 1.0f - (1.0f - t) * (1.0f - t);
+        case Easing::EaseInOut: return t < 0.5f ? 2.0f * t * t : 1.0f - (float)pow(-2.0f * t + 2.0f, 2.0f) / 2.0f;
+    }
+    return t;
+}
+
+static void setAnimProperty(MorphNode* node, AnimProperty prop, float val) {
+    switch (prop) {
+        case AnimProperty::X: node->x = val; node->markDirty(LayoutDirty); break;
+        case AnimProperty::Y: node->y = val; node->markDirty(LayoutDirty); break;
+        case AnimProperty::W: node->w = val; node->markDirty(LayoutDirty); break;
+        case AnimProperty::H: node->h = val; node->markDirty(LayoutDirty); break;
+        case AnimProperty::BgColorR: node->style.bgColor[0] = val; node->markDirty(PaintDirty); break;
+        case AnimProperty::BgColorG: node->style.bgColor[1] = val; node->markDirty(PaintDirty); break;
+        case AnimProperty::BgColorB: node->style.bgColor[2] = val; node->markDirty(PaintDirty); break;
+        case AnimProperty::BgColorA: node->style.bgColor[3] = val; node->markDirty(PaintDirty); break;
+        case AnimProperty::ColorR: node->style.color[0] = val; node->markDirty(PaintDirty); break;
+        case AnimProperty::ColorG: node->style.color[1] = val; node->markDirty(PaintDirty); break;
+        case AnimProperty::ColorB: node->style.color[2] = val; node->markDirty(PaintDirty); break;
+        case AnimProperty::ColorA: node->style.color[3] = val; node->markDirty(PaintDirty); break;
+        case AnimProperty::BorderRadius: node->style.borderRadius = val; node->markDirty(PaintDirty); break;
+    }
+}
+
+static float getAnimProperty(MorphNode* node, AnimProperty prop) {
+    switch (prop) {
+        case AnimProperty::X: return node->x;
+        case AnimProperty::Y: return node->y;
+        case AnimProperty::W: return node->w;
+        case AnimProperty::H: return node->h;
+        case AnimProperty::BgColorR: return node->style.bgColor[0];
+        case AnimProperty::BgColorG: return node->style.bgColor[1];
+        case AnimProperty::BgColorB: return node->style.bgColor[2];
+        case AnimProperty::BgColorA: return node->style.bgColor[3];
+        case AnimProperty::ColorR: return node->style.color[0];
+        case AnimProperty::ColorG: return node->style.color[1];
+        case AnimProperty::ColorB: return node->style.color[2];
+        case AnimProperty::ColorA: return node->style.color[3];
+        case AnimProperty::BorderRadius: return node->style.borderRadius;
+    }
+    return 0;
+}
+
+void MorphNode::startAnimation(AnimProperty prop, float to, float duration, Easing easing) {
+    for (auto& a : m_animations) {
+        if (a.property == prop) {
+            a.from = getAnimProperty(this, prop);
+            a.to = to;
+            a.duration = duration;
+            a.elapsed = 0;
+            a.easing = easing;
+            a.running = true;
+            a.finished = false;
+            markDirty(PaintDirty);
+            return;
+        }
+    }
+    MorphAnimation a;
+    a.property = prop;
+    a.from = getAnimProperty(this, prop);
+    a.to = to;
+    a.duration = duration;
+    a.elapsed = 0;
+    a.easing = easing;
+    a.running = true;
+    a.finished = false;
+    m_animations.push_back(a);
+    markDirty(PaintDirty);
+}
+
+void MorphNode::updateAnimations(float dt) {
+    for (auto& a : m_animations) {
+        if (!a.running || a.finished) continue;
+        a.elapsed += dt;
+        float t = a.elapsed / a.duration;
+        if (t >= 1.0f) {
+            t = 1.0f;
+            a.finished = true;
+            a.running = false;
+        }
+        float val = a.from + (a.to - a.from) * applyEasing(t, a.easing);
+        setAnimProperty(this, a.property, val);
+    }
+}
+
+void MorphNode::update(float dt) {
+    updateAnimations(dt);
+    for (auto* c : children) c->update(dt);
+}
+
+// ── Display list helpers ─────────────────────────────────────
+void MorphNode::recordDisplayList(Renderer& r) {
+    // Base: nothing to record. Widgets override this.
+}
+
+void MorphNode::executeDisplayList(Renderer& r) {
+    // Base: draw children. Widgets override to add their own display list ops.
+    // Default: fall back to draw() if no display list optimization
+    draw(r);
+}
+
 // ── W3C box-model helpers ────────────────────────────────────
 //  Horizontal sizing bonus: content-box → pl+pr+bw*2, border-box → 0.
 static float hBonus(const MorphStyle& s) {
@@ -594,9 +743,14 @@ bool MorphNode::dispatchEvent(MorphEvent& e, float ex, float ey) {
 #ifdef MORPH_FEATURE_SCROLL
     if (scrollEnabled && e.type == EventType::Scroll) {
         if (inBounds) {
+            float oldScrollY = scrollY;
             scrollY -= e.scroll * 40.0f;
             if (scrollY < 0) scrollY = 0;
             if (scrollY > contentH - h) scrollY = contentH - h;
+            if (scrollY != oldScrollY) {
+                markDirty(PaintDirty);
+                for (auto* c : children) c->markDirty(PaintDirty);
+            }
             return true;
         }
     }
@@ -615,9 +769,14 @@ bool MorphNode::dispatchEvent(MorphEvent& e, float ex, float ey) {
                 return true;
             } else {
                 float page = h * 0.7f;
+                float oldScrollY = scrollY;
                 scrollY += (ey < thumbY) ? -page : page;
                 if (scrollY < 0) scrollY = 0;
                 if (scrollY > contentH - h) scrollY = contentH - h;
+                if (scrollY != oldScrollY) {
+                    markDirty(PaintDirty);
+                    for (auto* c : children) c->markDirty(PaintDirty);
+                }
                 return true;
             }
         }
@@ -625,6 +784,7 @@ bool MorphNode::dispatchEvent(MorphEvent& e, float ex, float ey) {
             scrollDragging = false;
         }
         if (e.type == EventType::MouseMove && scrollDragging) {
+            float oldScrollY = scrollY;
             float thumbH = (h / contentH) * h;
             float dy = ey - scrollDragStartY;
             float range = contentH - h;
@@ -633,6 +793,10 @@ bool MorphNode::dispatchEvent(MorphEvent& e, float ex, float ey) {
                 scrollY = scrollDragStartVal + (dy / thumbRange) * range;
                 if (scrollY < 0) scrollY = 0;
                 if (scrollY > range) scrollY = range;
+            }
+            if (scrollY != oldScrollY) {
+                markDirty(PaintDirty);
+                for (auto* c : children) c->markDirty(PaintDirty);
             }
             return true;
         }

@@ -1,6 +1,5 @@
 #pragma once
 #include "../core/node.h"
-#include "../core/renderer.h"
 #include "../core/event.h"
 #include <functional>
 
@@ -14,6 +13,58 @@ public:
             return true;
         }
         return false;
+    }
+
+    void recordDisplayList(Renderer& r) override {
+        m_displayList.clear();
+        float rad = style.borderRadius > 0.0f ? style.borderRadius : 6.0f;
+        DrawOp bg;
+#ifdef MORPH_FEATURE_BORDER
+        if (style.borderWidth > 0.0f && style.borderStyle == "solid") {
+            float bw = style.borderWidth;
+            bool inner = (style.boxSizing == "border-box");
+            if (inner)
+                bg.setBordered(x, y, w, h, rad, style.bgColor, bw, style.borderColor);
+            else
+                bg.setBordered(x - bw, y - bw, w + 2.0f * bw, h + 2.0f * bw,
+                               rad, style.bgColor, bw, style.borderColor);
+        } else
+#endif
+        {
+            bg.setRounded(x, y, w, h, rad, style.bgColor);
+        }
+        m_displayList.push_back(bg);
+    }
+
+    void executeDisplayList(Renderer& r) override {
+        // 1. Render self (background)
+        for (auto& op : m_displayList) {
+            switch (op.type) {
+                case DrawOp::Rect: r.drawRect(op.x,op.y,op.w,op.h,&op.r); break;
+                case DrawOp::RoundedRect: r.drawRoundedRect(op.x,op.y,op.w,op.h,op.data[0],&op.r); break;
+                case DrawOp::BorderedRect: r.drawBorderedRect(op.x,op.y,op.w,op.h,&op.r,op.data[1],&op.br); break;
+                case DrawOp::BorderedRoundedRect: r.drawBorderedRoundedRect(op.x,op.y,op.w,op.h,op.data[0],&op.r,op.data[1],&op.br); break;
+                default: break;
+            }
+        }
+
+        // 2. Clip + scroll + children
+#ifdef MORPH_FEATURE_SCROLL
+        bool scrolling = scrollEnabled && contentH > h;
+        if (scrolling) {
+            r.beginClip(x, y, w, h);
+            r.pushScrollOffset(0, -scrollY);
+        }
+#endif
+        for (auto* child : children)
+            child->executeDisplayList(r);
+#ifdef MORPH_FEATURE_SCROLL
+        if (scrolling) {
+            r.popScrollOffset(0, -scrollY);
+            r.endClip();
+            drawScrollbar(r);
+        }
+#endif
     }
 
     void draw(Renderer& r) override {
