@@ -14,6 +14,7 @@ class IRNode:
     text_content: str = ""
     attrs: dict[str, str] = field(default_factory=dict)
     parent_id: str | None = None
+    raw_styles: dict[str, str] = field(default_factory=dict)
 
     # computed by LayoutEngine
     x: float = 0.0

@@ -18,7 +18,7 @@ class JSXWalker:
 
     def _extract_imports(self, root: Node) -> list[dict]:
         imports = []
-        for node in self._find_all(root, "import_declaration"):
+        for node in self._find_all(root, "import_statement"):
             source = self._get_import_source(node)
             if not source:
                 continue

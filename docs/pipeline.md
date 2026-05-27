@@ -171,12 +171,14 @@ g++ -std=c++17 -O2 app.cpp /path/to/glad.c -o app \
 
 ## C++ Runtime Architecture
 
-### Renderer (`runtime/core/gl_renderer.h`)
+### Renderer (`runtime/render/gl_renderer.h` / `.cpp`)
 
 - OpenGL 3.3 core profile
 - Instanced rendering via VAO/VBO/IBO with `glDrawElementsInstanced`
 - Shared unit quad (top-left origin, 0..1 range)
-- Two shader programs: quad (rounded rect SDF) and text (glyph atlas texture)
+- Three shader programs: quad (rounded rect SDF), text (glyph atlas texture), border (SDF ring)
+- Stencil buffer for border-radius clipping: `GL_INCR` for proper nesting
+- Flush order: fills → text → images (per-texture-ID batches) → borders (on top of everything)
 
 ### Text Rendering
 
@@ -185,8 +187,21 @@ g++ -std=c++17 -O2 app.cpp /path/to/glad.c -o app \
 - Space characters get advance without bitmap
 - Per-font-size text batches flushed separately
 
+### Image Rendering
+
+- `stb_image`-backed: PNG, JPEG, WebP, GIF, BMP, TGA, PSD, HDR, PNM, PIC
+- Texture cache keyed by `src` path
+- Batch-per-texture-ID: `m_imageBatches: unordered_map<GLuint, vector<ImageInstance>>`
+- `border-radius` applied via stencil clipping; border ring drawn inside stencil scope
+
 ### Style Inheritance
 
 - `color`, `font-size`, `font-weight` cascade from parent to child elements
 - Intermediate containers that don't set a color still pass the inherited color to text children
 - Default bgColor is transparent `(0,0,0,0)` — no white background unless explicitly set
+
+### Margin Auto Runtime
+
+- Build-time sentinel `-1.0f` for auto margins, `marginAuto[4]` flags in JSON
+- C++ `MorphNode::layout()` re-resolves centering on every frame when flags are set
+- Both build and dev modes share the same mechanism

@@ -44,17 +44,71 @@ from morph.layout.inline import (
     apply_inline_positions,
     estimate_text_width,
 )
+from morph.style.units import resolve, DEFERRED
 
 
 class LayoutEngine:
 
     def compute(self, windows: list[IRWindow]) -> None:
         for win in windows:
+            self._viewport_w = float(win.width)
+            self._viewport_h = float(win.height)
+
             self._heights: dict[str, float] = {}  # node_id → content height
             for node in win.nodes:
-                self._measure(node, float(win.width))
+                self._measure(node, self._viewport_w)
             for node in win.nodes:
-                self._layout(node, 0.0, 0.0, float(win.width), float(win.height))
+                self._layout(node, 0.0, 0.0, self._viewport_w, self._viewport_h)
+
+    @staticmethod
+    def _resolve_raw_styles(node: IRNode, parent_w: float, parent_h: float,
+                             viewport_w: float, viewport_h: float) -> None:
+        """Resolve deferred width/height/gap CSS values (%, vh, vw) at layout time.
+        
+        Margin/padding percentages are resolved directly in resolve_border_box
+        because they reference the parent's content width.
+        """
+        if not node.raw_styles:
+            return
+
+        s = node.style
+        for css_key, css_val in node.raw_styles.items():
+            if css_key in ("margin", "padding", "margin-top", "margin-right",
+                           "margin-bottom", "margin-left", "padding-top",
+                           "padding-right", "padding-bottom", "padding-left"):
+                continue  # resolved in resolve_border_box
+            v = css_val.strip()
+            if v.endswith("vh"):
+                val = (float(v[:-2]) / 100.0) * viewport_h
+            elif v.endswith("vw"):
+                val = (float(v[:-2]) / 100.0) * viewport_w
+            elif v.endswith("%"):
+                if css_key in ("height", "min-height", "max-height"):
+                    val = (float(v[:-1]) / 100.0) * parent_h
+                else:
+                    val = (float(v[:-1]) / 100.0) * parent_w
+            else:
+                val = resolve(css_val, parent_w, viewport_h)
+
+            if val is not None:
+                if css_key == "width":
+                    s.width = val
+                elif css_key == "height":
+                    s.height = val
+                elif css_key == "min-width":
+                    s.min_width = val
+                elif css_key == "max-width":
+                    s.max_width = val
+                elif css_key == "min-height":
+                    s.min_height = val
+                elif css_key == "max-height":
+                    s.max_height = val
+                elif css_key == "gap":
+                    s.gap = val
+                elif css_key in ("left", "right"):
+                    s.left = s.right = val
+                elif css_key in ("top", "bottom"):
+                    s.top = s.bottom = val
 
     # ═══════════════════════════════════════════════════════════
     #  Pass 1 — Measure (bottom-up)
@@ -78,7 +132,11 @@ class LayoutEngine:
         pt, pr, pb, pl = node.style.padding
         mt, mr, mb, ml = node.style.margin
 
-        if node.style.width is not None:
+        # Deferred margins (auto, %) — treat as 0 during measure pass
+        ml = 0.0 if ml == DEFERRED else ml
+        mr = 0.0 if mr == DEFERRED else mr
+
+        if node.style.width is not None and node.style.width != DEFERRED:
             raw = node.style.width
             if node.style.box_sizing == "border-box":
                 cw = raw - pl - pr - bw * 2
@@ -184,16 +242,20 @@ class LayoutEngine:
                 node.h = node.style.font_size * 1.4
             return
 
-        # ── 2. Resolve border-box ─────────────────────────────
+        # ── 2. Resolve deferred raw styles (%, vh, vw) ───────
+        self._resolve_raw_styles(node, parent_w, parent_h,
+                                 self._viewport_w, self._viewport_h)
+
+        # ── 3. Resolve border-box ─────────────────────────────
         ch = self._heights.get(node.node_id)
         node.x, node.y, node.w, node.h = resolve_border_box(
             node, px, py, parent_w, parent_h, content_h=ch,
         )
 
-        # ── 3. Content area for children ──────────────────────
+        # ── 4. Content area for children ──────────────────────
         cx, cy, cw, _ch = resolve_content_box(node)
 
-        # ── 4. Lay out children ───────────────────────────────
+        # ── 5. Lay out children ───────────────────────────────
         i = 0
         prev_block: IRNode | None = None  # last block sibling (for margin collapsing)
 
@@ -241,7 +303,7 @@ class LayoutEngine:
             prev_block = child
             i += 1
 
-        # ── 5. Auto-height expansion ─────────────────────────
+        # ── 6. Auto-height expansion ─────────────────────────
         if node.style.height is None and node.children:
             bw = node.style.border_width
             pb = node.style.padding[2]
@@ -253,7 +315,7 @@ class LayoutEngine:
             if desired > node.h:
                 node.h = desired
 
-        # ── 6. Min / max clamping (final) ───────────────────
+        # ── 7. Min / max clamping (final) ───────────────────
         apply_min_max(node)
 
     # ── Inline group helper ─────────────────────────────────

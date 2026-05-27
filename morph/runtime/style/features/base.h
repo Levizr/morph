@@ -8,6 +8,7 @@ struct StyleBase {
     float fontSize     = 16.0f;
     float padding[4]   = {0,0,0,0};
     float margin[4]    = {0,0,0,0};
+    bool marginAuto[4] = {false,false,false,false};
     float explicitWidth  = -1.0f;
     float explicitHeight = -1.0f;
     float minWidth  = -1.0f;

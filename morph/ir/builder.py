@@ -1,26 +1,100 @@
 from __future__ import annotations
 
+import math
 from morph.ir.node import IRNode, IRWindow
 from morph.ir.style import IRStyle
 from morph.ir.event import IREvent
 from morph.style.tailwind import TailwindResolver
 from morph.style.selector import matches_selector, calculate_specificity
 from morph.utils.color import parse_color
-from morph.style.units import to_px
+from morph.style.units import to_px, needs_layout, DEFERRED
 
 # User-agent default styles for HTML tags (lowest priority — overridden by everything)
+# Specificity is effectively (0,0,0) — any user CSS rule overrides these.
 _UA_DEFAULTS: dict[str, dict[str, str]] = {
-    "h1": {"font-size": "32px",    "font-weight": "bold", "margin": "21.44px 0"},
-    "h2": {"font-size": "24px",    "font-weight": "bold", "margin": "19.92px 0"},
-    "h3": {"font-size": "18.72px", "font-weight": "bold", "margin": "18.72px 0"},
-    "h4": {"font-size": "16px",    "font-weight": "bold", "margin": "21.28px 0"},
-    "h5": {"font-size": "13.28px", "font-weight": "bold", "margin": "22.18px 0"},
-    "h6": {"font-size": "10.72px", "font-weight": "bold", "margin": "24.97px 0"},
-    "p":   {"margin": "16px 0"},
-    "strong": {"font-weight": "bold"},
-    "span": {"display": "inline"},
-    "a":    {"display": "inline", "color": "#0000ee", "cursor": "pointer"},
-    "img":  {"display": "inline-block"},
+    # ── Document ────────────────────────────────────────────
+    "html": {"display": "block"},
+    "body": {"display": "block", "margin": "8px"},
+
+    # ── Headings ────────────────────────────────────────────
+    "h1": {"display": "block", "font-size": "32px",    "font-weight": "bold", "margin": "21.44px 0"},
+    "h2": {"display": "block", "font-size": "24px",    "font-weight": "bold", "margin": "19.92px 0"},
+    "h3": {"display": "block", "font-size": "18.72px", "font-weight": "bold", "margin": "18.72px 0"},
+    "h4": {"display": "block", "font-size": "16px",    "font-weight": "bold", "margin": "21.28px 0"},
+    "h5": {"display": "block", "font-size": "13.28px", "font-weight": "bold", "margin": "22.18px 0"},
+    "h6": {"display": "block", "font-size": "10.72px", "font-weight": "bold", "margin": "24.97px 0"},
+
+    # ── Grouping ────────────────────────────────────────────
+    "div":       {"display": "block"},
+    "p":         {"display": "block", "margin": "16px 0"},
+    "pre":       {"display": "block", "margin": "16px 0"},
+    "blockquote":{"display": "block", "margin": "16px 40px"},
+    "hr":        {"display": "block"},
+    "figure":    {"display": "block", "margin": "16px 40px"},
+    "figcaption":{"display": "block"},
+    "main":      {"display": "block"},
+    "header":    {"display": "block"},
+    "footer":    {"display": "block"},
+    "nav":       {"display": "block"},
+    "section":   {"display": "block"},
+    "article":   {"display": "block"},
+    "aside":     {"display": "block"},
+
+    # ── Lists ───────────────────────────────────────────────
+    "ul":  {"display": "block", "margin": "16px 0"},
+    "ol":  {"display": "block", "margin": "16px 0"},
+    "li":  {"display": "block"},
+    "dl":  {"display": "block", "margin": "16px 0"},
+    "dt":  {"display": "block"},
+    "dd":  {"display": "block", "margin-left": "40px"},
+
+    # ── Text-level ──────────────────────────────────────────
+    "span":    {"display": "inline"},
+    "a":       {"display": "inline", "color": "#0000ee", "cursor": "pointer"},
+    "strong":  {"font-weight": "bold"},
+    "b":       {"font-weight": "bold"},
+    "small":   {"font-size": "13.28px"},
+    "mark":    {"background-color": "#ffff00", "color": "#000000"},
+    "sub":     {"font-size": "13.28px"},
+    "sup":     {"font-size": "13.28px"},
+    "code":    {"display": "inline"},
+    "kbd":     {"display": "inline"},
+    "samp":    {"display": "inline"},
+    "em":      {"display": "inline"},
+    "i":       {"display": "inline"},
+    "ins":     {"display": "inline"},
+    "u":       {"display": "inline"},
+    "del":     {"display": "inline"},
+    "s":       {"display": "inline"},
+    "q":       {"display": "inline"},
+
+    # ── Embedded ────────────────────────────────────────────
+    "img": {"display": "inline-block"},
+
+    # ── Forms ───────────────────────────────────────────────
+    "button":   {"display": "inline-block"},
+    "input":    {"display": "inline-block"},
+    "select":   {"display": "inline-block"},
+    "textarea": {"display": "inline-block"},
+    "label":    {"display": "inline"},
+    "fieldset": {"display": "block", "border-width": "2px", "border-style": "groove", "margin": "0 2px", "padding": "5px 12px 10px"},
+    "legend":   {"display": "block", "padding": "0 2px"},
+    "form":     {"display": "block"},
+
+    # ── Tables ──────────────────────────────────────────────
+    "table":    {"display": "block"},
+    "caption":  {"display": "block"},
+    "thead":    {"display": "block"},
+    "tbody":    {"display": "block"},
+    "tfoot":    {"display": "block"},
+    "tr":       {"display": "block"},
+    "td":       {"display": "block"},
+    "th":       {"display": "block", "font-weight": "bold", "text-align": "center"},
+
+    # ── Interactive ─────────────────────────────────────────
+    "details":  {"display": "block"},
+    "summary":  {"display": "block"},
+    "dialog":   {"display": "block"},
 }
 
 # CSS property name → IRStyle field name
@@ -74,7 +148,11 @@ _CSS_TO_IR: dict[str, str] = {
 
 
 def _parse_side_value(key: str, val: str) -> tuple[float, float, float, float]:
-    """Parse a CSS shorthand like '10px 20px' or a single value into 4 sides."""
+    """Parse a CSS shorthand like '10px 20px' or '0 auto' into 4 sides.
+    
+    ``auto`` values are stored as ``math.inf`` (DEFERRED) so the layout
+    engine can compute the actual value with available space.
+    """
     parts = val.split()
     nums = [to_px(p) for p in parts]
     if len(nums) == 1:
@@ -86,6 +164,22 @@ def _parse_side_value(key: str, val: str) -> tuple[float, float, float, float]:
     if len(nums) == 4:
         return (nums[0], nums[1], nums[2], nums[3])
     return (0.0, 0.0, 0.0, 0.0)
+
+
+def _parse_margin_auto(val: str) -> tuple[bool, bool, bool, bool]:
+    """Return a 4-tuple indicating which sides are ``auto``."""
+    parts = val.split()
+    n = len(parts)
+    auto_flags = [p == "auto" for p in parts]
+    if n == 1:
+        return (auto_flags[0], auto_flags[0], auto_flags[0], auto_flags[0])
+    if n == 2:
+        return (auto_flags[0], auto_flags[1], auto_flags[0], auto_flags[1])
+    if n == 3:
+        return (auto_flags[0], auto_flags[1], auto_flags[2], auto_flags[1])
+    if n == 4:
+        return (auto_flags[0], auto_flags[1], auto_flags[2], auto_flags[3])
+    return (False, False, False, False)
 
 
 class IRBuilder:
@@ -201,10 +295,10 @@ class IRBuilder:
         merged.update(inline_raw)  # inline style overrides everything
 
         # ── Convert merged CSS → IRStyle fields ──────────────
-        ir_kw = {}
+        ir_kw: dict[str, any] = {}
+        raw_styles: dict[str, str] = {}
         for css_key, css_val in merged.items():
             if css_key == "border":
-                # Expand border shorthand: <width> <style> <color>
                 parts = css_val.split()
                 for p in parts:
                     if p in ("solid", "dashed", "dotted", "none"):
@@ -220,9 +314,24 @@ class IRBuilder:
             ir_field = _CSS_TO_IR.get(css_key)
             if ir_field is None:
                 continue
+
+            css_val_stripped = css_val.strip() if isinstance(css_val, str) else ""
+
+            # `auto` for width/height → None (fills available / content-based)
+            if css_val_stripped == "auto" and ir_field in ("width", "height"):
+                continue
+
+            # Values needing layout-time resolution (%, vh, vw) — store raw
+            if needs_layout(css_val) and css_val_stripped != "auto":
+                raw_styles[css_key] = css_val
+                ir_kw[ir_field] = DEFERRED
+                continue
+
             val = _convert_value(ir_field, css_val)
             if val is not None:
                 ir_kw[ir_field] = val
+                if css_key == "margin":
+                    ir_kw["margin_auto"] = _parse_margin_auto(css_val)
 
         # Merge individual side properties into margin/padding tuples
         for base in ("margin", "padding"):
@@ -283,6 +392,7 @@ class IRBuilder:
             children=children_nodes,
             events=events,
             attrs=attrs,
+            raw_styles=raw_styles,
         )
 
     def _next_id(self) -> str:

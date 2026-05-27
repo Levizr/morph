@@ -1,6 +1,7 @@
 import time
 import os
 import sys
+import select
 from morph.config.loader import load_config
 from morph.dev import devrt
 from morph.dev.server import IPCClient
@@ -76,8 +77,23 @@ def run(args=None) -> None:
     try:
         while True:
             time.sleep(0.3)
+            # Show any stderr from the dev binary
+            if process.stderr and process.stderr.readable():
+                import select
+                r, _, _ = select.select([process.stderr], [], [], 0)
+                if r:
+                    line = process.stderr.readline()
+                    if line:
+                        print(f"  \033[90m{line.rstrip()}\033[0m")
             rc = process.poll()
             if rc is not None:
+                # Read any remaining stderr
+                if process.stderr:
+                    for line in process.stderr:
+                        if line.strip():
+                            print(f"  \033[90m{line.rstrip()}\033[0m")
+                if rc != 0:
+                    log_error(f"morph_devrt exited with code {rc}")
                 log_success("Window closed — dev mode stopping")
                 break
     except KeyboardInterrupt:

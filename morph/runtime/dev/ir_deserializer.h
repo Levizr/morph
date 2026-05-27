@@ -85,6 +85,10 @@ static void applyStyle(MorphStyle& s, const JsonValue& styleVal) {
     setFloatOpt(s.maxHeight, styleVal["max_height"]);
 
     setFloat4(s.margin, styleVal["margin"]);
+    if (styleVal.has("margin_auto") && styleVal["margin_auto"].type() == JsonType::Array && styleVal["margin_auto"].size() >= 4) {
+        for (int i = 0; i < 4; i++)
+            s.marginAuto[i] = styleVal["margin_auto"][i].asBool();
+    }
     setFloat4(s.padding, styleVal["padding"]);
 
     if (!styleVal["border_radius"].isNull())

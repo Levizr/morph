@@ -12,6 +12,7 @@ class IRStyle:
     min_height:    float | None = None
     max_height:    float | None = None
     margin:        tuple[float,float,float,float] = (0,0,0,0)  # T R B L
+    margin_auto:   tuple[bool,bool,bool,bool]     = (False,False,False,False)
     padding:       tuple[float,float,float,float] = (0,0,0,0)
     border_radius: float = 0.0
     font_size:     float = 16.0

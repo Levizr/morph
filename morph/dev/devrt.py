@@ -33,16 +33,24 @@ def _hash_file(path: str) -> str:
 
 
 def _compute_source_hash() -> str:
-    src_dir = _get_dev_src_dir()
+    dev_dir = _get_dev_src_dir()
+    runtime_dir = os.path.abspath(os.path.join(dev_dir, ".."))
     paths = []
-    for root, _dirs, files in os.walk(src_dir):
-        for f in files:
-            if f.endswith((".cpp", ".h", ".hpp")) or f == "CMakeLists.txt":
-                paths.append(os.path.join(root, f))
+
+    # Scan dev, core, render, widget, style directories for source changes
+    for sub in ["dev", "core", "render", "widgets", "style"]:
+        scan = os.path.join(runtime_dir, sub)
+        if not os.path.isdir(scan):
+            continue
+        for root, _dirs, files in os.walk(scan):
+            for f in files:
+                if f.endswith((".cpp", ".h", ".hpp")) or f == "CMakeLists.txt":
+                    paths.append(os.path.join(root, f))
+
     paths.sort()
     h = hashlib.sha256()
     for p in paths:
-        rel = os.path.relpath(p, src_dir)
+        rel = os.path.relpath(p, dev_dir)
         h.update(rel.encode())
         h.update(_hash_file(p).encode())
     return h.hexdigest()
@@ -125,4 +133,4 @@ def launch() -> subprocess.Popen:
             "Run `morph doctor` for diagnostics."
         )
 
-    return subprocess.Popen([path], stderr=subprocess.DEVNULL)
+    return subprocess.Popen([path], stderr=subprocess.PIPE, text=True)

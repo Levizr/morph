@@ -1,5 +1,6 @@
 #include "node.h"
 #include "renderer.h"
+#include <cmath>
 
 // ── W3C box-model helpers ────────────────────────────────────
 //  Horizontal sizing bonus: content-box → pl+pr+bw*2, border-box → 0.
@@ -35,6 +36,9 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                        Renderer* r) {
     float ml = style.margin[3], mr = style.margin[1];
     float mt = style.margin[0], mb = style.margin[2];
+    bool autoL = style.marginAuto[3], autoR = style.marginAuto[1];
+    bool autoT = style.marginAuto[0], autoB = style.marginAuto[2];
+
     float pl = style.padding[3], pr = style.padding[1];
     float pt = style.padding[0], pb = style.padding[2];
 
@@ -44,8 +48,10 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
     float bw = 0.0f;
 #endif
 
-    x = px + ml;
-    y = py + mt;
+    // ── Resolve auto margins ──
+    // Treat auto as 0 for width computation, then resolve afterward
+    float mlForWidth = autoL ? 0.0f : ml;
+    float mrForWidth = autoR ? 0.0f : mr;
 
     // ── Width (border-box total) ──
     if (style.explicitWidth >= 0.0f) {
@@ -58,9 +64,25 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
             w = style.explicitWidth + pl + pr + bw * 2.0f;
         }
     } else {
-        w = parentW - ml - mr;
+        w = parentW - mlForWidth - mrForWidth;
     }
     if (w < 0.0f) w = 0.0f;
+
+    // Resolve auto horizontal margins
+    float availH = parentW - w;
+    if (autoL && autoR) {
+        ml = mr = fmaxf(availH * 0.5f, 0.0f);
+    } else if (autoL) {
+        ml = fmaxf(availH - mr, 0.0f);
+    } else if (autoR) {
+        mr = fmaxf(availH - ml, 0.0f);
+    }
+    // Auto top/bottom → 0 in normal flow
+    if (autoT) mt = 0.0f;
+    if (autoB) mb = 0.0f;
+
+    x = px + ml;
+    y = py + mt;
 
     // ── Height (border-box total) ──
     if (style.explicitHeight >= 0.0f) {

@@ -9,7 +9,7 @@ from morph.style.css_parser import CSSParser
 from morph.style.css_fetcher import CSSFetcher
 from morph.style.tailwind import TailwindResolver
 from morph.ir.builder import IRBuilder
-from morph.ir.serializer import IRSerializer
+from morph.ir.serializer import IRSerializer, _clean_inf
 from morph.layout.engine import LayoutEngine
 from morph.utils.logger import log_error, log_parse_error, log_dim, log_warn
 
@@ -91,7 +91,7 @@ def run(config) -> dict | None:
         log_dim(f"laid  out  in {_fmt(time.time() - t)}")
 
         t = time.time()
-        result = IRSerializer().to_dict(ir)
+        result = _clean_inf(IRSerializer().to_dict(ir))
         log_dim(f"serialized  in {_fmt(time.time() - t)}")
 
         log_dim(f"total  {_fmt(time.time() - ts)}")

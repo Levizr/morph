@@ -111,7 +111,14 @@ int main() {
         return 1;
     }
 
+    {
     MorphWindow window(config.title, config.width, config.height, config.visible);
+    if (!window.handle()) {
+        fprintf(stderr, "[devrt] glfwCreateWindow failed — cannot create OpenGL window\n");
+        fprintf(stderr, "[devrt] On Wayland, try: GDK_BACKEND=x11 GDK_DEBUG=x11-override\n");
+        glfwTerminate();
+        return 1;
+    }
     window.addChild(rootNode);
 
     // ── DevTools ─────────────────────────────────────────────
@@ -186,7 +193,11 @@ int main() {
 
     // ── Cleanup ─────────────────────────────────────────────
     deleteNodeTree(rootNode);
+    // window destroyed here (before glfwTerminate)
+    } // ~MorphWindow, ~DevTools
+
     glfwTerminate();
     fprintf(stderr, "[devrt] done\n");
     return 0;
 }
+

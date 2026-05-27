@@ -98,14 +98,17 @@ morph build
 Morph is a **compiler**, not an interpreter. Your source files never ship — only the compiled binary does.
 
 ```
-src/App.mx ──► MorphParser ──► JSXWalker ──► IRBuilder ──► LayoutEngine ──► IR dict ──► C++ Codegen ──► g++ ──► native binary
-                                                                                        │
-                                                                                 [Dev: Unix Socket]
+src/App.mx ──► MorphParser ──► JSXWalker ──► IRBuilder ──► LayoutEngine ──► IRSerializer
+                                                                                    │
+                                                   ┌────────────────────────────────┴──────────────┐
+                                                   ▼                                               ▼
+                                           [Dev: IPC Socket]                              [Build: C++ Codegen]
+                                           morph_devrt binary                       node_emitter → g++ → binary
 ```
 
 **Python** handles the entire toolchain — `.mx` parsing via tree-sitter, IR building, layout math, and Jinja2-based C++ code generation. **C++** handles the runtime — OpenGL rendering, window management, and event handling. The final binary contains zero Python and zero Node.
 
-In **dev mode**, the pipeline produces an IR dict that is sent over a Unix socket to a pre-compiled renderer (`morph_devrt`) on every file save. The window never closes — only the node tree swaps.
+In **dev mode**, the pipeline produces an IR dict that is sent over a Unix socket to a pre-compiled renderer (`morph_devrt`) on every file save. The window never closes — only the node tree swaps. In **build mode**, the same IR dict drives Jinja2 C++ code generation, producing a standalone binary via g++.
 
 ---
 
@@ -151,6 +154,10 @@ In **dev mode**, the pipeline produces an IR dict that is sent over a Unix socke
 | **Dev mode auto-build** — CMake integration, automatic binary rebuild on missing | Complete |
 | **Window config hot reload** — title update on save, node tree swap without restart | Complete |
 | **DevTools panel** — F12 toggle, element inspect (F2/click), box-model overlay (margin/border/padding/content), element info panel | Complete |
+| **Nested border-radius clipping** — stencil-based (GL_INCR) so child clips properly intersect ancestor masks | Complete |
+| **Runtime `margin: auto`** — dynamic horizontal centering re-resolved on window resize | Complete |
+| **Dev source hash** — CMake rebuild triggered when shared runtime files (core/, render/, widgets/, style/) change | Complete |
+| **Wayland/X11 fallback error** — clear message when GLFW window creation fails | Complete |
 
 ### 🚧 In Progress
 
@@ -184,8 +191,9 @@ In **dev mode**, the pipeline produces an IR dict that is sent over a Unix socke
 
 **C++ Runtime**
 - OpenGL 3.3 core profile batch renderer (instanced VAO/VBO/IBO)
-- Rounded rectangles via SDF fragment shader (radius auto-clamped)
-- Border rendering — `border-width`, `border-color`, `border-style` via SDF shader on all elements (`div`, `button`, `img`, etc.); border ring batch flushed on top of everything
+- Rounded rectangles via SDF fragment shader (radius auto-clamped, `border-radius` > 100px → 100px)
+- Border rendering — `border-width`, `border-color`, `border-style` via SDF shader on all elements (`div`, `button`, `img`, etc.); border ring batch (`m_borderBatch`) flushed last, on top of fills, text, and images
+- Stencil-based border-radius clipping for images and child overflow (uses `GL_INCR` so nested clips properly intersect)
 - `box-sizing: content-box` / `border-box` layout modes
 - FreeType text rendering with per-size glyph atlas and word-wrap
 - Font weight support (bold / normal with `DejaVuSans-Bold.ttf`)
@@ -195,7 +203,8 @@ In **dev mode**, the pipeline produces an IR dict that is sent over a Unix socke
 - Scrollbar with drag, wheel, track-click; nested scroll containers
 - Viewport culling for draw + events
 - Feature-based dead code elimination
-- Image rendering — stb_image-backed texture loading (PNG/JPEG/WebP/GIF/BMP/TGA/PSD/HDR/PNM/PIC); per-texture-ID batched draw calls; `border-radius` stencil clipping on images
+- Image rendering — stb_image-backed texture loading (PNG/JPEG/WebP/GIF/BMP/TGA/PSD/HDR/PNM/PIC); per-texture-ID batched draw calls (`m_imageBatches: unordered_map<GLuint, vector<ImageInstance>>`); `border-radius` stencil clipping on images
+- Runtime `margin: auto` — sentinel `-1.0f` in style + `marginAuto[4]` flags, re-resolved dynamically on window resize
 - `cursor: pointer` and `cursor: text` via GLFW standard cursors
 
 **DevTools (`morph_devrt` only)**

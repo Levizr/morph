@@ -74,8 +74,20 @@ Or delete `.morph/css-cache/` manually.
 2. `morph_devrt` binary doesn't exist → no renderer to receive IR
 3. Unix socket connection fails → IR never reaches renderer
 4. CSS/Tailwind resolution fails → styles are empty
+5. `JSON parse error: Unexpected char: I` → `float('inf')` not cleaned from IR dict before JSON serialization (fixed in `pipeline.py` via `_clean_inf()`)
 
-**Debug**: Check terminal output for `[morph] ERRROR:` messages. Add temporary print/log statements in `morph/dev/pipeline.py` to inspect the IR before serialization.
+**Debug**: Check terminal output for `[morph] ERROR:` messages. Add temporary print/log statements in `morph/dev/pipeline.py` to inspect the IR before serialization.
+
+### Dev window closes immediately
+
+**Cause**: The dev binary (`morph_devrt`) crashes or exits immediately. Possible causes:
+
+1. **GLFW not initialized**: `glfwInit()` fails or `glfwCreateWindow` returns null — check `[GLFW] error` messages in terminal output
+2. **Wayland vs X11**: If on Wayland with the X11-only `libglfw3`, window creation fails. Try: `GDK_BACKEND=x11 morph dev`
+3. **JSON parse failure**: If the IR dict contains `Infinity` (from `float('inf')`), the C++ JSON parser rejects it. Ensure `_clean_inf()` is applied
+4. **`morph_devrt` exited with code -11**: SIGSEGV — usually from `~MorphWindow` destructor calling GLFW functions after `glfwTerminate()`. Fixed by scoping window destruction before `glfwTerminate()`
+
+**Fix**: Run `morph dev` with binary stderr visible (default after v0.0.5). Check for `[GLFW] error` or `[devrt]` messages. Ensure `libglfw3` is installed and try with `GDK_BACKEND=x11` on Wayland.
 
 ## Getting Help
 

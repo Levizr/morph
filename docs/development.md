@@ -94,18 +94,51 @@ tests/                        # Test suite
 └── integration/              #   integration tests
 
 runtime/                      # C++ runtime headers
-├── core/                     #   MorphNode, Renderer, GL batch renderer, WindowManager
-├── viewport/                 #   ViewportDriver interface
-├── dev/                      #   Dev mode: Unix socket server, JSON parser, IR deserializer, main.cpp
-├── style/features/           #   Optional style features (outline, shadow, border)
-├── vendor/                   #   GLAD OpenGL loader
-└── widgets/                  #   RectNode, TextNode, ButtonNode
+├── core/                     #   MorphNode, Window, Renderer, Event system
+│   ├── node.h / node.cpp     #   MorphNode base + layout + margin auto re-resolution
+│   ├── window.h / window.cpp #   GLFW window wrapper, ortho projection, render loop
+│   ├── renderer.h            #   Renderer interface
+│   ├── window_manager.h      #   Multi-window management
+│   └── event.h               #   Event system (MouseDown/Up/Move, Click, Scroll)
+├── render/                   #   OpenGL renderer
+│   ├── gl_renderer.h / .cpp  #   Batch renderer (VAO/VBO/IBO), stencil ops, border batch
+│   └── shader.h              #   GLSL shaders: SDF rounded rect, text glyph atlas
+├── widgets/                  #   Node types
+│   ├── morph_rect.h          #   RectNode (div, span, h1–h6) with overflow clipping
+│   ├── morph_text.h          #   TextNode with FreeType glyph atlas + word-wrap
+│   ├── morph_radius.h        #   RoundedRectNode
+│   ├── morph_button.h        #   ButtonNode with onClick
+│   └── morph_image.h         #   ImageNode (stb_image, stencil clip, border rendering)
+├── style/features/           #   Optional style features
+│   └── base.h                #   StyleBase with marginAuto[4] flags
+├── dev/                      #   Dev mode: main.cpp, socket, JSON parser, deserializer, inspector
+│   ├── main.cpp              #   Entry point: socket → IPC → GLFW → render loop
+│   ├── dev_socket.h / .cpp   #   Unix socket server
+│   ├── ir_deserializer.h     #   JSON → MorphNode tree
+│   ├── json_parser.h         #   Minimal JSON parser
+│   └── inspector.h           #   DevTools overlay + panel
+└── vendor/                   #   Dependencies
+    ├── glad/glad.h / .cpp    #   GLAD OpenGL 3.3 loader
+    └── stb_image.c           #   Image loading
 
 templates/default/            # morph init scaffolding
 my-app/                       # sample project
 ```
 
 ## Key Design Decisions
+
+### Pipeline Overview
+
+```
+.mx file ──► MorphParser ──► AST ──► JSXWalker ──► walked dict
+                                                          │
+                                              CSS files ──┤ ──► IRBuilder ──► LayoutEngine ──► IR dict
+                                          Tailwind ──────┘                           │
+                                                                         ┌────────────┴────────────┐
+                                                                         ▼                         ▼
+                                                                  [Dev: IPC Socket]         [Build: Codegen]
+                                                                  morph_devrt binary      g++ → production binary
+```
 
 ### .mx Files Instead of Separate HTML/CSS/JS
 
@@ -149,6 +182,30 @@ Add the class to the `STATIC_MAP` dict in `morph/style/tailwind.py`. Follow the 
 ```python
 "bg-red-500": {"background-color": "#ef4444"},
 ```
+
+### Stencil-based Border-radius Clipping
+
+Border-radius clipping uses stencil buffers. The nested stencil test uses `GL_INCR` (increment operator) so that when a child with border-radius is inside a parent with border-radius/overflow clipping, the inner clip properly intersects with the ancestor mask (0→1→2→...). `endRoundedClip` restores the parent's stencil function rather than always setting `GL_EQUAL, 1`.
+
+For images, the border ring (`drawBorderRing()`) is drawn inside the stencil scope (before `endRoundedClip`) so the border is visible at the correct stencil level.
+
+### Image Rendering Pipeline
+
+Images are loaded via `stb_image` and cached in a texture map keyed by `src` path. They are batched by texture ID: `m_imageBatches: unordered_map<GLuint, vector<ImageInstance>>`. This avoids binding the same texture multiple times per frame.
+
+### Border Rendering
+
+Borders are rendered as SDF rings via a dedicated `m_borderBatch` flushed last — on top of fills, text, and images. Each element splits into a fill draw and a border ring draw.
+
+### Margin Auto at Runtime
+
+`margin: auto` horizontal centering is re-resolved dynamically on window resize:
+- **Build-time**: `margin_auto[4]` flags serialized, auto margins stored as `-1.0f` sentinel
+- **Runtime**: `MorphNode::layout()` detects sentinel + flags → computes centering each frame
+
+### Dev Binary Source Hash
+
+The dev binary (`morph_devrt`) is auto-rebuilt via CMake when source files change. The hash covers `runtime/dev/`, `runtime/core/`, `runtime/render/`, `runtime/widgets/`, and `runtime/style/` — so changes to shared runtime files also trigger a rebuild.
 
 ## DevTools (`morph_devrt`)
 

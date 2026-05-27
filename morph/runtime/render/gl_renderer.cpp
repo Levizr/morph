@@ -284,10 +284,14 @@ void GLRenderer::endClip() {
 void GLRenderer::beginRoundedClip(float x, float y, float w, float h, float radius) {
     flush(m_proj);
 
-    // Enable stencil, write 1 where the rounded shape covers
+    // Use GL_INCR so nested masks properly intersect:
+    //   Level 1: stencil goes 0→1 for fragments inside shape 1.
+    //   Level 2: stencil goes 1→2 for fragments inside BOTH shape 1 AND shape 2.
+    // Because discard in the shader prevents INCR for fragments outside the shape,
+    // only the intersection of all ancestor masks plus this shape passes.
     glEnable(GL_STENCIL_TEST);
-    glStencilFunc(GL_ALWAYS, 1, 0xFF);
-    glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+    glStencilFunc(GL_ALWAYS, 0xFF, 0xFF);
+    glStencilOp(GL_KEEP, GL_KEEP, GL_INCR);
     glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
     glDepthMask(GL_FALSE);
 
@@ -307,7 +311,8 @@ void GLRenderer::beginRoundedClip(float x, float y, float w, float h, float radi
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     glDepthMask(GL_TRUE);
 
-    glStencilFunc(GL_EQUAL, 1, 0xFF);
+    int newRef = m_stencilClipDepth + 1;
+    glStencilFunc(GL_EQUAL, newRef, 0xFF);
     glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
 
     m_stencilClipDepth++;
@@ -316,7 +321,9 @@ void GLRenderer::beginRoundedClip(float x, float y, float w, float h, float radi
 void GLRenderer::endRoundedClip() {
     flush(m_proj);
     m_stencilClipDepth--;
-    if (m_stencilClipDepth <= 0) {
+    if (m_stencilClipDepth > 0) {
+        glStencilFunc(GL_EQUAL, m_stencilClipDepth, 0xFF);
+    } else {
         glDisable(GL_STENCIL_TEST);
         m_stencilClipDepth = 0;
     }

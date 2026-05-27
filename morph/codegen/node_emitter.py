@@ -10,6 +10,8 @@ _TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
 
 def fmt(v: float) -> str:
     """Format a float for C++ literal — always includes a decimal point."""
+    if v == float("inf") or v == float("-inf") or v != v:
+        return "0.0f"
     s = f"{v:.1f}"
     return s.rstrip("0").rstrip(".") + ".0f" if "." not in s else s + "f"
 
@@ -133,10 +135,13 @@ class NodeEmitter:
             lines.append(f"{prefix}.padding[2] = {fmt(s.padding[2])};")
             lines.append(f"{prefix}.padding[3] = {fmt(s.padding[3])};")
         if s.margin != (0, 0, 0, 0):
-            lines.append(f"{prefix}.margin[0] = {fmt(s.margin[0])};")
-            lines.append(f"{prefix}.margin[1] = {fmt(s.margin[1])};")
-            lines.append(f"{prefix}.margin[2] = {fmt(s.margin[2])};")
-            lines.append(f"{prefix}.margin[3] = {fmt(s.margin[3])};")
+            for i in range(4):
+                v = s.margin[i]
+                if v != 0.0 or s.margin_auto[i]:
+                    coded = fmt(v) if v != float("inf") else "-1.0f"
+                    lines.append(f"{prefix}.margin[{i}] = {coded};")
+                    if s.margin_auto[i]:
+                        lines.append(f"{prefix}.marginAuto[{i}] = true;")
         if s.width is not None:
             lines.append(f"{prefix}.explicitWidth = {fmt(s.width)};")
         if s.height is not None:

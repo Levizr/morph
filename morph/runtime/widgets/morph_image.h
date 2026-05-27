@@ -31,17 +31,19 @@ public:
 
             r.drawTexture(textureId, x, y, w, h);
 
+#ifdef MORPH_FEATURE_BORDER
+            if (style.borderWidth > 0.0f && style.borderStyle == "solid") {
+                // Border drawn inside the stencil scope so it's not hidden
+                // by nested GL_INCR stencil masking.
+                r.drawBorderRing(x, y, w, h, style.borderRadius,
+                                 style.borderWidth, style.borderColor);
+            }
+#endif
+
             if (br > 0.0f) {
                 r.endRoundedClip();
             }
         }
-
-#ifdef MORPH_FEATURE_BORDER
-        if (style.borderWidth > 0.0f && style.borderStyle == "solid") {
-            r.drawBorderRing(x, y, w, h, style.borderRadius,
-                             style.borderWidth, style.borderColor);
-        }
-#endif
 
         // Draw children on top (e.g., overlay text)
         for (auto* c : children) c->draw(r);

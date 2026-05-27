@@ -170,6 +170,14 @@ def _deserialize(ir_dict: dict) -> list:
     return windows
 
 
+def _clean_margin(val):
+    """Convert None back to float('inf') (DEFERRED) after JSON round-trip."""
+    import math
+    if val is None:
+        return math.inf
+    return float(val)
+
+
 def _deser_node(d: dict) -> IRNode:
     s = d.get("style", {})
     style = IRStyle(
@@ -177,7 +185,8 @@ def _deser_node(d: dict) -> IRNode:
         color=tuple(s.get("color", [0, 0, 0, 1])),
         width=s.get("width"),
         height=s.get("height"),
-        margin=tuple(s.get("margin", [0, 0, 0, 0])),
+        margin=tuple(_clean_margin(v) for v in s.get("margin", [0, 0, 0, 0])),
+        margin_auto=tuple(s.get("margin_auto", [False, False, False, False])),
         padding=tuple(s.get("padding", [0, 0, 0, 0])),
         border_radius=s.get("border_radius", 0.0),
         font_size=s.get("font_size", 16.0),
@@ -218,6 +227,7 @@ def _deser_node(d: dict) -> IRNode:
         style=style,
         children=[_deser_node(c) for c in d.get("children", [])],
         attrs=d.get("attrs", {}),
+        raw_styles=d.get("raw_styles", {}),
         events=[
             IREvent(trigger=e.get("trigger", ""), action=e.get("action", ""),
                     target=e.get("target", ""))
