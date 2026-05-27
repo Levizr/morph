@@ -4,6 +4,7 @@ from morph.ir.node import IRNode, IRWindow
 from morph.ir.style import IRStyle
 from morph.ir.event import IREvent
 from morph.style.tailwind import TailwindResolver
+from morph.style.selector import matches_selector, calculate_specificity
 from morph.utils.color import parse_color
 from morph.style.units import to_px
 
@@ -141,6 +142,7 @@ class IRBuilder:
         jsx_node: dict,
         css_rules: dict,
         tw_resolver: TailwindResolver,
+        ancestry: list[tuple[str, list[str]]] | None = None,
     ) -> IRNode | None:
         tag = jsx_node.get("tag")
         if not tag:
@@ -166,13 +168,27 @@ class IRBuilder:
             inline_raw = {}
         class_names = _get_classes(props)
         tw_styles = _resolve_tw(props, tw_resolver)
+        node_id_attr = props.get("id", "")
 
-        # Merge: inline > HTML attrs > Tailwind > CSS rules > UA defaults
+        # Cascade order (lowest to highest priority):
+        #   1. UA defaults
+        #   2. External CSS rules (sorted by specificity)
+        #   3. Tailwind classes
+        #   4. HTML attributes (width, height)
+        #   5. Inline style
         merged = {}
         merged.update(_UA_DEFAULTS.get(tag, {}))
-        for rule_key in css_rules:
-            if _selector_matches(tag, rule_key, class_names):
-                merged.update(css_rules[rule_key])
+
+        # Collect matching CSS rules with specificity, then apply in order
+        matched = []
+        for rule_key, rule_props in css_rules.items():
+            if matches_selector(rule_key, tag, class_names, node_id_attr, ancestry):
+                spec = calculate_specificity(rule_key)
+                matched.append((spec, rule_props))
+        matched.sort(key=lambda x: x[0])  # lowest specificity first
+        for _, rule_props in matched:
+            merged.update(rule_props)
+
         merged.update(tw_styles)
         # HTML attributes like width="400" height="300" → CSS properties
         for attr in ('width', 'height'):
@@ -228,9 +244,10 @@ class IRBuilder:
             node_style = IRStyle()
 
         # ── Children ─────────────────────────────────────────
+        child_ancestry = (ancestry or []) + [(tag, class_names)]
         children_nodes = []
         for child in jsx_node.get("children", []):
-            child_node = self._build_node(child, css_rules, tw_resolver)
+            child_node = self._build_node(child, css_rules, tw_resolver, child_ancestry)
             if child_node:
                 children_nodes.append(child_node)
 
@@ -294,16 +311,6 @@ def _resolve_tw(props: dict, tw: TailwindResolver) -> dict:
         if result:
             merged.update(result)
     return merged
-
-
-def _selector_matches(tag: str, rule_key: str, classes: list[str]) -> bool:
-    """Simple tag / class selector matching."""
-    key = rule_key.strip()
-    if key.startswith("."):
-        return key[1:] in classes
-    if key.startswith("#"):
-        return False  # id matching not needed yet
-    return key == tag
 
 
 def _int_prop(props: dict, key: str, tw_styles: dict, fallback: int) -> int:

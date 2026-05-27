@@ -44,6 +44,10 @@ def main():
     p_build.add_argument("--output", type=str, default=None,
                          help="Output directory (default: dist/)")
 
+    p_run = sub.add_parser("run", help="Run built production binary")
+    p_run.add_argument("binary", nargs="?", default=None,
+                       help="Path to binary (default: <output>/app)")
+
     p_pkg = sub.add_parser("pkg", help="Package manager")
     pkg_sub = p_pkg.add_subparsers(dest="pkg_command")
     pkg_add = pkg_sub.add_parser("add");    pkg_add.add_argument("package")
@@ -77,6 +81,9 @@ def main():
             run(args)
         case "build":
             from morph.cli.cmd_build import run
+            run(args)
+        case "run":
+            from morph.cli.cmd_run import run
             run(args)
         case "pkg":
             from morph.cli.cmd_pkg import run
@@ -115,6 +122,7 @@ def _show_welcome(parser: argparse.ArgumentParser) -> None:
         ("init   [name]",  "Scaffold a new .mx project (interactive wizard)"),
         ("dev",            "Start dev mode with live hot reload"),
         ("build",          "Compile .mx → native OpenGL binary"),
+        ("run    [path]",  "Run built production binary"),
         ("pkg   <add|rm|install|list|search>",  "Package manager"),
         ("doctor",         "Verify system dependencies"),
         ("cache",          "Clear fetched CSS cache"),

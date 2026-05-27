@@ -11,7 +11,7 @@ from morph.style.tailwind import TailwindResolver
 from morph.ir.builder import IRBuilder
 from morph.ir.serializer import IRSerializer
 from morph.layout.engine import LayoutEngine
-from morph.utils.logger import log_error, log_parse_error, log_dim
+from morph.utils.logger import log_error, log_parse_error, log_dim, log_warn
 
 _tw_resolver: TailwindResolver | None = None
 _fetcher = CSSFetcher()
@@ -73,6 +73,8 @@ def run(config) -> dict | None:
                 if path.exists():
                     rules = _css_parser.parse_file(str(path))
                     css_rules.update(rules)
+                else:
+                    log_warn(f"CSS file not found: {path} (imported from {config.entry})")
             elif imp["type"] == "css_url":
                 css_text = _fetcher.fetch(imp["url"])
                 if css_text:
