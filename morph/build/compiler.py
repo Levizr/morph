@@ -11,6 +11,7 @@ class Compiler:
 
     def __init__(self):
         self.gpp = shutil.which("g++") or shutil.which("clang++") or "g++"
+        self.silent = False
 
     def compile(self, source_path: str, binary_path: str,
                 needs_freetype: bool = True,
@@ -73,7 +74,8 @@ class Compiler:
                 ft_libs = ["-lfreetype"]
             cmd.extend([*ft_cflags, *ft_libs])
 
-        log_info(f"Compiling: {' '.join(cmd)}")
+        if not self.silent:
+            log_info(f"Compiling: {' '.join(cmd)}")
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
 
         if result.returncode != 0:
