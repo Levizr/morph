@@ -41,16 +41,15 @@ def run(args=None) -> None:
     client.connect()
     log_success(f"IPC connected in {_fmt_duration(time.time() - t1)}")
 
-    t1 = time.time()
-
     def reload(changed_file: str = ""):
+        t_reload = time.time()
         if changed_file:
             rel = os.path.relpath(changed_file, os.getcwd())
             log_info(f"File changed: {rel}")
         ir = pipeline.run(config)
         if ir:
             client.send_ir(ir)
-            log_success(f"Rebuilt & reloaded in {_fmt_duration(time.time() - t1)}")
+            log_success(f"Rebuilt & reloaded in {_fmt_duration(time.time() - t_reload)}")
         else:
             log_error("Build failed — check terminal output above")
             client.send_error("Build failed — check terminal output above")
