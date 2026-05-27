@@ -14,4 +14,6 @@ build_dev/
 
 my-app
 test.py
-morph/bin/
+morph/bin/morph_devrt
+morph/bin/morph_devrt*
+morph/bin/.devrt_source_hash

@@ -1,12 +1,14 @@
 [build-system]
-requires = ["setuptools>=61.0.0", "wheel"]
+requires = ["setuptools>=61.0.0,<70", "wheel"]
 build-backend = "setuptools.build_meta"
 
 
 [project]
-name = "morph-ui"
-version = "0.0.4"
+name = "levizr-morph"
+version = "0.0.5"
 description = "Build native OpenGL Applications with HTML, CSS, and JavaScript"
+license = {text = "Apache-2.0"}
+readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "watchdog>=6.0.0",
@@ -18,6 +20,17 @@ dependencies = [
 ]
 [tool.setuptools.packages.find]
 include = ["morph*"]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.package-data]
+morph = ["codegen/templates/*.j2"]
+
+[project.urls]
+Homepage = "https://github.com/levizr/morph"
+Source = "https://github.com/levizr/morph"
+BugTracker = "https://github.com/levizr/morph/issues"
 
 [project.scripts]
 morph = "morph.cli.main:main"

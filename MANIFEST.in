@@ -1,0 +1,16 @@
+include LICENSE
+include README.md
+
+recursive-include morph/runtime *.cpp *.h *.c *.hpp *.cmake *.txt
+include morph/runtime/shaders/.gitkeep
+include morph/runtime/dev/.gitkeep
+include morph/runtime/vendor/.gitkeep
+include morph/runtime/widgets/.gitkeep
+
+prune morph/runtime/dev/build
+
+graft morph/templates
+
+recursive-include morph/codegen/templates *.j2
+
+include morph/bin/.gitkeep

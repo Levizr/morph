@@ -8,7 +8,7 @@ from morph.utils.logger import (
     _BOLD, _GREEN, _CYAN, _DIM, _YELLOW, _RESET,
 )
 
-TEMPLATES = os.path.join(os.path.dirname(__file__), "../../templates/default")
+TEMPLATES = os.path.join(os.path.dirname(__file__), "../templates/default")
 
 
 def run(args) -> None:

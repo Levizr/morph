@@ -96,7 +96,7 @@ def _show_version() -> None:
     from morph.utils.logger import _BOLD, _CYAN, _DIM, _RESET
     try:
         from importlib.metadata import version
-        v = version("morph-ui")
+        v = version("levizr-morph")
     except Exception:
         v = "dev"
     print(f"{_BOLD}{_CYAN}morph{_RESET} {_DIM}v{v}{_RESET}")

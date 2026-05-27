@@ -24,7 +24,7 @@ class CSSFetcher:
         try:
             req = urllib.request.Request(
                 url,
-                headers={"User-Agent": "morph-ui/0.1"}
+                headers={"User-Agent": "levizr-morph/0.1"}
             )
             with urllib.request.urlopen(req, timeout=10) as r:
                 css = r.read().decode("utf-8")
@@ -79,7 +79,7 @@ class CSSFetcher:
 
         try:
             req = urllib.request.Request(
-                url, headers={"User-Agent": "morph-ui/0.1"}
+                url, headers={"User-Agent": "levizr-morph/0.1"}
             )
             with urllib.request.urlopen(req, timeout=10) as r:
                 data = r.read()

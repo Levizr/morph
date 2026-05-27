@@ -68,7 +68,7 @@ morph build    # optimized native binary
 
 **1. Install**
 ```bash
-pip install morph-ui
+pip install levizr-morph
 morph doctor          # verify system dependencies
 ```
 
@@ -109,7 +109,7 @@ In **dev mode**, the pipeline produces an IR dict that is sent over a Unix socke
 
 ---
 
-## Current State (v0.0.4 — Early Development)
+## Current State (v0.0.5 — Early Development)
 
 ### ✅ Working
 

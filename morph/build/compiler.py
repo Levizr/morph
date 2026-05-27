@@ -19,7 +19,7 @@ class Compiler:
             log_error(f"Source not found: {source_path}")
             return False
 
-        runtime_dir = os.path.join(os.path.dirname(__file__), "../../runtime")
+        runtime_dir = os.path.join(os.path.dirname(__file__), "../runtime")
         runtime_dir = os.path.abspath(runtime_dir)
 
         if not shutil.which(self.gpp):

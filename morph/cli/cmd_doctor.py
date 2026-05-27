@@ -39,7 +39,7 @@ def run(args) -> None:
         all_ok = False
 
     ok, ver = _check_version("g++", ["--version"])
-    _print_status("g++", ok, detail=ver)
+    _print_status("g++ (C++17)", ok, detail=ver)
     if not ok:
         all_ok = False
     elif not _check_gpp_version(ver, 11):
@@ -54,8 +54,8 @@ def run(args) -> None:
     ok, ver = _check_version("pkg-config", ["--version"])
     _print_status("pkg-config", ok, detail=ver)
 
-    # ── OpenGL ──────────────────────────────────────────────
-    log_step("OpenGL / Graphics")
+    # ── Graphics & Windowing ──────────────────────────────
+    log_step("Graphics & Windowing")
 
     ok = _check_lib("glfw3")
     _print_status("GLFW", ok)
@@ -78,7 +78,70 @@ def run(args) -> None:
         if ok2:
             log_muted(f"    → Version: {ver}")
 
-    # ── Optional ────────────────────────────────────────────
+    ok = _check_lib("x11")
+    _print_status("X11", ok)
+    if not ok and system == "Linux":
+        log_muted(f"    → Install: {_YELLOW}sudo apt install libx11-dev{_RESET} (Linux)")
+        all_ok = False
+    elif verbose and ok:
+        log_muted("    → Usually provided by libx11-dev")
+
+    # ── Text Rendering ─────────────────────────────────────
+    log_step("Text Rendering")
+
+    ok = _check_lib("freetype2")
+    _print_status("FreeType", ok)
+    if not ok:
+        log_muted(f"    → Install: {_YELLOW}sudo apt install libfreetype-dev{_RESET} (Linux)")
+        log_muted(f"    →          {_YELLOW}brew install freetype{_RESET} (macOS)")
+        all_ok = False
+    elif verbose:
+        ok2, ver = _check_version("pkg-config", ["--modversion", "freetype2"])
+        if ok2:
+            log_muted(f"    → Version: {ver}")
+            # Also check for FreeType headers
+            inc = subprocess.run(
+                ["pkg-config", "--cflags", "freetype2"],
+                capture_output=True, text=True, timeout=5
+            ).stdout.strip()
+            if inc:
+                log_muted(f"    → Headers: {inc}")
+
+    # ── Bundled Runtime ────────────────────────────────────
+    log_step("Bundled Runtime")
+    rt_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "runtime")
+    vendor_dir = os.path.join(rt_dir, "vendor")
+
+    glad_c = os.path.join(rt_dir, "core", "glad.c")
+    stb_c = os.path.join(vendor_dir, "stb_image.c")
+
+    glad_ok = os.path.exists(glad_c)
+    stb_ok = os.path.exists(stb_c)
+
+    _print_status("glad (OpenGL loader)", glad_ok)
+    _print_status("stb_image (image I/O)", stb_ok)
+    if not glad_ok or not stb_ok:
+        log_error("Bundled vendor files missing — reinstall the package")
+        all_ok = False
+
+    # ── Dev Runtime Binary ──────────────────────────────────
+    from morph.dev import devrt as _devrt
+    devrt_path = _devrt.get_devrt_path()
+    if os.path.exists(devrt_path):
+        log_success("Dev runtime binary found")
+        if verbose:
+            log_muted(f"    → {devrt_path}")
+    else:
+        log_warn("Dev runtime binary not found")
+        log_dim("  Run `morph dev` to auto-build it")
+        cmake_ok = shutil.which("cmake") is not None
+        gpp_ok = shutil.which("g++") is not None
+        if cmake_ok and gpp_ok:
+            log_dim("  cmake and g++ available — will build on first `morph dev`")
+        else:
+            log_dim("  Install build tools: sudo apt install cmake g++")
+
+    # ── Optional Tools ─────────────────────────────────────
     log_step("Optional Tools")
 
     ok, ver = _check_version("node", ["--version"])
@@ -94,12 +157,10 @@ def run(args) -> None:
     else:
         _print_status("Tailwind CSS", ok, detail=ver)
 
-    # ── Tailwind mode ──────────────────────────────────────
     tw_paths = _find_tailwind()
     if tw_paths:
-        log_bullet(f"Tailwind found at: {tw_paths[0]}")
         if verbose:
-            log_bullet(f"Candidates: {', '.join(tw_paths[:3])}")
+            log_bullet(f"Tailwind found at: {tw_paths[0]}")
         log_success("Tailwind mode: full (all classes available)")
     else:
         log_dim("Tailwind mode: static (500 common classes)")
@@ -153,7 +214,6 @@ def _check_version(exe: str, args: list[str]) -> tuple[bool, str]:
             [path] + args, capture_output=True, text=True, timeout=5
         )
         output = (result.stdout or result.stderr or "").strip()
-        # Take first line only
         first = output.split("\n")[0].strip()
         return True, first
     except Exception:
@@ -194,7 +254,6 @@ def _find_tailwind() -> list[str]:
     candidates = [
         os.path.join(".", "node_modules", "tailwindcss"),
     ]
-    # Check parent dirs too
     for d in [".", ".."]:
         p = os.path.join(d, "node_modules", "tailwindcss")
         if os.path.exists(p):
@@ -206,18 +265,24 @@ def _print_system_fixes(system: str, ok: bool = True) -> None:
     if system == "Linux":
         print(f"  {_BOLD}Ubuntu/Debian:{_RESET}")
         print(f"    sudo apt update")
-        print(f"    sudo apt install g++ libglfw3-dev libgl-dev libgl1-mesa-dev pkg-config")
-        print(f"    sudo apt install cmake make")
+        print(f"    sudo apt install g++ cmake make pkg-config")
+        print(f"    sudo apt install libglfw3-dev libgl-dev libgl1-mesa-dev")
+        print(f"    sudo apt install libfreetype-dev libx11-dev")
         print()
         print(f"  {_BOLD}Fedora:{_RESET}")
-        print(f"    sudo dnf install gcc-c++ glfw-devel libglvnd-devel pkgconfig")
+        print(f"    sudo dnf install gcc-c++ cmake make pkgconfig")
+        print(f"    sudo dnf install glfw-devel libglvnd-devel")
+        print(f"    sudo dnf install freetype-devel libX11-devel")
         print()
         print(f"  {_BOLD}Arch:{_RESET}")
-        print(f"    sudo pacman -S gcc glfw-wayland libgl pkg-config")
+        print(f"    sudo pacman -S gcc cmake make pkg-config")
+        print(f"    sudo pacman -S glfw-wayland libgl freetype2 libx11")
     elif system == "Darwin":
         print(f"  {_BOLD}macOS:{_RESET}")
-        print(f"    brew install gcc glfw cmake pkg-config")
+        print(f"    brew install gcc cmake pkg-config")
+        print(f"    brew install glfw freetype")
     elif system == "Windows":
         print(f"  {_BOLD}Windows:{_RESET}")
         print(f"    Install MSVC Build Tools or MinGW")
         print(f"    GLFW is bundled — no action needed")
+        print(f"    Use vcpkg: vcpkg install freetype")

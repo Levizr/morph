@@ -1,4 +1,5 @@
 from __future__ import annotations
+import time
 from pathlib import Path
 
 from morph.parser.morph_parser import MorphParser, collect_errors
@@ -10,11 +11,17 @@ from morph.style.tailwind import TailwindResolver
 from morph.ir.builder import IRBuilder
 from morph.ir.serializer import IRSerializer
 from morph.layout.engine import LayoutEngine
-from morph.utils.logger import log_error, log_parse_error
+from morph.utils.logger import log_error, log_parse_error, log_dim
 
 _tw_resolver: TailwindResolver | None = None
 _fetcher = CSSFetcher()
 _css_parser = CSSParser()
+
+
+def _fmt(secs: float) -> str:
+    if secs < 0.5:
+        return f"{secs*1000:.1f}ms"
+    return f"{secs:.2f}s"
 
 
 def run(config) -> dict | None:
@@ -22,14 +29,17 @@ def run(config) -> dict | None:
     if _tw_resolver is None:
         _tw_resolver = TailwindResolver(project_root=".")
 
+    ts = time.time()
+
     try:
         source = Path(config.entry).read_text(encoding="utf-8")
         source_lines = source.split("\n")
 
-        # ── 1. Parse .mx → AST ────────────────────────────────
+        t = time.time()
         ast = MorphParser().parse(source)
+        log_dim(f"parsed  {Path(config.entry).name}  in {_fmt(time.time() - t)}")
 
-        # ── Validate for unrecoverable errors ──────────────────
+        t = time.time()
         for err_node in collect_errors(ast):
             if err_node.is_missing:
                 raise MorphParseError(
@@ -41,7 +51,6 @@ def run(config) -> dict | None:
                 )
             if err_node.type == "ERROR":
                 text = err_node.text.decode()
-                # Recoverable errors are bare & in text content — no JSX syntax
                 if "<" in text or "{" in text or "}" in text:
                     raise MorphParseError(
                         text.strip(),
@@ -50,11 +59,13 @@ def run(config) -> dict | None:
                         col=err_node.start_point[1] + 1,
                         source_lines=source_lines,
                     )
+        log_dim(f"validated  in {_fmt(time.time() - t)}")
 
-        # ── 2. Walk AST → components + imports ────────────────
+        t = time.time()
         walked = JSXWalker().walk(ast)
+        log_dim(f"walked  AST  in {_fmt(time.time() - t)}")
 
-        # ── 3. CSS resolve ────────────────────────────────────
+        t = time.time()
         css_rules: dict = {}
         for imp in walked.get("imports", []):
             if imp["type"] == "css_local":
@@ -67,15 +78,22 @@ def run(config) -> dict | None:
                 if css_text:
                     rules = _css_parser.parse_string(css_text)
                     css_rules.update(rules)
+        log_dim(f"resolved  CSS  in {_fmt(time.time() - t)}")
 
-        # ── 4. Build IR ───────────────────────────────────────
+        t = time.time()
         ir = IRBuilder(config).build(walked, css_rules, _tw_resolver)
+        log_dim(f"built  IR  in {_fmt(time.time() - t)}")
 
-        # ── 5. Layout ─────────────────────────────────────────
+        t = time.time()
         LayoutEngine().compute(ir)
+        log_dim(f"laid  out  in {_fmt(time.time() - t)}")
 
-        # ── 6. Serialize ──────────────────────────────────────
-        return IRSerializer().to_dict(ir)
+        t = time.time()
+        result = IRSerializer().to_dict(ir)
+        log_dim(f"serialized  in {_fmt(time.time() - t)}")
+
+        log_dim(f"total  {_fmt(time.time() - ts)}")
+        return result
 
     except MorphParseError as e:
         log_parse_error(e)

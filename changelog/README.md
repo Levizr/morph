@@ -1,7 +1,25 @@
 # Changelog
 
-## [0.0.4] - 2026-05-26
+## [0.0.5] - 2026-05-27
+### Changed
+- Restructured project layout for PyPI: runtime/, templates/, bin/ moved into morph/ package
+- Source-hash based auto-rebuild for dev runtime binary on source change
+- Modernized dev mode logs with per-step timing (parse, walk, build IR, layout, serialize)
+- Auto-exit dev mode when GLFW window is closed
+- Suppressed GLFW stderr noise from dev runtime
+- Updated CLI commands (dev, doctor) for better UX and diagnostics
 
+### Added
+- morph doctor: system dependency checks (FreeType, X11, GLFW, bundled vendor files)
+- .devrt_source_hash tracking for incremental dev runtime rebuilds
+- MANIFEST.in for proper PyPI package data inclusion
+- Package metadata: readme, license, project URLs
+
+### Fixed
+- CMake output path for dev runtime binary after project restructure
+- setuptools PEP 639 metadata compatibility (pinned setuptools <70)
+
+## [0.0.4] - 2026-05-26
 ### Added
 - **DevTools panel** — Press `F12` to toggle; element inspect via `F2` or click button; box-model overlay with non-overlapping colored rings (margin/orange, border/yellow, padding/green, content/blue)
 - **Element info panel** — Shows tag name badge, size, position, margin/padding (T/R/B/L), display, overflow, box-sizing, color/background with hex swatches, font-size, font-weight, text-align
