@@ -142,6 +142,15 @@ void MorphWindow::render(std::function<void(GLRenderer&, DirtyStats&)> overlayFn
     m_dirtyStats.reset();
 
     if (m_root) {
+        // Set clear color from body background (matches body's CSS background)
+        {
+            auto& bg = m_root->style.bgColor;
+            if (bg[3] > 0.0f)
+                m_renderer.setClearColor(bg[0], bg[1], bg[2], bg[3]);
+            else
+                m_renderer.setClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+        }
+
 #ifdef MORPH_FEATURE_DIRTY_RENDERING
         // Ensure renderer is ready (FreeType init, shaders) before layout,
         // since layout may call measureTextWidth which needs font atlases

@@ -136,22 +136,116 @@ void MorphNode::updateAnimations(float dt) {
 }
 
 void MorphNode::onHover(bool state) {
-    // Apply hover style if this node has one
     if (hoverStyle) {
-        if (state) {
-            style = *hoverStyle;
+        if (m_transitionDuration > 0.0f) {
+            // Animate to target style
+            if (!m_hoverTransition)
+                m_hoverTransition = new HoverTransition();
+            m_hoverTransition->startStyle = style;
+            m_hoverTransition->targetStyle = state ? *hoverStyle : m_baseStyle;
+            m_hoverTransition->elapsed = 0.0f;
+            m_hoverTransition->active = true;
         } else {
-            style = m_baseStyle;
+            // Snap (instant, no transition)
+            style = state ? *hoverStyle : m_baseStyle;
         }
         markDirty(PaintDirty);
         markDirty(LayoutDirty);
     }
-    // Propagate to all ancestors so their :hover rules activate too
-    // (browser behavior: hovering a child applies :hover to all ancestors)
+    // Propagate to ancestors (browser behavior: child hover applies :hover to all ancestors)
     if (parent) parent->onHover(state);
 }
 
+void MorphNode::updateHoverTransition(float dt) {
+    if (m_hoverTransition && m_hoverTransition->active) {
+        m_hoverTransition->elapsed += dt;
+        float t = m_hoverTransition->elapsed / m_transitionDuration;
+        if (t >= 1.0f) {
+            t = 1.0f;
+            style = m_hoverTransition->targetStyle;
+            m_hoverTransition->active = false;
+        } else {
+            interpolateStyles(style, m_hoverTransition->startStyle,
+                              m_hoverTransition->targetStyle,
+                              applyEasing(t, m_transitionEasing));
+        }
+        markDirty(PaintDirty);
+        markDirty(LayoutDirty);
+    }
+}
+
+void MorphNode::interpolateStyles(MorphStyle& out, const MorphStyle& a,
+                                   const MorphStyle& b, float t) {
+    for (int i = 0; i < 4; i++) {
+        out.bgColor[i] = a.bgColor[i] + (b.bgColor[i] - a.bgColor[i]) * t;
+        out.color[i] = a.color[i] + (b.color[i] - a.color[i]) * t;
+        out.padding[i] = a.padding[i] + (b.padding[i] - a.padding[i]) * t;
+        out.margin[i] = a.margin[i] + (b.margin[i] - a.margin[i]) * t;
+        out.marginAuto[i] = b.marginAuto[i]; // snap
+    }
+    out.borderRadius = a.borderRadius + (b.borderRadius - a.borderRadius) * t;
+    out.fontSize = a.fontSize + (b.fontSize - a.fontSize) * t;
+
+    // Width/height: interpolate only if both are explicitly set
+    auto lerpIfSet = [t](float av, float bv) {
+        return (av >= 0.0f && bv >= 0.0f) ? av + (bv - av) * t : bv;
+    };
+    out.explicitWidth = lerpIfSet(a.explicitWidth, b.explicitWidth);
+    out.explicitHeight = lerpIfSet(a.explicitHeight, b.explicitHeight);
+    out.minWidth = lerpIfSet(a.minWidth, b.minWidth);
+    out.maxWidth = lerpIfSet(a.maxWidth, b.maxWidth);
+    out.minHeight = lerpIfSet(a.minHeight, b.minHeight);
+    out.maxHeight = lerpIfSet(a.maxHeight, b.maxHeight);
+
+    // Strings: snap to target
+    out.fontWeight = b.fontWeight;
+    out.overflow = b.overflow;
+    out.display = b.display;
+    out.position = b.position;
+    out.textAlign = b.textAlign;
+    out.boxSizing = b.boxSizing;
+
+#ifdef MORPH_FEATURE_BORDER
+    out.borderWidth = a.borderWidth + (b.borderWidth - a.borderWidth) * t;
+    for (int i = 0; i < 4; i++)
+        out.borderColor[i] = a.borderColor[i] + (b.borderColor[i] - a.borderColor[i]) * t;
+    out.borderStyle = b.borderStyle; // snap
+#endif
+
+#ifdef MORPH_FEATURE_FLEX
+    out.gap = a.gap + (b.gap - a.gap) * t;
+    out.flexDirection = b.flexDirection;
+    out.justifyContent = b.justifyContent;
+    out.alignItems = b.alignItems;
+    out.flexWrap = b.flexWrap;
+#endif
+
+#ifdef MORPH_FEATURE_POSITION
+    auto lerpIfSetPos = [t](float av, float bv) {
+        return (av > -1e8f && bv > -1e8f) ? av + (bv - av) * t : bv;
+    };
+    out.left = lerpIfSetPos(a.left, b.left);
+    out.right = lerpIfSetPos(a.right, b.right);
+    out.top = lerpIfSetPos(a.top, b.top);
+    out.bottom = lerpIfSetPos(a.bottom, b.bottom);
+#endif
+
+#ifdef MORPH_FEATURE_SCROLL
+    out.scrollbarWidth = a.scrollbarWidth + (b.scrollbarWidth - a.scrollbarWidth) * t;
+    for (int i = 0; i < 4; i++) {
+        out.scrollbarTrackColor[i] = a.scrollbarTrackColor[i] + (b.scrollbarTrackColor[i] - a.scrollbarTrackColor[i]) * t;
+        out.scrollbarThumbColor[i] = a.scrollbarThumbColor[i] + (b.scrollbarThumbColor[i] - a.scrollbarThumbColor[i]) * t;
+    }
+    out.scrollbarBorderRadius = a.scrollbarBorderRadius + (b.scrollbarBorderRadius - a.scrollbarBorderRadius) * t;
+#endif
+
+#ifdef MORPH_FEATURE_CURSOR
+    out.cursor = b.cursor;
+#endif
+}
+
 void MorphNode::update(float dt) {
+    updateHoverTransition(dt);
     updateAnimations(dt);
     for (auto* c : children) c->update(dt);
 }

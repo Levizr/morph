@@ -21,7 +21,7 @@ No browser. No Electron. No WebView. Just a lightweight native binary.
 [![Python](https://img.shields.io/badge/python-3.10+-1dc98a?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![C++](https://img.shields.io/badge/C++-17-4da6ff?style=flat-square&logo=cplusplus&logoColor=white)](https://isocpp.org)
 [![OpenGL](https://img.shields.io/badge/OpenGL-3.3-f06449?style=flat-square)](https://opengl.org)
-[![Status](https://img.shields.io/badge/status-early%20dev-f5a623?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-0.0.6-7c6af5?style=flat-square)]()
 
 <br/>
 
@@ -112,7 +112,7 @@ In **dev mode**, the pipeline produces an IR dict that is sent over a Unix socke
 
 ---
 
-## Current State (v0.0.5 — Early Development)
+## Current State (v0.0.6 — Early Development)
 
 ### ✅ Working
 
@@ -157,7 +157,10 @@ In **dev mode**, the pipeline produces an IR dict that is sent over a Unix socke
 | **DevTools panel** — F12 toggle, element inspect (F2/click), box-model overlay (margin/border/padding/content), element info panel | Complete |
 | **Nested border-radius clipping** — stencil-based (GL_INCR) so child clips properly intersect ancestor masks | Complete |
 | **Runtime `margin: auto`** — dynamic horizontal centering re-resolved on window resize | Complete |
-| **CSS `:hover` pseudo-class** — class-based hover rules from CSS files; resolved at runtime with snap-style swap; supports color, background-color, margin, padding, border, border-radius, font-size, gap, justify-content, align-items, width, height | Complete |
+| **CSS `:hover` pseudo-class** — class-based hover rules from CSS files; resolved at runtime with snap-style swap or smooth transition; supports color, background-color, margin, padding, border, border-radius, font-size, gap, justify-content, align-items, width, height | Complete |
+| **CSS transition** — `transition-duration` / `transition-timing-function` properties and `transition` shorthand; per-element config; interpolation of all numeric/color properties with easing (linear, ease-in, ease-out, ease-in-out); string/display properties snap instantly | Complete |
+| **Body default `padding: 8px`** — replaced UA default `margin: 8px` so body background fills edge-to-edge without white gaps; no backward-compat baggage (Morph is not a browser); trivially overridable via CSS | Complete |
+| **Window clear color from body background** — `glClearColor` set to body's `background-color` each frame; fallback to white when body is transparent; eliminates color mismatch glitch during resize | Complete |
 | **Dev source hash** — CMake rebuild triggered when shared runtime files (core/, render/, widgets/, style/) change | Complete |
 | **Wayland/X11 fallback error** — clear message when GLFW window creation fails | Complete |
 
@@ -185,9 +188,11 @@ In **dev mode**, the pipeline produces an IR dict that is sent over a Unix socke
 - `overflow`, `cursor`
 - `font-size` (px, %, em, bare numbers), `font-weight`, `text-align`
 - `color`, `font-size`, `font-weight`, `text-align` cascade from parent to children
+- `<body>` default changed from `margin: 8px` → `padding: 8px` — body background fills window edge-to-edge; no white gaps. Override with any CSS rule.
 
 **Pseudo-classes**
 - `:hover` — class-based rules from CSS files (e.g. `.btn:hover`); style struct snap-copy on mouse enter/leave with correct restoration; all CSS properties above supported (color, background, margin, padding, border, border-radius, font-size, gap, flex alignment, width, height)
+- `:hover` with **transitions** — `transition-duration`, `transition-timing-function` CSS properties; `transition` shorthand (`all 0.3s ease-in-out`); interpolates all numeric/color properties (bgColor, color, margin, padding, border, radius, fontSize, gap, width/height, etc.); strings (display, position, flex-direction) snap instantly; easing: linear, ease-in, ease-out, ease-in-out
 
 **HTML Elements**
 - `div`, `span`, `h1`–`h6`, `p`, `button`
@@ -211,7 +216,9 @@ In **dev mode**, the pipeline produces an IR dict that is sent over a Unix socke
 - Image rendering — stb_image-backed texture loading (PNG/JPEG/WebP/GIF/BMP/TGA/PSD/HDR/PNM/PIC); per-texture-ID batched draw calls (`m_imageBatches: unordered_map<GLuint, vector<ImageInstance>>`); `border-radius` stencil clipping on images
 - Runtime `margin: auto` — sentinel `-1.0f` in style + `marginAuto[4]` flags, re-resolved dynamically on window resize
 - `cursor: pointer` and `cursor: text` via GLFW standard cursors
-- `:hover` pseudo-class — mouse enter/leave detection in `dispatchEvent()`; style struct snap-copy to/from `hoverStyle`; `m_baseStyle` snapshot for correct restoration
+- `:hover` pseudo-class — mouse enter/leave detection in `dispatchEvent()`; style struct snap-copy to/from `hoverStyle`; `m_baseStyle` snapshot for correct restoration; optional smooth transitions via `HoverTransition` system
+- CSS transitions — `m_transitionDuration` / `m_transitionEasing` per-node config; `onHover()` starts interpolation between current style and target; `interpolateStyles()` lerps all numeric/color/position properties, snaps strings instantly; `updateHoverTransition(dt)` runs each frame from `update()`
+- Window clear color set from body `background-color` each frame (falls back to white); eliminates color mismatch glitch on resize
 - Dirty incremental rendering — `DirtyFlag` enum (LayoutDirty, StyleDirty, PaintDirty, ScrollDirty, SubtreeDirty); `markDirty()` propagates flags up the tree; `layoutIfNeeded()` skips clean nodes; `recordPaintTree()` only re-records display lists for paint-dirty nodes; `executeDisplayList()` replays cached `m_displayList` for all nodes every frame; `MORPH_FEATURE_DIRTY_RENDERING` compile-time gate; auto-enabled when scroll, hover, events, or cursor features are present
 
 **DevTools (`morph_devrt` only)**

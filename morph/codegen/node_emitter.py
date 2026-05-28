@@ -51,6 +51,8 @@ class NodeEmitter:
             lines.append(self._set_style(node, indent, parent_style))
             lines.append(self._set_hover_style(node, indent))
             if parent_id:
+                lines.append(self._set_transition(node, indent))
+            if parent_id:
                 lines.append(f"{parent_id}->addChild({node.node_id});")
             return "\n".join(lines)
 
@@ -76,6 +78,7 @@ class NodeEmitter:
 
         lines.append(self._set_style(node, indent, parent_style))
         lines.append(self._set_hover_style(node, indent))
+        lines.append(self._set_transition(node, indent))
 
         for event in node.events:
             lines.append(self._emit_event(event, node.node_id, indent))
@@ -345,6 +348,20 @@ class NodeEmitter:
         lines = [f"{hv} = new MorphStyle({node.node_id}->style); // copy base, then override"]
         lines += [f"{indent}{l}" for l in overrides]
         return "\n" + "\n".join(lines)
+
+    def _set_transition(self, node: IRNode, indent: str) -> str:
+        if node.transition_duration <= 0:
+            return ""
+        dur = fmt(node.transition_duration)
+        easing_map = {
+            "linear": "Easing::Linear",
+            "ease-in": "Easing::EaseIn",
+            "ease-out": "Easing::EaseOut",
+            "ease-in-out": "Easing::EaseInOut",
+        }
+        easing = easing_map.get(node.transition_easing, "Easing::EaseInOut")
+        return f"{indent}{node.node_id}->m_transitionDuration = {dur};\n" \
+               f"{indent}{node.node_id}->m_transitionEasing = {easing};"
 
     def _emit_event(self, event, node_id: str, indent: str) -> str:
         from morph.codegen.event_emitter import emit_event

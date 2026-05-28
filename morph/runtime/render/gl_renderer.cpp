@@ -250,7 +250,6 @@ bool GLRenderer::ensureReady() {
     createImageBuffers();
 #endif
 
-    glClearColor(1,1,1,1);
     m_ready = true;
 #if defined(MORPH_FEATURE_TEXT) && defined(MORPH_FEATURE_IMAGE)
     return m_shader != 0 && m_textShader != 0 && m_imageShader != 0;

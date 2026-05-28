@@ -173,6 +173,7 @@ public:
     void setProjection(const float proj[16]) { memcpy(m_proj, proj, sizeof(m_proj)); }
 
     void clear() override;
+    void setClearColor(float r, float g, float b, float a) override { glClearColor(r, g, b, a); }
     void beginClip(float x, float y, float w, float h) override;
     void endClip() override;
     void beginRoundedClip(float x, float y, float w, float h, float radius) override;

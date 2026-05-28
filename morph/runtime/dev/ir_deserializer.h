@@ -204,6 +204,17 @@ static MorphNode* deserializeNode(const JsonValue& val,
         applyStyle(*node->hoverStyle, val["hover_style"]);
     }
 
+    // Transition config
+    if (val.has("transition_duration") && !val["transition_duration"].isNull())
+        node->m_transitionDuration = val["transition_duration"].asFloat();
+    if (val.has("transition_easing") && !val["transition_easing"].isNull()) {
+        std::string e = val["transition_easing"].asString();
+        if (e == "linear")      node->m_transitionEasing = Easing::Linear;
+        else if (e == "ease-in")   node->m_transitionEasing = Easing::EaseIn;
+        else if (e == "ease-out")  node->m_transitionEasing = Easing::EaseOut;
+        else if (e == "ease-in-out") node->m_transitionEasing = Easing::EaseInOut;
+    }
+
     // Compute resolved style for children
     InheritedStyle resolved = resolvedStyle(node->style, parentStyle);
 

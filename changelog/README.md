@@ -1,5 +1,43 @@
 # Changelog
 
+## [0.0.6] - 2026-05-28
+### Changed
+- **Default `<body>` margin → padding** — `_UA_DEFAULTS["body"]` switched from `margin: 8px` to `padding: 8px`. In browsers the margin creates white gaps around the window edges because the body background doesn't paint into margin space. Since Morph has zero backward-compat constraints, padding is the better default: the body background fills edge-to-edge, and internal spacing still works. Users can override with any CSS rule (e.g. `body { margin: 8px; padding: 0; }`).
+- **Window clear color matches body** — `MorphWindow::render()` now reads `m_root->style.bgColor` and sets `glClearColor` before each `clear()` call, falling back to `(1,1,1,1)` when the body is transparent. Eliminates the color-mismatch glitch visible during window resize.
+
+### Added
+- **CSS transition build-mode fix** — `cmd_build.py` `_deser_node()` now passes `transition_duration` and `transition_easing` when reconstructing IRNode objects from the JSON pipeline output. Previously these fields were silently dropped, causing build mode to always produce zero-duration (no transition) nodes even when CSS `transition` was specified.
+
+### How CSS Transitions Work
+Transitions animate style changes when `:hover` activates. Configured via standard CSS on any element:
+
+```css
+.card {
+  transition: all 0.3s ease-in-out;
+}
+/* or individually: */
+.swatch {
+  transition-duration: 0.2s;
+  transition-timing-function: ease;
+}
+```
+
+**Pipeline:**
+1. Python IR builder parses `transition`, `transition-duration`, `transition-timing-function` from CSS merged cascade and stores them as `IRNode.transition_duration` / `transition_easing`.
+2. In dev mode, the C++ deserializer reads these fields from JSON IR and sets `m_transitionDuration` / `m_transitionEasing` on the node.
+3. In build mode, the C++ codegen emits `node->m_transitionDuration = 0.2f;` / `node->m_transitionEasing = Easing::EaseInOut;` for each node.
+4. At runtime, `onHover()` allocates a `HoverTransition` struct (heap pointer `m_hoverTransition`, null when idle) capturing current style as start and the target (`hoverStyle` on enter, `m_baseStyle` on leave).
+5. `updateHoverTransition(dt)` runs each frame: advances `elapsed`, applies easing function, calls `interpolateStyles(startStyle, targetStyle, t, &out)`.
+6. `interpolateStyles()` lerps all numeric/color properties (`bgColor`, `color`, `margin`, `padding`, `border`, `borderRadius`, `fontSize`, `gap`, `width`/`height`, position offsets, scrollbar props). String/bool properties (`display`, `position`, `flexDirection`, `fontWeight`, `overflow`, `textAlign`, `boxSizing`, `borderStyle`, `cursor`, `marginAuto`) snap to target immediately. Width/height lerp only when both start and target are explicit (≥ 0).
+7. `HoverTransition` is deleted on completion. Mid-transition direction changes (hover leave during entry) capture current interpolated style as new start for smooth reversal.
+8. Easing: `Easing::Linear`, `EaseIn`, `EaseOut`, `EaseInOut` (extensible enum). Duration 0 disables transitions (backward-compatible snap behavior).
+
+Key design decisions:
+- Heap-allocated `HoverTransition` only during active transition — zero memory overhead when idle.
+- Transitions run per-node: parent and child can transition independently.
+- String/display properties snap instantly because changing layout mode mid-animation produces undefined intermediate states.
+- `updateHoverTransition()` runs before `updateAnimations()` in `update()` — explicit animations win if both target the same property.
+
 ## [0.0.5] - 2026-05-27
 ### Changed
 - Restructured project layout for PyPI: runtime/, templates/, bin/ moved into morph/ package
@@ -15,6 +53,7 @@
 - .devrt_source_hash tracking for incremental dev runtime rebuilds
 - MANIFEST.in for proper PyPI package data inclusion
 - Package metadata: readme, license, project URLs
+- **CSS transition support** — `transition-duration` / `transition-timing-function` CSS properties and `transition` shorthand; `HoverTransition` system on `MorphNode` with start/target style interpolation; `interpolateStyles()` lerps all numeric/color properties (bgColor, color, margin, padding, border, borderRadius, fontSize, gap, width/height, etc.) while snapping string properties (display, position, flex-direction, etc.) instantly; Easing enum with Linear, EaseIn, EaseOut, EaseInOut; configurable per-element via CSS transition properties; 4 easing functions with extensible enum for future additions
 - **Dirty incremental rendering system** — `DirtyFlag` enum (LayoutDirty, StyleDirty, PaintDirty, ScrollDirty, SubtreeDirty); `markDirty()` propagates flags up the tree for correct ancestor invalidation; `layoutIfNeeded()` only processes dirty/subtree-dirty nodes, skipping clean ones; `recordPaintTree()` selectively re-records display lists only for paint-dirty nodes; `executeDisplayList()` replays cached `m_displayList` for all nodes each frame; compile-time `MORPH_FEATURE_DIRTY_RENDERING` gate auto-enabled when scroll, hover, event, or cursor features are detected
 - **`DirtyStats` struct** — tracks `layoutCount`, `paintCount`, `fullTreeCount`, `skippedCount` per frame for diagnostics
 - **DevTools Rendering tab** — new second tab (F12, tabs: Elements / Rendering) showing frame number, total nodes, layout count/skipped/percentage, repainted count/cache hit, layout/paint savings percentages with green/red color coding

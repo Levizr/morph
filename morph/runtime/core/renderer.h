@@ -41,6 +41,8 @@ public:
                           int count, float color[4],
                           float x, float y, float size) = 0;
 
+    virtual void setClearColor(float r, float g, float b, float a) {}
+
     void pushScrollOffset(float dx, float dy) { m_scrollX += dx; m_scrollY += dy; }
     void popScrollOffset(float dx, float dy) { m_scrollX -= dx; m_scrollY -= dy; }
     float scrollX() const { return m_scrollX; }

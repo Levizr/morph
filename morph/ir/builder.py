@@ -14,7 +14,7 @@ from morph.style.units import to_px, needs_layout, DEFERRED
 _UA_DEFAULTS: dict[str, dict[str, str]] = {
     # ── Document ────────────────────────────────────────────
     "html": {"display": "block"},
-    "body": {"display": "block", "margin": "8px"},
+    "body": {"display": "block", "padding": "8px"},
 
     # ── Headings ────────────────────────────────────────────
     "h1": {"display": "block", "font-size": "32px",    "font-weight": "bold", "margin": "21.44px 0"},
@@ -355,6 +355,29 @@ class IRBuilder:
                 msg = m.group(1).strip().strip('"\'')
                 events.append(IREvent(trigger="click", action="log", target=msg))
 
+        # Extract transition config from merged CSS
+        trans_dur = 0.0
+        trans_easing = "ease-in-out"
+        # Support both `transition` shorthand and individual properties
+        if "transition" in merged:
+            trans_parts = merged["transition"].split()
+            # Parse: transition: <property> <duration> <timing-function> <delay>
+            for tp in trans_parts:
+                if tp.endswith("ms") or tp.endswith("s"):
+                    trans_dur = _parse_transition_duration(tp)
+                elif tp in ("ease", "ease-in", "ease-out", "ease-in-out", "linear"):
+                    trans_easing = tp
+            # If shorthand has no duration, default to 0.3s as sanity
+            if trans_dur == 0.0:
+                trans_dur = 0.3
+        if "transition-duration" in merged:
+            trans_dur = _parse_transition_duration(merged["transition-duration"])
+        if "transition-timing-function" in merged:
+            trans_easing = merged["transition-timing-function"]
+        # Normalize easing
+        if trans_easing == "ease":
+            trans_easing = "ease-in-out"
+
         return IRNode(
             node_id=node_id,
             node_type=tag,
@@ -364,6 +387,8 @@ class IRBuilder:
             events=events,
             attrs=attrs,
             raw_styles=raw_styles,
+            transition_duration=trans_dur,
+            transition_easing=trans_easing,
         )
 
     def _next_id(self) -> str:
@@ -463,6 +488,25 @@ def _int_prop(props: dict, key: str, tw_styles: dict, fallback: int) -> int:
         except (ValueError, TypeError):
             pass
     return fallback
+
+
+def _parse_transition_duration(raw: str) -> float:
+    """Parse CSS time like '0.3s' or '300ms' to float seconds."""
+    raw = raw.strip().lower()
+    if raw.endswith("ms"):
+        try:
+            return float(raw[:-2]) / 1000.0
+        except ValueError:
+            return 0.0
+    if raw.endswith("s"):
+        try:
+            return float(raw[:-1])
+        except ValueError:
+            return 0.0
+    try:
+        return float(raw)
+    except ValueError:
+        return 0.0
 
 
 def _convert_value(field: str, raw: str | float | int) -> float | str | tuple | None:

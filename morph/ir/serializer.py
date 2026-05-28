@@ -98,4 +98,7 @@ class IRSerializer:
         }
         if n.hover_style is not None:
             result["hover_style"] = self._style_dict(n.hover_style)
+        if n.transition_duration > 0:
+            result["transition_duration"] = n.transition_duration
+            result["transition_easing"] = n.transition_easing
         return result

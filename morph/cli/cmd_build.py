@@ -233,6 +233,8 @@ def _deser_node(d: dict) -> IRNode:
         children=[_deser_node(c) for c in d.get("children", [])],
         attrs=d.get("attrs", {}),
         raw_styles=d.get("raw_styles", {}),
+        transition_duration=d.get("transition_duration", 0.0),
+        transition_easing=d.get("transition_easing", "ease-in-out"),
         events=[
             IREvent(trigger=e.get("trigger", ""), action=e.get("action", ""),
                     target=e.get("target", ""))

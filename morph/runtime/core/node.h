@@ -48,6 +48,14 @@ struct MorphAnimation {
     bool finished;
 };
 
+// ── Hover transition state (heap-allocated only when active) ──
+struct HoverTransition {
+    MorphStyle startStyle;
+    MorphStyle targetStyle;
+    float elapsed = 0.0f;
+    bool active = false;
+};
+
 class MorphNode {
 public:
     float x = 0, y = 0, w = 0, h = 0;
@@ -55,6 +63,11 @@ public:
     float m_computedMargin[4] = {0}; // resolved margins after latest layout()
     MorphStyle m_baseStyle;   // snapshot of original base style (for hover restore)
     MorphStyle* hoverStyle = nullptr; // allocated only when :hover rules exist
+
+    // Transition config (0 duration = no transition, instant snap)
+    float m_transitionDuration = 0.0f;
+    Easing m_transitionEasing = Easing::EaseInOut;
+
     MorphNode* parent = nullptr;
     std::vector<MorphNode*> children;
     bool focused = false;
@@ -84,6 +97,12 @@ public:
     virtual bool onEvent(MorphEvent& e) { return false; }
     virtual void onHover(bool state);
 
+    // ── Hover transitions ──
+    HoverTransition* m_hoverTransition = nullptr;
+    void updateHoverTransition(float dt);
+    static void interpolateStyles(MorphStyle& out, const MorphStyle& a,
+                                  const MorphStyle& b, float t);
+
     void startAnimation(AnimProperty prop, float to, float duration, Easing easing = Easing::Linear);
 
     virtual float contentWidth(Renderer* r);
@@ -108,5 +127,5 @@ public:
     virtual void recordDisplayList(Renderer& r);
     virtual void executeDisplayList(Renderer& r);
 
-    virtual ~MorphNode() { delete hoverStyle; }
+    virtual ~MorphNode() { delete hoverStyle; delete m_hoverTransition; }
 };

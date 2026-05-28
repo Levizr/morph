@@ -16,6 +16,8 @@ class IRNode:
     attrs: dict[str, str] = field(default_factory=dict)
     parent_id: str | None = None
     raw_styles: dict[str, str] = field(default_factory=dict)
+    transition_duration: float = 0.0   # 0 = no transition
+    transition_easing: str = "ease-in-out"
 
     # computed by LayoutEngine
     x: float = 0.0
