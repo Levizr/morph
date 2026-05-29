@@ -20,7 +20,7 @@ KNOWN_PROPERTIES: dict[str, str] = {
     "border-radius":    "0",
     "display":          "block",
     "flex-direction":   "row",
-    "flex":             "0",
+    "flex":             "initial",
     "gap":              "0",
     "font-size":        "16px",
     "font-weight":      "normal",

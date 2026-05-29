@@ -193,6 +193,12 @@ class NodeEmitter:
                 lines.append(f"{prefix}.alignItems = \"{s.align_items}\";")
             if s.flex_wrap != "nowrap":
                 lines.append(f"{prefix}.flexWrap = \"{s.flex_wrap}\";")
+            if s.flex_grow != 0.0:
+                lines.append(f"{prefix}.flexGrow = {fmt(s.flex_grow)};")
+            if s.flex_shrink != 1.0:
+                lines.append(f"{prefix}.flexShrink = {fmt(s.flex_shrink)};")
+            if s.flex_basis != "auto":
+                lines.append(f"{prefix}.flexBasis = \"{s.flex_basis}\";")
 
         # ── Feature: POSITION ──
         if "position" in self.features:

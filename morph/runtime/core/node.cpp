@@ -421,13 +421,12 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
     int count = (int)normal.size();
 
 #ifdef MORPH_FEATURE_FLEX
-    // ── Flex layout (two-pass) ─────────────────────────────────
+    // ── Flex layout (multi-line with wrap/grow/shrink) ─────────
     if (style.display == "flex") {
-        struct ChildInfo { MorphNode* node; float w, h, mt, mb, ml, mr; };
-        std::vector<ChildInfo> info;
-        float totalMain = 0.0f;
+        struct FlexItem { MorphNode* node; float main, cross, mt, mr, mb, ml; };
+        std::vector<FlexItem> items;
 
-        // Pass 1: measure children
+        // Pass 1: measure each child
         for (auto* c : normal) {
             c->layout(0.0f, 0.0f, cw, 0.0f, r);
 
@@ -438,102 +437,171 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 
             float cmt = c->style.margin[0], cmb = c->style.margin[2];
             float cml = c->style.margin[3], cmr = c->style.margin[1];
-            float childDim = isCol ? c->h : c->w;
-            totalMain += childDim + (isCol ? cmt + cmb : cml + cmr);
-            info.push_back({c, c->w, c->h, cmt, cmb, cml, cmr});
+            float childMain = isCol ? (c->h + cmt + cmb) : (c->w + cml + cmr);
+            float childCross = isCol ? (c->w + cml + cmr) : (c->h + cmt + cmb);
+            items.push_back({c, childMain, childCross, cmt, cmr, cmb, cml});
         }
 
-        float gapTotal = (count > 1) ? (count - 1) * style.gap : 0.0f;
+        // Wrap into flex lines
+        float mainAvail = isCol ? ch : cw;
+        bool flexWrap = style.flexWrap == "wrap";
 
-        // Pass 2: position each child
-        float mainStart = isCol ? cy : cx;
-        float mainSize  = isCol ? ch : cw;
-        float cross     = isCol ? cx : cy;
-        float crossSize = isCol ? cw : ch;
+        struct FlexLine { std::vector<FlexItem*> fItems; float crossSize = 0.0f; float totalMain = 0.0f; };
+        std::vector<FlexLine> lines;
+        FlexLine curLine;
 
-        if (mainSize > totalMain + gapTotal) {
-            if (style.justifyContent == "center") {
-                mainStart += (mainSize - totalMain - gapTotal) * 0.5f;
-            } else if (style.justifyContent == "flex-end") {
-                mainStart += mainSize - totalMain - gapTotal;
+        for (auto& item : items) {
+            if (flexWrap && !curLine.fItems.empty() && curLine.totalMain + item.main > mainAvail) {
+                lines.push_back(curLine);
+                curLine = FlexLine();
             }
+            curLine.fItems.push_back(&item);
+            curLine.totalMain += item.main + (curLine.fItems.size() > 1 ? style.gap : 0.0f);
+            if (item.cross > curLine.crossSize) curLine.crossSize = item.cross;
         }
+        if (!curLine.fItems.empty()) lines.push_back(curLine);
+        if (lines.empty()) lines.push_back(FlexLine());
 
-        float cursor = mainStart;
-        for (size_t i = 0; i < normal.size(); i++) {
-            auto& ci = info[i];
-            float childMain = isCol ? ci.h : ci.w;
-            float crossDim  = isCol ? ci.w : ci.h;
+        // Apply flex-grow / flex-shrink per line
+        for (auto& line : lines) {
+            float extraGap = line.fItems.size() > 1 ? style.gap * (line.fItems.size() - 1) : 0.0f;
+            float remaining = mainAvail - line.totalMain;
 
-            float posMain = cursor + (isCol ? ci.mt : ci.ml);
-            float posCross = cross + (isCol ? ci.ml : ci.mt);
-
-            if (crossSize > crossDim) {
-                if (style.alignItems == "center") {
-                    posCross = cross + (crossSize - crossDim) * 0.5f;
-                } else if (style.alignItems == "flex-end") {
-                    posCross = cross + crossSize - crossDim;
-                    posCross -= (isCol ? ci.mr : ci.mb);
-                }
-            }
-
-            float childX = isCol ? posCross : posMain;
-            float childY = isCol ? posMain : posCross;
-            float childPW = isCol ? ((style.alignItems == "stretch") ? cw : crossDim) : childMain;
-            float childPH = isCol ? childMain : ((style.alignItems == "stretch") ? ch : crossDim);
-
-            // Content-based sizing for non-stretch flex children
-            if (style.alignItems != "stretch" && ci.node->style.explicitWidth < 0.0f && isCol) {
-                float cwVal = ci.node->contentWidth(r);
-                if (cwVal > 0.0f && cwVal < childPW) {
-                    crossDim = cwVal;
-                    childPW = cwVal;
-                    if (crossSize > crossDim) {
-                        if (style.alignItems == "center")
-                            posCross = cross + (crossSize - crossDim) * 0.5f;
-                        else if (style.alignItems == "flex-end")
-                            posCross = cross + crossSize - crossDim;
-                        childX = isCol ? posCross : posMain;
-                        childY = isCol ? posMain : posCross;
+            if (remaining > 0.0f) {
+                float growTotal = 0.0f;
+                for (auto* item : line.fItems) growTotal += item->node->style.flexGrow;
+                if (growTotal > 0.0f) {
+                    float perUnit = remaining / growTotal;
+                    for (auto* item : line.fItems) {
+                        float g = item->node->style.flexGrow;
+                        if (g > 0.0f) {
+                            float add = perUnit * g;
+                            if (isRow) item->node->w += add;
+                            else item->node->h += add;
+                            item->main += add;
+                        }
                     }
                 }
             }
 
-            // Save computed margins from the first layout pass (second call
-            // re-resolves auto margins with parentW == childPW == w, giving 0)
-            float savedCM[4] = {
-                ci.node->m_computedMargin[0], ci.node->m_computedMargin[1],
-                ci.node->m_computedMargin[2], ci.node->m_computedMargin[3]
-            };
-            ci.node->layout(childX, childY, childPW, childPH, r);
-            ci.node->m_computedMargin[0] = savedCM[0];
-            ci.node->m_computedMargin[1] = savedCM[1];
-            ci.node->m_computedMargin[2] = savedCM[2];
-            ci.node->m_computedMargin[3] = savedCM[3];
+            if (remaining < 0.0f) {
+                float shrinkTotal = 0.0f;
+                for (auto* item : line.fItems) shrinkTotal += item->node->style.flexShrink;
+                if (shrinkTotal > 0.0f) {
+                    float toReduce = -remaining;
+                    for (auto* item : line.fItems) {
+                        float s = item->node->style.flexShrink / shrinkTotal;
+                        float reduction = toReduce * s;
+                        float reduced = std::max(0.0f, item->main - reduction);
+                        if (isRow) item->node->w -= item->main - reduced;
+                        else item->node->h -= item->main - reduced;
+                        item->main = reduced;
+                    }
+                }
+            }
+        }
 
-            // Stretch alignment: item fills the cross-axis line size
-            if (style.alignItems == "stretch" && ci.node->style.explicitWidth < 0.0f && isCol) {
-                float availW = cw - ci.ml - ci.mr;
-                if (availW < 0.0f) availW = 0.0f;
-                if (availW > ci.node->w)
-                    ci.node->w = availW;
-            }
-            if (style.alignItems == "stretch" && ci.node->style.explicitHeight < 0.0f && isRow) {
-                float availH = ch - ci.mt - ci.mb;
-                if (availH < 0.0f) availH = 0.0f;
-                if (availH > ci.node->h)
-                    ci.node->h = availH;
+        // Position each line
+        float mainStart = isCol ? cy : cx;
+        float crossStart = isCol ? cx : cy;
+        float crossSize = isCol ? cw : ch;
+        float cursorCross = crossStart;
+
+        for (auto& line : lines) {
+            float lineCross = line.crossSize;
+            float extraGap = line.fItems.size() > 1 ? style.gap * (line.fItems.size() - 1) : 0.0f;
+            float free = mainAvail - line.totalMain;
+
+            // justify-content
+            float offset = 0.0f;
+            float itemGap = style.gap;
+            if (style.justifyContent == "center") {
+                offset = free * 0.5f;
+            } else if (style.justifyContent == "flex-end") {
+                offset = free;
+            } else if (style.justifyContent == "space-between") {
+                offset = 0.0f;
+                itemGap = line.fItems.size() > 1 ? free / (line.fItems.size() - 1) : 0.0f;
+            } else if (style.justifyContent == "space-around") {
+                offset = line.fItems.size() > 0 ? free / (line.fItems.size() * 2) : 0.0f;
+                itemGap = line.fItems.size() > 0 ? free / line.fItems.size() : 0.0f;
             }
 
-            float outerH = ci.node->h;
-            float outerW = ci.node->w;
-            cursor += (isCol ? outerH + ci.mt + ci.mb : outerW + ci.ml + ci.mr) + style.gap;
-            float cb = ci.node->y + outerH + ci.mb;
-            if (cb > maxBottom) maxBottom = cb;
-            if (isRow) {
-                float rb = ci.node->x + outerW + ci.mr;
-                if (rb > maxRight) maxRight = rb;
+            float cursor = mainStart + offset;
+
+            for (size_t i = 0; i < line.fItems.size(); i++) {
+                auto* ci = line.fItems[i];
+                float childMain = isCol ? ci->node->h : ci->node->w;
+                float crossDim  = isCol ? ci->node->w : ci->node->h;
+
+                float posMain = cursor + (isCol ? ci->mt : ci->ml);
+                float posCross = cursorCross + (isCol ? ci->ml : ci->mt);
+
+                if (lineCross > crossDim) {
+                    if (style.alignItems == "center") {
+                        posCross = cursorCross + (lineCross - crossDim) * 0.5f;
+                    } else if (style.alignItems == "flex-end") {
+                        posCross = cursorCross + lineCross - crossDim;
+                        posCross -= (isCol ? ci->mr : ci->mb);
+                    }
+                }
+
+                float childX = isCol ? posCross : posMain;
+                float childY = isCol ? posMain : posCross;
+                float childPW = isCol ? ((style.alignItems == "stretch") ? crossSize : crossDim) : childMain;
+                float childPH = isCol ? childMain : ((style.alignItems == "stretch") ? lineCross : crossDim);
+
+                // Content-based sizing for non-stretch flex children
+                if (style.alignItems != "stretch" && ci->node->style.explicitWidth < 0.0f && isCol) {
+                    float cwVal = ci->node->contentWidth(r);
+                    if (cwVal > 0.0f && cwVal < childPW) {
+                        crossDim = cwVal;
+                        childPW = cwVal;
+                        if (lineCross > crossDim) {
+                            if (style.alignItems == "center")
+                                posCross = cursorCross + (lineCross - crossDim) * 0.5f;
+                            else if (style.alignItems == "flex-end")
+                                posCross = cursorCross + lineCross - crossDim;
+                            childX = isCol ? posCross : posMain;
+                            childY = isCol ? posMain : posCross;
+                        }
+                    }
+                }
+
+                float savedCM[4] = {
+                    ci->node->m_computedMargin[0], ci->node->m_computedMargin[1],
+                    ci->node->m_computedMargin[2], ci->node->m_computedMargin[3]
+                };
+                ci->node->layout(childX, childY, childPW, childPH, r);
+                ci->node->m_computedMargin[0] = savedCM[0];
+                ci->node->m_computedMargin[1] = savedCM[1];
+                ci->node->m_computedMargin[2] = savedCM[2];
+                ci->node->m_computedMargin[3] = savedCM[3];
+
+                // Stretch alignment: item fills the cross-axis line size
+                if (style.alignItems == "stretch" && ci->node->style.explicitWidth < 0.0f && isCol) {
+                    float availW = crossSize - ci->ml - ci->mr;
+                    if (availW < 0.0f) availW = 0.0f;
+                    if (availW > ci->node->w) ci->node->w = availW;
+                }
+                if (style.alignItems == "stretch" && ci->node->style.explicitHeight < 0.0f && isRow) {
+                    float availH = lineCross - ci->mt - ci->mb;
+                    if (availH < 0.0f) availH = 0.0f;
+                    if (availH > ci->node->h) ci->node->h = availH;
+                }
+
+                float outerH = ci->node->h;
+                float outerW = ci->node->w;
+                cursor += (isCol ? outerH + ci->mt + ci->mb : outerW + ci->ml + ci->mr) + itemGap;
+                float cb = ci->node->y + outerH + ci->mb;
+                if (cb > maxBottom) maxBottom = cb;
+                if (isRow) {
+                    float rb = ci->node->x + outerW + ci->mr;
+                    if (rb > maxRight) maxRight = rb;
+                }
             }
+
+            cursorCross += lineCross + style.gap;
         }
         goto after_children;
     }
@@ -646,7 +714,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 
         // ── Single pass over children preserving document order ──
         for (auto* c : normal) {
-            if (c->style.display == "inline") {
+            if (c->style.display == "inline" || c->type == "__text__") {
                 currentInline.push_back(c);
             } else {
                 // Flush any pending inline group before this block
@@ -829,7 +897,7 @@ float MorphNode::contentWidth(Renderer* r) {
     {
         float totalInline = 0.0f;
         for (auto* c : children) {
-            if (c->style.display == "inline") {
+            if (c->style.display == "inline" || c->type == "__text__") {
                 float cw = c->contentWidth(r);
                 if (cw > 0.0f)
                     totalInline += cw + c->style.margin[3] + c->style.margin[1];

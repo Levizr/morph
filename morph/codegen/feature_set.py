@@ -38,7 +38,9 @@ class FeatureSet:
             self.features.add("flex")
         if s.gap > 0:
             self.features.add("flex")
-        if s.justify_content != "flex-start" or s.align_items != "stretch" or s.flex_wrap != "nowrap":
+        if (s.justify_content != "flex-start" or s.align_items != "stretch" or
+            s.flex_wrap != "nowrap" or
+            s.flex_grow != 0.0 or s.flex_shrink != 1.0 or s.flex_basis != "auto"):
             self.features.add("flex")
         if s.cursor not in ("default", "", None):
             self.features.add("cursor")

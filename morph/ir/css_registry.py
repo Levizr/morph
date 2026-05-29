@@ -29,7 +29,7 @@ CSS_REGISTRY = {
     "padding-left":           {"feature": None,  "type": "px"},
     "overflow":               {"feature": None,  "type": "keyword"},
     "display":                {"feature": None,  "type": "keyword",
-                               "values": {"flex": {"enables": ["flex-direction", "justify-content", "align-items", "gap", "flex-wrap"]}}},
+                               "values": {"flex": {"enables": ["flex-direction", "justify-content", "align-items", "gap", "flex-wrap", "flex-grow", "flex-shrink", "flex-basis"]}}},
     "box-sizing":             {"feature": None,  "type": "keyword"},
     "flex-direction":         {"feature": "flex", "type": "keyword"},
     "position":               {"feature": None,  "type": "keyword",
@@ -40,6 +40,9 @@ CSS_REGISTRY = {
     "justify-content":        {"feature": "flex", "type": "keyword"},
     "align-items":            {"feature": "flex", "type": "keyword"},
     "flex-wrap":              {"feature": "flex", "type": "keyword"},
+    "flex-grow":              {"feature": "flex", "type": "number"},
+    "flex-shrink":            {"feature": "flex", "type": "number"},
+    "flex-basis":             {"feature": "flex", "type": "keyword"},
     "gap":                    {"feature": "flex", "type": "px"},
 
     # ── Position ───────────────────────────────────────────

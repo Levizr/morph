@@ -122,6 +122,13 @@ static void applyStyle(MorphStyle& s, const JsonValue& styleVal) {
     if (!styleVal["align_items"].isNull())
         s.alignItems = styleVal["align_items"].asString();
 
+    if (!styleVal["flex_grow"].isNull())
+        s.flexGrow = styleVal["flex_grow"].asFloat();
+    if (!styleVal["flex_shrink"].isNull())
+        s.flexShrink = styleVal["flex_shrink"].asFloat();
+    if (!styleVal["flex_basis"].isNull())
+        s.flexBasis = styleVal["flex_basis"].asString();
+
     if (!styleVal["gap"].isNull())
         s.gap = styleVal["gap"].asFloat();
 

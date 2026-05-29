@@ -20,7 +20,9 @@ class IRStyle:
     text_align:    str   = "left"
     display:       str   = "block"
     flex_dir:      str   = "row"
-    flex:          float = 0.0
+    flex_grow:     float = 0.0
+    flex_shrink:   float = 1.0
+    flex_basis:    str   = "auto"
     gap:           float = 0.0
     position:      str   = "static"
     left:          float | None = None

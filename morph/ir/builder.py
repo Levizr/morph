@@ -124,7 +124,9 @@ _CSS_TO_IR: dict[str, str] = {
     "max-width":                "max_width",
     "display":                  "display",
     "flex-direction":           "flex_dir",
-    "flex":                     "flex",
+    "flex-grow":                "flex_grow",
+    "flex-shrink":              "flex_shrink",
+    "flex-basis":               "flex_basis",
     "gap":                      "gap",
     "overflow":                 "overflow",
     "position":                 "position",
@@ -251,7 +253,7 @@ class IRBuilder:
                 node_id=node_id,
                 node_type="__text__",
                 text_content=jsx_node.get("text", ""),
-                style=IRStyle(),
+                style=IRStyle(display="inline"),
                 children=[],
                 events=[],
             )
@@ -391,6 +393,50 @@ class IRBuilder:
             transition_easing=trans_easing,
         )
 
+    @staticmethod
+    def _parse_flex_shorthand(ir_kw: dict, css_val: str) -> None:
+        """Parse the CSS `flex` shorthand into flex_grow/shrink/basis."""
+        parts = css_val.strip().split()
+        kw = css_val.strip()
+        if kw == "none":
+            ir_kw["flex_grow"] = 0.0
+            ir_kw["flex_shrink"] = 0.0
+            ir_kw["flex_basis"] = "auto"
+        elif kw == "auto":
+            ir_kw["flex_grow"] = 1.0
+            ir_kw["flex_shrink"] = 1.0
+            ir_kw["flex_basis"] = "auto"
+        elif kw == "initial":
+            ir_kw["flex_grow"] = 0.0
+            ir_kw["flex_shrink"] = 1.0
+            ir_kw["flex_basis"] = "auto"
+        elif len(parts) == 1:
+            try:
+                v = float(parts[0])
+                ir_kw["flex_grow"] = v
+                ir_kw["flex_shrink"] = 1.0
+                ir_kw["flex_basis"] = "0%"
+            except ValueError:
+                pass
+        elif len(parts) == 2:
+            try:
+                g = float(parts[0])
+                s = float(parts[1])
+                ir_kw["flex_grow"] = g
+                ir_kw["flex_shrink"] = s
+                ir_kw["flex_basis"] = "0%"
+            except ValueError:
+                pass
+        elif len(parts) == 3:
+            try:
+                g = float(parts[0])
+                s = float(parts[1])
+                ir_kw["flex_grow"] = g
+                ir_kw["flex_shrink"] = s
+                ir_kw["flex_basis"] = parts[2]
+            except ValueError:
+                pass
+
     def _next_id(self) -> str:
         self._counter += 1
         return f"node_{self._counter:04d}"
@@ -412,6 +458,10 @@ class IRBuilder:
                             ir_kw["border_width"] = to_px(p)
                         except (ValueError, TypeError):
                             pass
+                continue
+
+            if css_key == "flex":
+                self._parse_flex_shorthand(ir_kw, css_val)
                 continue
             ir_field = _CSS_TO_IR.get(css_key)
             if ir_field is None:
@@ -521,7 +571,7 @@ def _convert_value(field: str, raw: str | float | int) -> float | str | tuple | 
         return parse_color(raw)
 
     if field in ("width", "height", "min_width", "max_width", "min_height", "max_height",
-                 "border_radius", "font_size", "flex", "gap"):
+                 "border_radius", "font_size", "flex_grow", "flex_shrink", "gap"):
         try:
             return to_px(raw)
         except (ValueError, TypeError):
@@ -539,7 +589,7 @@ def _convert_value(field: str, raw: str | float | int) -> float | str | tuple | 
 
     if field in ("font_weight", "text_align", "display", "flex_dir",
                  "overflow", "position", "justify_content", "align_items",
-                 "flex_wrap", "cursor", "box_sizing"):
+                 "flex_wrap", "flex_basis", "cursor", "box_sizing"):
         return raw
 
     if field in ("left", "right", "top", "bottom"):

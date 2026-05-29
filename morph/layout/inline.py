@@ -24,6 +24,8 @@ def estimate_text_width(node: IRNode) -> float:
     for ch in text:
         if ch == " ":
             w += fs * _SPACE_WIDTH_RATIO
+        elif ch in "\t\r\n":
+            pass
         else:
             w += fs * _CHAR_WIDTH_RATIO
     return w

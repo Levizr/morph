@@ -44,6 +44,7 @@ from morph.layout.inline import (
     apply_inline_positions,
     estimate_text_width,
 )
+from morph.layout.flex import apply_flex
 from morph.style.units import resolve, DEFERRED
 
 
@@ -159,54 +160,94 @@ class LayoutEngine:
         prev_mb = 0.0
         i = 0
 
-        while i < len(node.children):
-            child = node.children[i]
-            dsp = "inline" if child.node_type == "__text__" else child.style.display
+        # Flex container: measure children individually, estimate total height
+        # from flex line wrapping (like inline, but along main axis).
+        if node.style.display == "flex":
+            is_row = node.style.flex_dir == "row"
+            wrap = node.style.flex_wrap == "wrap"
+            flex_gap = node.style.gap
+            main_avail = cw if is_row else cw  # use cw for both (approximate)
+            total_cross = 0.0
+            line_main = 0.0
+            line_cross = 0.0
+            first_in_line = True
 
-            if dsp == "none":
-                self._heights[child.node_id] = 0.0
-                i += 1
-                continue
+            for child in node.children:
+                if child.style.display == "none":
+                    self._heights[child.node_id] = 0.0
+                    continue
+                self._measure(child, cw)
+                mt, mr, mb, ml = child.style.margin
+                cmain = (child.w + ml + mr) if is_row else (child.h + mt + mb)
+                ccross = (child.h + mt + mb) if is_row else (child.w + ml + mr)
 
-            if dsp == "inline":
-                group: list[IRNode] = []
-                while i < len(node.children):
-                    ic = node.children[i]
-                    icd = "inline" if ic.node_type == "__text__" else ic.style.display
-                    if icd != "inline":
-                        break
-                    self._measure(ic, cw)
-                    group.append(ic)
+                if not first_in_line and wrap and line_main + cmain > main_avail:
+                    total_cross += max(line_cross, 0.0) + flex_gap
+                    line_main = 0.0
+                    line_cross = 0.0
+                    first_in_line = True
+                line_main += cmain + (flex_gap if not first_in_line else 0)
+                if ccross > line_cross:
+                    line_cross = ccross
+                first_in_line = False
+
+            if line_cross > 0:
+                total_cross += line_cross
+            content_h = total_cross
+        else:
+            while i < len(node.children):
+                child = node.children[i]
+                dsp = "inline" if child.node_type == "__text__" else child.style.display
+
+                if dsp == "none":
+                    self._heights[child.node_id] = 0.0
                     i += 1
-                # Approximate line count from total inline width (ceil division)
-                if group:
-                    line_h = max(c.h for c in group)
-                    total_w = sum(c.w for c in group)
-                    n_lines = math.ceil(total_w / max(cw, 1))
-                    content_h += line_h * n_lines + (n_lines - 1) * node.style.gap
-                prev_mb = 0.0  # inline resets collapsing context
+                    continue
 
-            else:  # block
-                child_h = self._measure(child, cw)
-                # Convert content height to border-box height
-                child_bh = child_h
-                if child.style.height is not None:
-                    if child.style.box_sizing == "border-box":
-                        child_bh = child.style.height
+                if dsp == "inline":
+                    group: list[IRNode] = []
+                    while i < len(node.children):
+                        ic = node.children[i]
+                        icd = "inline" if ic.node_type == "__text__" else ic.style.display
+                        if icd != "inline":
+                            break
+                        self._measure(ic, cw)
+                        group.append(ic)
+                        i += 1
+                    # Line-breaking simulation matching inline.py layout_inline_lines
+                    if group:
+                        line_h = max(c.h for c in group)
+                        n_lines = 1
+                        line_x = 0.0
+                        for c in group:
+                            if line_x > 0.0 and line_x + c.w > cw:
+                                n_lines += 1
+                                line_x = 0.0
+                            line_x += c.w
+                        content_h += line_h * n_lines + (n_lines - 1) * node.style.gap
+                    prev_mb = 0.0  # inline resets collapsing context
+
+                else:  # block
+                    child_h = self._measure(child, cw)
+                    # Convert content height to border-box height
+                    child_bh = child_h
+                    if child.style.height is not None:
+                        if child.style.box_sizing == "border-box":
+                            child_bh = child.style.height
+                        else:
+                            child_bh = child.style.height + child.style.border_width * 2 \
+                                        + child.style.padding[0] + child.style.padding[2]
                     else:
-                        child_bh = child.style.height + child.style.border_width * 2 \
+                        child_bh = child_h + child.style.border_width * 2 \
                                     + child.style.padding[0] + child.style.padding[2]
-                else:
-                    child_bh = child_h + child.style.border_width * 2 \
-                                + child.style.padding[0] + child.style.padding[2]
 
-                child_bh = max(child_bh, 0.0)
-                cmt = child.style.margin[0]
-                cmb = child.style.margin[2]
-                gap = max(prev_mb, cmt) if prev_mb >= 0 else cmt
-                content_h += gap + child_bh
-                prev_mb = cmb
-                i += 1
+                    child_bh = max(child_bh, 0.0)
+                    cmt = child.style.margin[0]
+                    cmb = child.style.margin[2]
+                    gap = max(prev_mb, cmt) if prev_mb >= 0 else cmt
+                    content_h += gap + child_bh
+                    prev_mb = cmb
+                    i += 1
 
         self._heights[node.node_id] = content_h
         return content_h
@@ -256,6 +297,27 @@ class LayoutEngine:
         cx, cy, cw, _ch = resolve_content_box(node)
 
         # ── 5. Lay out children ───────────────────────────────
+        if node.style.display == "flex":
+            apply_flex(node)
+            # Recurse into children for their own descendants
+            for child in node.children:
+                if child.style.display != "none":
+                    self._layout(child, child.x, child.y, child.w, child.h)
+            # Skip normal child loop
+            # Auto-height expansion
+            if node.style.height is None and node.children:
+                bw = node.style.border_width
+                pb = node.style.padding[2]
+                max_bottom = max(
+                    (c.y + c.h for c in node.children if c.style.display != "none"),
+                    default=node.y + node.h,
+                )
+                desired = (max_bottom - node.y) + pb + bw
+                if desired > node.h:
+                    node.h = desired
+            apply_min_max(node)
+            return
+
         i = 0
         prev_block: IRNode | None = None  # last block sibling (for margin collapsing)
 
