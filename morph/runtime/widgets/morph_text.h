@@ -52,10 +52,16 @@ public:
 
     void executeDisplayList(Renderer& r) override {
         for (auto& top : m_textOps) {
-            // Inherit parent's animated color when own color isn't explicitly overridden
             float* effectiveColor = top.color;
             if (parent && !m_colorOverridden) {
-                effectiveColor = parent->style.color;
+                MorphNode* src = parent;
+                while (src) {
+                    float* c = src->style.color;
+                    if (c[0] != 0.0f || c[1] != 0.0f || c[2] != 0.0f || c[3] != 1.0f)
+                        break;
+                    src = src->parent;
+                }
+                effectiveColor = src ? src->style.color : parent->style.color;
             }
             r.drawText(top.text, top.x, top.y, effectiveColor, top.align,
                        top.fontSize, top.fontWeight);
@@ -150,7 +156,18 @@ public:
                 float tw = r.measureTextWidth(line, style.fontSize, style.fontWeight);
                 lx = x + w - tw;
             }
-            r.drawText(line, lx, py, style.color, TextAlign::Left,
+            float* effectiveColor = style.color;
+            if (parent && !m_colorOverridden) {
+                MorphNode* src = parent;
+                while (src) {
+                    float* c = src->style.color;
+                    if (c[0] != 0.0f || c[1] != 0.0f || c[2] != 0.0f || c[3] != 1.0f)
+                        break;
+                    src = src->parent;
+                }
+                effectiveColor = src ? src->style.color : parent->style.color;
+            }
+            r.drawText(line, lx, py, effectiveColor, TextAlign::Left,
                        style.fontSize, style.fontWeight);
             py += lh;
         }
