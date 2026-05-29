@@ -204,12 +204,12 @@ class LayoutEngine:
                     i += 1
                     continue
 
-                if dsp == "inline":
+                if dsp in ("inline", "inline-block"):
                     group: list[IRNode] = []
                     while i < len(node.children):
                         ic = node.children[i]
                         icd = "inline" if ic.node_type == "__text__" else ic.style.display
-                        if icd != "inline":
+                        if icd not in ("inline", "inline-block"):
                             break
                         self._measure(ic, cw)
                         group.append(ic)
@@ -277,8 +277,10 @@ class LayoutEngine:
         if node.node_type == "__text__":
             node.x = px
             node.y = py
-            if node.w == 0.0:
-                node.w = estimate_text_width(node)
+            # Use parent content width so the build-time hardcoded w
+            # matches the wrapping width the runtime will compute
+            if node.w == 0.0 or node.w > parent_w:
+                node.w = parent_w
             if node.h == 0.0:
                 node.h = node.style.font_size * 1.4
             return
@@ -330,13 +332,13 @@ class LayoutEngine:
                 i += 1
                 continue
 
-            if dsp == "inline":
+            if dsp in ("inline", "inline-block"):
                 # Collect consecutive inline children into line boxes
                 group: list[IRNode] = []
                 while i < len(node.children):
                     ic = node.children[i]
                     icd = "inline" if ic.node_type == "__text__" else ic.style.display
-                    if icd != "inline":
+                    if icd not in ("inline", "inline-block"):
                         break
                     group.append(ic)
                     i += 1

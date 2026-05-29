@@ -133,6 +133,7 @@ private:
     GLint m_uProj = -1;
     GLint m_uStencilMode = -1;
     int m_stencilClipDepth = 0;
+    int m_scissorClipDepth = 0;
     bool m_ready = false;
     std::vector<Instance> m_batch;
     float m_proj[16] = {};

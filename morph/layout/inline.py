@@ -106,7 +106,9 @@ def layout_inline_lines(
             node=child,
             x=line_x,
             y=cy,
-            w=text_w,
+            # Clamp text node width to available line width so wrapping
+            # texts don't keep their single-line content width
+            w=min(text_w, available_width) if child.node_type == "__text__" else text_w,
             h=child_h,
         )
         current_line.items.append(item)

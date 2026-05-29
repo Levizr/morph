@@ -135,25 +135,168 @@ void MorphNode::updateAnimations(float dt) {
     }
 }
 
+// Helper: apply only non-default fields from delta to target
+static void applyStyleDelta(MorphStyle& target, const MorphStyle& delta) {
+    if (delta.bgColor[0] != 0.0f || delta.bgColor[1] != 0.0f || delta.bgColor[2] != 0.0f || delta.bgColor[3] != 0.0f)
+        memcpy(target.bgColor, delta.bgColor, sizeof(float)*4);
+    if (delta.color[0] != 0.0f || delta.color[1] != 0.0f || delta.color[2] != 0.0f || delta.color[3] != 1.0f)
+        memcpy(target.color, delta.color, sizeof(float)*4);
+    if (delta.borderRadius != 0.0f) target.borderRadius = delta.borderRadius;
+    if (delta.fontSize != 16.0f)     target.fontSize = delta.fontSize;
+    if (delta.fontWeight != "normal") target.fontWeight = delta.fontWeight;
+    if (delta.textAlign != "left")    target.textAlign = delta.textAlign;
+    if (delta.display != "block")     target.display = delta.display;
+    if (delta.overflow != "visible")  target.overflow = delta.overflow;
+    if (delta.position != "static")   target.position = delta.position;
+    if (delta.boxSizing != "content-box") target.boxSizing = delta.boxSizing;
+    // Spacing
+    if (delta.padding[0] != 0.0f || delta.padding[1] != 0.0f || delta.padding[2] != 0.0f || delta.padding[3] != 0.0f)
+        memcpy(target.padding, delta.padding, sizeof(float)*4);
+    if (delta.margin[0] != 0.0f || delta.margin[1] != 0.0f || delta.margin[2] != 0.0f || delta.margin[3] != 0.0f)
+        memcpy(target.margin, delta.margin, sizeof(float)*4);
+    if (delta.marginAuto[0] || delta.marginAuto[1] || delta.marginAuto[2] || delta.marginAuto[3])
+        memcpy(target.marginAuto, delta.marginAuto, sizeof(bool)*4);
+    // Sizing
+    if (delta.explicitWidth >= 0.0f)  target.explicitWidth = delta.explicitWidth;
+    if (delta.explicitHeight >= 0.0f) target.explicitHeight = delta.explicitHeight;
+    if (delta.minWidth >= 0.0f)       target.minWidth = delta.minWidth;
+    if (delta.maxWidth >= 0.0f)       target.maxWidth = delta.maxWidth;
+    if (delta.minHeight >= 0.0f)      target.minHeight = delta.minHeight;
+    if (delta.maxHeight >= 0.0f)      target.maxHeight = delta.maxHeight;
+    // Flex
+#ifdef MORPH_FEATURE_FLEX
+    if (delta.flexDirection != "row")  target.flexDirection = delta.flexDirection;
+    if (delta.gap != 0.0f)             target.gap = delta.gap;
+    if (delta.justifyContent != "flex-start") target.justifyContent = delta.justifyContent;
+    if (delta.alignItems != "stretch") target.alignItems = delta.alignItems;
+    if (delta.flexWrap != "nowrap")    target.flexWrap = delta.flexWrap;
+    if (delta.flexGrow != 0.0f)        target.flexGrow = delta.flexGrow;
+    if (delta.flexShrink != 1.0f)      target.flexShrink = delta.flexShrink;
+    if (delta.flexBasis != "auto")     target.flexBasis = delta.flexBasis;
+#endif
+    // Position
+#ifdef MORPH_FEATURE_POSITION
+    if (delta.left > -1e8f)  target.left = delta.left;
+    if (delta.right > -1e8f) target.right = delta.right;
+    if (delta.top > -1e8f)   target.top = delta.top;
+    if (delta.bottom > -1e8f) target.bottom = delta.bottom;
+#endif
+    // Cursor
+#ifdef MORPH_FEATURE_CURSOR
+    if (delta.cursor != "default") target.cursor = delta.cursor;
+#endif
+    // Border
+#ifdef MORPH_FEATURE_BORDER
+    if (delta.borderWidth > 0.0f) target.borderWidth = delta.borderWidth;
+    if (delta.borderColor[0] != 0.0f || delta.borderColor[1] != 0.0f || delta.borderColor[2] != 0.0f || delta.borderColor[3] != 1.0f)
+        memcpy(target.borderColor, delta.borderColor, sizeof(float)*4);
+    if (delta.borderStyle != "none") target.borderStyle = delta.borderStyle;
+#endif
+    // Scroll
+#ifdef MORPH_FEATURE_SCROLL
+    if (delta.scrollbarWidth != 8.0f) target.scrollbarWidth = delta.scrollbarWidth;
+    if (delta.scrollbarTrackColor[0] != 0.85f || delta.scrollbarTrackColor[1] != 0.85f || delta.scrollbarTrackColor[2] != 0.85f || delta.scrollbarTrackColor[3] != 0.4f)
+        memcpy(target.scrollbarTrackColor, delta.scrollbarTrackColor, sizeof(float)*4);
+    if (delta.scrollbarThumbColor[0] != 0.5f || delta.scrollbarThumbColor[1] != 0.5f || delta.scrollbarThumbColor[2] != 0.5f || delta.scrollbarThumbColor[3] != 0.6f)
+        memcpy(target.scrollbarThumbColor, delta.scrollbarThumbColor, sizeof(float)*4);
+    if (delta.scrollbarBorderRadius != 4.0f) target.scrollbarBorderRadius = delta.scrollbarBorderRadius;
+#endif
+}
+
 void MorphNode::onHover(bool state) {
     if (hoverStyle) {
-        if (m_transitionDuration > 0.0f) {
-            // Animate to target style
-            if (!m_hoverTransition)
-                m_hoverTransition = new HoverTransition();
-            m_hoverTransition->startStyle = style;
-            m_hoverTransition->targetStyle = state ? *hoverStyle : m_baseStyle;
-            m_hoverTransition->elapsed = 0.0f;
-            m_hoverTransition->active = true;
+        if (!m_hoverTransition)
+            m_hoverTransition = new HoverTransition();
+        if (state) {
+            // Only snapshot on fresh hover entry, not during re-entry
+            // from child-propagation while a revert animation is running
+            if (!m_hoverTransition->active)
+                m_hoverTransition->preHoverStyle = style;
+            if (m_transitionDuration > 0.0f) {
+                m_hoverTransition->startStyle = style;
+                m_hoverTransition->targetStyle = style;
+                applyStyleDelta(m_hoverTransition->targetStyle, *hoverStyle);
+                m_hoverTransition->elapsed = 0.0f;
+                m_hoverTransition->active = true;
+            } else {
+                applyStyleDelta(style, *hoverStyle);
+            }
         } else {
-            // Snap (instant, no transition)
-            style = state ? *hoverStyle : m_baseStyle;
+            if (m_transitionDuration > 0.0f) {
+                m_hoverTransition->startStyle = style;
+                m_hoverTransition->targetStyle = m_hoverTransition->preHoverStyle;
+                m_hoverTransition->elapsed = 0.0f;
+                m_hoverTransition->active = true;
+            } else {
+                style = m_hoverTransition->preHoverStyle;
+            }
         }
         markDirty(PaintDirty);
         markDirty(LayoutDirty);
     }
-    // Propagate to ancestors (browser behavior: child hover applies :hover to all ancestors)
+    // Check ancestor-hover rules on descendants when this node's hover toggles
+    _applyAncestorHover(state);
+    // Propagate to ancestors: CSS says child hover applies :hover to all ancestors
     if (parent) parent->onHover(state);
+}
+
+static void _applyOneAncestorRule(MorphNode* child, const AncestorHoverRule& rule, bool state) {
+    auto t = child->m_ancestorHoverTransition;
+    if (state) {
+        if (!t) {
+            t = new AncestorHoverTransition();
+            child->m_ancestorHoverTransition = t;
+        }
+        if (t->applyCount == 0)
+            t->revertStyle = child->style;
+        t->applyCount++;
+
+        if (child->m_transitionDuration > 0.0f && t->active) {
+            t->targetStyle = child->style;
+            applyStyleDelta(t->targetStyle, rule.style);
+            t->applying = true;
+            t->elapsed = 0.0f;
+        } else if (child->m_transitionDuration > 0.0f) {
+            t->targetStyle = child->style;
+            applyStyleDelta(t->targetStyle, rule.style);
+            t->applying = true;
+            t->elapsed = 0.0f;
+            t->active = true;
+        } else {
+            applyStyleDelta(child->style, rule.style);
+        }
+        child->markDirty(PaintDirty);
+        child->markDirty(LayoutDirty);
+    } else {
+        if (!t) return; // nothing to revert
+        t->applyCount--;
+        if (t->applyCount > 0) return; // other ancestor rules still active
+
+        if (t->active) {
+            t->applying = false;
+            t->elapsed = 0.0f;
+        } else if (child->m_transitionDuration > 0.0f) {
+            t->applying = false;
+            t->elapsed = 0.0f;
+            t->active = true;
+        } else {
+            child->style = t->revertStyle;
+        }
+        child->markDirty(PaintDirty);
+        child->markDirty(LayoutDirty);
+    }
+}
+
+void MorphNode::_applyAncestorHover(bool state) {
+    for (auto* child : children) {
+        child->_applyAncestorHover(state);
+        for (auto& rule : child->m_ancestorHoverRules) {
+            // Match: ancestorTag is empty (any ancestor) or matches this node's type
+            if (rule.ancestorTag.empty() || type == rule.ancestorTag) {
+                _applyOneAncestorRule(child, rule, state);
+            }
+        }
+    }
 }
 
 void MorphNode::updateHoverTransition(float dt) {
@@ -244,8 +387,36 @@ void MorphNode::interpolateStyles(MorphStyle& out, const MorphStyle& a,
 #endif
 }
 
+void MorphNode::updateAncestorHoverTransition(float dt) {
+    if (m_ancestorHoverTransition && m_ancestorHoverTransition->active) {
+        float dur = m_transitionDuration > 0.0f ? m_transitionDuration : 0.3f;
+        m_ancestorHoverTransition->elapsed += dt;
+        float t = m_ancestorHoverTransition->elapsed / dur;
+        if (t >= 1.0f) {
+            t = 1.0f;
+            if (m_ancestorHoverTransition->applying) {
+                style = m_ancestorHoverTransition->targetStyle;
+            } else {
+                style = m_ancestorHoverTransition->revertStyle;
+            }
+            m_ancestorHoverTransition->active = false;
+        } else {
+            const MorphStyle& from = m_ancestorHoverTransition->applying
+                ? m_ancestorHoverTransition->revertStyle
+                : m_ancestorHoverTransition->targetStyle;
+            const MorphStyle& to = m_ancestorHoverTransition->applying
+                ? m_ancestorHoverTransition->targetStyle
+                : m_ancestorHoverTransition->revertStyle;
+            interpolateStyles(style, from, to, applyEasing(t, m_transitionEasing));
+        }
+        markDirty(PaintDirty);
+        markDirty(LayoutDirty);
+    }
+}
+
 void MorphNode::update(float dt) {
     updateHoverTransition(dt);
+    updateAncestorHoverTransition(dt);
     updateAnimations(dt);
     for (auto* c : children) c->update(dt);
 }
@@ -660,7 +831,9 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                     float pml = p.node->style.margin[3];
                     p.node->x = itemX + pml;
                     p.node->y = lineY;
-                    p.node->w = p.w;
+                    // Clamp width to available line space so TextNode doesn't
+                    // keep the single-line contentWidth after wrapping
+                    p.node->w = (p.w < cw) ? p.w : cw;
                     p.node->h = p.h;
                     for (auto* child : p.node->children) {
                         float cBw = 0.0f;
@@ -855,6 +1028,9 @@ after_children:
     // third re-layout (with wrong parentW) from layoutIfNeeded's iterator.
     clearDirty(LayoutDirty);
     clearDirty(StyleDirty);
+    // When layout() is called directly (not via layoutIfNeeded), mark PaintDirty
+    // so the display list gets regenerated with the updated position/size.
+    markDirty(PaintDirty);
 }
 
 float MorphNode::contentWidth(Renderer* r) {

@@ -49,21 +49,34 @@ public:
         }
 
         // 2. Clip + scroll + children
+        bool needRadiusClip = style.borderRadius > 0.0f;
 #ifdef MORPH_FEATURE_SCROLL
         bool scrolling = scrollEnabled && contentH > h;
-        if (scrolling) {
-            r.beginClip(x, y, w, h);
-            r.pushScrollOffset(0, -scrollY);
-        }
+        bool needRectClip = scrolling || style.overflow == "hidden" || style.overflow == "auto";
+#else
+        bool needRectClip = false;
 #endif
-        for (auto* child : children)
-            child->executeDisplayList(r);
+
+        if (needRectClip || needRadiusClip) {
+            if (needRectClip) r.beginClip(x, y, w, h);
+            if (needRadiusClip) r.beginRoundedClip(x, y, w, h, style.borderRadius);
 #ifdef MORPH_FEATURE_SCROLL
-        if (scrolling) {
-            r.popScrollOffset(0, -scrollY);
-            r.endClip();
-            drawScrollbar(r);
+            if (scrolling) r.pushScrollOffset(0, -scrollY);
+#endif
+            for (auto* child : children)
+                child->executeDisplayList(r);
+#ifdef MORPH_FEATURE_SCROLL
+            if (scrolling) r.popScrollOffset(0, -scrollY);
+#endif
+            if (needRadiusClip) r.endRoundedClip();
+            if (needRectClip) r.endClip();
+        } else {
+            for (auto* child : children)
+                child->executeDisplayList(r);
         }
+
+#ifdef MORPH_FEATURE_SCROLL
+        if (scrolling) drawScrollbar(r);
 #endif
     }
 

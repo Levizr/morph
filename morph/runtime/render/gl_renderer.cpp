@@ -267,6 +267,7 @@ void GLRenderer::clear() {
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+    m_stencilClipDepth = 0;
 }
 
 void GLRenderer::beginClip(float x, float y, float w, float h) {
@@ -274,10 +275,15 @@ void GLRenderer::beginClip(float x, float y, float w, float h) {
     float cy = y + m_scrollY;
     glEnable(GL_SCISSOR_TEST);
     glScissor((GLint)cx, m_fbHeight - (GLint)(cy + h), (GLsizei)w, (GLsizei)h);
+    m_scissorClipDepth++;
 }
 
 void GLRenderer::endClip() {
-    glDisable(GL_SCISSOR_TEST);
+    m_scissorClipDepth--;
+    if (m_scissorClipDepth <= 0) {
+        m_scissorClipDepth = 0;
+        glDisable(GL_SCISSOR_TEST);
+    }
 }
 
 void GLRenderer::beginRoundedClip(float x, float y, float w, float h, float radius) {
@@ -289,7 +295,7 @@ void GLRenderer::beginRoundedClip(float x, float y, float w, float h, float radi
     // Because discard in the shader prevents INCR for fragments outside the shape,
     // only the intersection of all ancestor masks plus this shape passes.
     glEnable(GL_STENCIL_TEST);
-    glStencilFunc(GL_ALWAYS, 0xFF, 0xFF);
+    glStencilFunc(GL_EQUAL, m_stencilClipDepth, 0xFF);
     glStencilOp(GL_KEEP, GL_KEEP, GL_INCR);
     glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
     glDepthMask(GL_FALSE);

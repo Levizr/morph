@@ -57,7 +57,8 @@ public:
                 MorphNode* src = parent;
                 while (src) {
                     float* c = src->style.color;
-                    if (c[0] != 0.0f || c[1] != 0.0f || c[2] != 0.0f || c[3] != 1.0f)
+                    bool nonDefault = c[0] != 0.0f || c[1] != 0.0f || c[2] != 0.0f || c[3] != 1.0f;
+                    if (nonDefault && !src->m_colorInherited)
                         break;
                     src = src->parent;
                 }
@@ -161,7 +162,8 @@ public:
                 MorphNode* src = parent;
                 while (src) {
                     float* c = src->style.color;
-                    if (c[0] != 0.0f || c[1] != 0.0f || c[2] != 0.0f || c[3] != 1.0f)
+                    bool nonDefault = c[0] != 0.0f || c[1] != 0.0f || c[2] != 0.0f || c[3] != 1.0f;
+                    if (nonDefault && !src->m_colorInherited)
                         break;
                     src = src->parent;
                 }

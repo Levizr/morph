@@ -94,3 +94,82 @@ def test_pseudo_class_ignored():
     assert len(selectors) == 1
     assert selectors[0].specificity == (0, 0, 1)
     assert matches_selector("div:hover", "div", [])
+
+
+def test_child_combinator():
+    selectors = parse_selector("div > p")
+    assert len(selectors) == 1
+    from morph.style.selector import Combinator
+    assert selectors[0].combinators == [Combinator.CHILD]
+    # Immediate child should match (parent is 'div')
+    ancestry = [("div", [])]
+    assert matches_selector("div > p", "p", [], None, ancestry)
+    # Non-immediate (grandchild) should NOT match (parent is 'section', not 'div')
+    ancestry = [("div", []), ("section", [])]
+    assert not matches_selector("div > p", "p", [], None, ancestry)
+
+
+def test_child_combinator_no_spaces():
+    selectors = parse_selector("div>p")
+    from morph.style.selector import Combinator
+    assert selectors[0].combinators == [Combinator.CHILD]
+    ancestry = [("div", [])]
+    assert matches_selector("div>p", "p", [], None, ancestry)
+
+
+def test_descendant_with_child_mixed():
+    selectors = parse_selector("div > p span")
+    assert len(selectors) == 1
+    from morph.style.selector import Combinator
+    assert selectors[0].combinators == [Combinator.CHILD, Combinator.DESCENDANT]
+    # tree: div > p → span (parent of span is p, p's parent is div)
+    ancestry = [("div", []), ("p", [])]
+    assert matches_selector("div > p span", "span", [], None, ancestry)
+    # tree: div > section → span (parent of span is section, not p)
+    ancestry = [("div", []), ("section", [])]
+    assert not matches_selector("div > p span", "span", [], None, ancestry)
+
+
+def test_ancestor_hover_parsing():
+    from morph.style.selector import CompoundSelector, Combinator
+    selectors = parse_selector("h1:hover button")
+    assert len(selectors) == 1
+    sel = selectors[0]
+    assert sel.compounds[0].tag == "h1"
+    assert sel.compounds[0].pseudo == "hover"
+    assert sel.compounds[1].tag == "button"
+    assert sel.combinators == [Combinator.DESCENDANT]
+    # matches_selector should work (pseudo is ignored during matching)
+    ancestry = [("div", []), ("h1", [])]
+    assert matches_selector("h1:hover button", "button", [], None, ancestry)
+
+
+def test_ancestor_hover_with_child():
+    from morph.style.selector import CompoundSelector, Combinator
+    selectors = parse_selector("h1:hover > button")
+    assert len(selectors) == 1
+    sel = selectors[0]
+    assert sel.compounds[0].tag == "h1"
+    assert sel.compounds[0].pseudo == "hover"
+    assert sel.compounds[1].tag == "button"
+    assert sel.combinators == [Combinator.CHILD]
+    # Immediate child matches
+    ancestry = [("h1", [])]
+    assert matches_selector("h1:hover > button", "button", [], None, ancestry)
+    # Not immediate child (parent is 'div', not 'h1')
+    ancestry = [("h1", []), ("div", [])]
+    assert not matches_selector("h1:hover > button", "button", [], None, ancestry)
+
+
+def test_selector_to_string():
+    from morph.style.selector import selector_to_string, CompoundSelector, Combinator
+    compounds = [
+        CompoundSelector(tag="div", classes=["card"]),
+        CompoundSelector(tag="span", pseudo="hover"),
+        CompoundSelector(tag="button"),
+    ]
+    result = selector_to_string(compounds, [Combinator.DESCENDANT, Combinator.CHILD])
+    assert result == "div.card span:hover > button"
+    # No combinators
+    result2 = selector_to_string([CompoundSelector(tag="h1", pseudo="hover")])
+    assert result2 == "h1:hover"

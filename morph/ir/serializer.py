@@ -103,4 +103,9 @@ class IRSerializer:
         if n.transition_duration > 0:
             result["transition_duration"] = n.transition_duration
             result["transition_easing"] = n.transition_easing
+        if n.ancestor_hover_rules:
+            result["ancestor_hover_rules"] = [
+                {"ancestor_tag": tag, "style": self._style_dict(s)}
+                for tag, s in n.ancestor_hover_rules
+            ]
         return result

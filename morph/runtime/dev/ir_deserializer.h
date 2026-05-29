@@ -197,11 +197,11 @@ static MorphNode* deserializeNode(const JsonValue& val,
         if (!isDefaultColor(node->style.color))
             static_cast<TextNode*>(node)->m_colorOverridden = true;
     } else {
+        bool colorWasDefault = isDefaultColor(node->style.color);
         inheritStyle(node->style, parentStyle);
+        if (colorWasDefault && !isDefaultColor(node->style.color))
+            node->m_colorInherited = true;
     }
-
-    // Snapshot base style (for hover restore)
-    node->m_baseStyle = node->style;
 
     // Apply hover style if present
     if (val.has("hover_style") && val["hover_style"].type() == JsonType::Object) {
@@ -220,6 +220,20 @@ static MorphNode* deserializeNode(const JsonValue& val,
         else if (e == "ease-in")   node->m_transitionEasing = Easing::EaseIn;
         else if (e == "ease-out")  node->m_transitionEasing = Easing::EaseOut;
         else if (e == "ease-in-out") node->m_transitionEasing = Easing::EaseInOut;
+    }
+
+    // Deserialize ancestor hover rules
+    if (val.has("ancestor_hover_rules") && val["ancestor_hover_rules"].type() == JsonType::Array) {
+        auto& rules = val["ancestor_hover_rules"];
+        for (size_t i = 0; i < rules.size(); i++) {
+            auto& r = rules[i];
+            AncestorHoverRule rule;
+            if (r.has("ancestor_tag") && !r["ancestor_tag"].isNull())
+                rule.ancestorTag = r["ancestor_tag"].asString();
+            if (r.has("style") && r["style"].type() == JsonType::Object)
+                applyStyle(rule.style, r["style"]);
+            node->m_ancestorHoverRules.push_back(rule);
+        }
     }
 
     // Compute resolved style for children

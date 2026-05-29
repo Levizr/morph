@@ -222,6 +222,14 @@ def _deser_style(s: dict) -> IRStyle:
 def _deser_node(d: dict) -> IRNode:
     hs = d.get("hover_style")
     hover_style = _deser_style(hs) if hs and isinstance(hs, dict) else None
+    # Deserialize ancestor_hover_rules
+    ancestor_hover_rules = []
+    for rule in d.get("ancestor_hover_rules", []):
+        if isinstance(rule, dict):
+            tag = rule.get("ancestor_tag", "")
+            style_data = rule.get("style", {})
+            if isinstance(style_data, dict) and tag:
+                ancestor_hover_rules.append((tag, _deser_style(style_data)))
     return IRNode(
         node_id=d.get("id", ""),
         node_type=d.get("type", ""),
@@ -242,6 +250,7 @@ def _deser_node(d: dict) -> IRNode:
                     target=e.get("target", ""))
             for e in d.get("events", [])
         ],
+        ancestor_hover_rules=ancestor_hover_rules,
     )
 
 

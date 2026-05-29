@@ -52,8 +52,25 @@ struct MorphAnimation {
 struct HoverTransition {
     MorphStyle startStyle;
     MorphStyle targetStyle;
+    MorphStyle preHoverStyle; // snapshot before hover, for restore on exit
     float elapsed = 0.0f;
     bool active = false;
+};
+
+// ── Ancestor-hover rule (built at codegen / deserialization) ──
+struct AncestorHoverRule {
+    std::string ancestorTag;
+    MorphStyle style;
+};
+
+// ── Ancestor-hover transition state ──
+struct AncestorHoverTransition {
+    MorphStyle revertStyle;  // style before ANY ancestor-hover was applied
+    MorphStyle targetStyle;  // the rule's style
+    float elapsed = 0.0f;
+    bool active = false;
+    bool applying = true;    // true = animating to target, false = animating back
+    int applyCount = 0;      // number of active ancestor-hover rules
 };
 
 class MorphNode {
@@ -61,7 +78,6 @@ public:
     float x = 0, y = 0, w = 0, h = 0;
     MorphStyle style;
     float m_computedMargin[4] = {0}; // resolved margins after latest layout()
-    MorphStyle m_baseStyle;   // snapshot of original base style (for hover restore)
     MorphStyle* hoverStyle = nullptr; // allocated only when :hover rules exist
 
     // Transition config (0 duration = no transition, instant snap)
@@ -71,6 +87,7 @@ public:
     MorphNode* parent = nullptr;
     std::vector<MorphNode*> children;
     bool focused = false;
+    bool m_colorInherited = false;
     std::string type = "div";
 
     // Scroll state (always present — zero overhead when unused)
@@ -103,6 +120,12 @@ public:
     static void interpolateStyles(MorphStyle& out, const MorphStyle& a,
                                   const MorphStyle& b, float t);
 
+    // ── Ancestor-hover rules + transitions ──
+    std::vector<AncestorHoverRule> m_ancestorHoverRules;
+    AncestorHoverTransition* m_ancestorHoverTransition = nullptr;
+    void _applyAncestorHover(bool state);
+    void updateAncestorHoverTransition(float dt);
+
     void startAnimation(AnimProperty prop, float to, float duration, Easing easing = Easing::Linear);
 
     virtual float contentWidth(Renderer* r);
@@ -127,5 +150,5 @@ public:
     virtual void recordDisplayList(Renderer& r);
     virtual void executeDisplayList(Renderer& r);
 
-    virtual ~MorphNode() { delete hoverStyle; delete m_hoverTransition; }
+    virtual ~MorphNode() { delete hoverStyle; delete m_hoverTransition; delete m_ancestorHoverTransition; }
 };

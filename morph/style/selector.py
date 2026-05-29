@@ -15,6 +15,7 @@ class CompoundSelector:
     tag: str | None = None
     classes: list[str] = field(default_factory=list)
     id: str | None = None
+    pseudo: str | None = None
     universal: bool = False
 
 
@@ -47,10 +48,7 @@ class Selector:
             return True
 
         ancestors = ancestry or []
-        return self._match_ancestors(self.compounds[:-1], self.combinators[:-1]
-                                     if len(self.combinators) >= len(self.compounds) - 1
-                                     else self.combinators,
-                                     ancestors)
+        return self._match_ancestors(self.compounds[:-1], self.combinators, ancestors)
 
     @staticmethod
     def _match_compound(comp: CompoundSelector, tag: str,
@@ -72,16 +70,32 @@ class Selector:
         if not compounds:
             return True
 
+        reversed_anc = list(reversed(ancestry))
         comp_idx = len(compounds) - 1
-        for ancestor_tag, ancestor_classes in reversed(ancestry):
-            if self._match_compound(compounds[comp_idx], ancestor_tag, ancestor_classes, None):
-                comp_idx -= 1
-                if comp_idx < 0:
-                    return True
+        level = 0
+
+        while comp_idx >= 0 and level < len(reversed_anc):
+            comb = combinators[comp_idx] if comp_idx < len(combinators) else Combinator.DESCENDANT
+            tag, classes = reversed_anc[level]
+            if comb == Combinator.CHILD:
+                if self._match_compound(compounds[comp_idx], tag, classes, None):
+                    comp_idx -= 1
+                    level += 1
+                else:
+                    return False
             else:
-                if comp_idx < len(compounds) - 1:
-                    continue
-        return False
+                found = False
+                for l in range(level, len(reversed_anc)):
+                    t, c = reversed_anc[l]
+                    if self._match_compound(compounds[comp_idx], t, c, None):
+                        comp_idx -= 1
+                        level = l + 1
+                        found = True
+                        break
+                if not found:
+                    return False
+
+        return comp_idx < 0
 
 
 def parse_selector(key: str) -> list[Selector]:
@@ -104,27 +118,25 @@ def _parse_single(part: str) -> Selector | None:
     if not part:
         return None
 
-    raw_compounds = _split_by_combinators(part)
+    raw_compounds, combinators = _split_by_combinators(part)
     compounds: list[CompoundSelector] = []
-    combinators: list[Combinator] = []
-
-    for i, raw in enumerate(raw_compounds):
+    for raw in raw_compounds:
         comp = _parse_compound(raw.strip())
         if comp is None:
             return None
         compounds.append(comp)
 
-    for i in range(len(raw_compounds) - 1):
-        combinators.append(Combinator.DESCENDANT)
-
     return Selector(compounds=compounds, combinators=combinators)
 
 
-def _split_by_combinators(part: str) -> list[str]:
-    result: list[str] = []
+def _split_by_combinators(part: str) -> tuple[list[str], list[Combinator]]:
+    segments: list[str] = []
+    combinators: list[Combinator] = []
     current: list[str] = []
     depth = 0
-    for ch in part:
+    i = 0
+    while i < len(part):
+        ch = part[i]
         if ch in ("(", "["):
             depth += 1
             current.append(ch)
@@ -132,18 +144,34 @@ def _split_by_combinators(part: str) -> list[str]:
             depth -= 1
             current.append(ch)
         elif ch == " " and depth == 0:
-            if current:
-                result.append("".join(current))
+            # Peek ahead: if next non-space is a combinator (>+~), skip space
+            next_nonspace = ""
+            for j in range(i + 1, len(part)):
+                c2 = part[j]
+                if c2 != " ":
+                    next_nonspace = c2
+                    break
+            if next_nonspace in (">", "+", "~"):
+                pass  # let the combinator handle this split
+            elif current:
+                segments.append("".join(current))
                 current = []
+                combinators.append(Combinator.DESCENDANT)
         elif ch == ">" and depth == 0:
             if current:
-                result.append("".join(current))
+                segments.append("".join(current))
                 current = []
+                combinators.append(Combinator.CHILD)
+            elif segments and combinators:
+                # Handle " > " pattern where space before > created a segment
+                # Remove the trailing empty segment
+                pass
         else:
             current.append(ch)
+        i += 1
     if current:
-        result.append("".join(current))
-    return result
+        segments.append("".join(current))
+    return segments, combinators
 
 
 def _parse_compound(raw: str) -> CompoundSelector | None:
@@ -178,8 +206,12 @@ def _parse_compound(raw: str) -> CompoundSelector | None:
             if i > id_start:
                 comp.id = raw[id_start:i]
         elif ch == ":":
+            i += 1
+            pseudo_start = i
             while i < len(raw) and raw[i] not in (".", "#", " ", ">"):
                 i += 1
+            if i > pseudo_start:
+                comp.pseudo = raw[pseudo_start:i]
         elif ch in (" ", ">"):
             break
         else:
@@ -194,6 +226,34 @@ def _parse_compound(raw: str) -> CompoundSelector | None:
             comp.tag = tag_str
 
     return comp
+
+
+def selector_to_string(compounds: list[CompoundSelector],
+                       combinators: list[Combinator] | None = None) -> str:
+    if not compounds:
+        return ""
+    combinators = combinators or []
+    parts = [_compound_to_string(compounds[0])]
+    for i, comb in enumerate(combinators):
+        if i + 1 < len(compounds):
+            sep = " > " if comb == Combinator.CHILD else " "
+            parts.append(sep + _compound_to_string(compounds[i + 1]))
+    return "".join(parts)
+
+
+def _compound_to_string(comp: CompoundSelector) -> str:
+    result = ""
+    if comp.universal:
+        result += "*"
+    elif comp.tag:
+        result += comp.tag
+    for cls in comp.classes:
+        result += "." + cls
+    if comp.id:
+        result += "#" + comp.id
+    if comp.pseudo:
+        result += ":" + comp.pseudo
+    return result
 
 
 def calculate_specificity(key: str) -> tuple[int, int, int]:

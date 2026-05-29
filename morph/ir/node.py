@@ -19,6 +19,9 @@ class IRNode:
     transition_duration: float = 0.0   # 0 = no transition
     transition_easing: str = "ease-in-out"
 
+    ancestor_hover_rules: list[tuple[str, IRStyle]] = field(default_factory=list)
+    # Each tuple: (ancestor_tag, resolved IRStyle)
+
     # computed by LayoutEngine
     x: float = 0.0
     y: float = 0.0

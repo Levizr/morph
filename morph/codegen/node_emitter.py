@@ -50,6 +50,7 @@ class NodeEmitter:
             lines.append(f"{indent}{node.node_id}->h = {fmt(node.h)};")
             lines.append(self._set_style(node, indent, parent_style))
             lines.append(self._set_hover_style(node, indent))
+            lines.append(self._set_ancestor_hover_rules(node, indent))
             if parent_id:
                 lines.append(self._set_transition(node, indent))
             if parent_id:
@@ -82,6 +83,8 @@ class NodeEmitter:
 
         for event in node.events:
             lines.append(self._emit_event(event, node.node_id, indent))
+
+        lines.append(self._set_ancestor_hover_rules(node, indent))
 
         lines.append("")
 
@@ -143,6 +146,8 @@ class NodeEmitter:
             if node.node_type == "__text__":
                 lines.append(f"{prefix}.color[3]   = {c[3]:.4f}f;")
                 lines.append(f"{node.node_id}->m_colorOverridden = true;")
+            elif s.color == (0, 0, 0, 1) and parent_style and parent_style.color != (0, 0, 0, 1):
+                lines.append(f"{node.node_id}->m_colorInherited = true;")
         if s.padding != (0, 0, 0, 0):
             lines.append(f"{prefix}.padding[0] = {fmt(s.padding[0])};")
             lines.append(f"{prefix}.padding[1] = {fmt(s.padding[1])};")
@@ -248,8 +253,86 @@ class NodeEmitter:
             if s.scrollbar_border_radius != 4.0:
                 lines.append(f"{prefix}.scrollbarBorderRadius = {fmt(s.scrollbar_border_radius)};")
 
-        lines.append(f"{node.node_id}->m_baseStyle = {prefix}; // snapshot for hover restore")
         return "\n".join(f"{indent}{l}" for l in lines)
+
+    def _set_ancestor_hover_rules(self, node: IRNode, indent: str) -> str:
+        if not node.ancestor_hover_rules:
+            return ""
+        lines = []
+        for tag, rule_style in node.ancestor_hover_rules:
+            var = f"_ah_{node.node_id}_{tag}"
+            lines.append(f"AncestorHoverRule {var};")
+            lines.append(f"{var}.ancestorTag = \"{tag}\";")
+            s = rule_style
+            # Emit style fields (same pattern as _set_style but no inheritance)
+            if s.bg_color != (0, 0, 0, 0):
+                for i, ch in enumerate("rgba"):
+                    lines.append(f"{var}.style.bgColor[{i}] = {s.bg_color[i]:.4f}f;")
+            if s.color != (0, 0, 0, 1):
+                for i, ch in enumerate("rgba"):
+                    lines.append(f"{var}.style.color[{i}] = {s.color[i]:.4f}f;")
+            if s.border_radius > 0:
+                lines.append(f"{var}.style.borderRadius = {fmt(s.border_radius)};")
+            if s.padding != (0, 0, 0, 0):
+                for i in range(4):
+                    lines.append(f"{var}.style.padding[{i}] = {fmt(s.padding[i])};")
+            if s.margin != (0, 0, 0, 0):
+                for i in range(4):
+                    if s.margin[i] != 0.0 or s.margin_auto[i]:
+                        v = fmt(s.margin[i]) if s.margin[i] != float("inf") else "-1.0f"
+                        lines.append(f"{var}.style.margin[{i}] = {v};")
+                        if s.margin_auto[i]:
+                            lines.append(f"{var}.style.marginAuto[{i}] = true;")
+            if s.width is not None:
+                lines.append(f"{var}.style.explicitWidth = {fmt(s.width)};")
+            if s.height is not None:
+                lines.append(f"{var}.style.explicitHeight = {fmt(s.height)};")
+            if s.min_width is not None:
+                lines.append(f"{var}.style.minWidth = {fmt(s.min_width)};")
+            if s.max_width is not None:
+                lines.append(f"{var}.style.maxWidth = {fmt(s.max_width)};")
+            if s.min_height is not None:
+                lines.append(f"{var}.style.minHeight = {fmt(s.min_height)};")
+            if s.max_height is not None:
+                lines.append(f"{var}.style.maxHeight = {fmt(s.max_height)};")
+            if s.font_size != 16.0:
+                lines.append(f"{var}.style.fontSize = {fmt(s.font_size)};")
+            if s.font_weight != "normal":
+                lines.append(f"{var}.style.fontWeight = \"{s.font_weight}\";")
+            if s.text_align != "left":
+                lines.append(f"{var}.style.textAlign = \"{s.text_align}\";")
+            if s.display != "block":
+                lines.append(f"{var}.style.display = \"{s.display}\";")
+            if s.overflow != "visible":
+                lines.append(f"{var}.style.overflow = \"{s.overflow}\";")
+            if s.position != "static":
+                lines.append(f"{var}.style.position = \"{s.position}\";")
+            if s.box_sizing != "content-box":
+                lines.append(f"{var}.style.boxSizing = \"{s.box_sizing}\";")
+            if s.cursor != "default":
+                lines.append(f"{var}.style.cursor = \"{s.cursor}\";")
+            if s.border_width > 0:
+                lines.append(f"{var}.style.borderWidth = {fmt(s.border_width)};")
+            if s.border_color != (0.0, 0.0, 0.0, 1.0):
+                for i in range(4):
+                    lines.append(f"{var}.style.borderColor[{i}] = {s.border_color[i]:.4f}f;")
+            if s.border_style not in ("", "none"):
+                lines.append(f"{var}.style.borderStyle = \"{s.border_style}\";")
+            if "flex" in self.features:
+                if s.flex_dir != "column":
+                    lines.append(f"{var}.style.flexDirection = \"{s.flex_dir}\";")
+                if s.justify_content != "flex-start":
+                    lines.append(f"{var}.style.justifyContent = \"{s.justify_content}\";")
+                if s.align_items != "stretch":
+                    lines.append(f"{var}.style.alignItems = \"{s.align_items}\";")
+                if s.flex_wrap != "nowrap":
+                    lines.append(f"{var}.style.flexWrap = \"{s.flex_wrap}\";")
+                if s.flex_grow != 0.0:
+                    lines.append(f"{var}.style.flexGrow = {fmt(s.flex_grow)};")
+                if s.flex_shrink != 1.0:
+                    lines.append(f"{var}.style.flexShrink = {fmt(s.flex_shrink)};")
+            lines.append(f"{node.node_id}->m_ancestorHoverRules.push_back({var});")
+        return "\n" + "\n".join(f"{indent}{l}" for l in lines)
 
     def _set_hover_style(self, node: IRNode, indent: str) -> str:
         s = node.hover_style
@@ -351,7 +434,7 @@ class NodeEmitter:
 
         if not overrides:
             return ""
-        lines = [f"{hv} = new MorphStyle({node.node_id}->style); // copy base, then override"]
+        lines = [f"{hv} = new MorphStyle(); // delta only"]
         lines += [f"{indent}{l}" for l in overrides]
         return "\n" + "\n".join(lines)
 

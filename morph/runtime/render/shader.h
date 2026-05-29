@@ -48,7 +48,7 @@ out vec4 FragColor;
 void main() {
     vec2 halfSize = vSize * 0.5;
     vec2 p = vUV * vSize - halfSize;
-    float rad = clamp(vRadius, 0.001, 100.0);
+    float rad = min(max(vRadius, 0.001), min(halfSize.x, halfSize.y));
 
     // Outer rounded rect SDF
     vec2 d_outer = abs(p) - halfSize + rad;

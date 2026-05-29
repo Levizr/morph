@@ -1,88 +1,73 @@
-export default function App() {
-  console.log("Morph app started!");
-  return (
-    <morph-window title="My App" width={800} height={600}>
-      <div style={{
-        backgroundColor: '#1a1a2e',
-        padding: 32,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 24
-      }}>
-        <h1 style={{ color: '#e8e8f0', fontSize: 32, fontWeight: 'bold' }}>
-          {console.log("Rendered heading")}Morph Framework
-        </h1>
-        <p style={{ color: '#8888cc', fontSize: 14 }}>
-          Edit src/App.mx to get started. Text automatically wraps when it exceeds container width, just like a browser.
-        </p>
+import "./style.css"
 
-        <div style={{
-          backgroundColor: '#16213e',
-          padding: 24,
-          borderRadius: 12,
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'auto',
-          height: 160,
-          gap: 12
-        }}>
-          <div style={{
-            backgroundColor: '#0f3460',
-            padding: '12px 16px',
-            borderRadius: 8
-          }}>
-            <p style={{ color: '#e94560', fontSize: 14, fontWeight: 'bold' }}>
-              Scrollable container
-            </p>
-            <p style={{ color: '#a0a0c0', fontSize: 12 }}>
-              This container has overflow auto and a fixed height. Scroll with mouse wheel or drag the scrollbar.
-            </p>
-          </div>
-          <div style={{
-            backgroundColor: '#0f3460',
-            padding: '12px 16px',
-            borderRadius: 8
-          }}>
-            <p style={{ color: '#53d769', fontSize: 14, fontWeight: 'bold' }}>
-              Item 2 border-radius + font-weight
-            </p>
-            <p style={{ color: '#a0a0c0', fontSize: 12 }}>
-              Bold headings with normal weight body text, rounded corners on all cards.
-            </p>
-          </div>
-          <div style={{
-            backgroundColor: '#0f3460',
-            padding: '12px 16px',
-            borderRadius: 8
-          }}>
-            <p style={{ color: '#f1c40f', fontSize: 14, fontWeight: 'bold' }}>
-              Item 3 console.log anywhere
-            </p>
-            <p style={{ color: '#a0a0c0', fontSize: 12 }}>
-              Body, JSX expressions, and onClick handlers.
-            </p>
-          </div>
-          <div style={{
-            backgroundColor: '#0f3460',
-            padding: '12px 16px',
-            borderRadius: 8
-          }}>
-            <p style={{ color: '#9b59b6', fontSize: 14, fontWeight: 'bold' }}>
-              Item 4 Runtime layout + resize
-            </p>
-            <p style={{ color: '#a0a0c0', fontSize: 12 }}>
-              Window resize reflows everything. Text wraps to container width.
-            </p>
+export default function App() {
+  return (
+    <morph-window title="Morph — Build Beautiful Apps" width={1100} height={850}>
+      <body>
+        {/* Navigation */}
+        <div className="nav">
+          <div className="nav-logo">Morph</div>
+          <div className="nav-links">
+            <span className="nav-link">Features</span>
+            <span className="nav-link">Docs</span>
+            <span className="nav-link">GitHub</span>
           </div>
         </div>
 
-        <button onClick={() => console.log("Button clicked!")}
-                style={{ backgroundColor: '#3b82f6', color: '#fff',
-                         padding: '12px 24px', borderRadius: 8, fontSize: 14,
-                         fontWeight: 'bold' }}>
-          Click me (console.log)
-        </button>
-      </div>
+        {/* Hero */}
+        <div className="hero">
+          <div className="hero-badge">v0.0.6 — Now in Alpha</div>
+          <h1 className="hero-title">Build Native Apps with Web Tech</h1>
+          <p className="hero-subtitle">Write JSX and CSS, get native C++ performance. Zero runtime overhead, beautiful results.</p>
+          <div className="hero-actions">
+            <div className="btn btn-primary">Get Started</div>
+            <div className="btn btn-outline">View on GitHub</div>
+          </div>
+        </div>
+
+        {/* Features */}
+        <div className="features">
+          <div className="card">
+            <div className="card-icon" style={{ color: "#6366f1" }}>01</div>
+            <div className="card-title">Native Performance</div>
+            <div className="card-text">Compiled to C++ with no garbage collector, no VM, no interpreter. Just raw speed.</div>
+          </div>
+          <div className="card">
+            <div className="card-icon" style={{ color: "#8b5cf6" }}>02</div>
+            <div className="card-title">CSS + Tailwind</div>
+            <div className="card-text">Use the CSS you already know. Tailwind utilities, flexbox, transitions — all work out of the box.</div>
+          </div>
+          <div className="card">
+            <div className="card-icon" style={{ color: "#06b6d4" }}>03</div>
+            <div className="card-title">Developer Experience</div>
+            <div className="card-text">Hot reload in dev mode, optimized builds in production. One command to ship.</div>
+          </div>
+          <div className="card">
+            <div className="card-icon" style={{ color: "#10b981" }}>04</div>
+            <div className="card-title">Tiny Binaries</div>
+            <div className="card-text">Small compiled output. No Electron, no browser engine. Just your app and the runtime.</div>
+          </div>
+          <div className="card">
+            <div className="card-icon" style={{ color: "#f59e0b" }}>05</div>
+            <div className="card-title">Rich Layout</div>
+            <div className="card-text">Flexbox, inline, block, absolute positioning. Scroll containers with custom scrollbars.</div>
+          </div>
+          <div className="card">
+            <div className="card-icon" style={{ color: "#ec4899" }}>06</div>
+            <div className="card-title">Smooth Transitions</div>
+            <div className="card-text">CSS transitions on hover with multiple easing functions. Animations at 60 fps.</div>
+          </div>
+        </div>
+
+        {/* CTA */}
+        <div className="cta">
+          <h2 className="cta-title">Ready to Build?</h2>
+          <div className="cta-text">Get started in minutes. Create your first Morph app today.</div>
+          <div className="btn btn-primary" style={{ fontSize: "18px", padding: "16px 40px", marginTop: "5px" }}>Install Morph</div>
+        </div>
+        {/* Footer */}
+        <div className="footer">Built with Morph.</div>
+      </body>
     </morph-window>
   )
 }

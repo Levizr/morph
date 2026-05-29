@@ -5,7 +5,7 @@ from morph.ir.node import IRNode, IRWindow
 from morph.ir.style import IRStyle
 from morph.ir.event import IREvent
 from morph.style.tailwind import TailwindResolver
-from morph.style.selector import matches_selector, calculate_specificity
+from morph.style.selector import matches_selector, calculate_specificity, parse_selector, selector_to_string
 from morph.utils.color import parse_color
 from morph.style.units import to_px, needs_layout, DEFERRED
 
@@ -276,20 +276,43 @@ class IRBuilder:
         merged.update(_UA_DEFAULTS.get(tag, {}))
 
         # Collect matching CSS rules with specificity, then apply in order
-        matched = []        # non-:hover rules
-        hover_matched = []  # :hover pseudo-class rules
+        matched = []               # non-:hover rules
+        hover_matched = []         # :hover pseudo-class on THIS element
+        ancestor_hover_matched = []  # :hover on an ANCESTOR compound
         for rule_key, rule_props in css_rules.items():
             has_hover = ":hover" in rule_key
-            match_key = rule_key.replace(":hover", "").strip() if has_hover else rule_key
-            if not matches_selector(match_key, tag, class_names, node_id_attr, ancestry):
-                continue
-            spec = calculate_specificity(match_key)
-            if has_hover:
-                hover_matched.append((spec, rule_props))
-            else:
+            if not has_hover:
+                if not matches_selector(rule_key, tag, class_names, node_id_attr, ancestry):
+                    continue
+                spec = calculate_specificity(rule_key)
                 matched.append((spec, rule_props))
+            else:
+                # Strip :hover and check if the node matches the structural part
+                match_key = rule_key.replace(":hover", "").strip()
+                if not matches_selector(match_key, tag, class_names, node_id_attr, ancestry):
+                    continue
+                spec = calculate_specificity(rule_key)
+                # Parse selector to determine if :hover is on this element or an ancestor
+                selectors = parse_selector(rule_key)
+                is_self_hover = False
+                is_ancestor_hover = False
+                ancestor_tag = None
+                for sel in selectors:
+                    for i, comp in enumerate(sel.compounds):
+                        if comp.pseudo == "hover":
+                            if i == len(sel.compounds) - 1:
+                                is_self_hover = True
+                            else:
+                                ancestor_tag = comp.tag
+                                is_ancestor_hover = True
+                            break
+                if is_ancestor_hover and ancestor_tag:
+                    ancestor_hover_matched.append((spec, rule_props, ancestor_tag))
+                elif is_self_hover:
+                    hover_matched.append((spec, rule_props))
         matched.sort(key=lambda x: x[0])   # lowest specificity first
         hover_matched.sort(key=lambda x: x[0])
+        ancestor_hover_matched.sort(key=lambda x: x[0])
         for _, rule_props in matched:
             merged.update(rule_props)
 
@@ -310,7 +333,7 @@ class IRBuilder:
         # Build hover style from matching :hover CSS rules
         hover_style = None
         if hover_matched:
-            hover_merged = dict(merged)
+            hover_merged = {}
             for _, rule_props in hover_matched:
                 hover_merged.update(rule_props)
             hover_ir_kw, _ = self._css_to_ir_kw(hover_merged, collect_raw=False)
@@ -318,6 +341,24 @@ class IRBuilder:
                 hover_style = IRStyle(**hover_ir_kw)
             except TypeError:
                 pass
+
+        # Build ancestor hover rules (pairs of ancestor_tag → resolved IRStyle)
+        ancestor_hover_rules = []
+        if ancestor_hover_matched:
+            by_tag: dict[str, dict] = {}
+            for _, rule_props, ancestor_tag in ancestor_hover_matched:
+                existing = by_tag.get(ancestor_tag)
+                if existing is None:
+                    by_tag[ancestor_tag] = dict(rule_props)
+                else:
+                    existing.update(rule_props)
+            for ancestor_tag, props in by_tag.items():
+                rule_ir_kw, _ = self._css_to_ir_kw(props, collect_raw=False)
+                try:
+                    rule_style = IRStyle(**rule_ir_kw)
+                    ancestor_hover_rules.append((ancestor_tag, rule_style))
+                except TypeError:
+                    pass
 
         try:
             node_style = IRStyle(**ir_kw)
@@ -391,6 +432,7 @@ class IRBuilder:
             raw_styles=raw_styles,
             transition_duration=trans_dur,
             transition_easing=trans_easing,
+            ancestor_hover_rules=ancestor_hover_rules,
         )
 
     @staticmethod
