@@ -8,8 +8,6 @@
 #include "../widgets/morph_image.h"
 
 static void deleteNodeTree(MorphNode* node) {
-    if (!node) return;
-    for (auto* c : node->children) deleteNodeTree(c);
     delete node;
 }
 

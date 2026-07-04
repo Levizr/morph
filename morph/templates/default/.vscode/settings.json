@@ -1,8 +1,8 @@
 {
   "files.associations": {
-    "*.mx": "javascriptreact"
+    "*.mx": "typescriptreact"
   },
   "emmet.includeLanguages": {
-    "morph": "javascriptreact"
+    "morph": "typescriptreact"
   }
 }

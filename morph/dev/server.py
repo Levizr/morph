@@ -29,11 +29,11 @@ class IPCClient:
                               f"after {retries} retries: {last_err}")
 
     def send_ir(self, ir: dict) -> None:
-        payload = json.dumps(ir).encode() + b"\x00"
+        payload = json.dumps(ir, ensure_ascii=False).encode() + b"\x00"
         self.sock.sendall(payload)
 
     def send_error(self, msg: str) -> None:
-        payload = json.dumps({"__error__": msg}).encode() + b"\x00"
+        payload = json.dumps({"__error__": msg}, ensure_ascii=False).encode() + b"\x00"
         self.sock.sendall(payload)
 
     def close(self) -> None:

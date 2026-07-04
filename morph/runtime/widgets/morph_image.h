@@ -1,5 +1,6 @@
 #pragma once
 #include "../core/node.h"
+#include "morph_radius.h"
 
 class ImageNode : public MorphNode {
 public:
@@ -24,24 +25,31 @@ public:
         ensureLoaded(r);
         if (!textureId || imgW <= 0 || imgH <= 0) return;
 
-        float br = style.borderRadius;
+        auto sc = [&](float v) { return m_hasLayoutTransition ? v : std::round(v); };
+        float sx = sc(x), sy = sc(y);
+        float sw = sc(w), sh = sc(h);
+        float br = m_isTransitioning ? style.borderRadius : snapRadius(style.borderRadius);
+
+        // Clip self for borderRadius (each node's flat render handles children separately)
         if (br > 0.0f) {
-            DrawOp cl; cl.setClip(x, y, w, h, true, br);
+            DrawOp cl; cl.setClip(sx, sy, sw, sh, true, br);
             m_displayList.push_back(cl);
         }
 
         DrawOp tex;
         tex.type = DrawOp::TextureQuad;
-        tex.x = x; tex.y = y; tex.w = w; tex.h = h;
+        tex.x = sx; tex.y = sy; tex.w = sw; tex.h = sh;
         tex.texId = textureId;
         tex.r = tex.g = tex.b = tex.a = 1.0f;
         m_displayList.push_back(tex);
 
 #ifdef MORPH_FEATURE_BORDER
         if (style.borderWidth > 0.0f && style.borderStyle == "solid") {
+            float bw = m_isTransitioning ? style.borderWidth : snapBorderWidth(style.borderWidth);
             DrawOp brr;
-            brr.setBordered(x, y, w, h, br, style.bgColor, style.borderWidth, style.borderColor);
-            brr.type = DrawOp::BorderRing; // draw border ring only
+            brr.setBordered(sx, sy, sw, sh, br, style.bgColor,
+                            bw, style.borderColor);
+            brr.type = DrawOp::BorderRing;
             m_displayList.push_back(brr);
         }
 #endif
@@ -71,19 +79,21 @@ public:
         ensureLoaded(r);
 
         if (textureId && imgW > 0 && imgH > 0) {
-            float br = style.borderRadius;
+            auto sc = [&](float v) { return m_hasLayoutTransition ? v : std::round(v); };
+            float sx = sc(x), sy = sc(y);
+            float sw = sc(w), sh = sc(h);
+            float br = m_isTransitioning ? style.borderRadius : snapRadius(style.borderRadius);
             if (br > 0.0f) {
-                r.beginRoundedClip(x, y, w, h, br);
+                r.beginRoundedClip(sx, sy, sw, sh, br);
             }
 
-            r.drawTexture(textureId, x, y, w, h);
+            r.drawTexture(textureId, sx, sy, sw, sh);
 
 #ifdef MORPH_FEATURE_BORDER
             if (style.borderWidth > 0.0f && style.borderStyle == "solid") {
-                // Border drawn inside the stencil scope so it's not hidden
-                // by nested GL_INCR stencil masking.
-                r.drawBorderRing(x, y, w, h, style.borderRadius,
-                                 style.borderWidth, style.borderColor);
+                float bw = m_isTransitioning ? style.borderWidth : snapBorderWidth(style.borderWidth);
+                r.drawBorderRing(sx, sy, sw, sh, br,
+                                 bw, style.borderColor);
             }
 #endif
 

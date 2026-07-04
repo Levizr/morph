@@ -9,9 +9,12 @@ class JSXWalker:
     """
 
     def walk(self, root: Node) -> dict:
+        imports = self._extract_imports(root)
+        imports.extend(self._extract_css_load_calls(root))
         return {
-            "imports":    self._extract_imports(root),
-            "components": self._extract_components(root),
+            "imports":      imports,
+            "components":   self._extract_components(root),
+            "windowConfig": self._extract_window_config(root),
         }
 
     # ── Imports ───────────────────────────────────────────────
@@ -24,9 +27,9 @@ class JSXWalker:
                 continue
 
             if source.startswith("http://") or source.startswith("https://"):
-                imports.append({"type": "css_url",   "url":  source})
+                imports.append({"type": "css_url",   "url":  source, "style": "import"})
             elif source.endswith(".css"):
-                imports.append({"type": "css_local", "path": source})
+                imports.append({"type": "css_local", "path": source, "style": "import"})
             else:
                 specifiers = self._get_import_specifiers(node)
                 imports.append({
@@ -50,6 +53,54 @@ class JSXWalker:
                 for sub in self._find_all(child, "identifier"):
                     specifiers.append(sub.text.decode())
         return specifiers
+
+    def _extract_css_load_calls(self, root: Node) -> list[dict]:
+        entries = []
+        for node in self._find_all(root, "call_expression"):
+            fn_parts, args = self._parse_call_expr(node)
+            if fn_parts != ["CSS", "load"]:
+                continue
+            if args is None:
+                continue
+            for child in args.children:
+                if child.type == "string":
+                    source = child.text.decode().strip("'\"")
+                    if source.startswith("http://") or source.startswith("https://"):
+                        entries.append({"type": "css_url", "url": source, "style": "css_load"})
+                    else:
+                        entries.append({"type": "css_local", "path": source, "style": "css_load"})
+                    break
+        return entries
+
+    def _extract_window_config(self, root: Node) -> dict | None:
+        for node in self._find_all(root, "export_statement"):
+            for decl in self._find_all(node, "variable_declarator"):
+                name = ""
+                obj_node = None
+                for child in decl.children:
+                    if child.type == "identifier":
+                        name = child.text.decode()
+                    elif child.type == "object":
+                        obj_node = child
+                if name == "windowConfig" and obj_node is not None:
+                    config = {}
+                    for pair in self._find_all(obj_node, "pair"):
+                        key = ""
+                        val = None
+                        for part in pair.children:
+                            if part.type == "property_identifier":
+                                key = part.text.decode()
+                            elif part.type == "string":
+                                val = part.text.decode().strip("'\"")
+                            elif part.type == "number":
+                                try:
+                                    val = int(part.text.decode())
+                                except ValueError:
+                                    val = float(part.text.decode())
+                        if key and val is not None:
+                            config[key] = val
+                    return config
+        return None
 
     # ── Components ────────────────────────────────────────────
 
@@ -178,11 +229,12 @@ class JSXWalker:
         for node in self._find_all(block, "return_statement"):
             for child in node.children:
                 if child.type in ("jsx_element", "jsx_self_closing_element",
-                                  "parenthesized_expression"):
+                                  "jsx_fragment", "parenthesized_expression"):
                     if child.type == "parenthesized_expression":
                         for sub in child.children:
                             if sub.type in ("jsx_element",
-                                            "jsx_self_closing_element"):
+                                            "jsx_self_closing_element",
+                                            "jsx_fragment"):
                                 return sub
                     return child
         return None
@@ -223,8 +275,16 @@ class JSXWalker:
                     if text:
                         children.append({"tag": "__text__", "text": text})
 
+            tag = self._get_jsx_tag(opening) if opening else ""
+            if tag == "":
+                return {
+                    "tag":      "__fragment__",
+                    "props":    {},
+                    "children": children,
+                    "self_closing": False,
+                }
             return {
-                "tag":      self._get_jsx_tag(opening) if opening else "",
+                "tag":      tag,
                 "props":    self._get_jsx_props(opening) if opening else {},
                 "children": children,
                 "self_closing": False,

@@ -15,6 +15,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${MORPH_BIN_DIR})
 find_package(OpenGL REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(FREETYPE REQUIRED freetype2)
+pkg_check_modules(HARFBUZZ REQUIRED harfbuzz)
 
 # Runtime directory (for relative includes like "core/node.h")
 set(RUNTIME_DIR ${CMAKE_CURRENT_SOURCE_DIR}/..)
@@ -29,6 +30,7 @@ set(DEV_SOURCES
 set(RUNTIME_SOURCES
     ${RUNTIME_DIR}/core/node.cpp
     ${RUNTIME_DIR}/core/window.cpp
+    ${RUNTIME_DIR}/core/compositor.cpp
     ${RUNTIME_DIR}/render/gl_renderer.cpp
     ${RUNTIME_DIR}/core/glad.c
     ${VENDOR_DIR}/stb_image.c
@@ -40,6 +42,7 @@ target_include_directories(morph_devrt PRIVATE
     ${RUNTIME_DIR}        # for "core/node.h", "render/gl_renderer.h"
     ${VENDOR_DIR}         # for "vendor/glad/glad.h"
     ${FREETYPE_INCLUDE_DIRS}
+    ${HARFBUZZ_INCLUDE_DIRS}
 )
 
 # All features enabled for dev mode (dead code elimination not needed in dev)
@@ -68,4 +71,5 @@ target_link_libraries(morph_devrt PRIVATE
     pthread
     dl
     ${FREETYPE_LIBRARIES}
+    ${HARFBUZZ_LIBRARIES}
 )

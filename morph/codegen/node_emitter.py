@@ -188,7 +188,7 @@ class NodeEmitter:
 
         # ── Feature: FLEX ──
         if "flex" in self.features:
-            if s.display == "flex" and s.flex_dir != "column":
+            if s.display == "flex" and s.flex_dir != "row":
                 lines.append(f"{prefix}.flexDirection = \"{s.flex_dir}\";")
             if s.gap > 0:
                 lines.append(f"{prefix}.gap = {fmt(s.gap)};")
@@ -319,7 +319,7 @@ class NodeEmitter:
             if s.border_style not in ("", "none"):
                 lines.append(f"{var}.style.borderStyle = \"{s.border_style}\";")
             if "flex" in self.features:
-                if s.flex_dir != "column":
+                if s.flex_dir != "row":
                     lines.append(f"{var}.style.flexDirection = \"{s.flex_dir}\";")
                 if s.justify_content != "flex-start":
                     lines.append(f"{var}.style.justifyContent = \"{s.justify_content}\";")
@@ -405,7 +405,7 @@ class NodeEmitter:
 
         # ── Feature: FLEX ──
         if "flex" in self.features:
-            if s.flex_dir != "column" and s.flex_dir != base.flex_dir:
+            if s.flex_dir != "row" and s.flex_dir != base.flex_dir:
                 overrides.append(f"{hv}->flexDirection = \"{s.flex_dir}\";")
             if s.gap > 0 and s.gap != base.gap:
                 overrides.append(f"{hv}->gap = {fmt(s.gap)};")

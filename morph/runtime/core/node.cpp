@@ -1,6 +1,8 @@
 #include "node.h"
 #include "renderer.h"
 #include <cmath>
+#include <cstring>
+#include <chrono>
 
 // ── Dirty flag propagation ───────────────────────────────────
 void MorphNode::markDirty(DirtyFlag f) {
@@ -129,10 +131,14 @@ void MorphNode::updateAnimations(float dt) {
             t = 1.0f;
             a.finished = true;
             a.running = false;
+            // Snap to final value on main thread (for correctness)
+            float val = a.to;
+            setAnimProperty(this, a.property, val);
         }
-        float val = a.from + (a.to - a.from) * applyEasing(t, a.easing);
-        setAnimProperty(this, a.property, val);
     }
+    // Running animations are interpolated by the compositor thread now.
+    // We only snap on completion here so the node's properties settle
+    // at the correct final value after the compositor's work is done.
 }
 
 // Helper: apply only non-default fields from delta to target
@@ -414,11 +420,64 @@ void MorphNode::updateAncestorHoverTransition(float dt) {
     }
 }
 
+// ── Check if two styles differ in layout-affecting properties ──
+static bool hasLayoutDiff(const MorphStyle& a, const MorphStyle& b) {
+    if (memcmp(a.padding, b.padding, sizeof(float)*4) != 0) return true;
+    if (memcmp(a.margin, b.margin, sizeof(float)*4) != 0) return true;
+    if (a.explicitWidth != b.explicitWidth) return true;
+    if (a.explicitHeight != b.explicitHeight) return true;
+    if (a.minWidth != b.minWidth || a.maxWidth != b.maxWidth) return true;
+    if (a.minHeight != b.minHeight || a.maxHeight != b.maxHeight) return true;
+    if (a.fontSize != b.fontSize) return true;
+#ifdef MORPH_FEATURE_BORDER
+    if (a.borderWidth != b.borderWidth) return true;
+#endif
+#ifdef MORPH_FEATURE_FLEX
+    if (a.gap != b.gap) return true;
+#endif
+#ifdef MORPH_FEATURE_POSITION
+    if (a.left != b.left || a.right != b.right || a.top != b.top || a.bottom != b.bottom) return true;
+#endif
+    return false;
+}
+
+static bool isLayoutAnimProperty(AnimProperty p) {
+    return p == AnimProperty::X || p == AnimProperty::Y
+        || p == AnimProperty::W || p == AnimProperty::H;
+}
+
 void MorphNode::update(float dt) {
+    bool wasTransitioning = m_isTransitioning;
+    bool wasLayoutTransition = m_hasLayoutTransition;
+    m_isTransitioning = false;
+    m_hasLayoutTransition = false;
+
     updateHoverTransition(dt);
     updateAncestorHoverTransition(dt);
     updateAnimations(dt);
+
+    if (m_hoverTransition && m_hoverTransition->active) {
+        m_isTransitioning = true;
+        if (hasLayoutDiff(m_hoverTransition->startStyle, m_hoverTransition->targetStyle))
+            m_hasLayoutTransition = true;
+    }
+    if (m_ancestorHoverTransition && m_ancestorHoverTransition->active) {
+        m_isTransitioning = true;
+        if (hasLayoutDiff(m_ancestorHoverTransition->revertStyle, m_ancestorHoverTransition->targetStyle))
+            m_hasLayoutTransition = true;
+    }
+    for (auto& a : m_animations) {
+        if (a.running && !a.finished) {
+            m_isTransitioning = true;
+            if (isLayoutAnimProperty(a.property))
+                m_hasLayoutTransition = true;
+        }
+    }
+
     for (auto* c : children) c->update(dt);
+
+    if (m_isTransitioning != wasTransitioning) markDirty(PaintDirty);
+    if (m_hasLayoutTransition != wasLayoutTransition) markDirty(PaintDirty);
 }
 
 // ── Display list helpers ─────────────────────────────────────
@@ -427,9 +486,131 @@ void MorphNode::recordDisplayList(Renderer& r) {
 }
 
 void MorphNode::executeDisplayList(Renderer& r) {
-    // Base: draw children. Widgets override to add their own display list ops.
-    // Default: fall back to draw() if no display list optimization
     draw(r);
+}
+
+// ── Helpers for style string → FlatRenderNode enum conversion ─
+static uint8_t overflowToEnum(const std::string& s) {
+    if (s == "hidden") return 1;
+    if (s == "scroll") return 2;
+    if (s == "auto")   return 3;
+    return 0; // visible
+}
+static uint8_t boxSizingToEnum(const std::string& s) {
+    return (s == "border-box") ? 1 : 0;
+}
+static uint8_t displayToEnum(const std::string& s) {
+    if (s == "flex")  return 1;
+    if (s == "none")  return 2;
+    if (s == "inline") return 3;
+    return 0; // block
+}
+static uint8_t positionToEnum(const std::string& s) {
+    return (s == "absolute") ? 1 : 0;
+}
+static uint8_t fontWeightToEnum(const std::string& s) {
+    return (s == "bold") ? 1 : 0;
+}
+static uint8_t borderStyleToEnum(const std::string& s) {
+    return (s == "solid") ? 1 : 0;
+}
+
+// ── Default: no extra data to flatten ────────────────────────
+int MorphNode::flattenExtra(RenderFrame& frame, FlatRenderNode& fn) {
+    (void)frame; (void)fn;
+    return 0;
+}
+
+// ── Flatten node tree into lock-free render frame ─────────────
+int MorphNode::flatten(RenderFrame& frame, int parentId) {
+    int idx = (int)frame.nodes.size();
+    FlatRenderNode fn;
+    fn.id = idx;
+    fn.parentId = parentId;
+    fn.x = x; fn.y = y; fn.w = w; fn.h = h;
+    fn.isTransitioning = m_isTransitioning;
+    fn.hasLayoutTransition = m_hasLayoutTransition;
+
+    memcpy(fn.bgColor, style.bgColor, sizeof(float)*4);
+    memcpy(fn.color, style.color, sizeof(float)*4);
+    fn.borderRadius = style.borderRadius;
+    fn.borderWidth = 0.0f;
+    fn.borderColor[0] = fn.borderColor[1] = fn.borderColor[2] = 0.0f; fn.borderColor[3] = 1.0f;
+    fn.borderStyle = 0;
+#ifdef MORPH_FEATURE_BORDER
+    fn.borderWidth = style.borderWidth;
+    memcpy(fn.borderColor, style.borderColor, sizeof(float)*4);
+    fn.borderStyle = borderStyleToEnum(style.borderStyle);
+#endif
+
+    fn.overflow = overflowToEnum(style.overflow);
+    fn.boxSizing = boxSizingToEnum(style.boxSizing);
+    fn.display = displayToEnum(style.display);
+    fn.position = positionToEnum(style.position);
+
+    fn.fontSize = style.fontSize;
+    fn.textAlign = (style.textAlign == "center") ? (uint8_t)1 : (style.textAlign == "right" ? (uint8_t)2 : (uint8_t)0);
+    fn.fontWeight = fontWeightToEnum(style.fontWeight);
+
+    fn.scrollY = scrollY;
+    fn.contentH = contentH;
+    fn.scrollEnabled = scrollEnabled;
+    fn.scrollbarWidth = 8.0f;
+    { float c[4] = {0.85f,0.85f,0.85f,0.4f}; memcpy(fn.scrollbarTrackColor, c, sizeof(float)*4); }
+    { float c[4] = {0.5f,0.5f,0.5f,0.6f}; memcpy(fn.scrollbarThumbColor, c, sizeof(float)*4); }
+    fn.scrollbarBorderRadius = 4.0f;
+#ifdef MORPH_FEATURE_SCROLL
+    fn.scrollbarWidth = style.scrollbarWidth;
+    memcpy(fn.scrollbarTrackColor, style.scrollbarTrackColor, sizeof(float)*4);
+    memcpy(fn.scrollbarThumbColor, style.scrollbarThumbColor, sizeof(float)*4);
+    fn.scrollbarBorderRadius = style.scrollbarBorderRadius;
+#endif
+
+    // Copy display list into frame's flat drawOps array
+    int dlStart = (int)frame.drawOps.size();
+    frame.drawOps.insert(frame.drawOps.end(), m_displayList.begin(), m_displayList.end());
+    fn.dlOffset = dlStart;
+    fn.dlCount = (int)m_displayList.size();
+
+    // Collect node-specific extra data (text ops, etc.)
+    fn.textOpOffset = (int)frame.textOps.size();
+    fn.textOpCount = flattenExtra(frame, fn);
+
+    // Animations (only compositor-safe properties)
+    auto now = std::chrono::steady_clock::now().time_since_epoch().count();
+    double nowSec = (double)now / 1000000000.0;
+    for (auto& a : m_animations) {
+        if (!a.running || a.finished) continue;
+        CompositorAnimProperty cap;
+        switch (a.property) {
+            case AnimProperty::X: cap = CompositorAnimProperty::X; break;
+            case AnimProperty::Y: cap = CompositorAnimProperty::Y; break;
+            case AnimProperty::BgColorR: cap = CompositorAnimProperty::BgColorR; break;
+            case AnimProperty::BgColorG: cap = CompositorAnimProperty::BgColorG; break;
+            case AnimProperty::BgColorB: cap = CompositorAnimProperty::BgColorB; break;
+            case AnimProperty::BgColorA: cap = CompositorAnimProperty::BgColorA; break;
+            case AnimProperty::ColorR: cap = CompositorAnimProperty::ColorR; break;
+            case AnimProperty::ColorG: cap = CompositorAnimProperty::ColorG; break;
+            case AnimProperty::ColorB: cap = CompositorAnimProperty::ColorB; break;
+            case AnimProperty::ColorA: cap = CompositorAnimProperty::ColorA; break;
+            case AnimProperty::BorderRadius: cap = CompositorAnimProperty::BorderRadius; break;
+            default: continue; // W, H — not compositor-safe, skip
+        }
+        // Effective start time: now minus already-elapsed time
+        double startTime = nowSec - (double)a.elapsed;
+        frame.animations.push_back({idx, cap, a.from, a.to,
+                                    startTime, a.duration, (uint8_t)a.easing, true});
+    }
+
+    frame.nodes.push_back(fn);
+
+    // Flatten children
+    for (auto* child : children) {
+        int childIdx = child->flatten(frame, idx);
+        frame.nodes[idx].children.push_back(childIdx);
+    }
+
+    return idx;
 }
 
 // ── W3C box-model helpers ────────────────────────────────────
@@ -656,13 +837,13 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
             }
 
             if (remaining < 0.0f) {
-                float shrinkTotal = 0.0f;
-                for (auto* item : line.fItems) shrinkTotal += item->node->style.flexShrink;
-                if (shrinkTotal > 0.0f) {
+                float scaledTotal = 0.0f;
+                for (auto* item : line.fItems) scaledTotal += item->main * item->node->style.flexShrink;
+                if (scaledTotal > 0.0f) {
                     float toReduce = -remaining;
                     for (auto* item : line.fItems) {
-                        float s = item->node->style.flexShrink / shrinkTotal;
-                        float reduction = toReduce * s;
+                        float scaled = item->main * item->node->style.flexShrink;
+                        float reduction = toReduce * scaled / scaledTotal;
                         float reduced = std::max(0.0f, item->main - reduction);
                         if (isRow) item->node->w -= item->main - reduced;
                         else item->node->h -= item->main - reduced;
@@ -692,10 +873,10 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                 offset = free;
             } else if (style.justifyContent == "space-between") {
                 offset = 0.0f;
-                itemGap = line.fItems.size() > 1 ? free / (line.fItems.size() - 1) : 0.0f;
+                itemGap = (line.fItems.size() > 1) ? style.gap + free / (line.fItems.size() - 1) : 0.0f;
             } else if (style.justifyContent == "space-around") {
                 offset = line.fItems.size() > 0 ? free / (line.fItems.size() * 2) : 0.0f;
-                itemGap = line.fItems.size() > 0 ? free / line.fItems.size() : 0.0f;
+                itemGap = line.fItems.size() > 0 ? style.gap + free / line.fItems.size() : 0.0f;
             }
 
             float cursor = mainStart + offset;
@@ -710,7 +891,8 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 
                 if (lineCross > crossDim) {
                     if (style.alignItems == "center") {
-                        posCross = cursorCross + (lineCross - crossDim) * 0.5f;
+                        float marginCross = isCol ? (ci->ml + ci->mr) : (ci->mt + ci->mb);
+                        posCross = cursorCross + (isCol ? ci->ml : ci->mt) + (lineCross - (crossDim + marginCross)) * 0.5f;
                     } else if (style.alignItems == "flex-end") {
                         posCross = cursorCross + lineCross - crossDim;
                         posCross -= (isCol ? ci->mr : ci->mb);
@@ -751,7 +933,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 
                 // Stretch alignment: item fills the cross-axis line size
                 if (style.alignItems == "stretch" && ci->node->style.explicitWidth < 0.0f && isCol) {
-                    float availW = crossSize - ci->ml - ci->mr;
+                    float availW = lineCross - ci->ml - ci->mr;
                     if (availW < 0.0f) availW = 0.0f;
                     if (availW > ci->node->w) ci->node->w = availW;
                 }

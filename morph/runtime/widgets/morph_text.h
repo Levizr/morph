@@ -145,6 +145,47 @@ public:
         }
     }
 
+    int flattenExtra(RenderFrame& frame, FlatRenderNode& fn) override {
+        (void)fn;
+        // Compute effective color (same parent-chain logic as executeDisplayList)
+        float* effectiveColor = nullptr;
+        if (!m_textOps.empty()) {
+            effectiveColor = m_textOps[0].color;
+        }
+        if (parent && !m_colorOverridden) {
+            MorphNode* src = parent;
+            while (src) {
+                float* c = src->style.color;
+                bool nonDefault = c[0] != 0.0f || c[1] != 0.0f || c[2] != 0.0f || c[3] != 1.0f;
+                if (nonDefault && !src->m_colorInherited)
+                    break;
+                src = src->parent;
+            }
+            effectiveColor = src ? src->style.color : parent->style.color;
+        }
+        int count = 0;
+        for (auto& top : m_textOps) {
+            FlatTextOp fto;
+            fto.nodeId = fn.id;
+            fto.text = top.text;
+            fto.x = top.x;
+            fto.y = top.y;
+            if (effectiveColor) {
+                fto.color[0] = effectiveColor[0]; fto.color[1] = effectiveColor[1];
+                fto.color[2] = effectiveColor[2]; fto.color[3] = effectiveColor[3];
+            } else {
+                fto.color[0] = top.color[0]; fto.color[1] = top.color[1];
+                fto.color[2] = top.color[2]; fto.color[3] = top.color[3];
+            }
+            fto.align = (uint8_t)top.align;
+            fto.fontSize = top.fontSize;
+            fto.fontWeight = (top.fontWeight == "bold") ? (uint8_t)1 : (uint8_t)0;
+            frame.textOps.push_back(fto);
+            count++;
+        }
+        return count;
+    }
+
     void draw(Renderer& r) override {
         float lh = style.fontSize * 1.4f;
         float py = y;

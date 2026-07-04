@@ -15,6 +15,7 @@ class Compiler:
 
     def compile(self, source_path: str, binary_path: str,
                 needs_freetype: bool = True,
+                needs_harfbuzz: bool = True,
                 defines: list[str] | None = None) -> bool:
         if not os.path.exists(source_path):
             log_error(f"Source not found: {source_path}")
@@ -37,6 +38,7 @@ class Compiler:
             os.path.join(runtime_dir, "core", "node.cpp"),
             os.path.join(runtime_dir, "core", "window.cpp"),
             os.path.join(runtime_dir, "render", "gl_renderer.cpp"),
+            os.path.join(runtime_dir, "core", "compositor.cpp"),
         ]
 
         cmd = [
@@ -73,6 +75,21 @@ class Compiler:
             except Exception:
                 ft_libs = ["-lfreetype"]
             cmd.extend([*ft_cflags, *ft_libs])
+
+        if needs_harfbuzz:
+            try:
+                hb_cflags = subprocess.check_output(
+                    ["pkg-config", "--cflags", "harfbuzz"], text=True
+                ).strip().split()
+            except Exception:
+                hb_cflags = []
+            try:
+                hb_libs = subprocess.check_output(
+                    ["pkg-config", "--libs", "harfbuzz"], text=True
+                ).strip().split()
+            except Exception:
+                hb_libs = ["-lharfbuzz"]
+            cmd.extend([*hb_cflags, *hb_libs])
 
         if not self.silent:
             log_info(f"Compiling: {' '.join(cmd)}")

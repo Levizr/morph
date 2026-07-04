@@ -1,8 +1,11 @@
-import "./style.css"
+import { CSS } from "morph"
+CSS.load("./style.css")
+
+export const windowConfig = { title: "Morph — Build Beautiful Apps", width: 1100, height: 850 }
 
 export default function App() {
   return (
-    <morph-window title="Morph — Build Beautiful Apps" width={1100} height={850}>
+    <>
       <body>
         {/* Navigation */}
         <div className="nav">
@@ -68,6 +71,6 @@ export default function App() {
         {/* Footer */}
         <div className="footer">Built with Morph.</div>
       </body>
-    </morph-window>
+    </>
   )
 }

@@ -106,10 +106,14 @@ class LayoutEngine:
                     s.max_height = val
                 elif css_key == "gap":
                     s.gap = val
-                elif css_key in ("left", "right"):
-                    s.left = s.right = val
-                elif css_key in ("top", "bottom"):
-                    s.top = s.bottom = val
+                elif css_key == "left":
+                    s.left = val
+                elif css_key == "right":
+                    s.right = val
+                elif css_key == "top":
+                    s.top = val
+                elif css_key == "bottom":
+                    s.bottom = val
 
     # ═══════════════════════════════════════════════════════════
     #  Pass 1 — Measure (bottom-up)
@@ -178,6 +182,12 @@ class LayoutEngine:
                     continue
                 self._measure(child, cw)
                 mt, mr, mb, ml = child.style.margin
+                # Clamp DEFERRED (auto) margins to 0 during measure —
+                # they will be resolved in the layout pass.
+                ml = 0.0 if ml == DEFERRED else ml
+                mr = 0.0 if mr == DEFERRED else mr
+                mt = 0.0 if mt == DEFERRED else mt
+                mb = 0.0 if mb == DEFERRED else mb
                 cmain = (child.w + ml + mr) if is_row else (child.h + mt + mb)
                 ccross = (child.h + mt + mb) if is_row else (child.w + ml + mr)
 
@@ -244,6 +254,9 @@ class LayoutEngine:
                     child_bh = max(child_bh, 0.0)
                     cmt = child.style.margin[0]
                     cmb = child.style.margin[2]
+                    # Clamp DEFERRED (auto) vertical margins to 0 during measure
+                    cmt = 0.0 if cmt == DEFERRED else cmt
+                    cmb = 0.0 if cmb == DEFERRED else cmb
                     gap = max(prev_mb, cmt) if prev_mb >= 0 else cmt
                     content_h += gap + child_bh
                     prev_mb = cmb

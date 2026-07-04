@@ -4,6 +4,7 @@
 #include "../style/style.h"
 #include "event.h"
 #include "../render/gl_renderer.h"
+#include "render_frame.h"
 
 class Renderer;
 
@@ -22,13 +23,6 @@ struct DirtyStats {
     int fullTreeCount = 0;
     int skippedCount = 0;
     void reset() { layoutCount = 0; paintCount = 0; fullTreeCount = 0; skippedCount = 0; }
-};
-
-enum class Easing : uint8_t {
-    Linear,
-    EaseIn,
-    EaseOut,
-    EaseInOut,
 };
 
 enum class AnimProperty : uint8_t {
@@ -99,6 +93,11 @@ public:
     float scrollDragStartY = 0;
     float scrollDragStartVal = 0;
 
+    // True while this node has an active hover/programmatic transition (no propagation)
+    bool m_isTransitioning = false;
+    // True when active transition changes layout-affecting properties (size, margin, padding, etc.)
+    bool m_hasLayoutTransition = false;
+
     // Dirty rendering state
     uint8_t m_dirtyFlags = Clean | LayoutDirty | PaintDirty;
 
@@ -150,5 +149,9 @@ public:
     virtual void recordDisplayList(Renderer& r);
     virtual void executeDisplayList(Renderer& r);
 
-    virtual ~MorphNode() { delete hoverStyle; delete m_hoverTransition; delete m_ancestorHoverTransition; }
+    // Flatten into a lock-free render frame for the compositor thread
+    virtual int flatten(RenderFrame& frame, int parentId);
+    virtual int flattenExtra(RenderFrame& frame, FlatRenderNode& fn);
+
+    virtual ~MorphNode() { delete hoverStyle; delete m_hoverTransition; delete m_ancestorHoverTransition; for (auto* child : children) delete child; }
 };

@@ -3,7 +3,7 @@
 
 #ifdef MORPH_FEATURE_FLEX
 struct FlexStyle {
-    std::string flexDirection = "column";
+    std::string flexDirection = "row";
     std::string justifyContent = "flex-start";
     std::string alignItems = "stretch";
     std::string flexWrap = "nowrap";

@@ -44,6 +44,9 @@ int main() {
 {% endfor %}
     }
 
+{% for win in windows %}
+    delete win_{{ win.window_id }};
+{% endfor %}
     glfwTerminate();
     return 0;
 }

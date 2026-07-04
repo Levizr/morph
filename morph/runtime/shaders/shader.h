@@ -45,41 +45,61 @@ in vec4 vBorderColor;
 in float vBorderOnly;
 uniform bool uStencilMode;
 out vec4 FragColor;
+
+// Precise Signed Distance Field for rounded rectangles
+float sdRoundedBox(vec2 p, vec2 b, float r) {
+    vec2 q = abs(p) - b + r;
+    return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
+}
+
 void main() {
     vec2 halfSize = vSize * 0.5;
     vec2 p = vUV * vSize - halfSize;
-    float rad = min(max(vRadius, 0.001), min(halfSize.x, halfSize.y));
+    
+    // Clamp radius so it can never exceed half of the dimensions
+    float rad = min(max(vRadius, 0.0), min(halfSize.x, halfSize.y));
 
-    // Outer rounded rect SDF
-    vec2 d_outer = abs(p) - halfSize + rad;
-    float dist_outer = length(max(d_outer, 0.0)) - rad;
-    float alpha_outer = 1.0 - smoothstep(0.0, fwidth(dist_outer), max(dist_outer, 0.0));
+    // 1. Calculate Exact Outer Signed Distance
+    float dist_outer = sdRoundedBox(p, halfSize, rad);
+    
+    // BROWSER FIX: Compute axis-aligned directional derivatives explicitly
+    // This prevents fwidth() from merging X and Y rate-of-change variances 
+    vec2 dDist = vec2(dFdx(dist_outer), dFdy(dist_outer));
+    float edgeSoftness = length(dDist) * 0.70710678118; // Exact pixel corner scale invariant factor
+    
+    // Symmetrical 1-pixel wide screenspace coverage transition
+    float alpha_outer = 1.0 - smoothstep(-edgeSoftness, edgeSoftness, dist_outer);
 
-    // Stencil mode: discard fragments outside the rounded shape so they
-    // don't write to the stencil buffer.
+    // Stencil optimization mode
     if (uStencilMode) {
         if (alpha_outer < 0.5) discard;
         FragColor = vec4(1.0);
         return;
     }
 
+    // Early discard optimization for completely transparent pixels
+    if (alpha_outer < 0.001) discard;
+
     vec4 color;
     if (vBorderWidth > 0.0) {
-        // Inner rounded rect SDF (inset by borderWidth)
+        // Calculate Exact Inner Signed Distance (nested concentric layout matching CSS rules)
         vec2 innerHalfSize = halfSize - vBorderWidth;
-        float innerRad = max(rad - vBorderWidth, 0.001);
-        vec2 d_inner = abs(p) - innerHalfSize + innerRad;
-        float dist_inner = length(max(d_inner, 0.0)) - innerRad;
-        float alpha_inner = 1.0 - smoothstep(0.0, fwidth(dist_inner), max(dist_inner, 0.0));
+        float innerRad = max(rad - vBorderWidth, 0.0);
+        
+        float dist_inner = sdRoundedBox(p, innerHalfSize, innerRad);
+        float alpha_inner = 1.0 - smoothstep(-edgeSoftness, edgeSoftness, dist_inner);
 
         if (vBorderOnly > 0.5) {
-            // Border-only: just the ring
+            // Border-only: Smoothly strip out the interior
             float ringAlpha = alpha_outer * (1.0 - alpha_inner);
             color = vec4(vBorderColor.rgb, vBorderColor.a * ringAlpha);
         } else {
-            // Fill + border
-            color = mix(vBorderColor, vColor, alpha_inner);
-            color.a = mix(vBorderColor.a, vColor.a, alpha_inner) * alpha_outer;
+            // Fill + Border: Multi-layered destination alpha blending
+            vec4 interiorFill = vec4(vColor.rgb, vColor.a * alpha_inner);
+            vec4 borderLayer = vec4(vBorderColor.rgb, vBorderColor.a);
+            
+            color = mix(interiorFill, borderLayer, borderLayer.a * (1.0 - alpha_inner));
+            color.a *= alpha_outer;
         }
     } else {
         color = vec4(vColor.rgb, vColor.a * alpha_outer);
@@ -89,6 +109,8 @@ void main() {
 }
 )glsl";
 
+
+
 #ifdef MORPH_FEATURE_TEXT
 static const char* kTextVertSrc = R"glsl(
 #version 330 core
@@ -96,14 +118,17 @@ layout(location = 0) in vec2 aPos;
 layout(location = 1) in vec4 aInst0;
 layout(location = 2) in vec4 aInst1;
 layout(location = 3) in vec4 aInst2;
+layout(location = 4) in float aIsColor;
 uniform mat4 uProj;
 out vec4 vColor;
 out vec2 vUV;
+flat out float vIsColor;
 void main() {
     vec2 pos = aInst0.xy + aPos * aInst0.zw;
     gl_Position = uProj * vec4(pos, 0.0, 1.0);
     vUV = mix(aInst1.xy, aInst1.zw, aPos);
     vColor = aInst2;
+    vIsColor = aIsColor;
 }
 )glsl";
 
@@ -111,11 +136,18 @@ static const char* kTextFragSrc = R"glsl(
 #version 330 core
 in vec4 vColor;
 in vec2 vUV;
+flat in float vIsColor;
 uniform sampler2D uAtlas;
+uniform sampler2D uColorAtlas;
 out vec4 FragColor;
 void main() {
-    float alpha = texture(uAtlas, vUV).r;
-    FragColor = vec4(vColor.rgb, vColor.a * alpha);
+    if (vIsColor > 0.5) {
+        vec4 c = texture(uColorAtlas, vUV);
+        FragColor = vec4(c.rgb, c.a * vColor.a);
+    } else {
+        float alpha = texture(uAtlas, vUV).r;
+        FragColor = vec4(vColor.rgb, vColor.a * alpha);
+    }
 }
 )glsl";
 #endif

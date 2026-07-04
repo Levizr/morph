@@ -198,6 +198,8 @@ class IRBuilder:
         tw_resolver: TailwindResolver,
     ) -> list[IRWindow]:
         ir_windows = []
+
+        win_cfg = walked.get("windowConfig")
         for comp in walked.get("components", []):
             if not comp.get("exported", False):
                 continue
@@ -205,21 +207,11 @@ class IRBuilder:
             jsx = comp.get("jsx", {})
             tag = jsx.get("tag")
 
-            if tag == "morph-window":
+            if win_cfg:
                 window_id = self._next_id()
-                props = jsx.get("props", {})
-
-                # ── Resolve Tailwind classes on window itself ──
-                tw_styles = _resolve_tw(props, tw_resolver)
-
-                config = {
-                    "title":  props.get("title",  str(getattr(self.config, "name", "Untitled"))),
-                    "width":  _int_prop(props, "width",  tw_styles, 800),
-                    "height": _int_prop(props, "height", tw_styles, 600),
-                }
-
                 window_nodes = []
-                for child in jsx.get("children", []):
+                children = jsx.get("children", []) if tag == "__fragment__" else [jsx]
+                for child in children:
                     node = self._build_node(child, css_rules, tw_resolver)
                     if node:
                         window_nodes.append(node)
@@ -228,7 +220,27 @@ class IRBuilder:
                     window_id=window_id,
                     nodes=window_nodes,
                     startup_logs=comp.get("body_logs", []),
-                    **config,
+                    title=win_cfg.get("title", str(getattr(self.config, "name", "Untitled"))),
+                    width=win_cfg.get("width", 800),
+                    height=win_cfg.get("height", 600),
+                ))
+            elif tag == "morph-window":
+                props = jsx.get("props", {})
+                tw_styles = _resolve_tw(props, tw_resolver)
+
+                window_nodes = []
+                for child in jsx.get("children", []):
+                    node = self._build_node(child, css_rules, tw_resolver)
+                    if node:
+                        window_nodes.append(node)
+
+                ir_windows.append(IRWindow(
+                    window_id=self._next_id(),
+                    nodes=window_nodes,
+                    startup_logs=comp.get("body_logs", []),
+                    title=props.get("title", str(getattr(self.config, "name", "Untitled"))),
+                    width=_int_prop(props, "width", tw_styles, 800),
+                    height=_int_prop(props, "height", tw_styles, 600),
                 ))
 
         return ir_windows

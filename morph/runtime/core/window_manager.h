@@ -10,6 +10,11 @@ class WindowManager {
     std::unordered_map<std::string, MorphWindow*> m_windows;
 
 public:
+    ~WindowManager() {
+        for (auto& [_, w] : m_windows) delete w;
+        m_windows.clear();
+    }
+
     static WindowManager& get() {
         static WindowManager inst;
         return inst;
@@ -24,7 +29,11 @@ public:
     }
 
     void close(const std::string& id) {
-        m_windows.clear();
+        auto it = m_windows.find(id);
+        if (it != m_windows.end()) {
+            delete it->second;
+            m_windows.erase(it);
+        }
     }
 
     void navigate(const std::string& windowId, const std::string& pageId) {

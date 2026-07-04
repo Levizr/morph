@@ -1,5 +1,6 @@
 #pragma once
 #include "../core/node.h"
+#include "morph_radius.h"
 
 class RectNode : public MorphNode {
 public:
@@ -11,31 +12,41 @@ public:
     void recordDisplayList(Renderer& r) override {
         m_displayList.clear();
 
+        auto sc = [&](float v) { return m_hasLayoutTransition ? v : std::round(v); };
+        float sx = sc(x), sy = sc(y);
+        float sw = sc(w), sh = sc(h);
+        float rad = m_isTransitioning ? style.borderRadius : snapRadius(style.borderRadius);
+
         // Background rect + border (only rendering ops — no clip/scroll state)
         DrawOp bg;
 #ifdef MORPH_FEATURE_BORDER
         if (style.borderWidth > 0.0f && style.borderStyle == "solid") {
-            float bw = style.borderWidth;
+            float bw = m_isTransitioning ? style.borderWidth : snapBorderWidth(style.borderWidth);
             if (style.boxSizing == "border-box") {
-                bg.setBordered(x, y, w, h, style.borderRadius, style.bgColor, bw, style.borderColor);
+                bg.setBordered(sx, sy, sw, sh, rad, style.bgColor, bw, style.borderColor);
             } else {
-                bg.setBordered(x - bw, y - bw, w + 2.0f * bw, h + 2.0f * bw,
-                               style.borderRadius, style.bgColor, bw, style.borderColor);
+                bg.setBordered(sx - bw, sy - bw, sw + 2.0f * bw, sh + 2.0f * bw,
+                               rad, style.bgColor, bw, style.borderColor);
             }
         } else
 #endif
 #ifdef MORPH_FEATURE_RADIUS
-        if (style.borderRadius > 0.0f) {
-            bg.setRounded(x, y, w, h, style.borderRadius, style.bgColor);
+        if (rad > 0.0f) {
+            bg.setRounded(sx, sy, sw, sh, rad, style.bgColor);
         } else
 #endif
         {
-            bg.setRect(x, y, w, h, style.bgColor);
+            bg.setRect(sx, sy, sw, sh, style.bgColor);
         }
         m_displayList.push_back(bg);
     }
 
     void executeDisplayList(Renderer& r) override {
+        auto sc = [&](float v) { return m_hasLayoutTransition ? v : std::round(v); };
+        float sx = sc(x), sy = sc(y);
+        float sw = sc(w), sh = sc(h);
+        float rad = m_isTransitioning ? style.borderRadius : snapRadius(style.borderRadius);
+
         // 1. Render self (background rect — from display list)
         for (auto& op : m_displayList) {
             switch (op.type) {
@@ -55,12 +66,12 @@ public:
 
         // 2. Clip setup (from node state — correct interleaving)
         bool needClip = (style.overflow == "hidden" || style.overflow == "scroll" || style.overflow == "auto");
-        bool needRadiusClip = style.borderRadius > 0.0f;
-        bool scrolling = scrollEnabled && contentH > h;
+        bool needRadiusClip = rad > 0.0f;
+        bool scrolling = scrollEnabled && contentH > sh;
 
         if (needClip || needRadiusClip) {
-            if (needClip) r.beginClip(x, y, w, h);
-            if (needRadiusClip) r.beginRoundedClip(x, y, w, h, style.borderRadius);
+            if (needClip) r.beginClip(sx, sy, sw, sh);
+            if (needRadiusClip) r.beginRoundedClip(sx, sy, sw, sh, rad);
         }
 
         // 3. Scroll + children
@@ -90,42 +101,46 @@ public:
 
     void draw(Renderer& r) override {
         // ── 1. Draw self background + border ──────────────────────
+        auto sc = [&](float v) { return m_hasLayoutTransition ? v : std::round(v); };
+        float sx = sc(x), sy = sc(y);
+        float sw = sc(w), sh = sc(h);
+        float rad = m_isTransitioning ? style.borderRadius : snapRadius(style.borderRadius);
 #ifdef MORPH_FEATURE_BORDER
         if (style.borderWidth > 0.0f && style.borderStyle == "solid") {
-            float bw = style.borderWidth;
+            float bw = m_isTransitioning ? style.borderWidth : snapBorderWidth(style.borderWidth);
             if (style.boxSizing == "border-box") {
-                r.drawBorderedRoundedRect(x, y, w, h, style.borderRadius,
+                r.drawBorderedRoundedRect(sx, sy, sw, sh, rad,
                                           style.bgColor, bw, style.borderColor);
             } else {
-                r.drawBorderedRoundedRect(x - bw, y - bw,
-                                          w + 2.0f * bw, h + 2.0f * bw,
-                                          style.borderRadius,
+                r.drawBorderedRoundedRect(sx - bw, sy - bw,
+                                          sw + 2.0f * bw, sh + 2.0f * bw,
+                                          rad,
                                           style.bgColor, bw, style.borderColor);
             }
         } else
 #endif
 #ifdef MORPH_FEATURE_RADIUS
-        if (style.borderRadius > 0.0f) {
-            r.drawRoundedRect(x, y, w, h, style.borderRadius, style.bgColor);
+        if (rad > 0.0f) {
+            r.drawRoundedRect(sx, sy, sw, sh, rad, style.bgColor);
         } else
 #endif
-            r.drawRect(x, y, w, h, style.bgColor);
+            r.drawRect(sx, sy, sw, sh, style.bgColor);
 
         // ── 2. Children (clipped when overflow is non-visible) ────
         bool overflowClipped = (style.overflow == "hidden" ||
                                 style.overflow == "scroll" ||
                                 style.overflow == "auto");
         bool needRectClip = overflowClipped;
-        bool needRadiusClip = style.borderRadius > 0.0f;
+        bool needRadiusClip = rad > 0.0f;
 #ifdef MORPH_FEATURE_SCROLL
-        bool scrolling = scrollEnabled && contentH > h;
+        bool scrolling = scrollEnabled && contentH > sh;
 #else
         bool scrolling = false;
 #endif
 
         if (needRectClip || needRadiusClip) {
-            if (needRectClip) r.beginClip(x, y, w, h);
-            if (needRadiusClip) r.beginRoundedClip(x, y, w, h, style.borderRadius);
+            if (needRectClip) r.beginClip(sx, sy, sw, sh);
+            if (needRadiusClip) r.beginRoundedClip(sx, sy, sw, sh, rad);
 
             r.pushScrollOffset(0, -scrollY);
             for (auto* child : children) {
@@ -156,18 +171,20 @@ public:
 
 #ifdef MORPH_FEATURE_SCROLL
     void drawScrollbar(Renderer& r) {
-        float sw = style.scrollbarWidth;
-        float trackX = x + w - sw;
-        float trackH = h;
-        r.drawRect(trackX, y, sw, trackH, style.scrollbarTrackColor);
-        float thumbH = (h / contentH) * h;
-        float thumbY = y + (scrollY / (contentH - h)) * (h - thumbH);
-        if (thumbY < y) thumbY = y;
-        if (thumbY + thumbH > y + h) thumbY = y + h - thumbH;
-        float radius = style.scrollbarBorderRadius;
+        auto sc = [&](float v) { return m_hasLayoutTransition ? v : std::round(v); };
+        float sx = sc(x), sy = sc(y);
+        float sw = sc(w), sh = sc(h);
+        float sbw = m_isTransitioning ? style.scrollbarWidth : snapBorderWidth(style.scrollbarWidth);
+        float trackX = sx + sw - sbw;
+        r.drawRect(trackX, sy, sbw, sh, style.scrollbarTrackColor);
+        float thumbH = sc((sh / contentH) * sh);
+        float thumbY = sy + sc((scrollY / (contentH - sh)) * (sh - thumbH));
+        if (thumbY < sy) thumbY = sy;
+        if (thumbY + thumbH > sy + sh) thumbY = sy + sh - thumbH;
+        float radius = m_isTransitioning ? style.scrollbarBorderRadius : snapRadius(style.scrollbarBorderRadius);
         if (radius > thumbH * 0.5f) radius = thumbH * 0.5f;
         if (radius < 0.5f) radius = 0.5f;
-        r.drawRoundedRect(trackX, thumbY, sw, thumbH, radius, style.scrollbarThumbColor);
+        r.drawRoundedRect(trackX, thumbY, sbw, thumbH, radius, style.scrollbarThumbColor);
     }
 #endif
 };

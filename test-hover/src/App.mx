@@ -1,0 +1,11 @@
+import "./style.css"
+
+export default function App() {
+  return (
+    <morph-window title="Hover Test" width={400} height={300}>
+      <body>
+        <div className="btn">Hover Me</div>
+      </body>
+    </morph-window>
+  );
+}

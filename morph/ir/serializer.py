@@ -26,7 +26,7 @@ class IRSerializer:
 
     def to_json(self, windows: list[IRWindow]) -> str:
         raw = self.to_dict(windows)
-        return json.dumps(_clean_inf(raw))
+        return json.dumps(_clean_inf(raw), ensure_ascii=False)
 
     def _window(self, w: IRWindow) -> dict:
         return {

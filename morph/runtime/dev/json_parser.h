@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <stdexcept>
 #include <cstdlib>
+#include <cstdint>
 
 enum class JsonType { Null, Bool, Number, String, Array, Object };
 
@@ -62,6 +63,24 @@ private:
     std::vector<JsonValue> m_arr;
     std::vector<std::pair<std::string, JsonValue>> m_obj;
 
+    static void appendUtf8(std::string& s, uint32_t cp) {
+        if (cp < 0x80) {
+            s += (char)cp;
+        } else if (cp < 0x800) {
+            s += (char)(0xC0 | (cp >> 6));
+            s += (char)(0x80 | (cp & 0x3F));
+        } else if (cp < 0x10000) {
+            s += (char)(0xE0 | (cp >> 12));
+            s += (char)(0x80 | ((cp >> 6) & 0x3F));
+            s += (char)(0x80 | (cp & 0x3F));
+        } else if (cp < 0x110000) {
+            s += (char)(0xF0 | (cp >> 18));
+            s += (char)(0x80 | ((cp >> 12) & 0x3F));
+            s += (char)(0x80 | ((cp >> 6) & 0x3F));
+            s += (char)(0x80 | (cp & 0x3F));
+        }
+    }
+
     static void skipWS(const std::string& s, size_t& p) {
         while (p < s.size() && (s[p] == ' ' || s[p] == '\t' || s[p] == '\n' || s[p] == '\r'))
             p++;
@@ -101,9 +120,19 @@ private:
                     case 'u': {
                         if (p + 4 >= s.size()) break;
                         std::string hex = s.substr(p + 1, 4);
-                        char code = (char)strtol(hex.c_str(), nullptr, 16);
-                        result += code;
+                        uint32_t cp = (uint32_t)strtol(hex.c_str(), nullptr, 16);
                         p += 4;
+                        if (cp >= 0xD800 && cp <= 0xDBFF) {
+                            if (p + 6 < s.size() && s[p] == '\\' && s[p+1] == 'u') {
+                                std::string loHex = s.substr(p + 2, 4);
+                                uint32_t lo = (uint32_t)strtol(loHex.c_str(), nullptr, 16);
+                                if (lo >= 0xDC00 && lo <= 0xDFFF) {
+                                    cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+                                    p += 6;
+                                }
+                            }
+                        }
+                        appendUtf8(result, cp);
                         break;
                     }
                     default: result += s[p]; break;

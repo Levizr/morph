@@ -1,2 +1,5 @@
 #pragma once
-// Rounded-render helper — used via morph_rect.h border_radius path
+#include <cmath>
+
+inline float snapRadius(float r) { return std::round(r); }
+inline float snapBorderWidth(float bw) { return std::round(bw); }

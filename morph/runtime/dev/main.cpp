@@ -128,6 +128,10 @@ int main() {
     glfwSetKeyCallback(window.handle(), keyCb);
     glfwSetMouseButtonCallback(window.handle(), mouseCb);
 
+    // ── Start compositor thread ─────────────────────────────
+    window.startCompositor(true); // vsync on
+    fprintf(stderr, "[devrt] compositor thread started\n");
+
     // ── Main loop ───────────────────────────────────────────
     fprintf(stderr, "[devrt] entering render loop\n");
 
@@ -186,10 +190,10 @@ int main() {
         if (dt > 0.1f) dt = 0.1f; // cap to prevent spiral of death
         lastFrameTime = now;
 
-        // Update animations (advances running animations, marks dirty on change)
+        // Update main-thread animation state (only tracks time, compositor interpolates)
         if (rootNode) rootNode->update(dt);
 
-        // Render frame — render() internally skips clean nodes
+        // Commit frame — layout + paint + flatten + atomic swap
         if (window.isVisible()) {
             // Track mouse for devtools inspect
             if (devtools.inspecting) {
@@ -199,8 +203,10 @@ int main() {
                 devtools.mouseY = (float)my;
                 devtools.updateHover(rootNode);
             }
-            window.render([&](GLRenderer& r, DirtyStats& ds) {
-                devtools.render(r, (float)window.width(), (float)window.height(), ds);
+            window.commitFrame();
+            window.renderFrame([&](GLRenderer& r, DirtyStats&) {
+                devtools.render(r, (float)window.width(), (float)window.height(),
+                                window.dirtyStats());
             });
         } else {
             // Hidden window — no point spinning, wait for events
@@ -208,8 +214,9 @@ int main() {
         }
     }
 
-    // ── Cleanup ─────────────────────────────────────────────
-    deleteNodeTree(rootNode);
+    window.stopCompositor();
+
+    // ~MorphWindow cleans up rootNode — don't double-delete
     // window destroyed here (before glfwTerminate)
     } // ~MorphWindow, ~DevTools
 

@@ -6,14 +6,17 @@
 #include "node.h"
 #include "../render/gl_renderer.h"
 #include "event.h"
+#include "compositor.h"
 
 class MorphWindow {
     std::string m_title;
     int m_width, m_height;
     bool m_visible;
+    bool m_vsync = true;
     GLFWwindow* m_handle = nullptr;
     MorphNode* m_root = nullptr;
-    GLRenderer m_renderer;
+    GLRenderer m_renderer;          // fallback renderer (single-threaded path)
+    Compositor* m_compositor = nullptr;
 #ifdef MORPH_FEATURE_CURSOR
     GLFWcursor* m_handCursor = nullptr;
     GLFWcursor* m_textCursor = nullptr;
@@ -45,13 +48,31 @@ public:
     GLFWwindow* handle() const { return m_handle; }
     bool shouldClose() const { return m_handle && glfwWindowShouldClose(m_handle); }
     bool isVisible() const { return m_visible && m_handle && !glfwWindowShouldClose(m_handle); }
+
+    // Single-threaded render (legacy / fallback)
     void render(std::function<void(GLRenderer&, DirtyStats&)> overlayFn = {});
+
+    // New: commit a frame for the compositor thread
+    void commitFrame();
+
+    // Render the latest interpolated frame (main thread, GL context current)
+    void renderFrame(std::function<void(GLRenderer&, DirtyStats&)> overlayFn = {});
+
+    // Start/stop compositor thread
+    void startCompositor(bool vsync = true);
+    void stopCompositor();
 
     // Dirty rendering accessors (for devtools)
     DirtyStats& dirtyStats() { return m_dirtyStats; }
     GLRenderer& renderer() { return m_renderer; }
 
 private:
+    void renderNode(const RenderFrame* frame, int nodeIdx);
+    static void drawOpsForNode(GLRenderer& r, const RenderFrame* frame, int nodeIdx,
+                               float ox, float oy);
+    static void drawScrollbar(GLRenderer& r, const FlatRenderNode& node,
+                              float sx, float sy, float sw, float sh);
+
     DirtyStats m_dirtyStats;
     bool m_prevHadDirty = true;
     bool m_pendingRender = true;

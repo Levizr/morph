@@ -1,4 +1,5 @@
 from morph.ir.node import IRNode
+from morph.style.units import DEFERRED
 
 
 def apply_flex(parent: IRNode) -> None:
@@ -25,6 +26,11 @@ def apply_flex(parent: IRNode) -> None:
     for child in children:
         cs = child.style
         mt, mr, mb, ml = cs.margin
+        # Clamp DEFERRED (auto) margins — resolved by the runtime on resize
+        ml = 0.0 if ml == DEFERRED else ml
+        mr = 0.0 if mr == DEFERRED else mr
+        mt = 0.0 if mt == DEFERRED else mt
+        mb = 0.0 if mb == DEFERRED else mb
         if is_row:
             main = child.w + ml + mr
             cross = child.h + mt + mb
@@ -80,12 +86,13 @@ def apply_flex(parent: IRNode) -> None:
         # shrink
         overflow = total_main + extra_gap - main_avail
         if overflow > 0:
-            shrink_total = sum(item["node"].style.flex_shrink for item in line)
-            if shrink_total > 0:
+            scaled_total = sum(item["main"] * item["node"].style.flex_shrink for item in line)
+            if scaled_total > 0:
                 for item in line:
                     sh = item["node"].style.flex_shrink
                     if sh > 0:
-                        reduction = overflow * (sh / shrink_total)
+                        scaled = item["main"] * sh
+                        reduction = overflow * scaled / scaled_total
                         reduced = max(0.0, item["main"] - reduction)
                         if is_row:
                             item["node"].w -= item["main"] - reduced
@@ -115,10 +122,10 @@ def apply_flex(parent: IRNode) -> None:
             item_gap = gap
         elif justify == "space-between":
             offset = 0.0
-            item_gap = free / (len(line) - 1) if len(line) > 1 else 0.0
+            item_gap = gap + free / (len(line) - 1) if len(line) > 1 else 0.0
         elif justify == "space-around":
             offset = free / (len(line) * 2) if len(line) > 0 else 0.0
-            item_gap = free / len(line) if len(line) > 0 else 0.0
+            item_gap = gap + free / len(line) if len(line) > 0 else 0.0
         else:
             offset = 0.0
             item_gap = gap
@@ -134,7 +141,7 @@ def apply_flex(parent: IRNode) -> None:
                 cs = child.style
                 ali = s.align_items
                 if ali == "center":
-                    child.y = cursor_cross + (line_cross - child.h) * 0.5
+                    child.y = cursor_cross + mt + (line_cross - (child.h + mt + mb)) * 0.5
                 elif ali == "flex-end":
                     child.y = cursor_cross + line_cross - child.h - mb
                 elif ali == "stretch":
@@ -150,7 +157,7 @@ def apply_flex(parent: IRNode) -> None:
                 cs = child.style
                 ali = s.align_items
                 if ali == "center":
-                    child.x = cursor_cross + (line_cross - child.w) * 0.5
+                    child.x = cursor_cross + ml + (line_cross - (child.w + ml + mr)) * 0.5
                 elif ali == "flex-end":
                     child.x = cursor_cross + line_cross - child.w - mr
                 elif ali == "stretch":

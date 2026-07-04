@@ -127,6 +127,7 @@ def run(args=None) -> None:
     compiler.silent = True
     ok = compiler.compile(out_path, binary_path,
                           needs_freetype=freetype,
+                          needs_harfbuzz=True,
                           defines=features.required_defines())
 
     if not ok:
