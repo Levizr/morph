@@ -6,7 +6,7 @@
 #include <cmath>
 #include "../core/renderer.h"
 #include "../core/draw_op.h"
-#include "../shaders/shader.h"
+#include "shader.h"
 
 #ifdef MORPH_FEATURE_IMAGE
 #include "../vendor/stb_image.h"

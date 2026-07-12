@@ -2,10 +2,10 @@
 #include <cstring>
 #include "json_parser.h"
 #include "../core/node.h"
-#include "../widgets/morph_rect.h"
-#include "../widgets/morph_text.h"
-#include "../widgets/morph_button.h"
-#include "../widgets/morph_image.h"
+#include "../ui/rect.h"
+#include "../ui/text.h"
+#include "../ui/button.h"
+#include "../ui/image.h"
 
 static void deleteNodeTree(MorphNode* node) {
     delete node;

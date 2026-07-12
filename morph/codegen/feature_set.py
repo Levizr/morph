@@ -73,19 +73,19 @@ class FeatureSet:
             self.features.add("dirty_rendering")
 
     def required_headers(self) -> list[str]:
-        headers: list[str] = ["widgets/morph_rect.h"]
+        headers: list[str] = ["ui/rect.h"]
         if "text" in self.features:
-            headers.append("widgets/morph_text.h")
+            headers.append("ui/text.h")
         if "button" in self.features:
-            headers.append("widgets/morph_button.h")
+            headers.append("ui/button.h")
         if "input" in self.features:
-            headers.append("widgets/morph_input.h")
+            headers.append("ui/input.h")
         if "event" in self.features:
             headers.append("core/event.h")
         if "viewport" in self.features:
-            headers.append("viewport/viewport_node.h")
+            headers.append("ui/viewport_node.h")
         if "image" in self.features:
-            headers.append("widgets/morph_image.h")
+            headers.append("ui/image.h")
         return headers
 
     def required_defines(self) -> list[str]:

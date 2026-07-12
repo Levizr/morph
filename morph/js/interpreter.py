@@ -19,6 +19,7 @@ class JSInterpreter(ASTVisitor):
             self.imports[local] = pkg
 
     def visit_NewExpression(self, node: dict):
+        print(node)
         # TODO: extract component instantiation
         pass
 

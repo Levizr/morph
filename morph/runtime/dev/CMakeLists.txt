@@ -28,11 +28,15 @@ set(DEV_SOURCES
 )
 
 set(RUNTIME_SOURCES
-    ${RUNTIME_DIR}/core/node.cpp
+    ${RUNTIME_DIR}/core/node/node.cpp
+    ${RUNTIME_DIR}/core/node/layout.cpp
+    ${RUNTIME_DIR}/core/node/style.cpp
+    ${RUNTIME_DIR}/core/node/flatten.cpp
+    ${RUNTIME_DIR}/core/node/events.cpp
     ${RUNTIME_DIR}/core/window.cpp
     ${RUNTIME_DIR}/core/compositor.cpp
     ${RUNTIME_DIR}/render/gl_renderer.cpp
-    ${RUNTIME_DIR}/core/glad.c
+    ${VENDOR_DIR}/glad/glad.c
     ${VENDOR_DIR}/stb_image.c
 )
 

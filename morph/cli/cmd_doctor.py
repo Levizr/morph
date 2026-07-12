@@ -112,7 +112,7 @@ def run(args) -> None:
     rt_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "runtime")
     vendor_dir = os.path.join(rt_dir, "vendor")
 
-    glad_c = os.path.join(rt_dir, "core", "glad.c")
+    glad_c = os.path.join(vendor_dir, "glad", "glad.c")
     stb_c = os.path.join(vendor_dir, "stb_image.c")
 
     glad_ok = os.path.exists(glad_c)
