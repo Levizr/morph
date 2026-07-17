@@ -23,3 +23,4 @@ morph/bin/morph_devrt*
 morph/bin/.devrt_source_hash
 temp/
 .opencode/
+future.md

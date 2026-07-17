@@ -62,6 +62,9 @@ def main():
 
     sub.add_parser("cache", help="Manage fetched CSS cache")
 
+    p_translate = sub.add_parser("translate", help="Translate .ts/.js to .cpp")
+    p_translate.add_argument("file", help="Path to .ts or .js file")
+
     args = parser.parse_args()
 
     if args.version:
@@ -94,6 +97,9 @@ def main():
         case "cache":
             from morph.cli.cmd_cache import run
             run()
+        case "translate":
+            from morph.cli.cmd_translate import run
+            run(args)
         case _:
             _show_welcome(parser)
             sys.exit(0)
@@ -124,8 +130,9 @@ def _show_welcome(parser: argparse.ArgumentParser) -> None:
         ("build",          "Compile .mx → native OpenGL binary"),
         ("run    [path]",  "Run built production binary"),
         ("pkg   <add|rm|install|list|search>",  "Package manager"),
-        ("doctor",         "Verify system dependencies"),
-        ("cache",          "Clear fetched CSS cache"),
+        ("doctor",             "Verify system dependencies"),
+        ("cache",              "Clear fetched CSS cache"),
+        ("translate  <file>",  "Translate .ts/.js → .cpp"),
     ]
     for cmd, desc in cmds:
         print(f"    {_BOLD}{_GREEN}{cmd:<41}{_RESET}{_DIM}{desc}{_RESET}")

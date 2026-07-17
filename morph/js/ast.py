@@ -69,6 +69,7 @@ class TSFunctionDeclaration(TSNode):
     params: list[TSVariableDeclaration]
     return_type: Optional[TSType]
     body: TSBlockStatement
+    type_parameters: Optional[list[TSTypeParameter]] = None
 
 
 @dataclass
@@ -76,6 +77,7 @@ class TSArrowFunction(TSNode):
     params: list[TSVariableDeclaration]
     return_type: Optional[TSType]
     body: TSBlockStatement | TSNode
+    type_parameters: Optional[list[TSTypeParameter]] = None
 
 
 @dataclass
@@ -159,3 +161,166 @@ class TSMemberExpression(TSNode):
 @dataclass
 class TSParenthesizedExpression(TSNode):
     expression: TSNode
+
+
+@dataclass
+class TSArrayLiteral(TSNode):
+    elements: list[TSNode]
+
+
+@dataclass
+class TSObjectProperty(TSNode):
+    key: str
+    value: TSNode
+
+
+@dataclass
+class TSObjectLiteral(TSNode):
+    properties: list[TSObjectProperty]
+
+
+@dataclass
+class TSFunctionExpression(TSNode):
+    params: list[TSVariableDeclaration]
+    return_type: Optional[TSType]
+    body: TSBlockStatement | TSNode
+    type_parameters: Optional[list[TSTypeParameter]] = None
+
+
+# ── OOP & Advanced ─────────────────────────────────────────
+
+
+@dataclass
+class TSThisExpression(TSNode):
+    pass
+
+
+@dataclass
+class TSSuperExpression(TSNode):
+    pass
+
+
+@dataclass
+class TSNewExpression(TSNode):
+    callee: TSNode
+    arguments: list[TSNode]
+    type_arguments: Optional[list[TSType]] = None
+
+
+@dataclass
+class TSTypeParameter(TSNode):
+    name: str
+    constraint: Optional[TSType] = None
+
+
+@dataclass
+class TSPropertyDefinition(TSNode):
+    name: str
+    type_annotation: Optional[TSType]
+    initializer: Optional[TSNode]
+    access_modifier: str = ""
+    static: bool = False
+    readonly: bool = False
+
+
+@dataclass
+class TSMethodDefinition(TSNode):
+    name: str
+    params: list[TSVariableDeclaration]
+    return_type: Optional[TSType]
+    body: TSBlockStatement
+    access_modifier: str = ""
+    static: bool = False
+
+
+@dataclass
+class TSConstructor(TSNode):
+    params: list[TSVariableDeclaration]
+    body: TSBlockStatement
+    access_modifier: str = "public"
+
+
+@dataclass
+class TSClassDeclaration(TSNode):
+    name: str
+    members: list[TSPropertyDefinition | TSMethodDefinition | TSConstructor]
+    type_parameters: Optional[list[TSTypeParameter]] = None
+    extends: Optional[str] = None
+    implements: list[str] = field(default_factory=list)
+
+
+@dataclass
+class TSInterfaceDeclaration(TSNode):
+    name: str
+    members: list[TSPropertyDefinition | TSMethodDefinition]
+    type_parameters: Optional[list[TSTypeParameter]] = None
+    extends: list[str] = field(default_factory=list)
+
+
+# ── Additional Control Flow ────────────────────────────────
+
+
+@dataclass
+class TSTernaryExpression(TSNode):
+    condition: TSNode
+    consequent: TSNode
+    alternate: TSNode
+
+
+@dataclass
+class TSBreakStatement(TSNode):
+    pass
+
+
+@dataclass
+class TSContinueStatement(TSNode):
+    pass
+
+
+@dataclass
+class TSDoWhileStatement(TSNode):
+    body: TSNode
+    condition: TSNode
+
+
+@dataclass
+class TSSwitchStatement(TSNode):
+    discriminant: TSNode
+    cases: list[TSNode]  # TSCaseClause | TSDefaultClause
+
+
+@dataclass
+class TSCaseClause(TSNode):
+    test: TSNode
+    consequence: list[TSNode]
+
+
+@dataclass
+class TSDefaultClause(TSNode):
+    consequence: list[TSNode]
+
+
+@dataclass
+class TSSequenceExpression(TSNode):
+    expressions: list[TSNode]
+
+
+# ── Try / Catch / Throw ──────────────────────────────────
+
+
+@dataclass
+class TSTryStatement(TSNode):
+    body: TSBlockStatement
+    handler: Optional[TSCatchClause]
+    finalizer: Optional[TSBlockStatement]
+
+
+@dataclass
+class TSCatchClause(TSNode):
+    param: TSIdentifier
+    body: TSBlockStatement
+
+
+@dataclass
+class TSThrowStatement(TSNode):
+    argument: TSNode
