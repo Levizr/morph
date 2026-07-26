@@ -42,7 +42,7 @@ def main():
     p_build.add_argument("--entry", type=str, default=None,
                          help="Override entry .mx file")
     p_build.add_argument("--output", type=str, default=None,
-                         help="Output directory (default: dist/)")
+                         help="Output directory (default: .morph/)")
 
     p_run = sub.add_parser("run", help="Run built production binary")
     p_run.add_argument("binary", nargs="?", default=None,

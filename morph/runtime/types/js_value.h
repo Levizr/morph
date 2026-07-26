@@ -411,23 +411,18 @@ inline JsString operator+(const JsString& a, const char* b) {
 inline JsString operator+(const char* a, const JsString& b) {
     return a + b.value;
 }
-inline JsString operator+(const JsString& a, int64_t b) {
-    return a.value + std::to_string(b);
-}
-inline JsString operator+(int64_t a, const JsString& b) {
-    return std::to_string(a) + b.value;
-}
-inline JsString operator+(const JsString& a, size_t b) {
-    return a.value + std::to_string(b);
-}
-inline JsString operator+(size_t a, const JsString& b) {
-    return std::to_string(a) + b.value;
-}
 inline JsString operator+(const JsString& a, const JsNumber& b) {
     return a.value + b.as_string();
 }
 inline JsString operator+(const JsNumber& a, const JsString& b) {
     return a.as_string() + b.value;
+}
+// int overloads to resolve ambiguity between JsNumber, JsValue, and int64_t
+inline JsString operator+(const JsString& a, int b) {
+    return a.value + std::to_string(b);
+}
+inline JsString operator+(int a, const JsString& b) {
+    return std::to_string(a) + b.value;
 }
 
 // ── JsValue arithmetic (extract numbers, fall back to undefined) ──

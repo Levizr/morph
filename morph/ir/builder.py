@@ -9,6 +9,12 @@ from morph.style.selector import matches_selector, calculate_specificity, parse_
 from morph.utils.color import parse_color
 from morph.style.units import to_px, needs_layout, DEFERRED
 
+import tree_sitter_typescript as tsts
+from tree_sitter import Language, Parser
+
+_JS_LANG = Language(tsts.language_tsx())
+_JS_PARSER = Parser(_JS_LANG)
+
 # User-agent default styles for HTML tags (lowest priority — overridden by everything)
 # Specificity is effectively (0,0,0) — any user CSS rule overrides these.
 _UA_DEFAULTS: dict[str, dict[str, str]] = {
@@ -190,6 +196,7 @@ class IRBuilder:
     def __init__(self, config=None):
         self.config = config
         self._counter = 0
+        self._extra_headers: set[str] = set()
 
     def build(
         self,
@@ -199,10 +206,101 @@ class IRBuilder:
     ) -> list[IRWindow]:
         ir_windows = []
 
+        # ── Transpile top-level function declarations ─────
+        premain_functions = []
+        for fd in walked.get("function_declarations", []):
+            try:
+                source = fd["source"]
+                tree = _JS_PARSER.parse(source.encode("utf-8"))
+                from morph.js.ast_builder import TSAstBuilder
+                from morph.js.codegen import TSToCppTranslator
+                builder = TSAstBuilder()
+                func_node = builder.build_statement(tree.root_node.children[0])
+                translator = TSToCppTranslator(indent_level=0)
+                cpp = translator.translate(func_node)
+                if cpp:
+                    premain_functions.append(cpp)
+                    self._extra_headers.update(translator._needed)
+            except Exception:
+                pass
+
+        # ── Transpile module-level variable declarations ──
+        for gv in walked.get("global_vars", []):
+            try:
+                source = gv["source"]
+                tree = _JS_PARSER.parse(source.encode("utf-8"))
+                from morph.js.ast_builder import TSAstBuilder
+                from morph.js.codegen import TSToCppTranslator
+                builder = TSAstBuilder()
+                stmt = builder.build_statement(tree.root_node.children[0])
+                translator = TSToCppTranslator(indent_level=0)
+                cpp = translator.translate(stmt)
+                if cpp:
+                    premain_functions.append(cpp)
+                    self._extra_headers.update(translator._needed)
+            except Exception:
+                pass
+
         win_cfg = walked.get("windowConfig")
+
         for comp in walked.get("components", []):
             if not comp.get("exported", False):
                 continue
+
+            # Build state variable mapping
+            state_vars_map: dict[str, str] = {}
+            for sv in comp.get("state_vars", []):
+                getter = sv.get("getter", "")
+                setter = sv.get("setter", "")
+                sig_name = f"__st_{getter}"
+                if getter:
+                    state_vars_map[getter] = f"{sig_name}.get()"
+                if setter:
+                    state_vars_map[setter] = f"{sig_name}.set"
+
+            # ── Translate inner functions ──
+            comp_premain = list(premain_functions)
+            for fd in comp.get("inner_functions", []):
+                try:
+                    source = fd["source"]
+                    tree = _JS_PARSER.parse(source.encode("utf-8"))
+                    from morph.js.ast_builder import TSAstBuilder
+                    from morph.js.codegen import TSToCppTranslator
+                    builder = TSAstBuilder()
+                    func_node = builder.build_statement(tree.root_node.children[0])
+                    translator = TSToCppTranslator(indent_level=0,
+                                                    state_vars=state_vars_map)
+                    cpp = translator.translate(func_node)
+                    if cpp:
+                        comp_premain.append(cpp)
+                        self._extra_headers.update(translator._needed)
+                except Exception:
+                    pass
+
+            # ── Transpile morphEffect bodies ──
+            effect_decls = []
+            for ef in comp.get("morph_effects", []):
+                try:
+                    cb_source = ef["callback"]
+                    deps_source = ef.get("deps", "")
+                    tree = _JS_PARSER.parse(cb_source.encode("utf-8"))
+                    from morph.js.ast_builder import TSAstBuilder
+                    from morph.js.codegen import TSToCppTranslator
+                    builder = TSAstBuilder()
+                    arrow_fn_node = tree.root_node.children[0].children[0]
+                    arrow_fn = builder.build_expression(arrow_fn_node)
+                    translator = TSToCppTranslator(indent_level=0, event_handler=False,
+                                                    state_vars=state_vars_map)
+                    translator._fn_body_depth = 1
+                    cpp_lambda = translator.translate(arrow_fn)
+                    effect_decls.append({
+                        "lambda": cpp_lambda,
+                        "deps": deps_source,
+                    })
+                    self._extra_headers.update(translator._needed)
+                except Exception:
+                    pass
+            # ── End morphEffect transpilation ──
 
             jsx = comp.get("jsx", {})
             tag = jsx.get("tag")
@@ -212,7 +310,8 @@ class IRBuilder:
                 window_nodes = []
                 children = jsx.get("children", []) if tag == "__fragment__" else [jsx]
                 for child in children:
-                    node = self._build_node(child, css_rules, tw_resolver)
+                    node = self._build_node(child, css_rules, tw_resolver,
+                                            state_vars_map=state_vars_map)
                     if node:
                         window_nodes.append(node)
 
@@ -223,6 +322,10 @@ class IRBuilder:
                     title=win_cfg.get("title", str(getattr(self.config, "name", "Untitled"))),
                     width=win_cfg.get("width", 800),
                     height=win_cfg.get("height", 600),
+                    premain_functions=comp_premain,
+                    extra_headers=sorted(self._extra_headers),
+                    state_vars=comp.get("state_vars", []),
+                    effect_decls=effect_decls,
                 ))
             elif tag == "morph-window":
                 props = jsx.get("props", {})
@@ -230,7 +333,8 @@ class IRBuilder:
 
                 window_nodes = []
                 for child in jsx.get("children", []):
-                    node = self._build_node(child, css_rules, tw_resolver)
+                    node = self._build_node(child, css_rules, tw_resolver,
+                                            state_vars_map=state_vars_map)
                     if node:
                         window_nodes.append(node)
 
@@ -241,9 +345,42 @@ class IRBuilder:
                     title=props.get("title", str(getattr(self.config, "name", "Untitled"))),
                     width=_int_prop(props, "width", tw_styles, 800),
                     height=_int_prop(props, "height", tw_styles, 600),
+                    premain_functions=comp_premain,
+                    extra_headers=sorted(self._extra_headers),
+                    state_vars=comp.get("state_vars", []),
+                    effect_decls=effect_decls,
                 ))
 
         return ir_windows
+
+    def _transpile_js_expr(self, js_source: str,
+                           state_vars_map: dict[str, str] | None = None) -> str:
+        """Transpile a JS expression like 'count + 1' to C++."""
+        if not js_source.strip():
+            return ""
+        try:
+            tree = _JS_PARSER.parse(js_source.encode("utf-8"))
+            from morph.js.ast_builder import TSAstBuilder
+            from morph.js.codegen import TSToCppTranslator
+            builder = TSAstBuilder()
+            expr = builder.build_expression(tree.root_node)
+            translator = TSToCppTranslator(indent_level=0,
+                                            state_vars=state_vars_map or {})
+            # expr is a TSProgram — extract the inner expression directly
+            # to avoid _translate_program adding #include headers
+            if (hasattr(expr, 'statements') and expr.statements
+                    and hasattr(expr.statements[0], 'expression')):
+                inner = expr.statements[0].expression
+                cpp = translator._translate_node(inner)
+            else:
+                # Empty / non-expression program — return empty string
+                if (hasattr(expr, 'statements') and not expr.statements):
+                    return ""
+                cpp = translator.translate(expr)
+            self._extra_headers.update(translator._needed)
+            return cpp
+        except Exception:
+            return js_source  # fallback: use raw source
 
     def _build_node(
         self,
@@ -251,6 +388,7 @@ class IRBuilder:
         css_rules: dict,
         tw_resolver: TailwindResolver,
         ancestry: list[tuple[str, list[str]]] | None = None,
+        state_vars_map: dict[str, str] | None = None,
     ) -> IRNode | None:
         tag = jsx_node.get("tag")
         if not tag:
@@ -258,6 +396,47 @@ class IRBuilder:
 
         node_id = self._next_id()
         props = jsx_node.get("props", {})
+
+        # ── Reactive text node (expression interpolation) ───
+        if tag == "__expr__":
+            raw_expr = jsx_node.get("text", "")
+            cpp_expr = self._transpile_js_expr(raw_expr, state_vars_map)
+            return IRNode(
+                node_id=node_id,
+                node_type="__text__",
+                text_content="",
+                reactive_text=cpp_expr,
+                style=IRStyle(display="inline"),
+                children=[],
+                events=[],
+            )
+
+        # ── Conditional node ─────────────────────────────────
+        if tag == "__conditional__":
+            cond_expr = self._transpile_js_expr(jsx_node.get("condition", ""),
+                                                 state_vars_map)
+            then_nodes = [
+                self._build_node(n, css_rules, tw_resolver, ancestry,
+                                 state_vars_map=state_vars_map)
+                for n in jsx_node.get("then_branch", [])
+                if n is not None
+            ]
+            else_nodes = [
+                self._build_node(n, css_rules, tw_resolver, ancestry,
+                                 state_vars_map=state_vars_map)
+                for n in jsx_node.get("else_branch", [])
+                if n is not None
+            ]
+            return IRNode(
+                node_id=node_id,
+                node_type="__conditional__",
+                style=IRStyle(),
+                children=[],
+                events=[],
+                condition_expr=cond_expr,
+                then_nodes=[n for n in then_nodes if n is not None],
+                else_nodes=[n for n in else_nodes if n is not None],
+            )
 
         # ── Text node ────────────────────────────────────────
         if tag == "__text__":
@@ -274,8 +453,40 @@ class IRBuilder:
         inline_raw = props.get("style", {})
         if isinstance(inline_raw, str):
             inline_raw = {}
-        class_names = _get_classes(props)
-        tw_styles = _resolve_tw(props, tw_resolver)
+
+        # Extract reactive inline style expressions
+        reactive_style: dict[str, str] = {}
+        filtered_inline: dict[str, str] = {}
+        for css_key, val in inline_raw.items():
+            if isinstance(val, dict) and "__expr__" in val:
+                cpp_expr = self._transpile_js_expr(val["__expr__"], state_vars_map)
+                reactive_style[css_key] = cpp_expr
+            else:
+                filtered_inline[css_key] = val
+
+        # Extract reactive className and resolve conditional class effects
+        raw_class = props.get("className") or props.get("class") or ""
+        reactive_class = ""
+        class_conditional_effects: list[tuple[str, dict[str, str], dict[str, str]]] = []
+        if isinstance(raw_class, dict):
+            if "__template__" in raw_class:
+                js_source = raw_class["__template__"]
+                reactive_class = self._transpile_js_expr(js_source, state_vars_map)
+                class_conditional_effects = self._analyze_class_template(js_source, tw_resolver, state_vars_map)
+                raw_class = ""
+            elif "__expr__" in raw_class:
+                js_source = raw_class["__expr__"]
+                reactive_class = self._transpile_js_expr(js_source, state_vars_map)
+                class_conditional_effects = self._analyze_class_expression(js_source, tw_resolver, state_vars_map)
+                raw_class = ""
+            elif "__ref__" in raw_class:
+                js_source = raw_class["__ref__"]
+                reactive_class = self._transpile_js_expr(js_source, state_vars_map)
+                raw_class = ""
+
+        # Rebuild class_names from the (now-sanitized) raw_class
+        class_names = _get_classes({"className": raw_class}) if isinstance(raw_class, str) else []
+        tw_styles = _resolve_tw({"className": raw_class}, tw_resolver) if isinstance(raw_class, str) else {}
         node_id_attr = props.get("id", "")
 
         # Cascade order (lowest to highest priority):
@@ -337,7 +548,7 @@ class IRBuilder:
                     merged[attr] = str(int(val)) + 'px'
                 except (ValueError, TypeError):
                     pass
-        merged.update(inline_raw)  # inline style overrides everything
+        merged.update(filtered_inline)  # inline style overrides everything
 
         # ── Convert merged CSS → IRStyle fields ──────────────
         ir_kw, raw_styles = self._css_to_ir_kw(merged)
@@ -381,7 +592,9 @@ class IRBuilder:
         child_ancestry = (ancestry or []) + [(tag, class_names)]
         children_nodes = []
         for child in jsx_node.get("children", []):
-            child_node = self._build_node(child, css_rules, tw_resolver, child_ancestry)
+            child_node = self._build_node(child, css_rules, tw_resolver,
+                                          child_ancestry,
+                                          state_vars_map=state_vars_map)
             if child_node:
                 children_nodes.append(child_node)
 
@@ -394,21 +607,51 @@ class IRBuilder:
 
         # ── Events ───────────────────────────────────────────
         events = []
+
+        # JSX event props → IREvent trigger mapping
+        _EVENT_PROPS = {
+            "onClick":"click",
+            "onKeyUp": "keyup",
+            "onKeyDown": "keydown",
+            "onDoubleClick": "dblclick",
+            "onMouseDown":  "mousedown",
+            "onMouseUp":    "mouseup",
+            "onMouseEnter": "mouseenter",
+            "onMouseLeave": "mouseleave",
+        }
+
+        # morph-* prefixed attributes
         for attr_key in ("morph-open", "morph-close", "morph-navigate"):
             target = props.get(attr_key)
             if target:
                 action = attr_key.split("-")[1]
                 events.append(IREvent(trigger="click", action=action, target=target))
 
-        # # onClick with console.log
-        # onclick = props.get("onClick")
-        # if isinstance(onclick, dict) and "__fn__" in onclick:
-        #     body = onclick["__fn__"]
-        #     import re
-        #     m = re.search(r'console\.log\(([^)]+)\)', body)
-        #     if m:
-        #         msg = m.group(1).strip().strip('"\'')
-        #         events.append(IREvent(trigger="click", action="log", target=msg))
+        # JS event props → transpile to C++ lambda
+        for jsx_prop, trigger in _EVENT_PROPS.items():
+            val = props.get(jsx_prop)
+            if isinstance(val, dict):
+                if "__fn__" in val:
+                    try:
+                        fn_source = val["__fn__"]
+                        tree = _JS_PARSER.parse(fn_source.encode("utf-8"))
+                        arrow_fn_node = tree.root_node.children[0].children[0]
+                        from morph.js.ast_builder import TSAstBuilder
+                        from morph.js.codegen import TSToCppTranslator
+                        builder = TSAstBuilder()
+                        arrow_fn = builder.build_expression(arrow_fn_node)
+                        translator = TSToCppTranslator(indent_level=0, event_handler=True,
+                                                        state_vars=state_vars_map or {})
+                        translator._fn_body_depth = 1  # emitted inside main() — [&] is valid
+                        cpp_lambda = translator.translate(arrow_fn)
+                        events.append(IREvent(trigger=trigger, action="call", target=cpp_lambda))
+                        self._extra_headers.update(translator._needed)
+                    except Exception:
+                        pass  # transpilation failed — skip this event
+                elif "__ref__" in val:
+                    ref_name = val["__ref__"]
+                    events.append(IREvent(trigger=trigger, action="call",
+                                          target=f"[&](JsObject) -> void {{ {ref_name}(); }}"))
 
         # Extract transition config from merged CSS
         trans_dur = 0.0
@@ -445,7 +688,119 @@ class IRBuilder:
             transition_duration=trans_dur,
             transition_easing=trans_easing,
             ancestor_hover_rules=ancestor_hover_rules,
+            reactive_class=reactive_class,
+            reactive_style=reactive_style,
+            class_conditional_effects=class_conditional_effects,
         )
+
+    def _analyze_class_template(self, js_source: str, tw_resolver: TailwindResolver,
+                                 state_vars_map: dict[str, str] | None = None
+                                 ) -> list[tuple[str, dict[str, str], dict[str, str]]]:
+        """Parse a template literal className expression.
+
+        For each expression part that is a ternary, extract:
+          - condition (C++ expression)
+          - class names from consequent branch → resolved on_styles
+          - class names from alternate branch → resolved off_styles
+
+        Returns [(condition_cpp, on_styles, off_styles), ...]
+        """
+        effects: list[tuple[str, dict[str, str], dict[str, str]]] = []
+        try:
+            from morph.js.ast_builder import TSAstBuilder
+            from morph.js.ast import TSLiteral, TSTemplateLiteral, TSTernaryExpression
+            from morph.js.ast import TSNode
+            tree = _JS_PARSER.parse(js_source.encode("utf-8"))
+            builder = TSAstBuilder()
+            prog = builder.build_expression(tree.root_node)
+
+            # Unwrap TSProgram → TSExpressionStatement → inner expression
+            inner = None
+            if (hasattr(prog, 'statements') and prog.statements
+                    and hasattr(prog.statements[0], 'expression')):
+                inner = prog.statements[0].expression
+
+            def _resolve_to_css(class_str: str) -> dict[str, str]:
+                result: dict[str, str] = {}
+                for cls in class_str.split():
+                    cls = cls.strip()
+                    if cls:
+                        tw = tw_resolver.resolve(cls)
+                        if tw:
+                            result.update(tw)
+                return result
+
+            def _extract_class_string(node: TSNode) -> str:
+                """Get the raw class string from a TSLiteral or str."""
+                if isinstance(node, TSLiteral) and isinstance(node.value, str):
+                    return node.value
+                return ""
+
+            from morph.js.codegen import TSToCppTranslator
+            translator = TSToCppTranslator(indent_level=0, state_vars=state_vars_map or {})
+
+            if isinstance(inner, TSTemplateLiteral):
+                for part in inner.parts:
+                    if isinstance(part, TSTernaryExpression):
+                        cond_cpp = translator._translate_node(part.condition)
+                        on_str = _extract_class_string(part.consequent)
+                        off_str = _extract_class_string(part.alternate)
+                        on_styles = _resolve_to_css(on_str)
+                        off_styles = _resolve_to_css(off_str)
+                        if on_styles or off_styles:
+                            effects.append((cond_cpp, on_styles, off_styles))
+        except Exception:
+            pass
+        return effects
+
+    def _analyze_class_expression(self, js_source: str, tw_resolver: TailwindResolver,
+                                   state_vars_map: dict[str, str] | None = None
+                                   ) -> list[tuple[str, dict[str, str], dict[str, str]]]:
+        """Analyze a non-template className expression (e.g., ternary).
+
+        Extracts conditional class style effects from ternary expressions
+        like 'count > 0 ? \"active\" : \"\"'.
+        """
+        effects: list[tuple[str, dict[str, str], dict[str, str]]] = []
+        try:
+            from morph.js.ast_builder import TSAstBuilder
+            tree = _JS_PARSER.parse(js_source.encode("utf-8"))
+            builder = TSAstBuilder()
+            prog = builder.build_expression(tree.root_node)
+            from morph.js.ast import TSLiteral, TSTernaryExpression
+            from morph.js.codegen import TSToCppTranslator
+
+            translator = TSToCppTranslator(indent_level=0, state_vars=state_vars_map or {})
+
+            def _resolve_to_css(class_str: str) -> dict[str, str]:
+                result: dict[str, str] = {}
+                for cls in class_str.split():
+                    cls = cls.strip()
+                    if cls:
+                        tw = tw_resolver.resolve(cls)
+                        if tw:
+                            result.update(tw)
+                return result
+
+            # Unwrap TSProgram → TSExpressionStatement → inner expression
+            inner = None
+            if (hasattr(prog, 'statements') and prog.statements
+                    and hasattr(prog.statements[0], 'expression')):
+                inner = prog.statements[0].expression
+
+            if isinstance(inner, TSTernaryExpression):
+                cond_cpp = translator._translate_node(inner.condition)
+                on_str = (inner.consequent.value if isinstance(inner.consequent, TSLiteral)
+                          and isinstance(inner.consequent.value, str) else "")
+                off_str = (inner.alternate.value if isinstance(inner.alternate, TSLiteral)
+                           and isinstance(inner.alternate.value, str) else "")
+                on_styles = _resolve_to_css(on_str)
+                off_styles = _resolve_to_css(off_str)
+                if on_styles or off_styles:
+                    effects.append((cond_cpp, on_styles, off_styles))
+        except Exception:
+            pass
+        return effects
 
     @staticmethod
     def _parse_flex_shorthand(ir_kw: dict, css_val: str) -> None:

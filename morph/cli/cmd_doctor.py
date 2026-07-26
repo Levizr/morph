@@ -38,12 +38,15 @@ def run(args) -> None:
         log_muted(f"    → Found {ver}, but {_YELLOW}3.10+ required{_RESET}")
         all_ok = False
 
-    ok, ver = _check_version("g++", ["--version"])
-    _print_status("g++ (C++17)", ok, detail=ver)
+    ok, ver = _check_version("g++-14", ["--version"])
+    if not ok:
+        ok, ver = _check_version("g++", ["--version"])
+    _print_status("g++ (C++23)", ok, detail=ver)
     if not ok:
         all_ok = False
-    elif not _check_gpp_version(ver, 11):
-        log_muted(f"    → Found {ver}, but {_YELLOW}g++ 11+ recommended{_RESET}")
+    elif not _check_gpp_version(ver, 14):
+        log_muted(f"    → Found {ver}, but {_YELLOW}g++ 14+ required (C++23){_RESET}")
+        all_ok = False
 
     ok, ver = _check_version("cmake", ["--version"])
     _print_status("cmake", ok, detail=ver)
@@ -178,7 +181,7 @@ def run(args) -> None:
         log_key("Entry",  cfg.get("entry", "?"))
         win = cfg.get("window", {})
         log_key("Window", f"{win.get('width', '?')}×{win.get('height', '?')} — \"{win.get('title', '?')}\"")
-        log_key("Output", cfg.get("output", "dist/"))
+        log_key("Output", cfg.get("output", ".morph/"))
         log_key("Deps",   str(len(cfg.get("dependencies", {}))))
         log_key("C++",    str(len(cfg.get("cpp_sources", []))))
 
@@ -265,7 +268,7 @@ def _print_system_fixes(system: str, ok: bool = True) -> None:
     if system == "Linux":
         print(f"  {_BOLD}Ubuntu/Debian:{_RESET}")
         print(f"    sudo apt update")
-        print(f"    sudo apt install g++ cmake make pkg-config")
+        print(f"    sudo apt install g++-14 cmake make pkg-config")
         print(f"    sudo apt install libglfw3-dev libgl-dev libgl1-mesa-dev")
         print(f"    sudo apt install libfreetype-dev libx11-dev")
         print()

@@ -1,6 +1,7 @@
 import hashlib
 import os
 import platform
+import shutil
 import subprocess
 
 from morph.utils.logger import log_info, log_error, log_success, log_warn
@@ -100,15 +101,19 @@ def ensure_built() -> bool:
     build_dir = os.path.join(dev_dir, "build")
 
     log_info("Configuring CMake...")
-    subprocess.run(["rm", "-rf", build_dir], check=True)
-    r = subprocess.run(["cmake", "-S", dev_dir, "-B", build_dir])
+    # Prefer g++-14 for C++23 support
+    cxx = shutil.which("g++-14") or "g++"
+    r = subprocess.run(["cmake", "-S", dev_dir, "-B", build_dir,
+                        f"-DCMAKE_CXX_COMPILER={cxx}"])
     if r.returncode != 0:
         log_error("CMake configuration failed")
         log_info("Ensure cmake is installed: sudo apt install cmake")
         return False
 
+    import multiprocessing
+    nproc = multiprocessing.cpu_count()
     log_info("Compiling morph_devrt (this may take a minute)...")
-    r = subprocess.run(["cmake", "--build", build_dir])
+    r = subprocess.run(["cmake", "--build", build_dir, "--", f"-j{nproc}"])
     if r.returncode != 0:
         log_error("Compilation failed — check output above for errors")
         return False
@@ -133,4 +138,7 @@ def launch() -> subprocess.Popen:
             "Run `morph doctor` for diagnostics."
         )
 
-    return subprocess.Popen([path], stderr=subprocess.PIPE, text=True)
+    logic_so_path = os.path.abspath(".morph/cache/logic.so")
+    env = os.environ.copy()
+    env["MORPH_LOGIC_PATH"] = logic_so_path
+    return subprocess.Popen([path], stderr=subprocess.PIPE, text=True, env=env)

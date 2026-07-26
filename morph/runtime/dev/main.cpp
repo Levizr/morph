@@ -4,6 +4,8 @@
 #include <csignal>
 #include <unistd.h>
 #include <chrono>
+#include <dlfcn.h>
+#include <string>
 
 #include "vendor/glad/glad.h"
 #include <GLFW/glfw3.h>
@@ -13,13 +15,71 @@
 #include "../core/node.h"
 #include "../core/renderer.h"
 #include "../render/gl_renderer.h"
+#include "../reactivity/signal.h"
 
 #include "dev_socket.h"
 #include "ir_deserializer.h"
 #include "inspector.h"
+#include "signal_store.h"
+#include "node_registry.h"
 
 static volatile bool g_running = true;
 static void signalHandler(int) { g_running = false; }
+
+// ── Logic .so loading ──
+static void* g_logic_handle = nullptr;
+static std::string g_logic_path;
+
+static void close_logic() {
+    if (g_logic_handle) {
+        void (*cleanup)() = (void (*)())dlsym(g_logic_handle, "morph_logic_cleanup");
+        if (cleanup) cleanup();
+        for (int i = 0; i < 5; i++) {
+            int rc = dlclose(g_logic_handle);
+            if (rc == 0) {
+                // Verify truly unloaded: RTLD_NOLOAD returns NULL if not loaded
+                if (!g_logic_path.empty()) {
+                    void* still = dlopen(g_logic_path.c_str(), RTLD_NOLOAD | RTLD_NOW);
+                    if (!still) break;
+                    dlclose(still);
+                } else {
+                    break;
+                }
+            }
+            usleep(10000);
+        }
+        g_logic_handle = nullptr;
+    }
+}
+
+static void open_logic(const std::string& path, NodeRegistry& registry, SignalStore& store) {
+    close_logic();
+    g_logic_path = path;
+    void* handle = dlopen(path.c_str(), RTLD_NOW);
+    if (!handle) {
+        fprintf(stderr, "[devrt] failed to load logic.so: %s\n", dlerror());
+        return;
+    }
+    void (*init)(NodeRegistry&, SignalStore&) =
+        (void (*)(NodeRegistry&, SignalStore&))dlsym(handle, "morph_logic_init");
+    if (!init) {
+        fprintf(stderr, "[devrt] morph_logic_init not found in logic.so: %s\n", dlerror());
+        dlclose(handle);
+        return;
+    }
+    init(registry, store);
+    g_logic_handle = handle;
+    fprintf(stderr, "[devrt] logic.so loaded & initialized (registry has %zu nodes)", registry.size());
+    // Debug: print first few node IDs
+    registry.debug_print();
+    fprintf(stderr, "\n");
+}
+
+static bool reload_logic(const std::string& path, NodeRegistry& registry, SignalStore& store) {
+    close_logic();
+    open_logic(path, registry, store);
+    return g_logic_handle != nullptr;
+}
 
 // ── DevTools (global for GLFW key callback) ────────────────
 static DevTools* g_devtools = nullptr;
@@ -33,15 +93,6 @@ static void keyCb(GLFWwindow* win, int key, int, int action, int) {
     if (key == GLFW_KEY_F2 && action == GLFW_PRESS && g_devtools->open) {
         g_devtools->toggleInspect();
     }
-}
-
-static void mouseCb(GLFWwindow* win, int btn, int action, int) {
-    if (!g_devtools || btn != GLFW_MOUSE_BUTTON_LEFT || action != GLFW_PRESS) return;
-    int ww;
-    glfwGetWindowSize(win, &ww, nullptr);
-    double mx, my;
-    glfwGetCursorPos(win, &mx, &my);
-    g_devtools->handleClick((float)mx, (float)my, (float)ww);
 }
 
 int main() {
@@ -92,11 +143,48 @@ int main() {
         return 1;
     }
 
+    NodeRegistry registry;
+    SignalStore signalStore;
+    std::vector<StateVarInfo> stateVars;
     DevWindowConfig config;
     MorphNode* rootNode = nullptr;
-    if (!parseIR(root, rootNode, config)) {
+    if (!parseIR(root, rootNode, config, registry, stateVars)) {
         fprintf(stderr, "[devrt] failed to parse IR\n");
         return 1;
+    }
+
+    // Create signals from state vars
+    for (auto& sv : stateVars) {
+        std::string raw = sv.init;
+        // Strip quotes if string
+        if (raw.size() >= 2 && raw[0] == '\'' && raw.back() == '\'')
+            raw = raw.substr(1, raw.size() - 2);
+        if (sv.type == "int")
+            signalStore.get_or_create<int>(sv.getter, std::stoi(raw));
+        else if (sv.type == "double")
+            signalStore.get_or_create<double>(sv.getter, std::stod(raw));
+        else if (sv.type == "bool")
+            signalStore.get_or_create<bool>(sv.getter, raw == "true");
+        else if (sv.type == "std::string")
+            signalStore.get_or_create<std::string>(sv.getter, raw);
+        fprintf(stderr, "[devrt] signal \"%s\" (%s) = %s\n",
+                sv.getter.c_str(), sv.type.c_str(), sv.init.c_str());
+    }
+
+    // Load logic.so — prefer path from IR, fallback to env var
+    std::string logicSoPath;
+    if (root.has("logic_so_path")) {
+        logicSoPath = root["logic_so_path"].asString();
+    }
+    if (logicSoPath.empty()) {
+        const char* logicPath = getenv("MORPH_LOGIC_PATH");
+        logicSoPath = logicPath ? logicPath : "/tmp/morph_cache/logic.so";
+    }
+    if (access(logicSoPath.c_str(), F_OK) == 0) {
+        open_logic(logicSoPath, registry, signalStore);
+    } else {
+        fprintf(stderr, "[devrt] no logic.so found at %s (interactivity disabled)\n",
+                logicSoPath.c_str());
     }
 
     fprintf(stderr, "[devrt] window: %s %dx%d\n",
@@ -126,7 +214,6 @@ int main() {
     DevTools devtools;
     g_devtools = &devtools;
     glfwSetKeyCallback(window.handle(), keyCb);
-    glfwSetMouseButtonCallback(window.handle(), mouseCb);
 
     // ── Start compositor thread ─────────────────────────────
     window.startCompositor(true); // vsync on
@@ -161,19 +248,47 @@ int main() {
                 continue;
             }
 
+            NodeRegistry newRegistry;
+            std::vector<StateVarInfo> newStateVars;
             DevWindowConfig newConfig;
             MorphNode* newNode = nullptr;
-            if (parseIR(newRoot, newNode, newConfig)) {
+            if (parseIR(newRoot, newNode, newConfig, newRegistry, newStateVars)) {
                 // Apply window config (title only; resizing disrupts dev flow)
                 window.setTitle(newConfig.title);
                 // Replace node tree
                 window.addChild(newNode);
                 deleteNodeTree(rootNode);
                 rootNode = newNode;
+                registry = std::move(newRegistry);
                 devtools.hoveredNode = nullptr; // tree changed, clear stale ref
                 MorphWindow::clearHoverState(); // clear stale hover pointer
+
+                // Reload logic .so with new tree but preserved signals
+                // (signals in signalStore are NOT cleared — state survives)
+                // Add any new signals from updated state vars
+                for (auto& sv : newStateVars) {
+                    if (!signalStore.has(sv.getter)) {
+                        std::string raw = sv.init;
+                        if (raw.size() >= 2 && raw[0] == '\'' && raw.back() == '\'')
+                            raw = raw.substr(1, raw.size() - 2);
+                        if (sv.type == "int")
+                            signalStore.get_or_create<int>(sv.getter, std::stoi(raw));
+                        else if (sv.type == "double")
+                            signalStore.get_or_create<double>(sv.getter, std::stod(raw));
+                        else if (sv.type == "bool")
+                            signalStore.get_or_create<bool>(sv.getter, raw == "true");
+                        else if (sv.type == "std::string")
+                            signalStore.get_or_create<std::string>(sv.getter, raw);
+                    }
+                }
+                // Use .so path from IR if provided (ensures unique file = fresh dlopen)
+                std::string reloadPath = logicSoPath;
+                if (newRoot.has("logic_so_path")) {
+                    reloadPath = newRoot["logic_so_path"].asString();
+                }
+                reload_logic(reloadPath, registry, signalStore);
                 window.notifyPendingRender();
-                fprintf(stderr, "[devrt] hot reloaded\n");
+                fprintf(stderr, "[devrt] hot reloaded (so=%s)\n", reloadPath.c_str());
             } else {
                 fprintf(stderr, "[devrt] failed to parse IR from client\n");
             }
@@ -189,6 +304,9 @@ int main() {
         float dt = std::chrono::duration<float>(now - lastFrameTime).count();
         if (dt > 0.1f) dt = 0.1f; // cap to prevent spiral of death
         lastFrameTime = now;
+
+        // Run pending reactive effects
+        morph::run_pending_effects();
 
         // Update main-thread animation state (only tracks time, compositor interpolates)
         if (rootNode) rootNode->update(dt);
@@ -220,6 +338,7 @@ int main() {
     // window destroyed here (before glfwTerminate)
     } // ~MorphWindow, ~DevTools
 
+    close_logic();
     glfwTerminate();
     fprintf(stderr, "[devrt] done\n");
     return 0;

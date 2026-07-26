@@ -12,7 +12,7 @@ class WindowConfig:
 class MorphConfig:
     name:         str          = "my-app"
     entry:        str          = "src/App.mx"      # .html → .mx
-    output:       str          = "dist/"
+    output:       str          = ".morph/"
     window:       WindowConfig = field(default_factory=WindowConfig)
     dependencies: dict         = field(default_factory=dict)
     cpp_sources:  list         = field(default_factory=list)
@@ -24,7 +24,7 @@ class MorphConfig:
         return MorphConfig(
             name=d.get("name", "my-app"),
             entry=d.get("entry", "src/App.mx"),
-            output=d.get("output", "dist/"),
+            output=d.get("output", ".morph/"),
             window=WindowConfig(
                 width=win.get("width", 800),
                 height=win.get("height", 600),

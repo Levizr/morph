@@ -28,6 +28,21 @@ class IRNode:
     w: float = 0.0
     h: float = 0.0
 
+    # ── Reactivity ────────────────────────────────────────────
+    reactive_text: str = ""          # C++ expression for dynamic text (empty = static)
+    condition_expr: str = ""         # C++ expression for conditional (empty = not conditional)
+    then_nodes: list[IRNode] = field(default_factory=list)
+    else_nodes: list[IRNode] = field(default_factory=list)
+
+    # ── Reactive className / style ────────────────────────────
+    reactive_class: str = ""         # C++ expression for dynamic className (empty = static)
+    reactive_style: dict[str, str] = field(default_factory=dict)
+    # CSS property name → C++ expression for dynamic inline style
+    # e.g. {"width": "__st_count.get()"}
+    class_conditional_effects: list[tuple[str, dict[str, str], dict[str, str]]] = field(default_factory=list)
+    # [(condition_cpp, {css_prop: css_value_on}, {css_prop: css_value_off}), ...]
+    # For each conditional class: if condition is true → apply on_styles, else → apply off_styles
+
 
 @dataclass
 class IRWindow:
@@ -39,6 +54,10 @@ class IRWindow:
     modal: bool = False
     nodes: list[IRNode] = field(default_factory=list)
     startup_logs: list[str] = field(default_factory=list)
+    premain_functions: list[str] = field(default_factory=list)
+    extra_headers: list[str] = field(default_factory=list)
+    state_vars: list[dict] = field(default_factory=list)  # morphState definitions
+    effect_decls: list[dict] = field(default_factory=list)  # morphEffect declarations
 
 
 @dataclass

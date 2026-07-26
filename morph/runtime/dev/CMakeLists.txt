@@ -36,6 +36,8 @@ set(RUNTIME_SOURCES
     ${RUNTIME_DIR}/core/window.cpp
     ${RUNTIME_DIR}/core/compositor.cpp
     ${RUNTIME_DIR}/render/gl_renderer.cpp
+    ${RUNTIME_DIR}/reactivity/effect.cpp
+    ${RUNTIME_DIR}/reactivity/task.cpp
     ${VENDOR_DIR}/glad/glad.c
     ${VENDOR_DIR}/stb_image.c
 )
@@ -67,6 +69,8 @@ target_compile_definitions(morph_devrt PRIVATE
     MORPH_FEATURE_IMAGE
     MORPH_FEATURE_DIRTY_RENDERING
 )
+
+target_link_options(morph_devrt PRIVATE -rdynamic)
 
 target_link_libraries(morph_devrt PRIVATE
     glfw

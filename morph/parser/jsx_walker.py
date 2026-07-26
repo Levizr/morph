@@ -11,10 +11,13 @@ class JSXWalker:
     def walk(self, root: Node) -> dict:
         imports = self._extract_imports(root)
         imports.extend(self._extract_css_load_calls(root))
+        components = self._extract_components(root)
         return {
             "imports":      imports,
-            "components":   self._extract_components(root),
+            "components":   components,
             "windowConfig": self._extract_window_config(root),
+            "function_declarations": self._extract_function_declarations(root, components),
+            "global_vars":  self._extract_global_vars(root),
         }
 
     # ── Imports ───────────────────────────────────────────────
@@ -145,13 +148,19 @@ class JSXWalker:
             return None
 
         body_logs = self._extract_body_logs(block_node) if block_node else []
+        state_vars = self._extract_state_vars(block_node) if block_node else []
+        inner_funcs = self._extract_inner_functions(block_node) if block_node else []
+        effects = self._extract_morph_effects(block_node) if block_node else []
 
         return {
-            "name":       name,
-            "params":     params,
-            "jsx":        self._parse_jsx_element(jsx_root),
-            "body_logs":  body_logs,
-            "exported":   False,
+            "name":           name,
+            "params":         params,
+            "jsx":            self._parse_jsx_element(jsx_root),
+            "body_logs":      body_logs,
+            "state_vars":     state_vars,
+            "inner_functions": inner_funcs,
+            "morph_effects":  effects,
+            "exported":       False,
         }
 
     def _extract_body_logs(self, block_node: Node) -> list[str]:
@@ -182,6 +191,98 @@ class JSXWalker:
                             break
         return logs
 
+    def _extract_state_vars(self, block_node: Node) -> list[dict]:
+        """Find morphState() calls in function body outside return/arrow fn."""
+        vars = []
+        for child in block_node.children:
+            if child.type in ("lexical_declaration", "variable_declaration"):
+                for decl in child.children:
+                    if decl.type != "variable_declarator":
+                        continue
+                    value_node = None
+                    pattern_nodes = []
+                    for c in decl.children:
+                        if c.type == "array_pattern":
+                            pattern_nodes = [p for p in c.children if p.type == "identifier"]
+                        elif c.type == "call_expression":
+                            value_node = c
+                    if not value_node or not pattern_nodes:
+                        continue
+                    fn_parts, _ = self._parse_call_expr(value_node)
+                    if fn_parts == ["morphState"]:
+                        getter = pattern_nodes[0].text.decode() if len(pattern_nodes) > 0 else ""
+                        setter = pattern_nodes[1].text.decode() if len(pattern_nodes) > 1 else ""
+                        init_val = self._extract_init_arg(value_node) or "0"
+                        vars.append({
+                            "getter": getter,
+                            "setter": setter,
+                            "init": init_val,
+                            "raw": child.text.decode(),
+                        })
+        return vars
+
+    @staticmethod
+    def _extract_init_arg(call_node: Node) -> str | None:
+        for child in call_node.children:
+            if child.type == "arguments":
+                for arg in child.children:
+                    if arg.type == "number":
+                        return arg.text.decode()
+                    if arg.type == "string":
+                        return arg.text.decode()
+                    if arg.type == "true":
+                        return "true"
+                    if arg.type == "false":
+                        return "false"
+                    if arg.type == "identifier":
+                        return arg.text.decode()
+        return None
+
+    def _extract_morph_effects(self, block_node: Node) -> list[dict]:
+        """Find morphEffect(fn, [deps]) calls in function body."""
+        effects = []
+        for call in self._find_all(block_node, "call_expression"):
+            if self._is_inside(call, "arrow_function"):
+                continue
+            if self._is_inside(call, "return_statement"):
+                continue
+            fn_parts, args_node = self._parse_call_expr(call)
+            if fn_parts == ["morphEffect"]:
+                if args_node is None:
+                    continue
+                arg_nodes = [c for c in args_node.children
+                             if c.type not in (",", "(", ")")]
+                if not arg_nodes:
+                    continue
+                effect = {"callback": arg_nodes[0].text.decode()}
+                if len(arg_nodes) > 1:
+                    effect["deps"] = arg_nodes[1].text.decode()
+                else:
+                    effect["deps"] = ""
+                effects.append(effect)
+        return effects
+
+    def _extract_global_vars(self, root: Node) -> list[dict]:
+        """Find module-level variable declarations (let, const) that are
+        NOT inside a component and NOT morphState/morphEffect calls."""
+        vars = []
+        for decl in self._find_all(root, "lexical_declaration"):
+            if self._is_inside(decl, "function_declaration"):
+                continue
+            if self._is_inside(decl, "export_statement"):
+                continue
+            # Skip morphState declarations
+            is_morph_state = False
+            for call in self._find_all(decl, "call_expression"):
+                fn_parts, _ = self._parse_call_expr(call)
+                if fn_parts == ["morphState"]:
+                    is_morph_state = True
+                    break
+            if is_morph_state:
+                continue
+            vars.append({"source": decl.text.decode()})
+        return vars
+
     def _is_inside(self, node: Node, ancestor_type: str) -> bool:
         p = node.parent
         while p:
@@ -201,6 +302,8 @@ class JSXWalker:
                     if p.type in ("identifier", "property_identifier"):
                         parts.append(p.text.decode())
                 fn_parts = parts
+            elif child.type == "identifier":
+                fn_parts = [child.text.decode()]
             elif child.type == "arguments":
                 args = child
         return fn_parts, args
@@ -239,6 +342,112 @@ class JSXWalker:
                     return child
         return None
 
+    def _parse_conditional_expr(self, container: Node) -> dict | None:
+        """Parse a jsx_expression_container that contains JSX (&& or ternary).
+        Returns a __conditional__ node or None."""
+        for expr in container.children:
+            if expr.type == "binary_expression":
+                # count > 5 && <p>Big!</p>
+                return self._extract_binary_conditional(expr)
+            if expr.type == "ternary_expression":
+                # loading ? <Spinner/> : <Content/>
+                return self._extract_ternary_conditional(expr)
+        return None
+
+    @staticmethod
+    def _unwrap_jsx(node: Node) -> Node | None:
+        """If node is or wraps a jsx_element/jsx_self_closing_element, return it."""
+        if node.type in ("jsx_element", "jsx_self_closing_element"):
+            return node
+        if node.type == "parenthesized_expression":
+            for child in node.children:
+                result = JSXWalker._unwrap_jsx(child)
+                if result is not None:
+                    return result
+        return None
+
+    def _extract_binary_conditional(self, node: Node) -> dict | None:
+        """Parse `left && <JSX>` into a conditional node."""
+        left = None
+        right = None
+        op = None
+        for child in node.children:
+            if child.type in ("binary_expression", "identifier",
+                              "call_expression", "member_expression",
+                              "number", "string", "true", "false",
+                              "unary_expression", "parenthesized_expression"):
+                if left is None:
+                    left = child
+                else:
+                    right = child
+            elif child.type in ("jsx_element", "jsx_self_closing_element"):
+                right = child
+            elif child.type == "&&" or (hasattr(child, 'type') and child.type == "&&"):
+                op = "&&"
+            elif child.type.startswith("operator_"):
+                op = child.text.decode()
+            elif child.is_named and child.type not in ("comment",):
+                if left is None:
+                    left = child
+                else:
+                    right = child
+        if left is None or right is None:
+            return None
+        if op not in ("&&", "||"):
+            return None
+        # The right side must contain JSX (possibly parenthesized)
+        jsx_node = self._unwrap_jsx(right)
+        if jsx_node is None:
+            return None
+        cond_source = left.text.decode()
+        then_jsx = self._parse_jsx_element(jsx_node)
+        if then_jsx is None:
+            return None
+        return {
+            "tag": "__conditional__",
+            "condition": cond_source,
+            "then_branch": [then_jsx] if isinstance(then_jsx, dict) else then_jsx,
+            "else_branch": [],
+        }
+
+    def _extract_ternary_conditional(self, node: Node) -> dict | None:
+        """Parse `cond ? <A/> : <B/>` into a conditional node."""
+        condition = None
+        consequent = None
+        alternate = None
+        for child in node.children:
+            if child.type in ("binary_expression", "identifier",
+                              "call_expression", "member_expression",
+                              "number", "string", "true", "false",
+                              "unary_expression", "parenthesized_expression"):
+                if condition is None:
+                    condition = child
+                elif consequent is None:
+                    consequent = child
+                else:
+                    alternate = child
+            elif child.type in ("jsx_element", "jsx_self_closing_element"):
+                if consequent is None:
+                    consequent = child
+                else:
+                    alternate = child
+        if condition is None:
+            return None
+        cond_source = condition.text.decode()
+        then_node = self._unwrap_jsx(consequent) if consequent else None
+        else_node = self._unwrap_jsx(alternate) if alternate else None
+        then_jsx = self._parse_jsx_element(then_node) if then_node else None
+        else_jsx = self._parse_jsx_element(else_node) if else_node else None
+        if then_jsx is None and else_jsx is None:
+            return None
+        result = {"tag": "__conditional__", "condition": cond_source,
+                  "then_branch": [], "else_branch": []}
+        if then_jsx:
+            result["then_branch"] = [then_jsx] if isinstance(then_jsx, dict) else then_jsx
+        if else_jsx:
+            result["else_branch"] = [else_jsx] if isinstance(else_jsx, dict) else else_jsx
+        return result
+
     def _parse_jsx_element(self, node: Node) -> dict:
         if node is None:
             return {}
@@ -259,11 +468,21 @@ class JSXWalker:
                     opening = child
                 elif child.type in ("jsx_element", "jsx_self_closing_element"):
                     children.append(self._parse_jsx_element(child))
-                elif child.type == "jsx_expression_container":
-                    children.append({
-                        "tag": "__expr__",
-                        "text": child.text.decode(),
-                    })
+                elif child.type in ("jsx_expression", "jsx_expression_container"):
+                    # Skip JSX comments: {/* ... */}
+                    raw = child.text.decode()
+                    inner = raw[1:-1].strip() if raw.startswith("{") and raw.endswith("}") else raw
+                    if inner.startswith("/*") and "*/" in inner:
+                        continue
+                    # Check for conditional rendering (JSX inside expression)
+                    cond = self._parse_conditional_expr(child)
+                    if cond:
+                        children.append(cond)
+                    else:
+                        children.append({
+                            "tag": "__expr__",
+                            "text": inner,
+                        })
                 elif child.type == "jsx_text":
                     text = child.text.decode()
                     if text.strip() == "":
@@ -325,7 +544,8 @@ class JSXWalker:
     def _unwrap_jsx_expr(self, node: Node):
         """
         Unwrap {value} from a jsx_expression_container.
-        Returns dict for style={{}}, string for others.
+        Returns dict for style={{}}, string for static values,
+        or dict with __template__ / __ref__ / __expr__ for dynamic expressions.
         """
         for child in node.children:
             if child.type == "object":
@@ -333,19 +553,26 @@ class JSXWalker:
             elif child.type in ("string", "number", "true", "false"):
                 return child.text.decode().strip("'\"")
             elif child.type == "template_string":
-                return child.text.decode()
+                return {"__template__": child.text.decode()}
             elif child.type == "identifier":
                 return {"__ref__": child.text.decode()}
             elif child.type == "arrow_function":
                 return {"__fn__": child.text.decode()}
-        return node.text.decode()
+        # Fallthrough — complex expression, mark so builder can transpile
+        raw = node.text.decode().strip()
+        if raw.startswith('{') and raw.endswith('}'):
+            raw = raw[1:-1].strip()
+        return {"__expr__": raw}
 
     def _parse_style_object(self, node: Node) -> dict:
-        """Parse {{ backgroundColor: '#fff', padding: 16 }}"""
+        """Parse {{ backgroundColor: '#fff', padding: 16 }}
+        Returns dict where expression values are wrapped in {"__expr__": "..."}
+        so the IR builder can transpile them to C++."""
         style = {}
         for child in node.children:
             if child.type == "pair":
                 key = val = ""
+                val_is_expr = False
                 for part in child.children:
                     if part.type == "property_identifier":
                         if not key:
@@ -355,16 +582,71 @@ class JSXWalker:
                             key = part.text.decode().strip("'\"")
                         else:
                             val = part.text.decode().strip("'\"")
-                    elif part.type in ("number", "template_string", "identifier"):
-                        val = part.text.decode().strip("'\"")
+                    elif part.type == "number":
+                        val = part.text.decode()
+                    elif part.type == "template_string":
+                        val = part.text.decode()
+                        val_is_expr = True
+                    elif part.type == "identifier":
+                        val = part.text.decode()
+                        val_is_expr = True
+                    elif part.is_named:
+                        # Any other named node — treat as expression
+                        val = part.text.decode()
+                        val_is_expr = True
                 if key and val:
-                    # camelCase → kebab-case
-                    style[self._camel_to_kebab(key)] = val
+                    css_key = self._camel_to_kebab(key)
+                    if val_is_expr:
+                        style[css_key] = {"__expr__": val}
+                    else:
+                        style[css_key] = val
         return style
 
     def _camel_to_kebab(self, s: str) -> str:
         import re
         return re.sub(r"(?<!^)(?=[A-Z])", "-", s).lower()
+
+    def _extract_function_declarations(self, root: Node, components: list[dict]) -> list[dict]:
+        """Extract top-level function declarations that are NOT components
+        and NOT inside a component body (those are handled per-component)."""
+        # Collect all tree-sitter node ids that are inside a component body
+        comp_body_ids = set()
+        for comp in components:
+            inner = comp.get("inner_functions", [])
+            for fn in inner:
+                comp_body_ids.add(fn["id"])
+
+        comp_names = {c["name"] for c in components}
+        funcs = []
+        for node in self._find_all(root, "function_declaration"):
+            if id(node) in comp_body_ids:
+                continue  # handled inside its component
+            name = ""
+            for child in node.children:
+                if child.type == "identifier":
+                    name = child.text.decode()
+                    break
+            if name and name not in comp_names:
+                funcs.append({"name": name, "source": node.text.decode()})
+        return funcs
+
+    def _extract_inner_functions(self, block_node: Node) -> list[dict]:
+        """Extract function declarations inside a component body."""
+        funcs = []
+        for child in block_node.children:
+            if child.type == "function_declaration":
+                name = ""
+                for c in child.children:
+                    if c.type == "identifier":
+                        name = c.text.decode()
+                        break
+                if name:
+                    funcs.append({
+                        "id": id(child),
+                        "name": name,
+                        "source": child.text.decode(),
+                    })
+        return funcs
 
     # ── Generic helpers ───────────────────────────────────────
 

@@ -37,6 +37,10 @@ class IRSerializer:
             "visible":      w.visible,
             "nodes":        [self._node(n) for n in w.nodes],
             "startup_logs": w.startup_logs,
+            "premain_functions": w.premain_functions,
+            "extra_headers": w.extra_headers,
+            "state_vars":   w.state_vars,
+            "effect_decls": w.effect_decls,
         }
 
     @staticmethod
@@ -98,6 +102,12 @@ class IRSerializer:
             "events":   [{"trigger": e.trigger, "action": e.action,
                           "target": e.target} for e in n.events],
         }
+        if n.reactive_text:
+            result["reactive_text"] = n.reactive_text
+        if n.condition_expr:
+            result["condition_expr"] = n.condition_expr
+            result["then_nodes"] = [self._node(tn) for tn in n.then_nodes]
+            result["else_nodes"] = [self._node(en) for en in n.else_nodes]
         if n.hover_style is not None:
             result["hover_style"] = self._style_dict(n.hover_style)
         if n.transition_duration > 0:

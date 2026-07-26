@@ -1,8 +1,11 @@
 #pragma once
 #include <vector>
 #include <string>
+#include <algorithm>
+#include <functional>
 #include "../style/style.h"
 #include "event.h"
+#include "../types/js_value.h"
 #include "../render/gl_renderer.h"
 #include "render_frame.h"
 
@@ -78,6 +81,7 @@ public:
     float m_transitionDuration = 0.0f;
     Easing m_transitionEasing = Easing::EaseInOut;
 
+    std::string nodeId;
     MorphNode* parent = nullptr;
     std::vector<MorphNode*> children;
     bool focused = false;
@@ -110,7 +114,75 @@ public:
                         Renderer* r = nullptr);
     virtual void draw(Renderer& r) = 0;
     virtual void update(float dt);
-    virtual bool onEvent(MorphEvent& e) { return false; }
+    virtual void setText(const std::string&) {}
+
+    // Runtime class name tracking (for dev-mode reactive className)
+    std::string className;
+    void setClassName(const std::string& c) {
+        if (className == c) return;
+        className = c;
+        markDirty(PaintDirty);
+    }
+
+    std::function<void(JsObject)> onClick;
+    std::function<void(JsObject)> onDoubleClick;
+    std::function<void(JsObject)> onMouseDown;
+    std::function<void(JsObject)> onMouseUp;
+    std::function<void(JsObject)> onMouseEnter;
+    std::function<void(JsObject)> onMouseLeave;
+    std::function<void(JsObject)> onKeyDown;
+    std::function<void(JsObject)> onKeyUp;
+
+    virtual bool onEvent(MorphEvent& e) {
+        JsObject evt;
+        evt.set("x", JsNumber(e.x));
+        evt.set("y", JsNumber(e.y));
+        evt.set("button", JsNumber(e.button));
+        evt.set("key", JsNumber(e.key));
+        evt.set("scroll", JsNumber(e.scroll));
+        {
+            const char* tn = "unknown";
+            switch (e.type) {
+                case EventType::Click: tn = "click"; break;
+                case EventType::DoubleClick: tn = "dblclick"; break;
+                case EventType::MouseMove: tn = "mousemove"; break;
+                case EventType::MouseDown: tn = "mousedown"; break;
+                case EventType::MouseUp: tn = "mouseup"; break;
+                case EventType::KeyUp: tn = "keyup"; break;
+                case EventType::KeyDown: tn = "keydown"; break;
+                case EventType::Scroll: tn = "scroll"; break;
+                case EventType::Resize: tn = "resize"; break;
+                case EventType::Focus: tn = "focus"; break;
+                case EventType::Blur: tn = "blur"; break;
+            }
+            evt.set("type", JsString(tn));
+        }
+        if (e.type == EventType::Click && onClick) {
+            onClick(evt);
+            return true;
+        }
+        if (e.type == EventType::DoubleClick && onDoubleClick) {
+            onDoubleClick(evt);
+            return true;
+        }
+        if (e.type == EventType::MouseDown && onMouseDown) {
+            onMouseDown(evt);
+            return true;
+        }
+        if (e.type == EventType::MouseUp && onMouseUp) {
+            onMouseUp(evt);
+            return true;
+        }
+        if (e.type == EventType::KeyDown && onKeyDown) {
+            onKeyDown(evt);
+            return true;
+        }
+        if (e.type == EventType::KeyUp && onKeyUp) {
+            onKeyUp(evt);
+            return true;
+        }
+        return false;
+    }
     virtual void onHover(bool state);
 
     // ── Hover transitions ──
@@ -134,6 +206,19 @@ public:
         child->parent = this;
         child->markDirty(LayoutDirty);
         child->markDirty(PaintDirty);
+    }
+    void removeChild(MorphNode* child) {
+        auto it = std::find(children.begin(), children.end(), child);
+        if (it != children.end()) {
+            children.erase(it);
+            child->parent = nullptr;
+            markDirty(SubtreeDirty);
+        }
+    }
+    void removeAllChildren() {
+        for (auto* c : children) c->parent = nullptr;
+        children.clear();
+        markDirty(SubtreeDirty);
     }
     bool dispatchEvent(MorphEvent& e, float ex, float ey);
 

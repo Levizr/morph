@@ -4,13 +4,13 @@
 #include <cctype>
 #include <sstream>
 #include <vector>
-
 struct JsNumber;
 
 struct JsString {
     std::string value;
 
     JsString() : value() {}
+    JsString(char* v) : value(std::string(v)) {}
     JsString(const char* v) : value(v) {}
     JsString(std::string v) : value(std::move(v)) {}
     JsString(const JsNumber& num);  // defined in js_value.h after JsNumber exists
@@ -31,6 +31,11 @@ struct JsString {
     JsString toLowerCase() const {
         std::string out = value;
         for (auto& c : out) c = char(std::tolower(static_cast<unsigned char>(c)));
+        return out;
+    }
+
+    std::string to_std_string() const {
+        std::string out = value;
         return out;
     }
 
@@ -98,6 +103,13 @@ struct JsString {
     JsString toString() const { return value; }
     explicit operator std::string() const { return value; }
 };
+
+// ── Mixed-type comparison operators ──
+
+inline bool operator==(const std::string& a, const JsString& b) { return a == b.value; }
+inline bool operator==(const JsString& a, const std::string& b) { return a.value == b; }
+inline bool operator!=(const std::string& a, const JsString& b) { return a != b.value; }
+inline bool operator!=(const JsString& a, const std::string& b) { return a.value != b; }
 
 // ── std::formatter for std::println / std::format ──
 

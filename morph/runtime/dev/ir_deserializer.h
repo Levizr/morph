@@ -1,6 +1,9 @@
 #pragma once
 #include <cstring>
+#include <cctype>
+#include <vector>
 #include "json_parser.h"
+#include "node_registry.h"
 #include "../core/node.h"
 #include "../ui/rect.h"
 #include "../ui/text.h"
@@ -10,6 +13,14 @@
 static void deleteNodeTree(MorphNode* node) {
     delete node;
 }
+
+// ── State var info from IR JSON ──
+struct StateVarInfo {
+    std::string getter;
+    std::string setter;
+    std::string init;
+    std::string type; // deduced from init
+};
 
 // ── Style inheritance helpers ──────────────────────────────────
 struct InheritedStyle {
@@ -154,11 +165,14 @@ static void applyStyle(MorphStyle& s, const JsonValue& styleVal) {
 
 // ── Node deserialization with inheritance ──────────────────────
 static MorphNode* deserializeNode(const JsonValue& val,
+                                   NodeRegistry& registry,
                                    const InheritedStyle& parentStyle = InheritedStyle()) {
     std::string type = val["type"].asString();
     MorphNode* node = nullptr;
 
-    if (type == "__text__") {
+    if (type == "__conditional__") {
+        node = new RectNode(0.0f, 0.0f, 0.0f, 0.0f);
+    } else if (type == "__text__") {
         std::string text;
         if (val.has("text") && !val["text"].isNull())
             text = val["text"].asString();
@@ -177,6 +191,10 @@ static MorphNode* deserializeNode(const JsonValue& val,
         node = new RectNode(0, 0, 0, 0);
     }
     node->type = type;
+    if (val.has("id") && !val["id"].isNull())
+        node->nodeId = val["id"].asString();
+    if (!node->nodeId.empty())
+        registry.put(node->nodeId, node);
 
     // Apply style from JSON
     if (val.has("style"))
@@ -246,8 +264,21 @@ static MorphNode* deserializeNode(const JsonValue& val,
     // Recurse children with resolved parent style
     if (val.has("children") && val["children"].type() == JsonType::Array) {
         for (size_t i = 0; i < val["children"].size(); i++) {
-            MorphNode* child = deserializeNode(val["children"][i], resolved);
+            MorphNode* child = deserializeNode(val["children"][i], registry, resolved);
             if (child) node->addChild(child);
+        }
+    }
+
+    // Deserialize conditional branch nodes into the registry (not added as children).
+    // The logic .so attaches/detaches them dynamically via effects.
+    if (val.has("then_nodes") && val["then_nodes"].type() == JsonType::Array) {
+        for (size_t i = 0; i < val["then_nodes"].size(); i++) {
+            deserializeNode(val["then_nodes"][i], registry, resolved);
+        }
+    }
+    if (val.has("else_nodes") && val["else_nodes"].type() == JsonType::Array) {
+        for (size_t i = 0; i < val["else_nodes"].size(); i++) {
+            deserializeNode(val["else_nodes"][i], registry, resolved);
         }
     }
 
@@ -263,8 +294,12 @@ struct DevWindowConfig {
 };
 
 static bool parseIR(const JsonValue& root, MorphNode*& outRoot,
-                    DevWindowConfig& config) {
+                    DevWindowConfig& config,
+                    NodeRegistry& registry,
+                    std::vector<StateVarInfo>& stateVars) {
     outRoot = nullptr;
+    registry.clear();
+    stateVars.clear();
 
     if (root.type() != JsonType::Object) return false;
     if (!root.has("windows")) return false;
@@ -284,12 +319,40 @@ static bool parseIR(const JsonValue& root, MorphNode*& outRoot,
     if (win.has("visible") && !win["visible"].isNull())
         config.visible = win["visible"].asBool();
 
+    // Extract state vars
+    if (win.has("state_vars") && win["state_vars"].type() == JsonType::Array) {
+        auto& svs = win["state_vars"];
+        for (size_t i = 0; i < svs.size(); i++) {
+            StateVarInfo sv;
+            auto& s = svs[i];
+            if (s.has("getter") && !s["getter"].isNull())
+                sv.getter = s["getter"].asString();
+            if (s.has("setter") && !s["setter"].isNull())
+                sv.setter = s["setter"].asString();
+            if (s.has("init") && !s["init"].isNull())
+                sv.init = s["init"].asString();
+            // Deduce type from init
+            std::string raw = sv.init;
+            if (raw == "true" || raw == "false")
+                sv.type = "bool";
+            else if (raw.size() >= 2 && raw[0] == '\'' && raw.back() == '\'')
+                sv.type = "std::string";
+            else if (raw.find('.') != std::string::npos)
+                sv.type = "double";
+            else if (!raw.empty() && (std::isdigit(raw[0]) || raw[0] == '-'))
+                sv.type = "int";
+            else
+                sv.type = "auto";
+            stateVars.push_back(sv);
+        }
+    }
+
     // Build node tree from window's top-level nodes
     if (win.has("nodes") && win["nodes"].type() == JsonType::Array) {
         std::vector<MorphNode*> topLevel;
         InheritedStyle rootStyle;
         for (size_t i = 0; i < win["nodes"].size(); i++) {
-            MorphNode* n = deserializeNode(win["nodes"][i], rootStyle);
+            MorphNode* n = deserializeNode(win["nodes"][i], registry, rootStyle);
             if (n) topLevel.push_back(n);
         }
 

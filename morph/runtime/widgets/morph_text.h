@@ -25,15 +25,15 @@ public:
     void recordDisplayList(Renderer& r) override {
         m_displayList.clear();
         m_textOps.clear();
-        float lh = style.fontSize * 1.4f;
+        float lh = _effFontSize() * 1.4f;
         float py = y;
         for (auto& line : lines) {
             float lx = x;
             if (style.textAlign == "center") {
-                float tw = r.measureTextWidth(line, style.fontSize, style.fontWeight);
+                float tw = r.measureTextWidth(line, _effFontSize(), _effFontWeight());
                 if (tw < w) lx = x + (w - tw) * 0.5f;
             } else if (style.textAlign == "right") {
-                float tw = r.measureTextWidth(line, style.fontSize, style.fontWeight);
+                float tw = r.measureTextWidth(line, _effFontSize(), _effFontWeight());
                 lx = x + w - tw;
             }
             TextOp top;
@@ -43,8 +43,8 @@ public:
             top.color[0] = style.color[0]; top.color[1] = style.color[1];
             top.color[2] = style.color[2]; top.color[3] = style.color[3];
             top.align = TextAlign::Left;
-            top.fontSize = style.fontSize;
-            top.fontWeight = style.fontWeight;
+            top.fontSize = _effFontSize();
+            top.fontWeight = _effFontWeight();
             m_textOps.push_back(top);
             py += lh;
         }
@@ -96,17 +96,17 @@ public:
             if (lines.empty())
                 lines.push_back(text);
 
-            float lh = style.fontSize * 1.4f;
+            float lh = _effFontSize() * 1.4f;
             h = (float)lines.size() * lh;
         } else {
             if (h == 0.0f)
-                h = style.fontSize * 1.4f;
+                h = _effFontSize() * 1.4f;
         }
     }
 
     void wrapParagraph(const std::string& para, Renderer* r, float lineW) {
         float epsilon = 0.5f;
-        float tw = r->measureTextWidth(para, style.fontSize, style.fontWeight);
+        float tw = r->measureTextWidth(para, _effFontSize(), _effFontWeight());
         if (tw <= lineW + epsilon) {
             lines.push_back(para);
             return;
@@ -126,7 +126,7 @@ public:
                 size_t nextSpace = para.find(' ', fitEnd + 1);
                 if (nextSpace == std::string::npos) nextSpace = para.size();
                 std::string candidate = para.substr(start, nextSpace - start);
-                if (r->measureTextWidth(candidate, style.fontSize, style.fontWeight) <= lineW + epsilon) {
+                if (r->measureTextWidth(candidate, _effFontSize(), _effFontWeight()) <= lineW + epsilon) {
                     fitEnd = nextSpace;
                 } else {
                     break;
@@ -179,7 +179,7 @@ public:
             }
             fto.align = (uint8_t)top.align;
             fto.fontSize = top.fontSize;
-            fto.fontWeight = (top.fontWeight == "bold") ? (uint8_t)1 : (uint8_t)0;
+            fto.fontWeight = (top.fontWeight == "bold" || top.fontWeight == "700" || top.fontWeight == "800" || top.fontWeight == "900") ? (uint8_t)1 : (uint8_t)0;
             frame.textOps.push_back(fto);
             count++;
         }
@@ -187,15 +187,15 @@ public:
     }
 
     void draw(Renderer& r) override {
-        float lh = style.fontSize * 1.4f;
+        float lh = _effFontSize() * 1.4f;
         float py = y;
         for (auto& line : lines) {
             float lx = x;
             if (style.textAlign == "center") {
-                float tw = r.measureTextWidth(line, style.fontSize, style.fontWeight);
+                float tw = r.measureTextWidth(line, _effFontSize(), _effFontWeight());
                 if (tw < w) lx = x + (w - tw) * 0.5f;
             } else if (style.textAlign == "right") {
-                float tw = r.measureTextWidth(line, style.fontSize, style.fontWeight);
+                float tw = r.measureTextWidth(line, _effFontSize(), _effFontWeight());
                 lx = x + w - tw;
             }
             float* effectiveColor = style.color;
@@ -211,7 +211,7 @@ public:
                 effectiveColor = src ? src->style.color : parent->style.color;
             }
             r.drawText(line, lx, py, effectiveColor, TextAlign::Left,
-                       style.fontSize, style.fontWeight);
+                       _effFontSize(), _effFontWeight());
             py += lh;
         }
         for (auto* child : children)
@@ -221,10 +221,21 @@ public:
     float contentWidth(Renderer* r) override {
         if (style.explicitWidth >= 0.0f) return style.explicitWidth;
         if (r) {
-            float tw = r->measureTextWidth(text, style.fontSize, style.fontWeight);
+            float tw = r->measureTextWidth(text, _effFontSize(), _effFontWeight());
             float pl = style.padding[3], pr = style.padding[1];
             return tw + pl + pr;
         }
         return MorphNode::contentWidth(r);
+    }
+
+private:
+    float _effFontSize() const {
+        if (style.fontSize != 16.0f || !parent) return style.fontSize;
+        float pfs = parent->style.fontSize;
+        return (pfs != 16.0f) ? pfs : style.fontSize;
+    }
+    const std::string& _effFontWeight() const {
+        if (style.fontWeight != "normal" || !parent) return style.fontWeight;
+        return (parent->style.fontWeight != "normal") ? parent->style.fontWeight : style.fontWeight;
     }
 };

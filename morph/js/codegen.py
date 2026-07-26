@@ -200,7 +200,8 @@ _INDENT = "    "
 class TSToCppTranslator:
     """Translates TypeScript AST → C++ code with automatic #include detection."""
 
-    def __init__(self, indent_level: int = 1):
+    def __init__(self, indent_level: int = 1, event_handler: bool = False,
+                 state_vars: dict[str, str] | None = None):
         self._indent = _INDENT * indent_level
         self._needed: set[str] = set()
         self._template_params: frozenset[str] = frozenset()
@@ -211,6 +212,12 @@ class TSToCppTranslator:
         self._var_types: dict[str, str] = {}
         self._fn_expr_depth: int = 0
         self._fn_body_depth: int = 0
+        self._event_handler = event_handler
+        # Map of JS identifier → C++ expression for state variables
+        # e.g. {"count": "__st_count.get()", "setCount": "__st_count.set"}
+        self._state_vars: dict[str, str] = state_vars or {}
+        # Set to True when a while(true) loop is encountered within a function
+        self._has_infinite_loop: bool = False
     
 
     def _need(self, cpp_type: str) -> None:
@@ -228,7 +235,8 @@ class TSToCppTranslator:
         return self._translate_node(node)
 
     def _sub(self) -> TSToCppTranslator:
-        sub = TSToCppTranslator(self._indent.count(_INDENT) + 1)
+        sub = TSToCppTranslator(self._indent.count(_INDENT) + 1, event_handler=self._event_handler,
+                                state_vars=self._state_vars)
         sub._template_params = self._template_params
         sub._is_interface_method = self._is_interface_method
         sub._interface_name = self._interface_name
@@ -237,10 +245,12 @@ class TSToCppTranslator:
         sub._var_types = self._var_types
         sub._fn_expr_depth = self._fn_expr_depth
         sub._fn_body_depth = self._fn_body_depth
+        sub._has_infinite_loop = self._has_infinite_loop
         return sub
 
     def _merge(self, child: TSToCppTranslator) -> None:
         self._needed |= child._needed
+        self._has_infinite_loop = self._has_infinite_loop or child._has_infinite_loop
 
     def _translate_node(self, node: TSNode) -> str:
         if isinstance(node, TSBlockStatement):
@@ -274,6 +284,8 @@ class TSToCppTranslator:
         if isinstance(node, TSMemberExpression):
             return self._member_expression(node)
         if isinstance(node, TSIdentifier):
+            if node.name in self._state_vars:
+                return self._state_vars[node.name]
             return node.name
         if isinstance(node, TSLiteral):
             return self._literal(node)
@@ -434,6 +446,8 @@ class TSToCppTranslator:
         return False
 
     def _function_declaration(self, node: TSFunctionDeclaration) -> str:
+        self._has_infinite_loop = False  # reset for this function
+
         if node.return_type is None:
             if node.name == "main":
                 ret = "int"
@@ -448,6 +462,10 @@ class TSToCppTranslator:
         self._fn_body_depth += 1
         body = self._translate_node(node.body)
         self._fn_body_depth -= 1
+        # After body translation, check for infinite loops
+        if self._has_infinite_loop and node.name != "main":
+            ret = "morph::Task"
+            self._needed.add('"../../morph/runtime/reactivity/task.h"')
 
         tpl = ""
         if node.type_parameters:
@@ -471,11 +489,28 @@ class TSToCppTranslator:
         return f"+[](JsValue _jsThis) -> JsValue {body}"
 
     def _arrow_function(self, node: TSArrowFunction) -> str:
+        capture = "[&]" if self._fn_body_depth > 0 else "[]"
+
+        if self._event_handler:
+            self._need("JsObject")
+            if node.params:
+                param_strs = []
+                for p in node.params:
+                    self._var_types[p.name.name] = "JsObject"
+                    param_strs.append(f"JsObject {p.name.name}")
+                params = ", ".join(param_strs)
+            else:
+                params = "JsObject"
+            ret = "void"
+            if isinstance(node.body, TSBlockStatement):
+                body = self._translate_node(node.body)
+                return f"{capture}({params}) -> void {body}"
+            expr = self._translate_node(node.body)
+            return f"{capture}({params}) -> void {{ {expr}; }}"
+
         ret = _resolve_type(node.return_type, "auto", template_params=self._template_params)
         self._need(ret)
         params = self._format_params(node.params)
-        capture = "[&]" if self._fn_body_depth > 0 else "[]"
-
         if isinstance(node.body, TSBlockStatement):
             body = self._translate_node(node.body)
             return f"{capture}({params}) -> {ret} {body}"
@@ -504,6 +539,26 @@ class TSToCppTranslator:
     def _while_statement(self, node: TSWhileStatement) -> str:
         cond = self._translate_node(node.condition)
         body = self._translate_node(node.body)
+
+        # Detect infinite loops: while(true), while(1), while((true)), etc.
+        is_infinite = cond.strip().strip("()") in ("true", "1")
+
+        if is_infinite and self._fn_body_depth > 0:
+            self._has_infinite_loop = True
+            self._needed.add('"../../morph/runtime/reactivity/task.h"')
+
+            bi = _INDENT * (self._indent.count(_INDENT) + 1)
+            if isinstance(node.body, TSBlockStatement):
+                body_stripped = body.rstrip()
+                if body_stripped.endswith("}"):
+                    body = (body_stripped[:-1].rstrip() + "\n" + bi
+                            + "co_await morph::next_frame();\n" + self._indent + "}")
+                return f"{self._indent}while ({cond}) {body}"
+            else:
+                return (f"{self._indent}while ({cond}) {{\n{bi}{body};\n{bi}"
+                        f"co_await morph::next_frame();\n{self._indent}}}")
+
+        # Normal while (not infinite)
         if isinstance(node.body, TSBlockStatement):
             return f"{self._indent}while ({cond}) {body}"
         bi = _INDENT * (self._indent.count(_INDENT) + 1)
@@ -606,6 +661,23 @@ class TSToCppTranslator:
         if init_clean.endswith(";"):
             init_clean = init_clean[:-1]
 
+        # Detect infinite for(;;)
+        is_infinite = cond.strip() == "" and init_clean == "" and update.strip() == ""
+
+        if is_infinite and self._fn_body_depth > 0:
+            self._has_infinite_loop = True
+            self._needed.add('"../../morph/runtime/reactivity/task.h"')
+            bi = _INDENT * (self._indent.count(_INDENT) + 1)
+            if isinstance(node.body, TSBlockStatement):
+                body_stripped = body.rstrip()
+                if body_stripped.endswith("}"):
+                    body = (body_stripped[:-1].rstrip() + "\n" + bi
+                            + "co_await morph::next_frame();\n" + self._indent + "}")
+                return f"{self._indent}for ({init_clean}; {cond}; {update}) {body}"
+            else:
+                return (f"{self._indent}for ({init_clean}; {cond}; {update}) {{\n{bi}{body};\n{bi}"
+                        f"co_await morph::next_frame();\n{self._indent}}}")
+
         if isinstance(node.body, TSBlockStatement):
             return f"{self._indent}for ({init_clean}; {cond}; {update}) {body}"
         bi = _INDENT * (self._indent.count(_INDENT) + 1)
@@ -645,14 +717,6 @@ class TSToCppTranslator:
 
         if node.operator == "??":
             return f"(JsValue({left}).is_undefined() || JsValue({left}).is_null() ? JsValue({right}) : JsValue({left}))"
-
-        # Wrap number literals in JsNumber for arithmetic with non-literals
-        # to avoid C++ primitive × JsNumber mismatch
-        if op in ("*", "/", "-"):
-            if left_is_num_lit and not right_is_num_lit:
-                left = f"JsNumber({left})"
-            elif right_is_num_lit and not left_is_num_lit:
-                right = f"JsNumber({right})"
 
         return f"{left} {op} {right}"
 
@@ -721,19 +785,22 @@ class TSToCppTranslator:
                 and not node.callee.computed
                 and node.callee.property.name in ("log", "warn", "error", "info")):
             self._need("std::println")
-            fmt_parts: list[str] = []
+            fmt_chars: list[str] = []
+            val_args: list[str] = []
             for a in node.arguments:
                 if isinstance(a, TSTemplateLiteral):
-                    fmt_str, tpl_args = self._extract_template_parts(a)
-                    fmt_parts.append(f'"{fmt_str}"')
-                    fmt_parts.extend(tpl_args)
+                    fstr, targs = self._extract_template_parts(a)
+                    fmt_chars.append(fstr)
+                    val_args.extend(targs)
+                elif isinstance(a, TSLiteral) and isinstance(a.value, str):
+                    fmt_chars.append(a.value.replace("{", "{{").replace("}", "}}"))
                 else:
-                    translated = self._translate_node(a)
-                    if _is_string_literal(translated):
-                        fmt_parts.append(translated)
-                    else:
-                        fmt_parts.append(f'"{{}}", {translated}')
-            return f"std::println({', '.join(fmt_parts)})"
+                    fmt_chars.append("{}")
+                    val_args.append(self._translate_node(a))
+            fmt_str = " ".join(fmt_chars)
+            if not val_args:
+                return f'std::println("{{}}", "{fmt_str}")'
+            return f'std::println("{fmt_str}", {", ".join(val_args)})'
 
         # Detect .push(item) → .push(item)
         if (isinstance(node.callee, TSMemberExpression)
@@ -743,6 +810,29 @@ class TSToCppTranslator:
             obj = self._translate_node(node.callee.object)
             arg = self._translate_node(node.arguments[0])
             return f"{obj}.push({arg})"
+
+        # ── JS built-in timers: setTimeout / setInterval / clearTimeout / clearInterval ──
+        if (isinstance(node.callee, TSIdentifier)
+                and node.callee.name in ("setTimeout", "setInterval", "clearTimeout", "clearInterval")):
+            self._needed.add('"../../morph/runtime/reactivity/task.h"')
+            if node.callee.name == "clearTimeout" or node.callee.name == "clearInterval":
+                args = [self._translate_node(a) for a in node.arguments]
+                return f"morph::clear_timer({', '.join(args)})"
+            else:
+                # First arg: function, second arg: delay in ms
+                fn_translated = self._translate_node(node.arguments[0])
+                delay = self._translate_node(node.arguments[1]) if len(node.arguments) > 1 else "0"
+                cpp_fn = f"morph::{('set_timeout' if node.callee.name == 'setTimeout' else 'set_interval')}"
+                return f"{cpp_fn}(std::function<void()>({fn_translated}), {delay})"
+
+        # State var getter: elapsed() → __st_elapsed.get() (no extra parens)
+        # State var setter: setElapsed(5) → __st_elapsed.set(5)
+        if isinstance(node.callee, TSIdentifier) and node.callee.name in self._state_vars:
+            callee = self._state_vars[node.callee.name]
+            args = [self._translate_node(a) for a in node.arguments]
+            if args:
+                return f"{callee}({', '.join(args)})"
+            return callee
 
         args = [self._translate_node(a) for a in node.arguments]
         # super(args) in constructor context

@@ -1,6 +1,7 @@
 import time
 import os
 import sys
+import hashlib
 import select
 from morph.config.loader import load_config
 from morph.dev import devrt
@@ -42,18 +43,44 @@ def run(args=None) -> None:
     client.connect()
     log_success(f"IPC connected in {_fmt_duration(time.time() - t1)}")
 
+    _file_hashes: dict[str, str] = {}
+    _reloading = False
+
     def reload(changed_file: str = ""):
-        t_reload = time.time()
-        if changed_file:
-            rel = os.path.relpath(changed_file, os.getcwd())
-            log_info(f"File changed: {rel}")
-        ir = pipeline.run(config)
-        if ir:
-            client.send_ir(ir)
-            log_success(f"Rebuilt & reloaded in {_fmt_duration(time.time() - t_reload)}")
-        else:
-            log_error("Build failed — check terminal output above")
-            client.send_error("Build failed — check terminal output above")
+        nonlocal _file_hashes, _reloading
+        if _reloading:
+            return
+        _reloading = True
+        try:
+            t_reload = time.time()
+            if changed_file:
+                rel = os.path.relpath(changed_file, os.getcwd())
+                # Skip if file content hasn't actually changed
+                try:
+                    with open(changed_file, "rb") as _f:
+                        cur = hashlib.sha256(_f.read()).hexdigest()
+                    if _file_hashes.get(changed_file) == cur:
+                        return
+                    _file_hashes[changed_file] = cur
+                except OSError:
+                    pass
+                log_info(f"File changed: {rel}")
+            ir = pipeline.run(config)
+            if ir and ir.get("windows"):
+                # Compile JS logic to .so (if there are state vars, events, etc.)
+                windows = pipeline.get_latest_windows()
+                if windows:
+                    pipeline.compile_logic(windows)
+                    so_path = pipeline.get_logic_so_path()
+                    if so_path:
+                        ir["logic_so_path"] = so_path
+                client.send_ir(ir)
+                log_success(f"Rebuilt & reloaded in {_fmt_duration(time.time() - t_reload)}")
+            else:
+                log_error("Build failed — check terminal output above")
+                client.send_error("Build failed — check terminal output above")
+        finally:
+            _reloading = False
 
     reload()
 

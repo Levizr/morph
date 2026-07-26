@@ -29,7 +29,7 @@ static uint8_t positionToEnum(const std::string& s) {
     return (s == "absolute") ? 1 : 0;
 }
 static uint8_t fontWeightToEnum(const std::string& s) {
-    return (s == "bold") ? 1 : 0;
+    return (s == "bold" || s == "700" || s == "800" || s == "900") ? 1 : 0;
 }
 static uint8_t borderStyleToEnum(const std::string& s) {
     return (s == "solid") ? 1 : 0;

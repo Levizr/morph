@@ -1,5 +1,7 @@
 from __future__ import annotations
+import hashlib
 import time
+import os
 from pathlib import Path
 
 from morph.parser.morph_parser import MorphParser, collect_errors
@@ -10,12 +12,22 @@ from morph.style.css_fetcher import CSSFetcher
 from morph.style.tailwind import TailwindResolver
 from morph.ir.builder import IRBuilder
 from morph.ir.serializer import IRSerializer, _clean_inf
+from morph.ir.node import IRWindow
 from morph.layout.engine import LayoutEngine
-from morph.utils.logger import log_error, log_parse_error, log_dim, log_warn
+from morph.codegen.emitter import Emitter
+from morph.build.compiler import Compiler
+from morph.utils.logger import log_error, log_parse_error, log_dim, log_warn, log_success
 
 _tw_resolver: TailwindResolver | None = None
 _fetcher = CSSFetcher()
 _css_parser = CSSParser()
+
+# Latest IR windows (used by compile_logic for codegen)
+_latest_windows: list[IRWindow] | None = None
+
+
+def get_latest_windows() -> list[IRWindow] | None:
+    return _latest_windows
 
 
 def _fmt(secs: float) -> str:
@@ -25,7 +37,7 @@ def _fmt(secs: float) -> str:
 
 
 def run(config) -> dict | None:
-    global _tw_resolver
+    global _tw_resolver, _latest_windows
     if _tw_resolver is None:
         _tw_resolver = TailwindResolver(project_root=".")
 
@@ -90,6 +102,8 @@ def run(config) -> dict | None:
         LayoutEngine().compute(ir)
         log_dim(f"laid  out  in {_fmt(time.time() - t)}")
 
+        _latest_windows = ir
+
         t = time.time()
         result = _clean_inf(IRSerializer().to_dict(ir))
         log_dim(f"serialized  in {_fmt(time.time() - t)}")
@@ -103,3 +117,83 @@ def run(config) -> dict | None:
     except Exception as e:
         log_error(f"{type(e).__name__}: {e}")
         return None
+
+
+LOGIC_CACHE_DIR = os.path.abspath(".morph/cache")
+LOGIC_SOURCE_PATH = os.path.join(LOGIC_CACHE_DIR, "app_logic.cpp")
+
+
+_last_logic_hash: str | None = None
+_last_logic_so_path: str | None = None
+
+
+def get_logic_so_path() -> str | None:
+    return _last_logic_so_path
+
+
+def compile_logic(windows: list[IRWindow]) -> bool:
+    """Generate and compile the JS logic to a .so shared library."""
+    global _last_logic_hash, _last_logic_so_path
+    try:
+        os.makedirs(LOGIC_CACHE_DIR, exist_ok=True)
+
+        emitter = Emitter()
+        t = time.time()
+        emitter.emit_logic(windows, LOGIC_SOURCE_PATH)
+        log_dim(f"generated logic  in {_fmt(time.time() - t)}")
+
+        # Skip compilation if source unchanged
+        with open(LOGIC_SOURCE_PATH, "rb") as f:
+            cur_hash = hashlib.sha256(f.read()).hexdigest()
+        if cur_hash == _last_logic_hash:
+            log_dim("logic source unchanged — skipping compilation")
+            return True
+        _last_logic_hash = cur_hash
+
+        # Use a content-hash-based unique filename so dlopen always gets a fresh file
+        so_filename = f"logic.{cur_hash[:16]}.so"
+        so_path = os.path.join(LOGIC_CACHE_DIR, so_filename)
+
+        # Only compile if the target file doesn't already exist
+        if os.path.exists(so_path):
+            _last_logic_so_path = so_path
+            log_dim("logic.so already compiled — reusing")
+            return True
+
+        compiler = Compiler()
+        compiler.silent = True
+        t = time.time()
+        # Compile to a temp file, then atomically rename to .so.<hash>
+        so_tmp = so_path + ".tmp." + str(os.getpid())
+        ok = compiler.compile_shared(LOGIC_SOURCE_PATH, so_tmp)
+        if ok:
+            os.rename(so_tmp, so_path)
+            # Clean up old .so files (keep last 3)
+            _cleanup_old_sos(LOGIC_CACHE_DIR, so_filename, keep=3)
+            _last_logic_so_path = so_path
+            log_dim(f"compiled logic.so  in {_fmt(time.time() - t)}")
+            return True
+        log_error("Logic compilation failed")
+        if os.path.exists(so_tmp):
+            os.remove(so_tmp)
+        return False
+    except Exception as e:
+        log_error(f"Logic compilation error: {e}")
+        return False
+
+
+def _cleanup_old_sos(cache_dir: str, keep_name: str, keep: int = 3) -> None:
+    """Remove old logic.<hash>.so files, keeping the `keep` most recent."""
+    import re
+    sos = []
+    for f in os.listdir(cache_dir):
+        m = re.match(r"logic\.([a-f0-9]+)\.so", f)
+        if m and f != keep_name:
+            path = os.path.join(cache_dir, f)
+            sos.append((os.path.getmtime(path), path))
+    sos.sort(reverse=True)  # newest first
+    for _, path in sos[keep:]:
+        try:
+            os.remove(path)
+        except OSError:
+            pass

@@ -166,6 +166,10 @@ def _deserialize(ir_dict: dict) -> list:
             visible=w.get("visible", True),
             nodes=[_deser_node(n) for n in w.get("nodes", [])],
             startup_logs=w.get("startup_logs", []),
+            premain_functions=w.get("premain_functions", []),
+            extra_headers=w.get("extra_headers", []),
+            state_vars=w.get("state_vars", []),
+            effect_decls=w.get("effect_decls", []),
         )
         windows.append(win)
     return windows
@@ -231,6 +235,8 @@ def _deser_node(d: dict) -> IRNode:
             style_data = rule.get("style", {})
             if isinstance(style_data, dict) and tag:
                 ancestor_hover_rules.append((tag, _deser_style(style_data)))
+    then_nodes = [_deser_node(c) for c in d.get("then_nodes", [])]
+    else_nodes = [_deser_node(c) for c in d.get("else_nodes", [])]
     return IRNode(
         node_id=d.get("id", ""),
         node_type=d.get("type", ""),
@@ -239,6 +245,10 @@ def _deser_node(d: dict) -> IRNode:
         w=d.get("w", 0.0),
         h=d.get("h", 0.0),
         text_content=d.get("text", ""),
+        reactive_text=d.get("reactive_text", ""),
+        condition_expr=d.get("condition_expr", ""),
+        then_nodes=then_nodes,
+        else_nodes=else_nodes,
         style=_deser_style(d.get("style", {})),
         hover_style=hover_style,
         children=[_deser_node(c) for c in d.get("children", [])],

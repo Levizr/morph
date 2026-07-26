@@ -2,14 +2,17 @@ from morph.ir.event import IREvent
 
 
 def emit_event(event: IREvent, node_var: str) -> str:
-    """Returns C++ lambda for an IREvent."""
+    """Returns the full C++ lambda for node->onClick = <result>."""
     if event.action == "open":
-        return f'wm.open("{event.target}");'
+        return f'[&wm]() {{ wm.open("{event.target}"); }}'
     if event.action == "close":
-        return f'wm.close("{event.target}");'
+        return f'[&wm]() {{ wm.close("{event.target}"); }}'
     if event.action == "navigate":
-        return f'wm.navigate("{event.target}");'
+        return f'[&wm]() {{ wm.navigate("{event.target}"); }}'
     if event.action == "log":
         escaped = event.target.replace('"', '\\"')
-        return f'fprintf(stderr, "{escaped}\\n");'
-    return f"// unhandled action: {event.action}"
+        return f'[&wm]() {{ fprintf(stderr, "{escaped}\\n"); }}'
+    if event.action == "call":
+        # event.target is already a C++ lambda from the JS transpiler
+        return event.target
+    return f"[&wm]() {{ /* unhandled action: {event.action} */ }}"

@@ -2,20 +2,9 @@
 #include "../core/node.h"
 #include "../core/event.h"
 #include "radius.h"
-#include <functional>
 
 class ButtonNode : public MorphNode {
 public:
-    std::function<void()> onClick;
-
-    bool onEvent(MorphEvent& e) override {
-        if (e.type == EventType::Click && onClick) {
-            onClick();
-            return true;
-        }
-        return false;
-    }
-
     void recordDisplayList(Renderer& r) override {
         m_displayList.clear();
         auto sc = [&](float v) { return m_hasLayoutTransition ? v : std::round(v); };

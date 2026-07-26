@@ -42,8 +42,11 @@ class NodeEmitter:
         indent = "    "
 
         if node.node_type == "__text__":
-            escaped = node.text_content.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\t", "\\t").replace("\r", "\\r")
-            lines.append(f"TextNode* {node.node_id} = new TextNode(\"{escaped}\");")
+            if node.reactive_text:
+                lines.append(f"TextNode* {node.node_id} = new TextNode(\"\");")
+            else:
+                escaped = node.text_content.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\t", "\\t").replace("\r", "\\r")
+                lines.append(f"TextNode* {node.node_id} = new TextNode(\"{escaped}\");")
             lines.append(f"{indent}{node.node_id}->x = {fmt(node.x)};")
             lines.append(f"{indent}{node.node_id}->y = {fmt(node.y)};")
             lines.append(f"{indent}{node.node_id}->w = {fmt(node.w)};")
@@ -55,6 +58,65 @@ class NodeEmitter:
                 lines.append(self._set_transition(node, indent))
             if parent_id:
                 lines.append(f"{parent_id}->addChild({node.node_id});")
+            if node.reactive_text:
+                lines.append(f"morph::create_effect([&]() {{")
+                lines.append(f"{indent}{node.node_id}->setText(morph::str({node.reactive_text}));")
+                lines.append(f"}});")
+            return "\n".join(lines)
+
+        # ── Conditional node ─────────────────────────────────
+        if node.node_type == "__conditional__":
+            child_var = f"__cond_{node.node_id}"
+            lines.append(f"RectNode* {node.node_id} = new RectNode(0.0f, 0.0f, 0.0f, 0.0f);")
+            lines.append(f"MorphNode* {child_var} = nullptr;")
+            if parent_id:
+                lines.append(f"{parent_id}->addChild({node.node_id});")
+            # Build then/else branch code once (without parent wiring)
+            then_code = ""
+            then_root_var = ""
+            for tn in node.then_nodes:
+                then_code = self.emit_node(tn, None, None)
+                then_root_var = tn.node_id
+                break  # V1: single root per branch
+            else_code = ""
+            else_root_var = ""
+            for en in node.else_nodes:
+                else_code = self.emit_node(en, None, None)
+                else_root_var = en.node_id
+                break
+            # Emit the effect
+            bi = indent + "    "
+            lines.append(f"morph::create_effect([&]() {{")
+            lines.append(f"{bi}if ({node.condition_expr}) {{")
+            if then_code and then_root_var:
+                lines.append(f"{bi}    if (!{child_var}) {{")
+                for line in then_code.split("\n"):
+                    lines.append(f"{bi}        {line}")
+                lines.append(f"{bi}        {node.node_id}->addChild({then_root_var});")
+                lines.append(f"{bi}        {child_var} = {then_root_var};")
+                lines.append(f"{bi}    }}")
+            else:
+                lines.append(f"{bi}    /* empty then */")
+            lines.append(f"{bi}}} else {{")
+            if else_code and else_root_var:
+                lines.append(f"{bi}    if (!{child_var}) {{")
+                for line in else_code.split("\n"):
+                    lines.append(f"{bi}        {line}")
+                lines.append(f"{bi}        {node.node_id}->addChild({else_root_var});")
+                lines.append(f"{bi}        {child_var} = {else_root_var};")
+                lines.append(f"{bi}    }}")
+            elif node.else_nodes:
+                lines.append(f"{bi}    /* non-JSX else */")
+            if then_root_var and (not else_code or node.else_nodes):
+                # Cleanup then branch when condition becomes false
+                lines.append(f"{bi}    if ({child_var}) {{")
+                lines.append(f"{bi}        {node.node_id}->removeChild({child_var});")
+                lines.append(f"{bi}        delete {child_var};")
+                lines.append(f"{bi}        {child_var} = nullptr;")
+                lines.append(f"{bi}    }}")
+            lines.append(f"{bi}}}")
+            lines.append(f"{bi}{node.node_id}->markDirty(LayoutDirty);")
+            lines.append(f"}});")
             return "\n".join(lines)
 
         if node.node_type == "button":
@@ -452,10 +514,22 @@ class NodeEmitter:
         return f"{indent}{node.node_id}->m_transitionDuration = {dur};\n" \
                f"{indent}{node.node_id}->m_transitionEasing = {easing};"
 
+    _EVENT_MEMBER = {
+        "click": "onClick",
+        "keyup": "onKeyUp",
+        "keydown": "onKeyDown",
+        "dblclick":   "onDoubleClick",
+        "mousedown":  "onMouseDown",
+        "mouseup":    "onMouseUp",
+        "mouseenter": "onMouseEnter",
+        "mouseleave": "onMouseLeave",
+    }
+
     def _emit_event(self, event, node_id: str, indent: str) -> str:
         from morph.codegen.event_emitter import emit_event
-        code = emit_event(event, node_id)
-        return f"{indent}{node_id}->onClick = [&wm]() {{ {code} }};"
+        member = self._EVENT_MEMBER.get(event.trigger, "onClick")
+        rhs = emit_event(event, node_id)
+        return f"{indent}{node_id}->{member} = {rhs};"
 
     def _emit_viewport(self, node: IRViewport, parent_id: str | None) -> str:
         lines = [

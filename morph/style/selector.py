@@ -9,7 +9,6 @@ class Combinator(Enum):
     ADJACENT = auto()
     SIBLING = auto()
 
-
 @dataclass
 class CompoundSelector:
     tag: str | None = None

@@ -1,37 +1,99 @@
 #include "window.h"
+#include <GLFW/glfw3.h>
+#include <algorithm>
+#include <print>
+// Double-click detection: threshold in seconds
+static double s_lastClickTime = 0.0;
+static const double DBL_CLICK_THRESHOLD = 0.3;
 
-void MorphWindow::mouseButtonCb(GLFWwindow* win, int btn, int act, int mods) {
-    (void)mods;
-    auto* self = (MorphWindow*)glfwGetWindowUserPointer(win);
-    if (!self || !self->m_root) return;
-    double mx, my;
-    glfwGetCursorPos(win, &mx, &my);
-    MorphEvent e;
-    e.type = (act == GLFW_PRESS) ? EventType::MouseDown : EventType::MouseUp;
-    e.button = btn;
-    e.x = (float)mx;
-    e.y = (float)my;
-    self->m_root->dispatchEvent(e, (float)mx, (float)my);
-    if (act == GLFW_PRESS) {
-        e.type = EventType::Click;
+void MorphWindow::mouseButtonCb(GLFWwindow *win, int btn, int act, int mods)
+{
+    if (btn == GLFW_MOUSE_BUTTON_1)
+    {
+        (void)mods;
+        auto *self = (MorphWindow *)glfwGetWindowUserPointer(win);
+        if (!self || !self->m_root)
+            return;
+        double mx, my;
+        glfwGetCursorPos(win, &mx, &my);
+        MorphEvent e;
+        e.type = (act == GLFW_PRESS) ? EventType::MouseDown : EventType::MouseUp;
+        e.button = btn;
+        e.x = (float)mx;
+        e.y = (float)my;
         self->m_root->dispatchEvent(e, (float)mx, (float)my);
+        if (act == GLFW_PRESS)
+        {
+            double now = glfwGetTime();
+            e.type = EventType::Click;
+            self->m_root->dispatchEvent(e, (float)mx, (float)my);
+            if (now - s_lastClickTime < DBL_CLICK_THRESHOLD)
+            {
+                e.type = EventType::DoubleClick;
+                self->m_root->dispatchEvent(e, (float)mx, (float)my);
+            }
+            s_lastClickTime = now;
+        }
     }
 }
 
-static MorphNode* s_lastHoverNode = nullptr;
+void MorphWindow::KeyCb(GLFWwindow *win, int key, int scancode, int act, int mods)
+{
+    (void)mods;
+    auto *self = (MorphWindow *)glfwGetWindowUserPointer(win);
+    if (!self || !self->m_root)
+        return;
+    double mx, my;
+    glfwGetCursorPos(win, &mx, &my);
+    MorphEvent e;
+    e.type = (act == GLFW_PRESS) ? EventType::KeyDown : EventType::KeyUp;
+    const char *keyName = glfwGetKeyName(key, scancode);
+
+    e.key = keyName ? std::string(keyName) : key == 259 ? "Backspace"
+                                         : key == 32    ? "Space"
+                                                        : "";
+    e.x = (float)mx;
+    e.y = (float)my;
+    self->m_root->dispatchEvent(e, (float)mx, (float)my);
+}
+
+static MorphNode *s_lastHoverNode = nullptr;
 
 void MorphWindow::clearHoverState() { s_lastHoverNode = nullptr; }
 
-void MorphWindow::cursorPosCb(GLFWwindow* win, double mx, double my) {
-    auto* self = (MorphWindow*)glfwGetWindowUserPointer(win);
-    if (!self || !self->m_root) return;
+void MorphWindow::cursorPosCb(GLFWwindow *win, double mx, double my)
+{
+    auto *self = (MorphWindow *)glfwGetWindowUserPointer(win);
+    if (!self || !self->m_root)
+        return;
 
-    auto* newHover = self->m_root->hitTest((float)mx, (float)my);
-    if (newHover != s_lastHoverNode) {
+    auto *newHover = self->m_root->hitTest((float)mx, (float)my);
+    if (newHover != s_lastHoverNode)
+    {
         if (s_lastHoverNode)
+        {
+            if (s_lastHoverNode->onMouseLeave)
+            {
+                JsObject evt;
+                evt.set("x", JsNumber((float)mx));
+                evt.set("y", JsNumber((float)my));
+                evt.set("type", JsString("mouseleave"));
+                s_lastHoverNode->onMouseLeave(evt);
+            }
             s_lastHoverNode->onHover(false);
+        }
         if (newHover)
+        {
+            if (newHover->onMouseEnter)
+            {
+                JsObject evt;
+                evt.set("x", JsNumber((float)mx));
+                evt.set("y", JsNumber((float)my));
+                evt.set("type", JsString("mouseenter"));
+                newHover->onMouseEnter(evt);
+            }
             newHover->onHover(true);
+        }
         s_lastHoverNode = newHover;
     }
 
@@ -42,10 +104,12 @@ void MorphWindow::cursorPosCb(GLFWwindow* win, double mx, double my) {
     self->m_root->dispatchEvent(e, (float)mx, (float)my);
 
 #ifdef MORPH_FEATURE_CURSOR
-    auto* target = newHover;
-    const std::string* cur = nullptr;
-    for (auto* n = target; n; n = n->parent) {
-        if (n->style.cursor != "default") {
+    auto *target = newHover;
+    const std::string *cur = nullptr;
+    for (auto *n = target; n; n = n->parent)
+    {
+        if (n->style.cursor != "default")
+        {
             cur = &n->style.cursor;
             break;
         }
@@ -59,21 +123,26 @@ void MorphWindow::cursorPosCb(GLFWwindow* win, double mx, double my) {
 #endif
 }
 
-void MorphWindow::windowSizeCb(GLFWwindow* win, int width, int height) {
-    auto* self = (MorphWindow*)glfwGetWindowUserPointer(win);
-    if (!self) return;
+void MorphWindow::windowSizeCb(GLFWwindow *win, int width, int height)
+{
+    auto *self = (MorphWindow *)glfwGetWindowUserPointer(win);
+    if (!self)
+        return;
     self->m_width = width;
     self->m_height = height;
     self->m_pendingRender = true;
-    if (self->m_root) {
+    if (self->m_root)
+    {
         self->m_root->markDirty(SubtreeDirty);
     }
 }
 
-void MorphWindow::scrollCb(GLFWwindow* win, double dx, double dy) {
+void MorphWindow::scrollCb(GLFWwindow *win, double dx, double dy)
+{
     (void)dx;
-    auto* self = (MorphWindow*)glfwGetWindowUserPointer(win);
-    if (!self || !self->m_root) return;
+    auto *self = (MorphWindow *)glfwGetWindowUserPointer(win);
+    if (!self || !self->m_root)
+        return;
     double mx, my;
     glfwGetCursorPos(win, &mx, &my);
     MorphEvent e;
@@ -84,17 +153,20 @@ void MorphWindow::scrollCb(GLFWwindow* win, double dx, double dy) {
     self->m_root->dispatchEvent(e, (float)mx, (float)my);
 }
 
-MorphWindow::MorphWindow(const std::string& title, int width, int height, bool visible)
-    : m_title(title), m_width(width), m_height(height), m_visible(visible) {
+MorphWindow::MorphWindow(const std::string &title, int width, int height, bool visible)
+    : m_title(title), m_width(width), m_height(height), m_visible(visible)
+{
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     m_handle = glfwCreateWindow(width, height, title.c_str(), nullptr, nullptr);
-    if (m_handle) {
+    if (m_handle)
+    {
         glfwMakeContextCurrent(m_handle);
         gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress));
         glfwSetWindowUserPointer(m_handle, this);
         glfwSetMouseButtonCallback(m_handle, mouseButtonCb);
+        glfwSetKeyCallback(m_handle, KeyCb);
         glfwSetCursorPosCallback(m_handle, cursorPosCb);
         glfwSetScrollCallback(m_handle, scrollCb);
         glfwSetWindowSizeCallback(m_handle, windowSizeCb);
@@ -107,50 +179,64 @@ MorphWindow::MorphWindow(const std::string& title, int width, int height, bool v
     }
 }
 
-void MorphWindow::setTitle(const std::string& title) {
+void MorphWindow::setTitle(const std::string &title)
+{
     m_title = title;
-    if (m_handle) glfwSetWindowTitle(m_handle, title.c_str());
+    if (m_handle)
+        glfwSetWindowTitle(m_handle, title.c_str());
 }
 
 // Forward declarations for dirty rendering helpers
-static int countNodes(MorphNode* n);
-static void recordPaintTree(MorphNode* n, Renderer& r, DirtyStats& stats);
+static int countNodes(MorphNode *n);
+static void recordPaintTree(MorphNode *n, Renderer &r, DirtyStats &stats);
 
-void MorphWindow::setSize(int width, int height) {
+void MorphWindow::setSize(int width, int height)
+{
     m_width = width;
     m_height = height;
-    if (m_handle) glfwSetWindowSize(m_handle, width, height);
+    if (m_handle)
+        glfwSetWindowSize(m_handle, width, height);
 }
 
-MorphWindow::~MorphWindow() {
+MorphWindow::~MorphWindow()
+{
     stopCompositor();
     delete m_root;
     m_root = nullptr;
 #ifdef MORPH_FEATURE_CURSOR
-    if (m_handCursor) glfwDestroyCursor(m_handCursor);
-    if (m_textCursor) glfwDestroyCursor(m_textCursor);
+    if (m_handCursor)
+        glfwDestroyCursor(m_handCursor);
+    if (m_textCursor)
+        glfwDestroyCursor(m_textCursor);
 #endif
-    if (m_handle) glfwDestroyWindow(m_handle);
+    if (m_handle)
+        glfwDestroyWindow(m_handle);
 }
 
-void MorphWindow::startCompositor(bool vsync) {
-    if (m_compositor) return;
+void MorphWindow::startCompositor(bool vsync)
+{
+    if (m_compositor)
+        return;
     m_vsync = vsync;
     m_compositor = new Compositor(m_handle, m_width, m_height);
     m_compositor->setVSync(vsync);
     m_compositor->start();
 }
 
-void MorphWindow::stopCompositor() {
-    if (m_compositor) {
+void MorphWindow::stopCompositor()
+{
+    if (m_compositor)
+    {
         m_compositor->stop();
         delete m_compositor;
         m_compositor = nullptr;
     }
 }
 
-void MorphWindow::commitFrame() {
-    if (!m_root) return;
+void MorphWindow::commitFrame()
+{
+    if (!m_root)
+        return;
 
     // Phase 1-2: Layout + paint (GL context is already current on main thread)
     m_renderer.ensureReady();
@@ -162,7 +248,7 @@ void MorphWindow::commitFrame() {
 
     // Phase 3: Flatten into render frame (no GL needed)
     int backIdx = g_backIndex.load();
-    RenderFrame& frame = g_backFrames[backIdx];
+    RenderFrame &frame = g_backFrames[backIdx];
     frame.nodes.clear();
     frame.drawOps.clear();
     frame.animations.clear();
@@ -179,62 +265,89 @@ void MorphWindow::commitFrame() {
     g_framePending.store(true, std::memory_order_release);
 }
 
-void MorphWindow::drawOpsForNode(GLRenderer& r, const RenderFrame* frame, int nodeIdx,
-                                 float ox, float oy) {
-    const auto& node = frame->nodes[nodeIdx];
-    for (int i = node.dlOffset; i < node.dlOffset + node.dlCount; i++) {
-        const auto& op = frame->drawOps[i];
+void MorphWindow::drawOpsForNode(GLRenderer &r, const RenderFrame *frame, int nodeIdx,
+                                 float ox, float oy)
+{
+    const auto &node = frame->nodes[nodeIdx];
+    for (int i = node.dlOffset; i < node.dlOffset + node.dlCount; i++)
+    {
+        const auto &op = frame->drawOps[i];
         float px = op.x + ox;
         float py = op.y + oy;
-        switch (op.type) {
-            case DrawOp::Rect:
-                r.drawRect(px, py, op.w, op.h, (float*)&op.r);
-                break;
-            case DrawOp::RoundedRect:
-                r.drawRoundedRect(px, py, op.w, op.h, op.data[0], (float*)&op.r);
-                break;
-            case DrawOp::BorderedRect:
-                r.drawBorderedRect(px, py, op.w, op.h, (float*)&op.r, op.data[1], (float*)&op.br);
-                break;
-            case DrawOp::BorderedRoundedRect:
-                r.drawBorderedRoundedRect(px, py, op.w, op.h, op.data[0], (float*)&op.r,
-                                          op.data[1], (float*)&op.br);
-                break;
-            case DrawOp::BorderRing:
-                r.drawBorderRing(px, py, op.w, op.h, op.data[0], op.data[1], (float*)&op.br);
-                break;
-            case DrawOp::BeginClip: r.beginClip(px, py, op.w, op.h); break;
-            case DrawOp::EndClip: r.endClip(); break;
-            case DrawOp::BeginRoundedClip: r.beginRoundedClip(px, py, op.w, op.h, op.data[0]); break;
-            case DrawOp::EndRoundedClip: r.endRoundedClip(); break;
-            case DrawOp::PushScroll: r.pushScrollOffset(0, op.r); break;
-            case DrawOp::PopScroll: r.popScrollOffset(0, op.r); break;
-            case DrawOp::Scrollbar: break; // handled in renderNode
-            case DrawOp::TextureQuad: r.drawTexture(op.texId, px, py, op.w, op.h); break;
-            case DrawOp::TextureBordered: r.drawTexture(op.texId, px, py, op.w, op.h); break;
+        switch (op.type)
+        {
+        case DrawOp::Rect:
+            r.drawRect(px, py, op.w, op.h, (float *)&op.r);
+            break;
+        case DrawOp::RoundedRect:
+            r.drawRoundedRect(px, py, op.w, op.h, op.data[0], (float *)&op.r);
+            break;
+        case DrawOp::BorderedRect:
+            r.drawBorderedRect(px, py, op.w, op.h, (float *)&op.r, op.data[1], (float *)&op.br);
+            break;
+        case DrawOp::BorderedRoundedRect:
+            r.drawBorderedRoundedRect(px, py, op.w, op.h, op.data[0], (float *)&op.r,
+                                      op.data[1], (float *)&op.br);
+            break;
+        case DrawOp::BorderRing:
+            r.drawBorderRing(px, py, op.w, op.h, op.data[0], op.data[1], (float *)&op.br);
+            break;
+        case DrawOp::BeginClip:
+            r.beginClip(px, py, op.w, op.h);
+            break;
+        case DrawOp::EndClip:
+            r.endClip();
+            break;
+        case DrawOp::BeginRoundedClip:
+            r.beginRoundedClip(px, py, op.w, op.h, op.data[0]);
+            break;
+        case DrawOp::EndRoundedClip:
+            r.endRoundedClip();
+            break;
+        case DrawOp::PushScroll:
+            r.pushScrollOffset(0, op.r);
+            break;
+        case DrawOp::PopScroll:
+            r.popScrollOffset(0, op.r);
+            break;
+        case DrawOp::Scrollbar:
+            break; // handled in renderNode
+        case DrawOp::TextureQuad:
+            r.drawTexture(op.texId, px, py, op.w, op.h);
+            break;
+        case DrawOp::TextureBordered:
+            r.drawTexture(op.texId, px, py, op.w, op.h);
+            break;
         }
     }
 }
 
-void MorphWindow::drawScrollbar(GLRenderer& r, const FlatRenderNode& node,
-                                float sx, float sy, float sw, float sh) {
+void MorphWindow::drawScrollbar(GLRenderer &r, const FlatRenderNode &node,
+                                float sx, float sy, float sw, float sh)
+{
     float sbw = node.scrollbarWidth;
     float trackX = sx + sw - sbw;
-    r.drawRect(trackX, sy, sbw, sh, (float*)node.scrollbarTrackColor);
+    r.drawRect(trackX, sy, sbw, sh, (float *)node.scrollbarTrackColor);
     float thumbH = (sh / node.contentH) * sh;
     float thumbY = sy + (node.scrollY / (node.contentH - sh)) * (sh - thumbH);
-    if (thumbY < sy) thumbY = sy;
-    if (thumbY + thumbH > sy + sh) thumbY = sy + sh - thumbH;
+    if (thumbY < sy)
+        thumbY = sy;
+    if (thumbY + thumbH > sy + sh)
+        thumbY = sy + sh - thumbH;
     float radius = node.scrollbarBorderRadius;
-    if (radius > thumbH * 0.5f) radius = thumbH * 0.5f;
-    if (radius < 0.5f) radius = 0.5f;
-    r.drawRoundedRect(trackX, thumbY, sbw, thumbH, radius, (float*)node.scrollbarThumbColor);
+    if (radius > thumbH * 0.5f)
+        radius = thumbH * 0.5f;
+    if (radius < 0.5f)
+        radius = 0.5f;
+    r.drawRoundedRect(trackX, thumbY, sbw, thumbH, radius, (float *)node.scrollbarThumbColor);
 }
 
-void MorphWindow::renderNode(const RenderFrame* frame, int nodeIdx) {
-    const auto& node = frame->nodes[nodeIdx];
+void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx)
+{
+    const auto &node = frame->nodes[nodeIdx];
 
-    auto sc = [&](float v) { return node.hasLayoutTransition ? v : std::round(v); };
+    auto sc = [&](float v)
+    { return node.hasLayoutTransition ? v : std::round(v); };
     float sx = sc(node.x + node.animOffsetX);
     float sy = sc(node.y + node.animOffsetY);
     float sw = sc(node.w);
@@ -248,61 +361,81 @@ void MorphWindow::renderNode(const RenderFrame* frame, int nodeIdx) {
     drawOpsForNode(m_renderer, frame, nodeIdx, node.animOffsetX, node.animOffsetY);
 
     // Text rendering
-    for (int i = node.textOpOffset; i < node.textOpOffset + node.textOpCount; i++) {
-        if (i >= (int)frame->textOps.size()) break;
-        const auto& to = frame->textOps[i];
+    for (int i = node.textOpOffset; i < node.textOpOffset + node.textOpCount; i++)
+    {
+        if (i >= (int)frame->textOps.size())
+            break;
+        const auto &to = frame->textOps[i];
         float tx = to.x + node.animOffsetX;
         float ty = to.y + node.animOffsetY;
-        m_renderer.drawText(to.text, tx, ty, const_cast<float*>(to.color),
-                           (TextAlign)to.align, to.fontSize,
-                           to.fontWeight ? "bold" : "normal");
+        m_renderer.drawText(to.text, tx, ty, const_cast<float *>(to.color),
+                            (TextAlign)to.align, to.fontSize,
+                            to.fontWeight ? "bold" : "normal");
     }
 
     // 2. Clip setup
-    if (overflowClipped || radiusClip) {
-        if (overflowClipped) m_renderer.beginClip(sx, sy, sw, sh);
-        if (radiusClip) m_renderer.beginRoundedClip(sx, sy, sw, sh, node.borderRadius);
+    if (overflowClipped || radiusClip)
+    {
+        if (overflowClipped)
+            m_renderer.beginClip(sx, sy, sw, sh);
+        if (radiusClip)
+            m_renderer.beginRoundedClip(sx, sy, sw, sh, node.borderRadius);
     }
 
     // 3. Scroll push + children
-    if (scrolling) m_renderer.pushScrollOffset(0, -node.scrollY);
-    for (int childIdx : node.children) {
-        if (scrolling) {
-            const auto& child = frame->nodes[childIdx];
+    if (scrolling)
+        m_renderer.pushScrollOffset(0, -node.scrollY);
+    for (int childIdx : node.children)
+    {
+        if (scrolling)
+        {
+            const auto &child = frame->nodes[childIdx];
             float childVisY = child.y + child.animOffsetY - node.scrollY;
-            if (childVisY + child.h > sy && childVisY < sy + sh) {
+            if (childVisY + child.h > sy && childVisY < sy + sh)
+            {
                 renderNode(frame, childIdx);
             }
-        } else {
+        }
+        else
+        {
             renderNode(frame, childIdx);
         }
     }
-    if (scrolling) m_renderer.popScrollOffset(0, -node.scrollY);
+    if (scrolling)
+        m_renderer.popScrollOffset(0, -node.scrollY);
 
     // 4. Clip teardown
-    if (overflowClipped || radiusClip) {
-        if (radiusClip) m_renderer.endRoundedClip();
-        if (overflowClipped) m_renderer.endClip();
+    if (overflowClipped || radiusClip)
+    {
+        if (radiusClip)
+            m_renderer.endRoundedClip();
+        if (overflowClipped)
+            m_renderer.endClip();
     }
 
     // 5. Scrollbar
-    if (scrolling) {
+    if (scrolling)
+    {
         drawScrollbar(m_renderer, node, sx, sy, sw, sh);
     }
 }
 
-void MorphWindow::renderFrame(std::function<void(GLRenderer&, DirtyStats&)> overlayFn) {
-    if (!m_handle) return;
+void MorphWindow::renderFrame(std::function<void(GLRenderer &, DirtyStats &)> overlayFn)
+{
+    if (!m_handle)
+        return;
 
     // Wait for compositor to finish interpolation
     // (typically already done by the time we get here, but spin if not)
-    while (!g_frameInterpolated.load(std::memory_order_acquire)) {
+    while (!g_frameInterpolated.load(std::memory_order_acquire))
+    {
         std::this_thread::yield();
     }
     g_frameInterpolated.store(false, std::memory_order_release);
 
-    auto* frame = g_frontFrame.load(std::memory_order_acquire);
-    if (!frame) return;
+    auto *frame = g_frontFrame.load(std::memory_order_acquire);
+    if (!frame)
+        return;
 
     glViewport(0, 0, m_width, m_height);
     m_renderer.setFBHeight(m_height);
@@ -315,14 +448,17 @@ void MorphWindow::renderFrame(std::function<void(GLRenderer&, DirtyStats&)> over
     m_renderer.setProjection(proj);
 
     // Render the flat node tree (compositor has already interpolated animations)
-    for (size_t i = 0; i < frame->nodes.size(); i++) {
-        if (frame->nodes[i].parentId == -1) {
+    for (size_t i = 0; i < frame->nodes.size(); i++)
+    {
+        if (frame->nodes[i].parentId == -1)
+        {
             renderNode(frame, (int)i);
         }
     }
 
     m_renderer.flush(proj);
-    if (overlayFn) {
+    if (overlayFn)
+    {
         overlayFn(m_renderer, m_dirtyStats);
         m_renderer.flush(proj);
     }
@@ -330,8 +466,10 @@ void MorphWindow::renderFrame(std::function<void(GLRenderer&, DirtyStats&)> over
 }
 
 // ── Legacy single-threaded render path ──
-void MorphWindow::render(std::function<void(GLRenderer&, DirtyStats&)> overlayFn) {
-    if (!m_handle) return;
+void MorphWindow::render(std::function<void(GLRenderer &, DirtyStats &)> overlayFn)
+{
+    if (!m_handle)
+        return;
     glfwMakeContextCurrent(m_handle);
     glViewport(0, 0, m_width, m_height);
     m_renderer.setFBHeight(m_height);
@@ -340,9 +478,10 @@ void MorphWindow::render(std::function<void(GLRenderer&, DirtyStats&)> overlayFn
 
     m_dirtyStats.reset();
 
-    if (m_root) {
+    if (m_root)
+    {
         {
-            auto& bg = m_root->style.bgColor;
+            auto &bg = m_root->style.bgColor;
             if (bg[3] > 0.0f)
                 m_renderer.setClearColor(bg[0], bg[1], bg[2], bg[3]);
             else
@@ -361,13 +500,15 @@ void MorphWindow::render(std::function<void(GLRenderer&, DirtyStats&)> overlayFn
 #else
         m_renderer.ensureReady();
         m_root->layout(0.0f, 0.0f, (float)m_width, (float)m_height, &m_renderer);
+        m_renderer.clear();
         m_renderer.setProjection(proj);
         m_root->draw(m_renderer);
 #endif
     }
 
     m_renderer.flush(proj);
-    if (overlayFn) {
+    if (overlayFn)
+    {
         overlayFn(m_renderer, m_dirtyStats);
         m_renderer.flush(proj);
     }
@@ -379,19 +520,23 @@ void MorphWindow::render(std::function<void(GLRenderer&, DirtyStats&)> overlayFn
     m_pendingRender = false;
 }
 
-static int countNodes(MorphNode* n) {
+static int countNodes(MorphNode *n)
+{
     int c = 1;
-    for (auto* child : n->children) c += countNodes(child);
+    for (auto *child : n->children)
+        c += countNodes(child);
     return c;
 }
 
-static void recordPaintTree(MorphNode* n, Renderer& r, DirtyStats& stats) {
-    if (n->isDirty(PaintDirty) || n->isDirty(ScrollDirty) || n->isDirty(StyleDirty)) {
+static void recordPaintTree(MorphNode *n, Renderer &r, DirtyStats &stats)
+{
+    if (n->isDirty(PaintDirty) || n->isDirty(ScrollDirty) || n->isDirty(StyleDirty))
+    {
         stats.paintCount++;
         n->recordDisplayList(r);
         n->clearDirty(PaintDirty);
         n->clearDirty(ScrollDirty);
     }
-    for (auto* child : n->children)
+    for (auto *child : n->children)
         recordPaintTree(child, r, stats);
 }
