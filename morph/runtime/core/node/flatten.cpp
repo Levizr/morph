@@ -118,7 +118,7 @@ int MorphNode::flatten(RenderFrame& frame, int parentId) {
 
     frame.nodes.push_back(fn);
 
-    for (auto* child : children) {
+    for (auto* child : paintOrder()) {
         int childIdx = child->flatten(frame, idx);
         frame.nodes[idx].children.push_back(childIdx);
     }

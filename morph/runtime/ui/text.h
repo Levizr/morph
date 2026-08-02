@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include <vector>
+#include <cctype>
 #include "../core/node.h"
 
 class TextNode : public MorphNode {
@@ -29,6 +30,12 @@ public:
         markDirty(PaintDirty);
     }
 
+    bool isWhitespaceOnly() const override {
+        for (size_t i = 0; i < text.size(); i++)
+            if (!std::isspace((unsigned char)text[i])) return false;
+        return true;
+    }
+
     void recordDisplayList(Renderer& r) override {
         m_displayList.clear();
         m_textOps.clear();
@@ -36,10 +43,10 @@ public:
         float py = y;
         for (auto& line : lines) {
             float lx = x;
-            if (style.textAlign == "center") {
+            if (_effTextAlign() == "center") {
                 float tw = r.measureTextWidth(line, _effFontSize(), _effFontWeight());
                 if (tw < w) lx = x + (w - tw) * 0.5f;
-            } else if (style.textAlign == "right") {
+            } else if (_effTextAlign() == "right") {
                 float tw = r.measureTextWidth(line, _effFontSize(), _effFontWeight());
                 lx = x + w - tw;
             }
@@ -74,7 +81,7 @@ public:
             r.drawText(top.text, top.x, top.y, effectiveColor, top.align,
                        top.fontSize, top.fontWeight);
         }
-        for (auto* child : children)
+        for (auto* child : paintOrder())
             child->executeDisplayList(r);
     }
 
@@ -198,10 +205,10 @@ public:
         float py = y;
         for (auto& line : lines) {
             float lx = x;
-            if (style.textAlign == "center") {
+            if (_effTextAlign() == "center") {
                 float tw = r.measureTextWidth(line, _effFontSize(), _effFontWeight());
                 if (tw < w) lx = x + (w - tw) * 0.5f;
-            } else if (style.textAlign == "right") {
+            } else if (_effTextAlign() == "right") {
                 float tw = r.measureTextWidth(line, _effFontSize(), _effFontWeight());
                 lx = x + w - tw;
             }
@@ -221,14 +228,24 @@ public:
                        _effFontSize(), _effFontWeight());
             py += lh;
         }
-        for (auto* child : children)
+        for (auto* child : paintOrder())
             child->draw(r);
     }
 
     float contentWidth(Renderer* r) override {
         if (style.explicitWidth >= 0.0f) return style.explicitWidth;
         if (r) {
-            float tw = r->measureTextWidth(text, _effFontSize(), _effFontWeight());
+            float tw = 0.0f;
+            size_t start = 0;
+            while (start <= text.size()) {
+                size_t end = text.find('\n', start);
+                if (end == std::string::npos) end = text.size();
+                float lw = r->measureTextWidth(text.substr(start, end - start),
+                                               _effFontSize(), _effFontWeight());
+                if (lw > tw) tw = lw;
+                if (end == text.size()) break;
+                start = end + 1;
+            }
             float pl = style.padding[3], pr = style.padding[1];
             return tw + pl + pr;
         }
@@ -244,5 +261,9 @@ private:
     const std::string& _effFontWeight() const {
         if (style.fontWeight != "normal" || !parent) return style.fontWeight;
         return (parent->style.fontWeight != "normal") ? parent->style.fontWeight : style.fontWeight;
+    }
+    const std::string& _effTextAlign() const {
+        if (style.textAlign != "left" || !parent) return style.textAlign;
+        return (parent->style.textAlign != "left") ? parent->style.textAlign : style.textAlign;
     }
 };

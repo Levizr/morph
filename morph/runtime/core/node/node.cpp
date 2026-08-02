@@ -4,14 +4,18 @@
 #include <cstring>
 #include <chrono>
 
+MorphNode* MorphNode::s_lastHoveredNode = nullptr;
+
 void MorphNode::markDirty(DirtyFlag f) {
     if (f == Clean) return;
     m_dirtyFlags |= f;
+    // Layout/subtree dirtiness genuinely affects ancestors (flex sizing,
+    // auto-height, margin collapse), so propagate a SubtreeDirty marker up.
+    // PaintDirty does NOT propagate: display lists are recorded in absolute
+    // coordinates and a node's own ops never depend on its descendants, so a
+    // child repaint must not force every ancestor to re-record its display list.
     if ((f == LayoutDirty || f == SubtreeDirty) && parent && !parent->isDirty(SubtreeDirty)) {
         parent->markDirty(SubtreeDirty);
-    }
-    if (f == PaintDirty && parent && !parent->isDirty(PaintDirty)) {
-        parent->markDirty(PaintDirty);
     }
 }
 
@@ -24,11 +28,7 @@ void MorphNode::layoutIfNeeded(float px, float py, float parentW, float parentH,
     if (!needsLayout && stats) stats->skippedCount++;
 
     if (needsLayout) {
-        if (stats) {
-            stats->layoutCount++;
-            if (selfDirty && !subtreeDirty)
-                stats->paintCount++;
-        }
+        if (stats) stats->layoutCount++;
         layout(px, py, parentW, parentH, r);
         clearDirty(LayoutDirty);
         clearDirty(StyleDirty);
@@ -36,9 +36,15 @@ void MorphNode::layoutIfNeeded(float px, float py, float parentW, float parentH,
     }
 
     for (auto* c : children) {
-        float cw = c->w > 0 ? c->w : (parentW - c->x + px);
+        // layout() re-applies the child's own margins to px/py, so pass the
+        // parent-assigned PRE-margin position and a margin-inclusive parent
+        // width; otherwise re-layout double-applies the margins (frame 1).
+        float cw = c->w > 0 ? (c->w + c->style.margin[3] + c->style.margin[1])
+                            : (parentW - c->x + px);
         float ch = c->h > 0 ? c->h : (parentH - c->y + py);
-        c->layoutIfNeeded(c->x, c->y, cw, ch, r, stats, force || subtreeDirty);
+        c->layoutIfNeeded(c->x - c->style.margin[3],
+                          c->y - c->style.margin[0],
+                          cw, ch, r, stats, force || subtreeDirty);
     }
     if (needsLayout) clearDirty(SubtreeDirty);
 }
@@ -80,7 +86,8 @@ float MorphNode::contentWidth(Renderer* r) {
     {
         float totalInline = 0.0f;
         for (auto* c : children) {
-            if (c->style.display == "inline" || c->type == "__text__") {
+            if (c->style.display == "inline" || c->style.display == "inline-block"
+                || c->type == "__text__") {
                 float cw = c->contentWidth(r);
                 if (cw > 0.0f)
                     totalInline += cw + c->style.margin[3] + c->style.margin[1];

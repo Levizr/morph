@@ -183,6 +183,13 @@ def _clean_margin(val):
     return float(val)
 
 
+def _clean_float(val: float | None, default: float = 0.0) -> float:
+    """Convert None back to default after JSON round-trip (inf → None → default)."""
+    if val is None:
+        return default
+    return float(val)
+
+
 def _deser_style(s: dict) -> IRStyle:
     return IRStyle(
         bg_color=tuple(s.get("bg_color", [0, 0, 0, 0])),
@@ -192,17 +199,17 @@ def _deser_style(s: dict) -> IRStyle:
         margin=tuple(_clean_margin(v) for v in s.get("margin", [0, 0, 0, 0])),
         margin_auto=tuple(s.get("margin_auto", [False, False, False, False])),
         padding=tuple(s.get("padding", [0, 0, 0, 0])),
-        border_radius=s.get("border_radius", 0.0),
-        font_size=s.get("font_size", 16.0),
+        border_radius=_clean_float(s.get("border_radius"), 0.0),
+        font_size=_clean_float(s.get("font_size"), 16.0),
         font_weight=s.get("font_weight", "normal"),
         text_align=s.get("text_align", "left"),
         max_width=s.get("max_width"),
         display=s.get("display", "block"),
         flex_dir=s.get("flex_dir", "row"),
-        flex_grow=s.get("flex_grow", 0.0),
-        flex_shrink=s.get("flex_shrink", 1.0),
+        flex_grow=_clean_float(s.get("flex_grow"), 0.0),
+        flex_shrink=_clean_float(s.get("flex_shrink"), 1.0),
         flex_basis=s.get("flex_basis", "auto"),
-        gap=s.get("gap", 0.0),
+        gap=_clean_float(s.get("gap"), 0.0),
         overflow=s.get("overflow", "visible"),
         position=s.get("position", "static"),
         left=s.get("left"),
@@ -213,20 +220,23 @@ def _deser_style(s: dict) -> IRStyle:
         align_items=s.get("align_items", "stretch"),
         flex_wrap=s.get("flex_wrap", "nowrap"),
         cursor=s.get("cursor", "default"),
-        scrollbar_width=s.get("scrollbar_width", 8.0),
+        scrollbar_width=_clean_float(s.get("scrollbar_width"), 8.0),
         scrollbar_track_color=tuple(s.get("scrollbar_track_color", [0.85, 0.85, 0.85, 0.4])),
         scrollbar_thumb_color=tuple(s.get("scrollbar_thumb_color", [0.5, 0.5, 0.5, 0.6])),
-        scrollbar_border_radius=s.get("scrollbar_border_radius", 4.0),
-        border_width=s.get("border_width", 0.0),
+        scrollbar_border_radius=_clean_float(s.get("scrollbar_border_radius"), 4.0),
+        border_width=_clean_float(s.get("border_width"), 0.0),
         border_color=tuple(s.get("border_color", [0, 0, 0, 1])),
         border_style=s.get("border_style", "none"),
         box_sizing=s.get("box_sizing", "content-box"),
+        z_index=s.get("z_index"),
     )
 
 
 def _deser_node(d: dict) -> IRNode:
     hs = d.get("hover_style")
     hover_style = _deser_style(hs) if hs and isinstance(hs, dict) else None
+    acs = d.get("active_style")
+    active_style = _deser_style(acs) if acs and isinstance(acs, dict) else None
     # Deserialize ancestor_hover_rules
     ancestor_hover_rules = []
     for rule in d.get("ancestor_hover_rules", []):
@@ -235,15 +245,27 @@ def _deser_node(d: dict) -> IRNode:
             style_data = rule.get("style", {})
             if isinstance(style_data, dict) and tag:
                 ancestor_hover_rules.append((tag, _deser_style(style_data)))
+    # Deserialize ancestor_active_rules
+    ancestor_active_rules = []
+    for rule in d.get("ancestor_active_rules", []):
+        if isinstance(rule, dict):
+            tag = rule.get("ancestor_tag", "")
+            style_data = rule.get("style", {})
+            if isinstance(style_data, dict) and tag:
+                ancestor_active_rules.append((tag, _deser_style(style_data)))
     then_nodes = [_deser_node(c) for c in d.get("then_nodes", [])]
     else_nodes = [_deser_node(c) for c in d.get("else_nodes", [])]
+    def _float(key: str, default: float = 0.0) -> float:
+        v = d.get(key, default)
+        return default if v is None else float(v)
+
     return IRNode(
         node_id=d.get("id", ""),
         node_type=d.get("type", ""),
-        x=d.get("x", 0.0),
-        y=d.get("y", 0.0),
-        w=d.get("w", 0.0),
-        h=d.get("h", 0.0),
+        x=_float("x"),
+        y=_float("y"),
+        w=_float("w"),
+        h=_float("h"),
         text_content=d.get("text", ""),
         reactive_text=d.get("reactive_text", ""),
         condition_expr=d.get("condition_expr", ""),
@@ -251,6 +273,7 @@ def _deser_node(d: dict) -> IRNode:
         else_nodes=else_nodes,
         style=_deser_style(d.get("style", {})),
         hover_style=hover_style,
+        active_style=active_style,
         children=[_deser_node(c) for c in d.get("children", [])],
         attrs=d.get("attrs", {}),
         raw_styles=d.get("raw_styles", {}),
@@ -262,6 +285,7 @@ def _deser_node(d: dict) -> IRNode:
             for e in d.get("events", [])
         ],
         ancestor_hover_rules=ancestor_hover_rules,
+        ancestor_active_rules=ancestor_active_rules,
     )
 
 

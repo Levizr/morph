@@ -25,9 +25,26 @@ _css_parser = CSSParser()
 # Latest IR windows (used by compile_logic for codegen)
 _latest_windows: list[IRWindow] | None = None
 
+# Last build error (for surfacing in the in-app DevTools)
+_last_error: str | None = None
+
 
 def get_latest_windows() -> list[IRWindow] | None:
     return _latest_windows
+
+
+def last_error() -> str | None:
+    return _last_error
+
+
+def _fmt_error(e: MorphParseError) -> str:
+    loc = ""
+    if e.file_path:
+        loc = f"{e.file_path}"
+        if e.line:
+            loc += f":{e.line}:{e.col}"
+        loc += ": "
+    return f"{loc}{e.args[0] if e.args else 'Parse error'}"
 
 
 def _fmt(secs: float) -> str:
@@ -36,20 +53,22 @@ def _fmt(secs: float) -> str:
     return f"{secs:.2f}s"
 
 
-def run(config) -> dict | None:
-    global _tw_resolver, _latest_windows
+def run(config, verbose: bool = True) -> dict | None:
+    global _tw_resolver, _latest_windows, _last_error
     if _tw_resolver is None:
         _tw_resolver = TailwindResolver(project_root=".")
 
     ts = time.time()
+    _last_error = None
 
     try:
         source = Path(config.entry).read_text(encoding="utf-8")
         source_lines = source.split("\n")
 
         t = time.time()
-        ast = MorphParser().parse(source)
-        log_dim(f"parsed  {Path(config.entry).name}  in {_fmt(time.time() - t)}")
+        ast = MorphParser().parse(source, file_path=str(config.entry))
+        if verbose:
+            log_dim(f"parsed  {Path(config.entry).name}  in {_fmt(time.time() - t)}")
 
         t = time.time()
         for err_node in collect_errors(ast):
@@ -71,11 +90,13 @@ def run(config) -> dict | None:
                         col=err_node.start_point[1] + 1,
                         source_lines=source_lines,
                     )
-        log_dim(f"validated  in {_fmt(time.time() - t)}")
+        if verbose:
+            log_dim(f"validated  in {_fmt(time.time() - t)}")
 
         t = time.time()
         walked = JSXWalker().walk(ast)
-        log_dim(f"walked  AST  in {_fmt(time.time() - t)}")
+        if verbose:
+            log_dim(f"walked  AST  in {_fmt(time.time() - t)}")
 
         t = time.time()
         css_rules: dict = {}
@@ -92,30 +113,35 @@ def run(config) -> dict | None:
                 if css_text:
                     rules = _css_parser.parse_string(css_text)
                     css_rules.update(rules)
-        log_dim(f"resolved  CSS  in {_fmt(time.time() - t)}")
+        if verbose:
+            log_dim(f"resolved  CSS  in {_fmt(time.time() - t)}")
 
         t = time.time()
         ir = IRBuilder(config).build(walked, css_rules, _tw_resolver)
-        log_dim(f"built  IR  in {_fmt(time.time() - t)}")
+        if verbose:
+            log_dim(f"built  IR  in {_fmt(time.time() - t)}")
 
         t = time.time()
         LayoutEngine().compute(ir)
-        log_dim(f"laid  out  in {_fmt(time.time() - t)}")
+        if verbose:
+            log_dim(f"laid  out  in {_fmt(time.time() - t)}")
 
         _latest_windows = ir
 
         t = time.time()
         result = _clean_inf(IRSerializer().to_dict(ir))
-        log_dim(f"serialized  in {_fmt(time.time() - t)}")
-
-        log_dim(f"total  {_fmt(time.time() - ts)}")
+        if verbose:
+            log_dim(f"serialized  in {_fmt(time.time() - t)}")
+            log_dim(f"total  {_fmt(time.time() - ts)}")
         return result
 
     except MorphParseError as e:
+        _last_error = _fmt_error(e)
         log_parse_error(e)
         return None
     except Exception as e:
-        log_error(f"{type(e).__name__}: {e}")
+        _last_error = f"{type(e).__name__}: {e}"
+        log_error(_last_error)
         return None
 
 
@@ -131,24 +157,25 @@ def get_logic_so_path() -> str | None:
     return _last_logic_so_path
 
 
-def compile_logic(windows: list[IRWindow]) -> bool:
+def compile_logic(windows: list[IRWindow], verbose: bool = True) -> bool:
     """Generate and compile the JS logic to a .so shared library."""
-    global _last_logic_hash, _last_logic_so_path
+    global _last_logic_hash, _last_logic_so_path, _last_error
     try:
         os.makedirs(LOGIC_CACHE_DIR, exist_ok=True)
 
         emitter = Emitter()
         t = time.time()
         emitter.emit_logic(windows, LOGIC_SOURCE_PATH)
-        log_dim(f"generated logic  in {_fmt(time.time() - t)}")
+        if verbose:
+            log_dim(f"generated logic  in {_fmt(time.time() - t)}")
 
         # Skip compilation if source unchanged
         with open(LOGIC_SOURCE_PATH, "rb") as f:
             cur_hash = hashlib.sha256(f.read()).hexdigest()
         if cur_hash == _last_logic_hash:
-            log_dim("logic source unchanged — skipping compilation")
+            if verbose:
+                log_dim("logic source unchanged — skipping compilation")
             return True
-        _last_logic_hash = cur_hash
 
         # Use a content-hash-based unique filename so dlopen always gets a fresh file
         so_filename = f"logic.{cur_hash[:16]}.so"
@@ -156,8 +183,10 @@ def compile_logic(windows: list[IRWindow]) -> bool:
 
         # Only compile if the target file doesn't already exist
         if os.path.exists(so_path):
+            _last_logic_hash = cur_hash
             _last_logic_so_path = so_path
-            log_dim("logic.so already compiled — reusing")
+            if verbose:
+                log_dim("logic.so already compiled — reusing")
             return True
 
         compiler = Compiler()
@@ -170,14 +199,22 @@ def compile_logic(windows: list[IRWindow]) -> bool:
             os.rename(so_tmp, so_path)
             # Clean up old .so files (keep last 3)
             _cleanup_old_sos(LOGIC_CACHE_DIR, so_filename, keep=3)
+            _last_logic_hash = cur_hash
             _last_logic_so_path = so_path
-            log_dim(f"compiled logic.so  in {_fmt(time.time() - t)}")
+            if verbose:
+                log_dim(f"compiled logic.so  in {_fmt(time.time() - t)}")
             return True
+        _last_logic_hash = None
+        _last_logic_so_path = None
+        _last_error = "Logic compilation failed"
         log_error("Logic compilation failed")
         if os.path.exists(so_tmp):
             os.remove(so_tmp)
         return False
     except Exception as e:
+        _last_logic_hash = None
+        _last_logic_so_path = None
+        _last_error = f"Logic compilation error: {e}"
         log_error(f"Logic compilation error: {e}")
         return False
 

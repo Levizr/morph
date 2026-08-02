@@ -19,3 +19,7 @@ body {
 .btn:hover {
   background-color: #4f46e5;
 }
+
+.btn:active {
+  background-color: #312e81;
+}

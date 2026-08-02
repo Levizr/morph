@@ -3,6 +3,7 @@ import os
 import platform
 import shutil
 import subprocess
+import sys
 
 from morph.utils.logger import log_info, log_error, log_success, log_warn
 
@@ -83,9 +84,24 @@ def _source_changed() -> bool:
     return cur != prev
 
 
+def _binary_valid(path: str) -> bool:
+    try:
+        if not os.path.exists(path):
+            return False
+        if os.path.getsize(path) == 0:
+            return False
+        with open(path, "rb") as f:
+            magic = f.read(4)
+        if sys.platform == "win32":
+            return magic[:2] == b"MZ"
+        return magic == b"\x7fELF" or magic[:2] == b"#!"
+    except OSError:
+        return False
+
+
 def ensure_built() -> bool:
     path = get_devrt_path()
-    binary_exists = os.path.exists(path)
+    binary_exists = _binary_valid(path)
     changed = _source_changed()
 
     if binary_exists and not changed:
@@ -95,7 +111,7 @@ def ensure_built() -> bool:
         log_info("morph_devrt source changed — rebuilding...")
 
     if not binary_exists:
-        log_info("morph_devrt not found — building from source...")
+        log_info("morph_devrt not found or corrupt — building from source...")
 
     dev_dir = _get_dev_src_dir()
     build_dir = os.path.join(dev_dir, "build")
@@ -104,8 +120,11 @@ def ensure_built() -> bool:
     # Prefer g++-14 for C++23 support
     cxx = shutil.which("g++-14") or "g++"
     r = subprocess.run(["cmake", "-S", dev_dir, "-B", build_dir,
-                        f"-DCMAKE_CXX_COMPILER={cxx}"])
+                        f"-DCMAKE_CXX_COMPILER={cxx}"],
+                       capture_output=True, text=True)
     if r.returncode != 0:
+        sys.stdout.write(r.stdout)
+        sys.stderr.write(r.stderr)
         log_error("CMake configuration failed")
         log_info("Ensure cmake is installed: sudo apt install cmake")
         return False
@@ -113,12 +132,15 @@ def ensure_built() -> bool:
     import multiprocessing
     nproc = multiprocessing.cpu_count()
     log_info("Compiling morph_devrt (this may take a minute)...")
-    r = subprocess.run(["cmake", "--build", build_dir, "--", f"-j{nproc}"])
+    r = subprocess.run(["cmake", "--build", build_dir, "--", f"-j{nproc}"],
+                       capture_output=True, text=True)
     if r.returncode != 0:
+        sys.stdout.write(r.stdout)
+        sys.stderr.write(r.stderr)
         log_error("Compilation failed — check output above for errors")
         return False
 
-    if os.path.exists(path):
+    if _binary_valid(path):
         _save_hash(_compute_source_hash())
         log_success(f"morph_devrt built at {path}")
         return True
@@ -141,4 +163,5 @@ def launch() -> subprocess.Popen:
     logic_so_path = os.path.abspath(".morph/cache/logic.so")
     env = os.environ.copy()
     env["MORPH_LOGIC_PATH"] = logic_so_path
-    return subprocess.Popen([path], stderr=subprocess.PIPE, text=True, env=env)
+    return subprocess.Popen([path], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            text=True, env=env)

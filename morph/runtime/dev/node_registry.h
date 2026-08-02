@@ -23,19 +23,4 @@ struct NodeRegistry {
     size_t size() const {
         return nodes.size();
     }
-
-    void debug_print() const {
-        fprintf(stderr, " [");
-        int count = 0;
-        for (auto& [id, _] : nodes) {
-            if (count++ > 0) fprintf(stderr, ",");
-            // Only print first 5 and last few
-            if (count <= 5 || nodes.size() - count <= 3) {
-                fprintf(stderr, "%s", id.c_str());
-            } else if (count == 6) {
-                fprintf(stderr, "...");
-            }
-        }
-        fprintf(stderr, "]");
-    }
 };

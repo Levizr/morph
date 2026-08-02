@@ -8,6 +8,7 @@
 #include "../types/js_value.h"
 #include "../render/gl_renderer.h"
 #include "render_frame.h"
+#include "../reactivity/signal.h"
 
 class Renderer;
 
@@ -72,10 +73,49 @@ struct AncestorHoverTransition {
 
 class MorphNode {
 public:
+    static MorphNode* s_lastHoveredNode;
+
     float x = 0, y = 0, w = 0, h = 0;
     MorphStyle style;
     float m_computedMargin[4] = {0}; // resolved margins after latest layout()
     MorphStyle* hoverStyle = nullptr; // allocated only when :hover rules exist
+    MorphStyle* activeStyle = nullptr; // allocated only when :active rules exist
+
+#ifdef MORPH_FEATURE_POSITION
+    // ── Positioned-element layout context ──────────────────
+    // Containing block for THIS node's own absolute positioning = padding box
+    // of the nearest positioned ancestor (window coords). Set by the parent
+    // before layout; a positioned node overwrites it with its own padding box.
+    float m_absCbX = 0, m_absCbY = 0, m_absCbW = 0, m_absCbH = 0;
+    // Viewport size (for `fixed` positioning and the initial containing block).
+    float m_winW = 0, m_winH = 0;
+    // Normal-flow position after relative offset, before any sticky clamp.
+    float m_flowX = 0, m_flowY = 0;
+
+    bool isPositioned() const { return style.position != "static"; }
+    MorphNode* nearestScrollContainer() {
+        for (MorphNode* p = parent; p; p = p->parent)
+            if (p->scrollEnabled) return p;
+        return nullptr;
+    }
+    void applySticky();
+    void updateStickySubtree();
+#endif
+
+    // ── Paint order ──────────────────────────────────────────────────
+    // Returns the parent's children in CSS stacking order. Always available
+    // (widgets call it unconditionally); with MORPH_FEATURE_ZINDEX it resolves
+    // a cached reordering, otherwise it degrades to DOM order (children).
+    const std::vector<MorphNode*>& paintOrder();
+#ifdef MORPH_FEATURE_ZINDEX
+    // ── Paint-order cache (CSS 2.1 stacking layers) ──────────────
+    // Rebuilt lazily; invalidated on child list changes and runtime z-index
+    // style changes.
+    std::vector<MorphNode*> m_paintOrder;
+    bool m_paintOrderValid = false;
+    void ensurePaintOrder();
+    void invalidatePaintOrder() { m_paintOrderValid = false; }
+#endif
 
     // Transition config (0 duration = no transition, instant snap)
     float m_transitionDuration = 0.0f;
@@ -108,7 +148,13 @@ public:
     void markDirty(DirtyFlag f);
     void clearDirty(DirtyFlag f) { m_dirtyFlags &= ~f; }
     bool isDirty(DirtyFlag f) const { return (m_dirtyFlags & f) != 0; }
-    bool isFullyClean() const { return m_dirtyFlags == Clean; }
+    bool isFullyClean() const
+    {
+        if (m_dirtyFlags != Clean) return false;
+        for (auto* c : children)
+            if (!c->isFullyClean()) return false;
+        return true;
+    }
 
     virtual void layout(float px, float py, float parentW, float parentH,
                         Renderer* r = nullptr);
@@ -184,6 +230,7 @@ public:
         return false;
     }
     virtual void onHover(bool state);
+    virtual void onActive(bool state);
 
     // ── Hover transitions ──
     HoverTransition* m_hoverTransition = nullptr;
@@ -191,21 +238,35 @@ public:
     static void interpolateStyles(MorphStyle& out, const MorphStyle& a,
                                   const MorphStyle& b, float t);
 
+    // ── Active (pressed) transitions ──
+    HoverTransition* m_activeTransition = nullptr;
+    void updateActiveTransition(float dt);
+
     // ── Ancestor-hover rules + transitions ──
     std::vector<AncestorHoverRule> m_ancestorHoverRules;
     AncestorHoverTransition* m_ancestorHoverTransition = nullptr;
     void _applyAncestorHover(bool state);
     void updateAncestorHoverTransition(float dt);
 
+    // ── Ancestor-active rules + transitions ──
+    std::vector<AncestorHoverRule> m_ancestorActiveRules;
+    AncestorHoverTransition* m_ancestorActiveTransition = nullptr;
+    void _applyAncestorActive(bool state);
+    void updateAncestorActiveTransition(float dt);
+
     void startAnimation(AnimProperty prop, float to, float duration, Easing easing = Easing::Linear);
 
     virtual float contentWidth(Renderer* r);
+    virtual bool isWhitespaceOnly() const { return false; }
     MorphNode* hitTest(float ex, float ey);
     void addChild(MorphNode* child) {
         children.push_back(child);
         child->parent = this;
         child->markDirty(LayoutDirty);
         child->markDirty(PaintDirty);
+#ifdef MORPH_FEATURE_ZINDEX
+        invalidatePaintOrder();
+#endif
     }
     void removeChild(MorphNode* child) {
         auto it = std::find(children.begin(), children.end(), child);
@@ -213,18 +274,27 @@ public:
             children.erase(it);
             child->parent = nullptr;
             markDirty(SubtreeDirty);
+#ifdef MORPH_FEATURE_ZINDEX
+            invalidatePaintOrder();
+#endif
         }
     }
     void removeAllChildren() {
         for (auto* c : children) c->parent = nullptr;
         children.clear();
         markDirty(SubtreeDirty);
+#ifdef MORPH_FEATURE_ZINDEX
+        invalidatePaintOrder();
+#endif
     }
     bool dispatchEvent(MorphEvent& e, float ex, float ey);
 
     // Animation state
     std::vector<MorphAnimation> m_animations;
     void updateAnimations(float dt);
+
+    // Associated reactive effects (cleaned up on destruction)
+    std::vector<morph::EffectNode*> m_associatedEffects;
 
     // Dirty rendering
     std::vector<struct DrawOp> m_displayList;
@@ -238,5 +308,13 @@ public:
     virtual int flatten(RenderFrame& frame, int parentId);
     virtual int flattenExtra(RenderFrame& frame, FlatRenderNode& fn);
 
-    virtual ~MorphNode() { delete hoverStyle; delete m_hoverTransition; delete m_ancestorHoverTransition; for (auto* child : children) delete child; }
+    virtual ~MorphNode() {
+        if (this == s_lastHoveredNode) s_lastHoveredNode = nullptr;
+        for (auto* ef : m_associatedEffects) ef->dead = true;
+        m_associatedEffects.clear();
+        delete hoverStyle; delete activeStyle;
+        delete m_hoverTransition; delete m_ancestorHoverTransition;
+        delete m_activeTransition; delete m_ancestorActiveTransition;
+        for (auto* child : children) delete child;
+    }
 };

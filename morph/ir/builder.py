@@ -78,7 +78,23 @@ _UA_DEFAULTS: dict[str, dict[str, str]] = {
     "img": {"display": "inline-block"},
 
     # ── Forms ───────────────────────────────────────────────
-    "button":   {"display": "inline-block"},
+    # Button defaults mirror browser UA styles (buttonface / buttonborder),
+    # so plain buttons are visible without any user CSS. `color` uses a
+    # near-black sentinel (#010101) instead of pure black so the runtime
+    # treats it as an explicit value and does NOT inherit the parent's
+    # color — matching browser behavior where button text stays dark.
+    "button": {
+        "display": "inline-block",
+        "background-color": "#efefef",
+        "color": "#010101",
+        "border-width": "1px",
+        "border-style": "solid",
+        "border-color": "#767676",
+        "border-radius": "4px",
+        "padding": "1px 6px",
+        "font-size": "13.33px",
+        "text-align": "center",
+    },
     "input":    {"display": "inline-block"},
     "select":   {"display": "inline-block"},
     "textarea": {"display": "inline-block"},
@@ -101,6 +117,18 @@ _UA_DEFAULTS: dict[str, dict[str, str]] = {
     "details":  {"display": "block"},
     "summary":  {"display": "block"},
     "dialog":   {"display": "block"},
+}
+
+# User-agent default :hover styles (lowest priority — merged FIRST, any
+# matching user `:hover` rule overrides per-property, like browsers).
+_UA_HOVER_DEFAULTS: dict[str, dict[str, str]] = {
+    "button": {"background-color": "#e6e6e6"},
+}
+
+# User-agent default :active styles (pressed state — darker face + border,
+# mirroring the browser's buttonface → buttonhighlight/buttonshadow shift).
+_UA_ACTIVE_DEFAULTS: dict[str, dict[str, str]] = {
+    "button": {"background-color": "#d4d4d4", "border-color": "#5a5a5a"},
 }
 
 # CSS property name → IRStyle field name
@@ -140,6 +168,7 @@ _CSS_TO_IR: dict[str, str] = {
     "right":                    "right",
     "top":                      "top",
     "bottom":                   "bottom",
+    "z-index":                  "z_index",
     "justify-content":          "justify_content",
     "align-items":              "align_items",
     "flex-wrap":                "flex_wrap",
@@ -499,43 +528,51 @@ class IRBuilder:
         merged.update(_UA_DEFAULTS.get(tag, {}))
 
         # Collect matching CSS rules with specificity, then apply in order
-        matched = []               # non-:hover rules
+        matched = []               # non-:hover/:active rules
         hover_matched = []         # :hover pseudo-class on THIS element
         ancestor_hover_matched = []  # :hover on an ANCESTOR compound
+        active_matched = []        # :active pseudo-class on THIS element
+        ancestor_active_matched = []  # :active on an ANCESTOR compound
         for rule_key, rule_props in css_rules.items():
-            has_hover = ":hover" in rule_key
-            if not has_hover:
+            has_state = ":hover" in rule_key or ":active" in rule_key
+            if not has_state:
                 if not matches_selector(rule_key, tag, class_names, node_id_attr, ancestry):
                     continue
                 spec = calculate_specificity(rule_key)
                 matched.append((spec, rule_props))
             else:
-                # Strip :hover and check if the node matches the structural part
-                match_key = rule_key.replace(":hover", "").strip()
+                # Strip pseudo-classes and check if the node matches the structural part
+                match_key = rule_key.replace(":hover", "").replace(":active", "").strip()
                 if not matches_selector(match_key, tag, class_names, node_id_attr, ancestry):
                     continue
                 spec = calculate_specificity(rule_key)
-                # Parse selector to determine if :hover is on this element or an ancestor
+                # Parse selector to determine whether each pseudo-class sits
+                # on this element or on an ancestor compound
                 selectors = parse_selector(rule_key)
-                is_self_hover = False
-                is_ancestor_hover = False
-                ancestor_tag = None
-                for sel in selectors:
-                    for i, comp in enumerate(sel.compounds):
-                        if comp.pseudo == "hover":
-                            if i == len(sel.compounds) - 1:
-                                is_self_hover = True
-                            else:
-                                ancestor_tag = comp.tag
-                                is_ancestor_hover = True
-                            break
-                if is_ancestor_hover and ancestor_tag:
-                    ancestor_hover_matched.append((spec, rule_props, ancestor_tag))
-                elif is_self_hover:
-                    hover_matched.append((spec, rule_props))
+                for pseudo in ("hover", "active"):
+                    is_self_state = False
+                    is_ancestor_state = False
+                    ancestor_tag = None
+                    for sel in selectors:
+                        for i, comp in enumerate(sel.compounds):
+                            if comp.pseudo and pseudo in comp.pseudo.split(":"):
+                                if i == len(sel.compounds) - 1:
+                                    is_self_state = True
+                                else:
+                                    ancestor_tag = comp.tag
+                                    is_ancestor_state = True
+                                break
+                    if is_ancestor_state and ancestor_tag:
+                        (ancestor_hover_matched if pseudo == "hover"
+                         else ancestor_active_matched).append((spec, rule_props, ancestor_tag))
+                    elif is_self_state:
+                        (hover_matched if pseudo == "hover"
+                         else active_matched).append((spec, rule_props))
         matched.sort(key=lambda x: x[0])   # lowest specificity first
         hover_matched.sort(key=lambda x: x[0])
         ancestor_hover_matched.sort(key=lambda x: x[0])
+        active_matched.sort(key=lambda x: x[0])
+        ancestor_active_matched.sort(key=lambda x: x[0])
         for _, rule_props in matched:
             merged.update(rule_props)
 
@@ -553,12 +590,13 @@ class IRBuilder:
         # ── Convert merged CSS → IRStyle fields ──────────────
         ir_kw, raw_styles = self._css_to_ir_kw(merged)
 
-        # Build hover style from matching :hover CSS rules
+        # Build hover style: UA defaults first, then matching :hover CSS rules
+        # (lowest priority — user rules override per-property)
+        hover_merged = dict(_UA_HOVER_DEFAULTS.get(tag, {}))
+        for _, rule_props in hover_matched:
+            hover_merged.update(rule_props)
         hover_style = None
-        if hover_matched:
-            hover_merged = {}
-            for _, rule_props in hover_matched:
-                hover_merged.update(rule_props)
+        if hover_merged:
             hover_ir_kw, _ = self._css_to_ir_kw(hover_merged, collect_raw=False)
             try:
                 hover_style = IRStyle(**hover_ir_kw)
@@ -580,6 +618,37 @@ class IRBuilder:
                 try:
                     rule_style = IRStyle(**rule_ir_kw)
                     ancestor_hover_rules.append((ancestor_tag, rule_style))
+                except TypeError:
+                    pass
+
+        # Build active style: UA defaults first, then matching :active CSS rules
+        # (lowest priority — user rules override per-property)
+        active_merged = dict(_UA_ACTIVE_DEFAULTS.get(tag, {}))
+        for _, rule_props in active_matched:
+            active_merged.update(rule_props)
+        active_style = None
+        if active_merged:
+            active_ir_kw, _ = self._css_to_ir_kw(active_merged, collect_raw=False)
+            try:
+                active_style = IRStyle(**active_ir_kw)
+            except TypeError:
+                pass
+
+        # Build ancestor active rules (pairs of ancestor_tag → resolved IRStyle)
+        ancestor_active_rules = []
+        if ancestor_active_matched:
+            by_tag: dict[str, dict] = {}
+            for _, rule_props, ancestor_tag in ancestor_active_matched:
+                existing = by_tag.get(ancestor_tag)
+                if existing is None:
+                    by_tag[ancestor_tag] = dict(rule_props)
+                else:
+                    existing.update(rule_props)
+            for ancestor_tag, props in by_tag.items():
+                rule_ir_kw, _ = self._css_to_ir_kw(props, collect_raw=False)
+                try:
+                    rule_style = IRStyle(**rule_ir_kw)
+                    ancestor_active_rules.append((ancestor_tag, rule_style))
                 except TypeError:
                     pass
 
@@ -681,6 +750,7 @@ class IRBuilder:
             node_type=tag,
             style=node_style,
             hover_style=hover_style,
+            active_style=active_style,
             children=children_nodes,
             events=events,
             attrs=attrs,
@@ -688,6 +758,7 @@ class IRBuilder:
             transition_duration=trans_dur,
             transition_easing=trans_easing,
             ancestor_hover_rules=ancestor_hover_rules,
+            ancestor_active_rules=ancestor_active_rules,
             reactive_class=reactive_class,
             reactive_style=reactive_style,
             class_conditional_effects=class_conditional_effects,
@@ -1004,6 +1075,14 @@ def _convert_value(field: str, raw: str | float | int) -> float | str | tuple | 
     if field in ("left", "right", "top", "bottom"):
         try:
             return to_px(raw)
+        except (ValueError, TypeError):
+            return None
+
+    if field == "z_index":
+        if raw.strip().lower() == "auto":
+            return None
+        try:
+            return int(float(raw))
         except (ValueError, TypeError):
             return None
 

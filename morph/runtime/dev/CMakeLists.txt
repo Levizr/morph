@@ -33,6 +33,7 @@ set(RUNTIME_SOURCES
     ${RUNTIME_DIR}/core/node/style.cpp
     ${RUNTIME_DIR}/core/node/flatten.cpp
     ${RUNTIME_DIR}/core/node/events.cpp
+    ${RUNTIME_DIR}/core/node/paint_order.cpp
     ${RUNTIME_DIR}/core/window.cpp
     ${RUNTIME_DIR}/core/compositor.cpp
     ${RUNTIME_DIR}/render/gl_renderer.cpp
@@ -58,6 +59,7 @@ target_compile_definitions(morph_devrt PRIVATE
     MORPH_FEATURE_TEXT
     MORPH_FEATURE_BOLD
     MORPH_FEATURE_POSITION
+    MORPH_FEATURE_ZINDEX
     MORPH_FEATURE_FLEX
     MORPH_FEATURE_CURSOR
     MORPH_FEATURE_BORDER

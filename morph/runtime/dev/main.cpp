@@ -6,6 +6,7 @@
 #include <chrono>
 #include <dlfcn.h>
 #include <string>
+#include <functional>
 
 #include "vendor/glad/glad.h"
 #include <GLFW/glfw3.h>
@@ -22,6 +23,7 @@
 #include "inspector.h"
 #include "signal_store.h"
 #include "node_registry.h"
+#include "dev_log.h"
 
 static volatile bool g_running = true;
 static void signalHandler(int) { g_running = false; }
@@ -57,22 +59,43 @@ static void open_logic(const std::string& path, NodeRegistry& registry, SignalSt
     g_logic_path = path;
     void* handle = dlopen(path.c_str(), RTLD_NOW);
     if (!handle) {
-        fprintf(stderr, "[devrt] failed to load logic.so: %s\n", dlerror());
+        fprintf(stderr, "[morph] failed to load logic.so: %s\n", dlerror());
+        devLogAdd(LOG_ERROR, "logic.so failed to load: " + std::string(dlerror()));
         return;
     }
     void (*init)(NodeRegistry&, SignalStore&) =
         (void (*)(NodeRegistry&, SignalStore&))dlsym(handle, "morph_logic_init");
     if (!init) {
-        fprintf(stderr, "[devrt] morph_logic_init not found in logic.so: %s\n", dlerror());
+        fprintf(stderr, "[morph] morph_logic_init not found in logic.so: %s\n", dlerror());
+        devLogAdd(LOG_ERROR, "logic.so missing morph_logic_init: " + std::string(dlerror()));
         dlclose(handle);
         return;
     }
     init(registry, store);
     g_logic_handle = handle;
-    fprintf(stderr, "[devrt] logic.so loaded & initialized (registry has %zu nodes)", registry.size());
-    // Debug: print first few node IDs
-    registry.debug_print();
-    fprintf(stderr, "\n");
+    devLogAdd(LOG_OK, "logic.so loaded & initialized (registry has " +
+              std::to_string(registry.size()) + " nodes)");
+}
+
+// Re-initialize logic in place when the same .so is already loaded.
+// Avoids dlclose/dlopen so file-scope state (signal statics, effect
+// signatures) survives hot reloads of styles/tree without re-running effects.
+static void reinit_logic(NodeRegistry& registry, SignalStore& store) {
+    if (!g_logic_handle) {
+        open_logic(g_logic_path, registry, store);
+        return;
+    }
+    void (*cleanup)() = (void (*)())dlsym(g_logic_handle, "morph_logic_cleanup");
+    if (cleanup) cleanup();
+    void (*rewire)(NodeRegistry&, SignalStore&) =
+        (void (*)(NodeRegistry&, SignalStore&))dlsym(g_logic_handle, "morph_logic_rewire");
+    if (rewire) {
+        rewire(registry, store);
+        return;
+    }
+    void (*init)(NodeRegistry&, SignalStore&) =
+        (void (*)(NodeRegistry&, SignalStore&))dlsym(g_logic_handle, "morph_logic_init");
+    if (init) init(registry, store);
 }
 
 static bool reload_logic(const std::string& path, NodeRegistry& registry, SignalStore& store) {
@@ -81,56 +104,158 @@ static bool reload_logic(const std::string& path, NodeRegistry& registry, Signal
     return g_logic_handle != nullptr;
 }
 
-// ── DevTools (global for GLFW key callback) ────────────────
+// ── DevTools (global for GLFW callbacks) ────────────────
 static DevTools* g_devtools = nullptr;
 
-static void keyCb(GLFWwindow* win, int key, int, int action, int) {
-    (void)win;
-    if (!g_devtools) return;
-    if (key == GLFW_KEY_F12 && action == GLFW_PRESS) {
-        g_devtools->toggle();
+static void collectRepaint(MorphNode* n) {
+    if (g_devtools) g_devtools->noteRepaint(n);
+}
+
+static void keyCb(GLFWwindow* win, int key, int scancode, int action, int mods) {
+    if (g_devtools && action == GLFW_PRESS) {
+        if (key == GLFW_KEY_F12) { g_devtools->toggle(); return; }
+        if (key == GLFW_KEY_F2 && g_devtools->open) { g_devtools->toggleInspect(); return; }
+        if (key == GLFW_KEY_ESCAPE && (g_devtools->open || g_devtools->inspecting)) {
+            g_devtools->cancelInspect();
+            return;
+        }
     }
-    if (key == GLFW_KEY_F2 && action == GLFW_PRESS && g_devtools->open) {
-        g_devtools->toggleInspect();
+    MorphWindow::KeyCb(win, key, scancode, action, mods);
+}
+
+static void mouseCb(GLFWwindow* win, int btn, int act, int mods) {
+    if (btn != GLFW_MOUSE_BUTTON_1 || !g_devtools) {
+        MorphWindow::mouseButtonCb(win, btn, act, mods);
+        return;
     }
+    double mx, my;
+    glfwGetCursorPos(win, &mx, &my);
+    int w = 0, h = 0;
+    glfwGetWindowSize(win, &w, &h);
+    if (g_devtools->open && mx >= w - DevTools::kPanelW) {
+        if (act == GLFW_PRESS)
+            g_devtools->handleClick((float)mx, (float)my, (float)w, (float)h);
+        else if (act == GLFW_RELEASE)
+            g_devtools->endLogDrag();
+        return; // consumed by the panel
+    }
+    if (g_devtools->inspecting && act == GLFW_PRESS) {
+        g_devtools->selectHovered();
+        return; // consumed by inspect mode
+    }
+    MorphWindow::mouseButtonCb(win, btn, act, mods);
+}
+
+static void scrollCb(GLFWwindow* win, double dx, double dy) {
+    if (g_devtools && g_devtools->open) {
+        double mx;
+        glfwGetCursorPos(win, &mx, nullptr);
+        int w = 0;
+        glfwGetWindowSize(win, &w, nullptr);
+        if (mx >= w - DevTools::kPanelW) {
+            g_devtools->scroll((float)dy);
+            return;
+        }
+    }
+    MorphWindow::scrollCb(win, dx, dy);
+}
+
+static void cursorCb(GLFWwindow* win, double mx, double my) {
+    if (g_devtools && g_devtools->open) {
+        int w = 0, h = 0;
+        glfwGetWindowSize(win, &w, &h);
+        if (mx >= w - DevTools::kPanelW)
+            g_devtools->handleCursorPos((float)mx, (float)my, (float)w, (float)h);
+    }
+    MorphWindow::cursorPosCb(win, mx, my);
+}
+
+// Handle non-IR control messages (errors + logs) from the Python client.
+static bool handleControlMessage(const std::string& msg, bool haveDevtools) {
+    if (msg.find("__error__") == std::string::npos &&
+        msg.find("__log__") == std::string::npos) {
+        return false;
+    }
+    JsonValue in;
+    try {
+        in = JsonValue::parse(msg);
+    } catch (std::exception&) {
+        return false;
+    }
+    if (in.type() != JsonType::Object) return false;
+    if (in.has("__error__")) {
+        std::string err = in["__error__"].asString();
+        fprintf(stderr, "[morph] error from client: %s\n", err.c_str());
+        devLogAdd(LOG_ERROR, err);
+        if (haveDevtools) g_devtools->showToast(LOG_ERROR, err);
+        return true;
+    }
+    if (in.has("__log__")) {
+        auto& l = in["__log__"];
+        std::string lvl = l["level"].asString();
+        std::string txt = l["msg"].asString();
+        int level = LOG_INFO;
+        if (lvl == "error") level = LOG_ERROR;
+        else if (lvl == "warn") level = LOG_WARN;
+        else if (lvl == "ok") level = LOG_OK;
+        devLogAdd(level, txt);
+        if (haveDevtools && (level == LOG_ERROR || level == LOG_WARN))
+            g_devtools->showToast(level, txt);
+        // Only echo warnings/errors to the terminal; info/ok updates (file
+        // changed, hot reloaded) are shown as a single-line spinner on the
+        // Python side and kept in the DevTools log panel.
+        if (level == LOG_ERROR || level == LOG_WARN)
+            fprintf(stderr, "[morph] log[%s]: %s\n", devLogLevelName(level), txt.c_str());
+        return true;
+    }
+    return false;
 }
 
 int main() {
     signal(SIGINT, signalHandler);
     signal(SIGTERM, signalHandler);
 
-    fprintf(stderr, "[devrt] starting...\n");
+    // Unbuffered stdio so piped logs appear in real time, in order
+    setvbuf(stdout, nullptr, _IONBF, 0);
+    setvbuf(stderr, nullptr, _IONBF, 0);
 
     // ── Socket server ──────────────────────────────────────
     DevSocket sock;
     if (!sock.listen("/tmp/morph_dev.sock")) {
-        fprintf(stderr, "[devrt] failed to create socket\n");
+        fprintf(stderr, "[morph] dev server: failed to create socket\n");
         return 1;
     }
 
     // ── Wait for first client connection ───────────────────
-    fprintf(stderr, "[devrt] waiting for client...\n");
     while (g_running && !sock.acceptClient()) {
         usleep(100000); // 100ms — no GLFW yet
     }
     if (!g_running) return 0;
     if (!sock.isConnected()) {
-        fprintf(stderr, "[devrt] no client connected\n");
+        fprintf(stderr, "[morph] dev server: no client connected\n");
         return 1;
     }
 
-    // ── Read first IR ──────────────────────────────────────
+    // ── Read first IR (skipping any control/error messages) ──
     std::string json;
-    fprintf(stderr, "[devrt] reading initial IR...\n");
-    while (g_running && !sock.readMessage(json, 2000)) {
-        if (!sock.isConnected()) {
-            fprintf(stderr, "[devrt] client disconnected during read\n");
-            return 1;
+    while (g_running) {
+        if (!sock.readMessage(json, 2000)) {
+            if (!sock.isConnected()) {
+                fprintf(stderr, "[morph] dev server: client disconnected during read\n");
+                return 1;
+            }
+            continue;
         }
+        if (json.empty()) continue;
+        if (handleControlMessage(json, false)) {
+            json.clear();
+            continue;
+        }
+        break;
     }
     if (!g_running) return 0;
     if (json.empty()) {
-        fprintf(stderr, "[devrt] empty IR, exiting\n");
+        fprintf(stderr, "[morph] dev server: empty IR, exiting\n");
         return 1;
     }
 
@@ -139,7 +264,7 @@ int main() {
     try {
         root = JsonValue::parse(json);
     } catch (std::exception& e) {
-        fprintf(stderr, "[devrt] JSON parse error: %s\n", e.what());
+        fprintf(stderr, "[morph] dev server: JSON parse error: %s\n", e.what());
         return 1;
     }
 
@@ -149,7 +274,7 @@ int main() {
     DevWindowConfig config;
     MorphNode* rootNode = nullptr;
     if (!parseIR(root, rootNode, config, registry, stateVars)) {
-        fprintf(stderr, "[devrt] failed to parse IR\n");
+        fprintf(stderr, "[morph] dev server: failed to parse IR\n");
         return 1;
     }
 
@@ -167,8 +292,6 @@ int main() {
             signalStore.get_or_create<bool>(sv.getter, raw == "true");
         else if (sv.type == "std::string")
             signalStore.get_or_create<std::string>(sv.getter, raw);
-        fprintf(stderr, "[devrt] signal \"%s\" (%s) = %s\n",
-                sv.getter.c_str(), sv.type.c_str(), sv.init.c_str());
     }
 
     // Load logic.so — prefer path from IR, fallback to env var
@@ -183,28 +306,25 @@ int main() {
     if (access(logicSoPath.c_str(), F_OK) == 0) {
         open_logic(logicSoPath, registry, signalStore);
     } else {
-        fprintf(stderr, "[devrt] no logic.so found at %s (interactivity disabled)\n",
+        fprintf(stderr, "[morph] no logic.so found at %s (interactivity disabled)\n",
                 logicSoPath.c_str());
     }
 
-    fprintf(stderr, "[devrt] window: %s %dx%d\n",
-            config.title.c_str(), config.width, config.height);
-
     // ── Init GLFW and create window ────────────────────────
     glfwSetErrorCallback([](int code, const char* msg) {
-        fprintf(stderr, "[GLFW] error %d: %s\n", code, msg);
+        fprintf(stderr, "[morph] GLFW error %d: %s\n", code, msg);
     });
 
     if (!glfwInit()) {
-        fprintf(stderr, "[devrt] glfwInit() failed\n");
+        fprintf(stderr, "[morph] glfwInit() failed\n");
         return 1;
     }
 
     {
     MorphWindow window(config.title, config.width, config.height, config.visible);
     if (!window.handle()) {
-        fprintf(stderr, "[devrt] glfwCreateWindow failed — cannot create OpenGL window\n");
-        fprintf(stderr, "[devrt] On Wayland, try: GDK_BACKEND=x11 GDK_DEBUG=x11-override\n");
+        fprintf(stderr, "[morph] glfwCreateWindow failed — cannot create OpenGL window\n");
+        fprintf(stderr, "[morph] On Wayland, try: GDK_BACKEND=x11 GDK_DEBUG=x11-override\n");
         glfwTerminate();
         return 1;
     }
@@ -213,15 +333,16 @@ int main() {
     // ── DevTools ─────────────────────────────────────────────
     DevTools devtools;
     g_devtools = &devtools;
+    g_repaintHook = collectRepaint;
     glfwSetKeyCallback(window.handle(), keyCb);
+    glfwSetMouseButtonCallback(window.handle(), mouseCb);
+    glfwSetScrollCallback(window.handle(), scrollCb);
+    glfwSetCursorPosCallback(window.handle(), cursorCb);
 
     // ── Start compositor thread ─────────────────────────────
     window.startCompositor(true); // vsync on
-    fprintf(stderr, "[devrt] compositor thread started\n");
 
     // ── Main loop ───────────────────────────────────────────
-    fprintf(stderr, "[devrt] entering render loop\n");
-
     auto lastFrameTime = std::chrono::steady_clock::now();
 
     while (g_running && !window.shouldClose()) {
@@ -233,9 +354,8 @@ int main() {
         while (sock.readMessage(msg, 0)) {
             if (msg.empty()) continue;
 
-            // Parse error messages from Python
-            if (msg.find("__error__") != std::string::npos) {
-                fprintf(stderr, "[devrt] error from client: %s\n", msg.c_str());
+            // Control messages (errors + logs) from Python
+            if (handleControlMessage(msg, true)) {
                 continue;
             }
 
@@ -244,7 +364,7 @@ int main() {
             try {
                 newRoot = JsonValue::parse(msg);
             } catch (std::exception&) {
-                fprintf(stderr, "[devrt] bad JSON from client\n");
+                fprintf(stderr, "[morph] dev server: bad JSON from client\n");
                 continue;
             }
 
@@ -261,10 +381,11 @@ int main() {
                 rootNode = newNode;
                 registry = std::move(newRegistry);
                 devtools.hoveredNode = nullptr; // tree changed, clear stale ref
+                devtools.selectedNode = nullptr; // tree changed, clear stale ref
+                devtools.clearRepaintTimers(); // nodes will be deleted
                 MorphWindow::clearHoverState(); // clear stale hover pointer
+                MorphWindow::clearActiveState(); // clear stale :active pointer
 
-                // Reload logic .so with new tree but preserved signals
-                // (signals in signalStore are NOT cleared — state survives)
                 // Add any new signals from updated state vars
                 for (auto& sv : newStateVars) {
                     if (!signalStore.has(sv.getter)) {
@@ -281,16 +402,23 @@ int main() {
                             signalStore.get_or_create<std::string>(sv.getter, raw);
                     }
                 }
-                // Use .so path from IR if provided (ensures unique file = fresh dlopen)
+                // If the logic .so is unchanged, re-init in place so effects
+                // aren't torn down/re-run (no stale "startup" output per edit).
+                // Otherwise do a full close + reopen.
                 std::string reloadPath = logicSoPath;
                 if (newRoot.has("logic_so_path")) {
                     reloadPath = newRoot["logic_so_path"].asString();
                 }
-                reload_logic(reloadPath, registry, signalStore);
+                if (g_logic_handle && !reloadPath.empty() && reloadPath == g_logic_path) {
+                    reinit_logic(registry, signalStore);
+                    devLogAdd(LOG_INFO, "logic re-initialized in place");
+                } else {
+                    reload_logic(reloadPath, registry, signalStore);
+                    devLogAdd(LOG_OK, "hot reloaded logic (" + reloadPath + ")");
+                }
                 window.notifyPendingRender();
-                fprintf(stderr, "[devrt] hot reloaded (so=%s)\n", reloadPath.c_str());
             } else {
-                fprintf(stderr, "[devrt] failed to parse IR from client\n");
+                fprintf(stderr, "[morph] dev server: failed to parse IR from client\n");
             }
         }
 
@@ -321,11 +449,18 @@ int main() {
                 devtools.mouseY = (float)my;
                 devtools.updateHover(rootNode);
             }
-            window.commitFrame();
-            window.renderFrame([&](GLRenderer& r, DirtyStats&) {
-                devtools.render(r, (float)window.width(), (float)window.height(),
-                                window.dirtyStats());
-            });
+            // Skip idle frames entirely (no layout, paint, flatten, or GL
+            // work) unless something changed or the devtools panel is open.
+            // The devtools overlay is drawn outside the app tree, so it can't
+            // rely on dirty flags to trigger repaints.
+            bool debugRender = devtools.open || window.hasPendingRender();
+            if (debugRender) {
+                window.commitFrame();
+                window.renderFrame([&](GLRenderer& r, DirtyStats&) {
+                    devtools.render(r, (float)window.width(), (float)window.height(),
+                                    window.dirtyStats());
+                });
+            }
         } else {
             // Hidden window — no point spinning, wait for events
             glfwWaitEvents();
@@ -340,7 +475,6 @@ int main() {
 
     close_logic();
     glfwTerminate();
-    fprintf(stderr, "[devrt] done\n");
     return 0;
 }
 

@@ -27,6 +27,91 @@ static float vBonus(const MorphStyle& s) {
 #endif
 }
 
+#ifdef MORPH_FEATURE_POSITION
+// Shift a sticky node and every descendant so children stay glued to it.
+static void shiftStickySubtree(MorphNode* n, float dx, float dy) {
+    n->x += dx;
+    n->y += dy;
+    for (auto* c : n->children) shiftStickySubtree(c, dx, dy);
+}
+
+static void markSubtreePaintDirty(MorphNode* n) {
+    n->markDirty(PaintDirty);
+    for (auto* c : n->children) markSubtreePaintDirty(c);
+}
+
+// `position: sticky` — keeps its normal-flow box (m_flowX/m_flowY) but gets
+// clamped against the nearest scroll container's scrollport, between the
+// top/bottom (and left/right) offsets and its containing block.
+void MorphNode::applySticky() {
+    MorphNode* sc = nearestScrollContainer();
+    if (!sc) return;
+
+    float newX = m_flowX;
+    float newY = m_flowY;
+
+#ifdef MORPH_FEATURE_BORDER
+    float bw = sc->style.borderWidth;
+#else
+    float bw = 0.0f;
+#endif
+
+    if (style.left > -1e8f || style.right > -1e8f) {
+        float spLeft = sc->x + bw + sc->style.padding[3];
+        float spW = sc->w - 2.0f * bw - sc->style.padding[3] - sc->style.padding[1];
+        if (spW < 0.0f) spW = 0.0f;
+        if (style.left > -1e8f) {
+            float minX = spLeft + style.left;
+            if (newX < minX) newX = minX;
+        }
+        if (style.right > -1e8f) {
+            float maxX = spLeft + spW - style.right - w;
+            if (newX > maxX) newX = maxX;
+        }
+        if (parent) {
+            float cbLeft = parent->x + bw + parent->style.padding[3];
+            float cbW = parent->w - 2.0f * bw - parent->style.padding[3] - parent->style.padding[1];
+            if (cbW < 0.0f) cbW = 0.0f;
+            if (newX < cbLeft) newX = cbLeft;
+            float cbRight = cbLeft + cbW - w;
+            if (newX > cbRight) newX = cbRight;
+        }
+    }
+
+    if (style.top > -1e8f || style.bottom > -1e8f) {
+        float spTop = sc->y + bw + sc->style.padding[0];
+        float spH = sc->h - 2.0f * bw - sc->style.padding[0] - sc->style.padding[2];
+        if (spH < 0.0f) spH = 0.0f;
+        if (style.top > -1e8f) {
+            float minY = spTop + style.top + sc->scrollY;
+            if (newY < minY) newY = minY;
+        }
+        if (style.bottom > -1e8f) {
+            float maxY = spTop + spH - style.bottom - h + sc->scrollY;
+            if (newY > maxY) newY = maxY;
+        }
+        if (parent) {
+            float cbTop = parent->x + bw + parent->style.padding[0];
+            float cbH = parent->h - 2.0f * bw - parent->style.padding[0] - parent->style.padding[2];
+            if (cbH < 0.0f) cbH = 0.0f;
+            if (newY < cbTop) newY = cbTop;
+            float cbBottom = cbTop + cbH - h;
+            if (newY > cbBottom) newY = cbBottom;
+        }
+    }
+
+    if (newX != x || newY != y) {
+        shiftStickySubtree(this, newX - x, newY - y);
+        markSubtreePaintDirty(this);
+    }
+}
+
+void MorphNode::updateStickySubtree() {
+    if (style.position == "sticky") applySticky();
+    for (auto* c : children) c->updateStickySubtree();
+}
+#endif
+
 void MorphNode::layout(float px, float py, float parentW, float parentH,
                        Renderer* r) {
     float ml = style.margin[3], mr = style.margin[1];
@@ -43,6 +128,82 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
     float bw = 0.0f;
 #endif
 
+#ifdef MORPH_FEATURE_POSITION
+    // Root node: establish the viewport + initial containing block.
+    if (!parent) {
+        m_winW = parentW;
+        m_winH = parentH;
+        m_absCbX = 0.0f; m_absCbY = 0.0f;
+        m_absCbW = parentW; m_absCbH = parentH;
+    }
+#endif
+
+#ifdef MORPH_FEATURE_POSITION
+    bool isAbs = (style.position == "absolute" || style.position == "fixed");
+    bool isRel = (style.position == "relative" || style.position == "sticky");
+
+    if (isAbs) {
+        // ── Out of flow: absolute (nearest positioned ancestor's padding box)
+        //    or fixed (viewport). px/py/parentW/parentH are ignored here.
+        float cbx, cby, cbw, cbh;
+        if (style.position == "fixed") {
+            cbx = 0.0f; cby = 0.0f;
+            cbw = m_winW; cbh = m_winH;
+        } else {
+            cbx = m_absCbX; cby = m_absCbY;
+            cbw = m_absCbW; cbh = m_absCbH;
+        }
+
+        // Width
+        if (style.explicitWidth >= 0.0f) {
+            w = style.explicitWidth;
+#ifdef MORPH_FEATURE_BORDER_BOX
+            if (style.boxSizing != "border-box")
+#endif
+                w += pl + pr + bw * 2.0f;
+        } else {
+            w = -1.0f;
+        }
+        if (style.left > -1e8f && style.right > -1e8f)
+            w = cbw - style.left - style.right;
+        if (w < 0.0f) w = 0.0f;
+        if (style.explicitWidth < 0.0f) {
+            // Auto width → shrink-to-fit (content-based), capped by available.
+            float avail = cbw;
+            if (style.left > -1e8f) avail -= style.left;
+            if (style.right > -1e8f) avail -= style.right;
+            if (style.left > -1e8f && style.right > -1e8f) avail = cbw - style.left - style.right;
+            float sw = r ? contentWidth(r) : 0.0f;
+            w = (sw > 0.0f && sw < avail) ? sw : avail;
+            if (w < 0.0f) w = 0.0f;
+        }
+
+        // Height
+        if (style.explicitHeight >= 0.0f) {
+            h = style.explicitHeight;
+#ifdef MORPH_FEATURE_BORDER_BOX
+            if (style.boxSizing != "border-box")
+#endif
+                h += pt + pb + bw * 2.0f;
+        } else {
+            h = 0.0f;
+        }
+        if (style.top > -1e8f && style.bottom > -1e8f)
+            h = cbh - style.top - style.bottom;
+        if (h < 0.0f) h = 0.0f;
+
+        // Position
+        x = cbx + (style.left > -1e8f ? style.left : 0.0f);
+        if (style.left <= -1e8f && style.right > -1e8f)
+            x = cbx + cbw - w - style.right;
+        y = cby + (style.top > -1e8f ? style.top : 0.0f);
+        if (style.top <= -1e8f && style.bottom > -1e8f)
+            y = cby + cbh - h - style.bottom;
+        x += ml;
+        y += mt;
+    } else
+#endif
+    {
     float mlForWidth = autoL ? 0.0f : ml;
     float mrForWidth = autoR ? 0.0f : mr;
 
@@ -64,12 +225,16 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
     if (autoL && autoR) {
         ml = mr = fmaxf(availH * 0.5f, 0.0f);
     } else if (autoL) {
-        ml = fmaxf(availH - mr, 0.0f);
+    ml = fmaxf(availH - mr, 0.0f);
     } else if (autoR) {
-        mr = fmaxf(availH - ml, 0.0f);
+    mr = fmaxf(availH - ml, 0.0f);
     }
     if (autoT) mt = 0.0f;
     if (autoB) mb = 0.0f;
+    if (getenv("MORPH_LAYOUT_DEBUG") && (mt != 0.0f || mb != 0.0f)) {
+        printf("[layout()] type=%s px=%.2f py=%.2f mt=%.2f mb=%.2f -> y=%.2f\n",
+               type.c_str(), px, py, mt, mb, py + mt);
+    }
     m_computedMargin[3] = ml; m_computedMargin[1] = mr;
     m_computedMargin[0] = mt; m_computedMargin[2] = mb;
 
@@ -89,6 +254,29 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
         h = 0.0f;
     }
 
+#ifdef MORPH_FEATURE_POSITION
+    // ── Relative: offset the flow box without affecting siblings. ──
+    // Sticky skips the fixed offset here — its offset is the scroll clamp
+    // applied in applySticky() (called below), anchored at m_flowX/m_flowY.
+    if (style.position == "relative") {
+        float offX = 0.0f, offY = 0.0f;
+        if (style.left > -1e8f) offX = style.left;
+        else if (style.right > -1e8f) offX = -style.right;
+        if (style.top > -1e8f) offY = style.top;
+        else if (style.bottom > -1e8f) offY = -style.bottom;
+        x += offX;
+        y += offY;
+    }
+#endif
+    }
+
+#ifdef MORPH_FEATURE_POSITION
+    m_flowX = x;
+    m_flowY = y;
+    if (style.position == "sticky")
+        applySticky();
+#endif
+
 #ifdef MORPH_FEATURE_MIN_MAX
     if (style.minWidth > 0.0f && w < style.minWidth) w = style.minWidth;
     if (style.maxWidth > 0.0f && w > style.maxWidth) w = style.maxWidth;
@@ -103,6 +291,26 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
     float cx = x + bw + pl;
     float cy = y + bw + pt;
 
+#ifdef MORPH_FEATURE_POSITION
+    // Containing block for absolute descendants = padding box of the nearest
+    // positioned ancestor (this node if positioned, otherwise inherited).
+    float cbX, cbY, cbW, cbH;
+    if (isPositioned()) {
+        cbX = x + bw; cbY = y + bw;
+        cbW = w - 2.0f * bw; cbH = h - 2.0f * bw;
+        if (cbW < 0.0f) cbW = 0.0f;
+        if (cbH < 0.0f) cbH = 0.0f;
+    } else {
+        cbX = m_absCbX; cbY = m_absCbY;
+        cbW = m_absCbW; cbH = m_absCbH;
+    }
+    for (auto* c : children) {
+        c->m_absCbX = cbX; c->m_absCbY = cbY;
+        c->m_absCbW = cbW; c->m_absCbH = cbH;
+        c->m_winW = m_winW; c->m_winH = m_winH;
+    }
+#endif
+
 #ifdef MORPH_FEATURE_DISPLAY_NONE
     if (style.display == "none") {
         w = 0.0f; h = 0.0f;
@@ -116,10 +324,15 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 
     std::vector<MorphNode*> normal;
     std::vector<MorphNode*> absChildren;
+    std::vector<MorphNode*> fixedChildren;
     for (auto* c : children) {
 #ifdef MORPH_FEATURE_POSITION
         if (c->style.position == "absolute") {
             absChildren.push_back(c);
+            continue;
+        }
+        if (c->style.position == "fixed") {
+            fixedChildren.push_back(c);
             continue;
         }
 #endif
@@ -134,6 +347,20 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 
     float maxBottom = cy;
     float maxRight  = 0.0f;
+
+#ifdef MORPH_FEATURE_MARGIN_COLLAPSE
+    // Parent–child margin-collapse tracking: a boundary-less block parent
+    // lets its first block child's top margin and its last block child's
+    // bottom margin collapse through — they are excluded from our height and
+    // passed up via m_computedMargin for the parent to apply.
+    // (Declared before the flex `goto` so the jump doesn't cross them.)
+    bool inlineBeforeFirstBlock = false;
+    bool inlineAfterLastBlock = false;
+    bool firstBlockChild = false;
+    bool lastBlockChildMbSet = false;
+    float firstChildMtEff = 0.0f;
+    float lastChildMbEff = 0.0f;
+#endif
 
 #ifdef MORPH_FEATURE_FLEX
     bool isRow = (style.display == "flex" && style.flexDirection == "row");
@@ -150,6 +377,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
         std::vector<FlexItem> items;
 
         for (auto* c : normal) {
+            if (c->isWhitespaceOnly()) continue;
             c->layout(0.0f, 0.0f, cw, 0.0f, r);
 
             if (isRow && c->style.explicitWidth < 0.0f) {
@@ -335,7 +563,11 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
         auto flushInline = [&]() {
             if (currentInline.empty()) return;
 
-            struct InlineItem { MorphNode* node; float w, h; };
+#ifdef MORPH_FEATURE_MARGIN_COLLAPSE
+            if (!firstBlockChild) inlineBeforeFirstBlock = true;
+            else inlineAfterLastBlock = true;
+#endif
+            struct InlineItem { MorphNode* node; float w, h; bool ws; };
             std::vector<InlineItem> items;
             for (auto* c : currentInline) {
                 c->layout(0.0f, 0.0f, cw, 0.0f, r);
@@ -347,7 +579,43 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                 }
                 if (iw <= 0.0f) iw = cw;
                 float ih = (c->h > 0.0f) ? c->h : (c->style.fontSize * 1.4f);
-                items.push_back({c, iw, ih});
+                items.push_back({c, iw, ih, c->isWhitespaceOnly()});
+            }
+
+            // Whitespace-only text (newlines/indent between elements) collapses
+            // like a browser: a single space between inline items, nothing at
+            // the start/end of a line, and no line box when it's all whitespace.
+            int firstVis = -1, lastVis = -1;
+            for (size_t i = 0; i < items.size(); i++) {
+                if (!items[i].ws) {
+                    if (firstVis < 0) firstVis = (int)i;
+                    lastVis = (int)i;
+                }
+            }
+            if (firstVis < 0) {
+                for (auto* c : currentInline) {
+                    c->w = 0.0f;
+                    c->h = 0.0f;
+                }
+                currentInline.clear();
+#ifdef MORPH_FEATURE_MARGIN_COLLAPSE
+                prevMb = 0.0f;
+#endif
+                return;
+            }
+            for (size_t i = 0; i < (size_t)firstVis; i++) {
+                items[i].w = 0.0f;
+                items[i].h = 0.0f;
+            }
+            for (size_t i = (size_t)lastVis + 1; i < items.size(); i++) {
+                items[i].w = 0.0f;
+                items[i].h = 0.0f;
+            }
+            for (size_t i = (size_t)firstVis; i <= (size_t)lastVis; i++) {
+                if (items[i].ws) {
+                    items[i].w = r ? r->measureTextWidth(" ", items[i].node->style.fontSize, "normal") : 4.0f;
+                    items[i].h = 0.0f;
+                }
             }
 
             float lineX = cx;
@@ -358,10 +626,13 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
             auto positionItems = [&](size_t end) {
                 float alignX = cx;
                 float lineW = lineX - cx;
-                if (lineStart > 0 || currentInline[0]->style.textAlign == "center" || currentInline[0]->style.textAlign == "right") {
-                    if (currentInline[0]->style.textAlign == "center")
+                // Line alignment comes from THIS container's text-align,
+                // not from the first inline item (e.g. a button with
+                // text-align:center must not center the whole line).
+                if (lineStart > 0 || style.textAlign == "center" || style.textAlign == "right") {
+                    if (style.textAlign == "center")
                         alignX = cx + (cw - lineW) * 0.5f;
-                    else if (currentInline[0]->style.textAlign == "right")
+                    else if (style.textAlign == "right")
                         alignX = cx + cw - lineW;
                 }
                 float itemX = alignX;
@@ -406,6 +677,10 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                     lineX = cx;
                     lineH = 0.0f;
                     lineStart = i;
+                    if (items[i].ws) {
+                        items[i].w = 0.0f;
+                        items[i].h = 0.0f;
+                    }
                 }
 
                 lineX += need;
@@ -423,21 +698,67 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
         };
 
         for (auto* c : normal) {
-            if (c->style.display == "inline" || c->type == "__text__") {
+            if (c->style.display == "inline" || c->style.display == "inline-block"
+                || c->type == "__text__") {
                 currentInline.push_back(c);
             } else {
                 flushInline();
 
-                float cmt = c->style.margin[0];
-                float cmb = c->style.margin[2];
+                float ownMt = c->style.margin[0];
+                float ownMb = c->style.margin[2];
 
 #ifdef MORPH_FEATURE_MARGIN_COLLAPSE
+                if (getenv("MORPH_LAYOUT_DEBUG")) {
+                    printf("[layout] %s child type=%s y=%.2f curY=%.2f cy=%.2f ownMt=%.2f firstBlock=%d inlineBefore=%d pt=%g bw=%g\n",
+                           style.display.c_str(), c->type.c_str(), c->y, curY, cy, ownMt,
+                           firstBlockChild ? 1 : 0, inlineBeforeFirstBlock ? 1 : 0, pt, bw);
+                }
+                // A child's collapsed-through margins (m_computedMargin) are
+                // only known after its own layout pass, so lay it out once at
+                // a provisional y to learn them, then move it to its final y
+                // and relayout only if the position changed.  This keeps the
+                // very first layout pass correct (no stale-margin pass 1).
+                float provY = (!firstBlockChild && !inlineBeforeFirstBlock
+                               && pt == 0.0f && bw == 0.0f)
+                                  ? curY - ownMt
+                                  : curY;
+                c->layout(cx, provY, cw, ch, r);
+
+                // Effective margins include margins collapsed up from the
+                // child's own children (stored in m_computedMargin by the
+                // child's layout pass just above).
+                float passMt = c->m_computedMargin[0];
+                float passMb = c->m_computedMargin[2];
+                float cmt = (passMt > ownMt) ? passMt : ownMt;
+                float cmb = (passMb > ownMb) ? passMb : ownMb;
                 float collapsedMt = (prevMb > cmt) ? prevMb : cmt;
-                float py = (curY - prevMb) + collapsedMt - cmt;
-                c->layout(cx, py, cw, ch, r);
+                // The first block child of a parent with no top boundary
+                // collapses its top margin with ours: apply nothing inside —
+                // the margin is passed up to our own parent instead.
+                float py;
+                if (!firstBlockChild && !inlineBeforeFirstBlock
+                    && pt == 0.0f && bw == 0.0f)
+                    py = curY - ownMt;
+                else
+                    py = (curY - prevMb) + collapsedMt - ownMt;
+                if (py != provY)
+                    c->layout(cx, py, cw, ch, r);
                 prevMb = cmb;
 #else
+                float cmt = ownMt;
+                float cmb = ownMb;
                 c->layout(cx, curY + cmt, cw, ch, r);
+#endif
+
+#ifdef MORPH_FEATURE_MARGIN_COLLAPSE
+                if (!firstBlockChild) {
+                    firstBlockChild = true;
+                    if (!inlineBeforeFirstBlock && pt == 0.0f && bw == 0.0f)
+                        firstChildMtEff = (passMt > ownMt) ? passMt : ownMt;
+                }
+                lastChildMbEff = (passMb > ownMb) ? passMb : ownMb;
+                lastBlockChildMbSet = true;
+                inlineAfterLastBlock = false;
 #endif
 
                 curY = c->y + c->h + cmb;
@@ -450,16 +771,44 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 
 #else
         for (auto* c : normal) {
-            float cmt = c->style.margin[0];
-            float cmb = c->style.margin[2];
+            float ownMt = c->style.margin[0];
+            float ownMb = c->style.margin[2];
 
 #ifdef MORPH_FEATURE_MARGIN_COLLAPSE
+            // Provisional first pass to learn the child's collapsed-through
+            // margins before deciding its final y (see the inline path above).
+            float provY = (!firstBlockChild && pt == 0.0f && bw == 0.0f)
+                              ? curY - ownMt
+                              : curY;
+            c->layout(cx, provY, cw, ch, r);
+
+            float passMt = c->m_computedMargin[0];
+            float passMb = c->m_computedMargin[2];
+            float cmt = (passMt > ownMt) ? passMt : ownMt;
+            float cmb = (passMb > ownMb) ? passMb : ownMb;
             float collapsedMt = (prevMb > cmt) ? prevMb : cmt;
-            float py = (curY - prevMb) + collapsedMt - cmt;
-            c->layout(cx, py, cw, ch, r);
+            float py;
+            if (!firstBlockChild && pt == 0.0f && bw == 0.0f)
+                py = curY - ownMt;
+            else
+                py = (curY - prevMb) + collapsedMt - ownMt;
+            if (py != provY)
+                c->layout(cx, py, cw, ch, r);
             prevMb = cmb;
 #else
+            float cmt = ownMt;
+            float cmb = ownMb;
             c->layout(cx, curY + cmt, cw, ch, r);
+#endif
+
+#ifdef MORPH_FEATURE_MARGIN_COLLAPSE
+            if (!firstBlockChild) {
+                firstBlockChild = true;
+                if (pt == 0.0f && bw == 0.0f)
+                    firstChildMtEff = (passMt > ownMt) ? passMt : ownMt;
+            }
+            lastChildMbEff = (passMb > ownMb) ? passMb : ownMb;
+            lastBlockChildMbSet = true;
 #endif
 
             curY = c->y + c->h + cmb;
@@ -471,52 +820,26 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 
 after_children:
 
-    for (auto* c : absChildren) {
-        float aw = c->style.explicitWidth >= 0.0f
-#ifdef MORPH_FEATURE_BORDER_BOX
-                   ? (c->style.boxSizing == "border-box"
-                      ? c->style.explicitWidth
-                      : c->style.explicitWidth + hBonus(c->style))
-                   : 0.0f;
-#else
-                   ? c->style.explicitWidth + hBonus(c->style) : 0.0f;
-#endif
-        float ah = c->style.explicitHeight >= 0.0f
-#ifdef MORPH_FEATURE_BORDER_BOX
-                   ? (c->style.boxSizing == "border-box"
-                      ? c->style.explicitHeight
-                      : c->style.explicitHeight + vBonus(c->style))
-                   : 0.0f;
-#else
-                   ? c->style.explicitHeight + vBonus(c->style) : 0.0f;
-#endif
 #ifdef MORPH_FEATURE_POSITION
-        if (c->style.left > -1e8f && c->style.right > -1e8f)
-            aw = cw - c->style.left - c->style.right;
-        if (c->style.top > -1e8f && c->style.bottom > -1e8f)
-            ah = ch - c->style.top - c->style.bottom;
+    // Absolute children position themselves relative to their containing
+    // block (m_absCb*, resolved inside layout) — out of flow, so they don't
+    // affect this node's height.
+    for (auto* c : absChildren)
+        c->layout(0.0f, 0.0f, 0.0f, 0.0f, r);
+    // Fixed children are positioned relative to the viewport.
+    for (auto* c : fixedChildren)
+        c->layout(0.0f, 0.0f, 0.0f, 0.0f, r);
 #endif
-        c->w = aw;
-        c->h = ah;
-
-#ifdef MORPH_FEATURE_POSITION
-        float ax = cx + (c->style.left > -1e8f ? c->style.left : 0.0f);
-        if (c->style.left <= -1e8f && c->style.right > -1e8f)
-            ax = cx + cw - aw - c->style.right;
-        float ay = cy + (c->style.top > -1e8f ? c->style.top : 0.0f);
-        if (c->style.top <= -1e8f && c->style.bottom > -1e8f)
-            ay = cy + ch - ah - c->style.bottom;
-#else
-        float ax = cx;
-        float ay = cy;
-#endif
-        c->x = ax + c->style.margin[3];
-        c->y = ay + c->style.margin[0];
-        c->layout(ax, ay, aw, ah, r);
-    }
 
     if (style.explicitHeight < 0.0f) {
         float autoH = (maxBottom - cy) + pt + pb + bw * 2.0f;
+#ifdef MORPH_FEATURE_MARGIN_COLLAPSE
+        // Parent–child margin collapse: the last block child's bottom margin
+        // collapses through a boundary-less parent, so it must not inflate
+        // our height — our parent applies it as the gap after us instead.
+        if (pb == 0.0f && bw == 0.0f && lastBlockChildMbSet && !inlineAfterLastBlock)
+            autoH -= lastChildMbEff;
+#endif
         if (autoH < 0.0f) autoH = 0.0f;
         if (autoH > h) h = autoH;
     }
@@ -540,12 +863,35 @@ after_children:
     }
 
     contentH = maxBottom - cy + pt + pb + bw * 2.0f;
+#ifdef MORPH_FEATURE_MARGIN_COLLAPSE
+    if (pb == 0.0f && bw == 0.0f && lastBlockChildMbSet && !inlineAfterLastBlock)
+        contentH -= lastChildMbEff;
+#endif
     if (contentH < h) contentH = h;
+
+#ifdef MORPH_FEATURE_MARGIN_COLLAPSE
+    // Pass collapsed-through margins up to our parent (parent–child margin
+    // collapse), e.g. an h1's 21px margins escape a boundary-less div that
+    // wraps it and become the gap around that div.
+    if (style.display != "flex" && style.explicitHeight < 0.0f) {
+        if (pt == 0.0f && bw == 0.0f && firstBlockChild && !inlineBeforeFirstBlock
+            && firstChildMtEff > m_computedMargin[0])
+            m_computedMargin[0] = firstChildMtEff;
+        if (pb == 0.0f && bw == 0.0f && lastBlockChildMbSet && !inlineAfterLastBlock
+            && lastChildMbEff > m_computedMargin[2])
+            m_computedMargin[2] = lastChildMbEff;
+    }
+#endif
     scrollEnabled = (style.overflow == "scroll") ||
                     (style.overflow == "auto" && contentH > h);
     if (scrollEnabled) {
         if (scrollY > contentH - h) scrollY = contentH - h;
         if (scrollY < 0) scrollY = 0;
+#ifdef MORPH_FEATURE_POSITION
+        // Sticky descendants are laid out before scrollEnabled was known, so
+        // resolve their clamps now that the scrollport geometry is final.
+        updateStickySubtree();
+#endif
     }
 
     clearDirty(LayoutDirty);

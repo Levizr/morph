@@ -76,7 +76,7 @@ public:
 
         // 3. Scroll + children
         if (scrolling) r.pushScrollOffset(0, -scrollY);
-        for (auto* child : children) {
+        for (auto* child : paintOrder()) {
             if (scrolling) {
                 float childVisY = child->y - scrollY;
                 if (childVisY + child->h > y && childVisY < y + h)
@@ -143,7 +143,7 @@ public:
             if (needRadiusClip) r.beginRoundedClip(sx, sy, sw, sh, rad);
 
             r.pushScrollOffset(0, -scrollY);
-            for (auto* child : children) {
+            for (auto* child : paintOrder()) {
                 if (scrolling) {
                     float childVisY = child->y - scrollY;
                     if (childVisY + child->h > y && childVisY < y + h)
@@ -157,7 +157,7 @@ public:
             if (needRadiusClip) r.endRoundedClip();
             if (needRectClip) r.endClip();
         } else {
-            for (auto* child : children)
+            for (auto* child : paintOrder())
                 child->draw(r);
         }
 

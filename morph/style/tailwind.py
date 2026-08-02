@@ -221,6 +221,15 @@ STATIC_MAP: dict[str, dict[str, str]] = {
     "sticky":   {"position": "sticky"},
     "static":   {"position": "static"},
 
+    # Z-index
+    "z-0":   {"z-index": "0"},
+    "z-10":  {"z-index": "10"},
+    "z-20":  {"z-index": "20"},
+    "z-30":  {"z-index": "30"},
+    "z-40":  {"z-index": "40"},
+    "z-50":  {"z-index": "50"},
+    "z-auto": {"z-index": "auto"},
+
     # Cursor
     "cursor-pointer": {"cursor": "pointer"},
     "cursor-default": {"cursor": "default"},
@@ -294,6 +303,12 @@ class TailwindResolver:
         if cls in self._cache:
             return self._cache[cls]
 
+        # 0. Negative z-index utilities (-z-10 → z-index: -10)
+        if cls.startswith("-z-") and cls[3:].lstrip("-").isdigit():
+            val = -int(cls[3:])
+            self._cache[cls] = {"z-index": str(val)}
+            return self._cache[cls]
+
         # 1. Static map
         if cls in STATIC_MAP:
             self._cache[cls] = STATIC_MAP[cls]
@@ -312,7 +327,7 @@ class TailwindResolver:
                 self._cache[cls] = result
                 return result
 
-        log_warn(f"unknown Tailwind class '{cls}' — skipped")
+        # log_warn(f"unknown Tailwind class '{cls}' — skipped")
         self._cache[cls] = {}
         return {}
 

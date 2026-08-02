@@ -2,9 +2,14 @@
 #include <GLFW/glfw3.h>
 #include <algorithm>
 #include <print>
+
+RepaintHookFn g_repaintHook = nullptr;
+
 // Double-click detection: threshold in seconds
 static double s_lastClickTime = 0.0;
 static const double DBL_CLICK_THRESHOLD = 0.3;
+// Node currently :active (pressed) — cleared on release / tree rebuild
+static MorphNode* s_activeNode = nullptr;
 
 void MorphWindow::mouseButtonCb(GLFWwindow *win, int btn, int act, int mods)
 {
@@ -22,6 +27,23 @@ void MorphWindow::mouseButtonCb(GLFWwindow *win, int btn, int act, int mods)
         e.x = (float)mx;
         e.y = (float)my;
         self->m_root->dispatchEvent(e, (float)mx, (float)my);
+
+        // :active pseudo-class — apply on press, release on button up
+        if (act == GLFW_PRESS)
+        {
+            if (s_activeNode)
+                s_activeNode->onActive(false);
+            s_activeNode = self->m_root->hitTest((float)mx, (float)my);
+            if (s_activeNode)
+                s_activeNode->onActive(true);
+        }
+        else
+        {
+            if (s_activeNode)
+                s_activeNode->onActive(false);
+            s_activeNode = nullptr;
+        }
+
         if (act == GLFW_PRESS)
         {
             double now = glfwGetTime();
@@ -57,9 +79,9 @@ void MorphWindow::KeyCb(GLFWwindow *win, int key, int scancode, int act, int mod
     self->m_root->dispatchEvent(e, (float)mx, (float)my);
 }
 
-static MorphNode *s_lastHoverNode = nullptr;
+void MorphWindow::clearHoverState() { MorphNode::s_lastHoveredNode = nullptr; }
 
-void MorphWindow::clearHoverState() { s_lastHoverNode = nullptr; }
+void MorphWindow::clearActiveState() { s_activeNode = nullptr; }
 
 void MorphWindow::cursorPosCb(GLFWwindow *win, double mx, double my)
 {
@@ -68,19 +90,20 @@ void MorphWindow::cursorPosCb(GLFWwindow *win, double mx, double my)
         return;
 
     auto *newHover = self->m_root->hitTest((float)mx, (float)my);
-    if (newHover != s_lastHoverNode)
+    auto*& hovered = MorphNode::s_lastHoveredNode;
+    if (newHover != hovered)
     {
-        if (s_lastHoverNode)
+        if (hovered)
         {
-            if (s_lastHoverNode->onMouseLeave)
+            if (hovered->onMouseLeave)
             {
                 JsObject evt;
                 evt.set("x", JsNumber((float)mx));
                 evt.set("y", JsNumber((float)my));
                 evt.set("type", JsString("mouseleave"));
-                s_lastHoverNode->onMouseLeave(evt);
+                hovered->onMouseLeave(evt);
             }
-            s_lastHoverNode->onHover(false);
+            hovered->onHover(false);
         }
         if (newHover)
         {
@@ -94,7 +117,7 @@ void MorphWindow::cursorPosCb(GLFWwindow *win, double mx, double my)
             }
             newHover->onHover(true);
         }
-        s_lastHoverNode = newHover;
+        hovered = newHover;
     }
 
     MorphEvent e;
@@ -164,6 +187,10 @@ MorphWindow::MorphWindow(const std::string &title, int width, int height, bool v
     {
         glfwMakeContextCurrent(m_handle);
         gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress));
+        // Cap presents at the monitor refresh rate. Dirty rendering already
+        // skips the swap when nothing changed; vsync keeps active animation
+        // from spinning at hundreds of FPS.
+        glfwSwapInterval(1);
         glfwSetWindowUserPointer(m_handle, this);
         glfwSetMouseButtonCallback(m_handle, mouseButtonCb);
         glfwSetKeyCallback(m_handle, KeyCb);
@@ -241,8 +268,10 @@ void MorphWindow::commitFrame()
     // Phase 1-2: Layout + paint (GL context is already current on main thread)
     m_renderer.ensureReady();
 
+    m_dirtyStats.reset();
     m_root->layoutIfNeeded(0.0f, 0.0f, (float)m_width, (float)m_height,
                            &m_renderer, &m_dirtyStats);
+    m_dirtyStats.fullTreeCount = countNodes(m_root);
 
     recordPaintTree(m_root, m_renderer, m_dirtyStats);
 
@@ -263,6 +292,9 @@ void MorphWindow::commitFrame()
     g_frontFrame.store(&frame, std::memory_order_release);
     g_backIndex.store((backIdx + 1) % 2, std::memory_order_release);
     g_framePending.store(true, std::memory_order_release);
+
+    // This frame has been consumed; only re-render on a new dirty event.
+    m_pendingRender = false;
 }
 
 void MorphWindow::drawOpsForNode(GLRenderer &r, const RenderFrame *frame, int nodeIdx,
@@ -503,6 +535,8 @@ void MorphWindow::render(std::function<void(GLRenderer &, DirtyStats &)> overlay
         m_renderer.clear();
         m_renderer.setProjection(proj);
         m_root->draw(m_renderer);
+        // Full relayout + redraw already happened, so nothing stays dirty.
+        clearAllDirty(m_root);
 #endif
     }
 
@@ -528,6 +562,17 @@ static int countNodes(MorphNode *n)
     return c;
 }
 
+static void clearAllDirty(MorphNode *n)
+{
+    n->clearDirty(StyleDirty);
+    n->clearDirty(LayoutDirty);
+    n->clearDirty(PaintDirty);
+    n->clearDirty(ScrollDirty);
+    n->clearDirty(SubtreeDirty);
+    for (auto *c : n->children)
+        clearAllDirty(c);
+}
+
 static void recordPaintTree(MorphNode *n, Renderer &r, DirtyStats &stats)
 {
     if (n->isDirty(PaintDirty) || n->isDirty(ScrollDirty) || n->isDirty(StyleDirty))
@@ -536,6 +581,8 @@ static void recordPaintTree(MorphNode *n, Renderer &r, DirtyStats &stats)
         n->recordDisplayList(r);
         n->clearDirty(PaintDirty);
         n->clearDirty(ScrollDirty);
+        if (g_repaintHook)
+            g_repaintHook(n);
     }
     for (auto *child : n->children)
         recordPaintTree(child, r, stats);

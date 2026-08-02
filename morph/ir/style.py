@@ -42,3 +42,4 @@ class IRStyle:
     border_color:               tuple[float,float,float,float] = (0.0, 0.0, 0.0, 1.0)
     border_style:               str   = "none"
     box_sizing:                 str   = "content-box"
+    z_index:                    int | None = None   # None = auto (no explicit z-index)

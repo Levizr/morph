@@ -42,6 +42,7 @@ class Compiler:
             os.path.join(node_dir, "flatten.cpp"),
             os.path.join(node_dir, "style.cpp"),
             os.path.join(node_dir, "layout.cpp"),
+            os.path.join(node_dir, "paint_order.cpp"),
             os.path.join(runtime_dir, "core", "window.cpp"),
             os.path.join(runtime_dir, "render", "gl_renderer.cpp"),
             os.path.join(runtime_dir, "core", "compositor.cpp"),
@@ -143,7 +144,8 @@ class Compiler:
         _DEV_FEATURES = [
             "MORPH_FEATURE_SCROLL", "MORPH_FEATURE_RADIUS",
             "MORPH_FEATURE_TEXT", "MORPH_FEATURE_BOLD",
-            "MORPH_FEATURE_POSITION", "MORPH_FEATURE_FLEX",
+            "MORPH_FEATURE_POSITION", "MORPH_FEATURE_ZINDEX",
+            "MORPH_FEATURE_FLEX",
             "MORPH_FEATURE_CURSOR", "MORPH_FEATURE_BORDER",
             "MORPH_FEATURE_DISPLAY_NONE", "MORPH_FEATURE_INLINE",
             "MORPH_FEATURE_MARGIN_COLLAPSE", "MORPH_FEATURE_MIN_MAX",

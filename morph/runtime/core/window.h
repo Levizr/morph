@@ -8,6 +8,11 @@
 #include "event.h"
 #include "compositor.h"
 
+// Optional hook for dev tools to observe which nodes are repainted each frame.
+// Left null in production builds — zero cost. Dev runtime sets it at startup.
+using RepaintHookFn = void (*)(MorphNode *);
+extern RepaintHookFn g_repaintHook;
+
 class MorphWindow
 {
     std::string m_title;
@@ -43,6 +48,9 @@ class MorphWindow
         m[15] = 1.0f;
     }
 
+public:
+    // Static GLFW callbacks are public so the dev runtime can chain them
+    // after intercepting its own DevTools input.
     static void mouseButtonCb(GLFWwindow *win, int btn, int act, int mods);
     static void KeyCb(GLFWwindow* win, int key, int scancode, int action, int mods);
     static void cursorPosCb(GLFWwindow *win, double mx, double my);
@@ -52,7 +60,6 @@ class MorphWindow
 public:
     MorphWindow(const std::string &title, int width, int height, bool visible = true);
     ~MorphWindow();
-
     void addChild(MorphNode *node) { m_root = node; }
     void update(float dt)
     {
@@ -60,6 +67,7 @@ public:
             m_root->update(dt);
     }
     static void clearHoverState();
+    static void clearActiveState();
     void setTitle(const std::string &title);
     void setSize(int width, int height);
     int width() const { return m_width; }

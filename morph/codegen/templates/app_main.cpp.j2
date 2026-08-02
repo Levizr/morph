@@ -44,8 +44,14 @@ int main() {
 
 {{ window_code }}
 
+    // Enable vsync so present is capped at the refresh rate when we do render.
+    glfwSwapInterval(1);
+
     while (!wm.allClosed()) {
-        glfwPollEvents();
+        // Block until an input event arrives, or ~16ms elapses so timers,
+        // effects and CSS transitions keep advancing. Sleeping here instead of
+        // spinning on glfwPollEvents() keeps idle CPU usage near 0%.
+        glfwWaitEventsTimeout(0.016);
         morph::process_tasks();
         morph::run_pending_effects();
 
@@ -56,8 +62,13 @@ int main() {
 
 {% for win in windows %}
         if (win_{{ win.window_id }}->isVisible()) {
+            // Advance transitions/animations; cheap when idle.
             win_{{ win.window_id }}->update(dt);
-            win_{{ win.window_id }}->render();
+            // Dirty rendering: skip layout, paint and the GL swap entirely
+            // unless something changed (input, effect, size, or animation).
+            if (win_{{ win.window_id }}->hasPendingRender()) {
+                win_{{ win.window_id }}->render();
+            }
         }
 {% endfor %}
     }

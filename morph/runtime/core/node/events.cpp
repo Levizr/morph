@@ -3,7 +3,8 @@
 
 MorphNode* MorphNode::hitTest(float ex, float ey) {
     if (ex < x || ex > x + w || ey < y || ey > y + h) return nullptr;
-    for (auto it = children.rbegin(); it != children.rend(); ++it) {
+    const auto& po = paintOrder();
+    for (auto it = po.rbegin(); it != po.rend(); ++it) {
         auto* c = *it;
         float cy = c->y - (scrollEnabled ? scrollY : 0);
         if (ex >= c->x && ex <= c->x + c->w &&
@@ -28,6 +29,9 @@ bool MorphNode::dispatchEvent(MorphEvent& e, float ex, float ey) {
             if (scrollY != oldScrollY) {
                 markDirty(PaintDirty);
                 for (auto* c : children) c->markDirty(PaintDirty);
+#ifdef MORPH_FEATURE_POSITION
+                updateStickySubtree();
+#endif
             }
             return true;
         }
@@ -54,6 +58,9 @@ bool MorphNode::dispatchEvent(MorphEvent& e, float ex, float ey) {
                 if (scrollY != oldScrollY) {
                     markDirty(PaintDirty);
                     for (auto* c : children) c->markDirty(PaintDirty);
+#ifdef MORPH_FEATURE_POSITION
+                    updateStickySubtree();
+#endif
                 }
                 return true;
             }
@@ -75,13 +82,17 @@ bool MorphNode::dispatchEvent(MorphEvent& e, float ex, float ey) {
             if (scrollY != oldScrollY) {
                 markDirty(PaintDirty);
                 for (auto* c : children) c->markDirty(PaintDirty);
+#ifdef MORPH_FEATURE_POSITION
+                updateStickySubtree();
+#endif
             }
             return true;
         }
     }
 #endif
 
-    for (auto it = children.rbegin(); it != children.rend(); ++it) {
+    const auto& po = paintOrder();
+    for (auto it = po.rbegin(); it != po.rend(); ++it) {
         auto* c = *it;
         float cy = c->y - (scrollEnabled ? scrollY : 0);
         if (ex >= c->x && ex <= c->x + c->w &&

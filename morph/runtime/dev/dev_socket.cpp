@@ -16,7 +16,7 @@ bool DevSocket::listen(const std::string& path) {
     m_path = path;
     m_sock = socket(AF_UNIX, SOCK_STREAM, 0);
     if (m_sock < 0) {
-        perror("[devrt] socket");
+        perror("[morph] dev socket");
         return false;
     }
 
@@ -30,13 +30,13 @@ bool DevSocket::listen(const std::string& path) {
 
     unlink(path.c_str());
     if (bind(m_sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        perror("[devrt] bind");
+        perror("[morph] dev socket bind");
         close();
         return false;
     }
 
     if (::listen(m_sock, 1) < 0) {
-        perror("[devrt] listen");
+        perror("[morph] dev socket listen");
         close();
         return false;
     }
@@ -45,7 +45,6 @@ bool DevSocket::listen(const std::string& path) {
     int flags = fcntl(m_sock, F_GETFL, 0);
     fcntl(m_sock, F_SETFL, flags | O_NONBLOCK);
 
-    fprintf(stderr, "[devrt] listening on %s\n", path.c_str());
     return true;
 }
 
@@ -56,7 +55,7 @@ bool DevSocket::acceptClient() {
     m_client = accept(m_sock, (struct sockaddr*)&addr, &len);
     if (m_client < 0) {
         if (errno != EAGAIN && errno != EWOULDBLOCK)
-            perror("[devrt] accept");
+            perror("[morph] dev socket accept");
         return false;
     }
 
@@ -64,7 +63,6 @@ bool DevSocket::acceptClient() {
     int flags = fcntl(m_client, F_GETFL, 0);
     fcntl(m_client, F_SETFL, flags | O_NONBLOCK);
 
-    fprintf(stderr, "[devrt] client connected\n");
     return true;
 }
 
@@ -80,7 +78,7 @@ bool DevSocket::readMessage(std::string& out, int timeoutMs) {
     pfd.events = POLLIN;
     int ret = poll(&pfd, 1, timeoutMs);
     if (ret < 0) {
-        perror("[devrt] poll");
+        perror("[morph] dev socket poll");
         return false;
     }
     if (ret == 0) {
@@ -90,7 +88,6 @@ bool DevSocket::readMessage(std::string& out, int timeoutMs) {
 
     // Check for errors
     if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) {
-        fprintf(stderr, "[devrt] client disconnected\n");
         ::close(m_client);
         m_client = -1;
         out.clear();
@@ -111,11 +108,10 @@ bool DevSocket::readMessage(std::string& out, int timeoutMs) {
             return true;
         }
     } else if (n == 0) {
-        fprintf(stderr, "[devrt] client disconnected\n");
         ::close(m_client);
         m_client = -1;
     } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
-        perror("[devrt] read");
+        perror("[morph] dev socket read");
         ::close(m_client);
         m_client = -1;
     }

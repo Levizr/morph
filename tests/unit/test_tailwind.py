@@ -26,3 +26,20 @@ def test_unknown_class_skipped():
     tw = TailwindResolver()
     result = tw.resolve("animate-spin")   # not in static map
     assert "animation" not in result      # silently skipped
+
+
+def test_z_index_classes():
+    tw = TailwindResolver()
+    assert tw.resolve("z-10").get("z-index") == "10"
+    assert tw.resolve("z-50").get("z-index") == "50"
+    assert tw.resolve("z-auto").get("z-index") == "auto"
+
+
+def test_negative_z_index():
+    tw = TailwindResolver()
+    assert tw.resolve("-z-10").get("z-index") == "-10"
+
+
+def test_arbitrary_z_index():
+    tw = TailwindResolver()
+    assert tw.resolve("z-[100]").get("z-index") == "100"

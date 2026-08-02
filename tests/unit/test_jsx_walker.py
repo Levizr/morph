@@ -47,3 +47,23 @@ def test_style_camel_to_kebab():
     child  = jsx["children"][0]
     style  = child["props"].get("style", {})
     assert "background-color" in style
+
+
+def test_negative_numeric_style_is_static():
+    """Inline `zIndex: -1` parses as a static value, not a reactive expr."""
+    src = """
+    export default function App() {
+      return (
+        <morph-window title="T" width={400} height={300}>
+          <div style={{ position: 'absolute', zIndex: -1, top: 10 }} />
+        </morph-window>
+      )
+    }
+    """
+    root   = MorphParser().parse(src)
+    walked = JSXWalker().walk(root)
+    div    = walked["components"][0]["jsx"]["children"][0]
+    style  = div["props"]["style"]
+    assert style["z-index"] == "-1", f"Expected static '-1', got {style['z-index']!r}"
+    assert style["position"] == "absolute"
+    assert style["top"] == "10"

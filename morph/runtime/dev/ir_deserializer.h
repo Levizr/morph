@@ -149,6 +149,12 @@ static void applyStyle(MorphStyle& s, const JsonValue& styleVal) {
         s.top = styleVal["top"].asFloat();
     if (!styleVal["bottom"].isNull())
         s.bottom = styleVal["bottom"].asFloat();
+#ifdef MORPH_FEATURE_ZINDEX
+    if (!styleVal["z_index"].isNull()) {
+        s.zIndex = styleVal["z_index"].asInt();
+        s.zIndexSet = true;
+    }
+#endif
 
     if (!styleVal["scrollbar_width"].isNull())
         s.scrollbarWidth = styleVal["scrollbar_width"].asFloat();
@@ -227,6 +233,14 @@ static MorphNode* deserializeNode(const JsonValue& val,
         applyStyle(*node->hoverStyle, val["hover_style"]);
     }
 
+    // Apply active style if present
+    if (val.has("active_style") && val["active_style"].type() == JsonType::Object) {
+        node->activeStyle = new MorphStyle();
+        // Copy base as starting point, then override with active properties
+        *node->activeStyle = node->style;
+        applyStyle(*node->activeStyle, val["active_style"]);
+    }
+
     // Transition config
     if (val.has("transition_duration") && !val["transition_duration"].isNull())
         node->m_transitionDuration = val["transition_duration"].asFloat();
@@ -249,6 +263,20 @@ static MorphNode* deserializeNode(const JsonValue& val,
             if (r.has("style") && r["style"].type() == JsonType::Object)
                 applyStyle(rule.style, r["style"]);
             node->m_ancestorHoverRules.push_back(rule);
+        }
+    }
+
+    // Deserialize ancestor active rules
+    if (val.has("ancestor_active_rules") && val["ancestor_active_rules"].type() == JsonType::Array) {
+        auto& rules = val["ancestor_active_rules"];
+        for (size_t i = 0; i < rules.size(); i++) {
+            auto& r = rules[i];
+            AncestorHoverRule rule;
+            if (r.has("ancestor_tag") && !r["ancestor_tag"].isNull())
+                rule.ancestorTag = r["ancestor_tag"].asString();
+            if (r.has("style") && r["style"].type() == JsonType::Object)
+                applyStyle(rule.style, r["style"]);
+            node->m_ancestorActiveRules.push_back(rule);
         }
     }
 

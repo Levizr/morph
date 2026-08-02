@@ -36,6 +36,12 @@ class IPCClient:
         payload = json.dumps({"__error__": msg}, ensure_ascii=False).encode() + b"\x00"
         self.sock.sendall(payload)
 
+    def send_log(self, level: str, msg: str) -> None:
+        """Send a console log message to the in-app DevTools (info|ok|warn|error)."""
+        payload = json.dumps({"__log__": {"level": level, "msg": msg}},
+                             ensure_ascii=False).encode() + b"\x00"
+        self.sock.sendall(payload)
+
     def close(self) -> None:
         if self.sock:
             self.sock.close()

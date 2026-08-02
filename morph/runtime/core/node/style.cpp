@@ -13,6 +13,8 @@ static float applyEasing(float t, Easing e) {
     return t;
 }
 
+static bool hasLayoutDiff(const MorphStyle& a, const MorphStyle& b);
+
 static void setAnimProperty(MorphNode* node, AnimProperty prop, float val) {
     switch (prop) {
         case AnimProperty::X: node->x = val; node->markDirty(LayoutDirty); break;
@@ -133,6 +135,12 @@ static void applyStyleDelta(MorphStyle& target, const MorphStyle& delta) {
     if (delta.top > -1e8f)   target.top = delta.top;
     if (delta.bottom > -1e8f) target.bottom = delta.bottom;
 #endif
+#ifdef MORPH_FEATURE_ZINDEX
+    if (delta.zIndexSet) {
+        target.zIndex = delta.zIndex;
+        target.zIndexSet = true;
+    }
+#endif
 #ifdef MORPH_FEATURE_CURSOR
     if (delta.cursor != "default") target.cursor = delta.cursor;
 #endif
@@ -152,50 +160,68 @@ static void applyStyleDelta(MorphStyle& target, const MorphStyle& delta) {
 #endif
 }
 
-void MorphNode::onHover(bool state) {
-    if (hoverStyle) {
-        if (!m_hoverTransition)
-            m_hoverTransition = new HoverTransition();
-        if (state) {
-            if (!m_hoverTransition->active)
-                m_hoverTransition->preHoverStyle = style;
-            if (m_transitionDuration > 0.0f) {
-                m_hoverTransition->startStyle = style;
-                m_hoverTransition->targetStyle = style;
-                applyStyleDelta(m_hoverTransition->targetStyle, *hoverStyle);
-                m_hoverTransition->elapsed = 0.0f;
-                m_hoverTransition->active = true;
-            } else {
-                applyStyleDelta(style, *hoverStyle);
-            }
+#ifdef MORPH_FEATURE_ZINDEX
+// A node's z-index only affects ordering among its parent's children, so a
+// runtime change must invalidate the parent's cached paint order.
+static void invalidatePaintOrderOnZ(MorphNode* n) {
+    if (n && n->parent) n->parent->invalidatePaintOrder();
+}
+#endif
+
+static void _applyStateStyle(MorphNode* node, bool state,
+                             MorphStyle* stateStyle, HoverTransition*& trans) {
+    if (!stateStyle) return;
+    if (!trans)
+        trans = new HoverTransition();
+    MorphStyle layoutBefore = node->style;
+    if (state) {
+        if (!trans->active)
+            trans->preHoverStyle = node->style;
+        if (node->m_transitionDuration > 0.0f) {
+            trans->startStyle = node->style;
+            trans->targetStyle = node->style;
+            applyStyleDelta(trans->targetStyle, *stateStyle);
+            trans->elapsed = 0.0f;
+            trans->active = true;
         } else {
-            if (m_transitionDuration > 0.0f) {
-                m_hoverTransition->startStyle = style;
-                m_hoverTransition->targetStyle = m_hoverTransition->preHoverStyle;
-                m_hoverTransition->elapsed = 0.0f;
-                m_hoverTransition->active = true;
-            } else {
-                style = m_hoverTransition->preHoverStyle;
-            }
+            applyStyleDelta(node->style, *stateStyle);
         }
-        markDirty(PaintDirty);
-        markDirty(LayoutDirty);
+    } else {
+        if (node->m_transitionDuration > 0.0f) {
+            trans->startStyle = node->style;
+            trans->targetStyle = trans->preHoverStyle;
+            trans->elapsed = 0.0f;
+            trans->active = true;
+        } else {
+            node->style = trans->preHoverStyle;
+        }
     }
-    _applyAncestorHover(state);
-    if (parent) parent->onHover(state);
+    node->markDirty(PaintDirty);
+    if (hasLayoutDiff(layoutBefore, node->style))
+        node->markDirty(LayoutDirty);
 }
 
-static void _applyOneAncestorRule(MorphNode* child, const AncestorHoverRule& rule, bool state) {
-    auto t = child->m_ancestorHoverTransition;
+void MorphNode::onHover(bool state) {
+    _applyStateStyle(this, state, hoverStyle, m_hoverTransition);
+    _applyAncestorHover(state);
+}
+
+void MorphNode::onActive(bool state) {
+    _applyStateStyle(this, state, activeStyle, m_activeTransition);
+    _applyAncestorActive(state);
+}
+
+static void _applyOneAncestorRule(MorphNode* child, const AncestorHoverRule& rule,
+                                  AncestorHoverTransition*& t, bool state) {
     if (state) {
         if (!t) {
             t = new AncestorHoverTransition();
-            child->m_ancestorHoverTransition = t;
         }
         if (t->applyCount == 0)
             t->revertStyle = child->style;
         t->applyCount++;
 
+        MorphStyle layoutBefore = child->style;
         if (child->m_transitionDuration > 0.0f && t->active) {
             t->targetStyle = child->style;
             applyStyleDelta(t->targetStyle, rule.style);
@@ -211,12 +237,14 @@ static void _applyOneAncestorRule(MorphNode* child, const AncestorHoverRule& rul
             applyStyleDelta(child->style, rule.style);
         }
         child->markDirty(PaintDirty);
-        child->markDirty(LayoutDirty);
+        if (hasLayoutDiff(layoutBefore, child->style))
+            child->markDirty(LayoutDirty);
     } else {
         if (!t) return;
         t->applyCount--;
         if (t->applyCount > 0) return;
 
+        MorphStyle layoutBefore = child->style;
         if (t->active) {
             t->applying = false;
             t->elapsed = 0.0f;
@@ -228,7 +256,8 @@ static void _applyOneAncestorRule(MorphNode* child, const AncestorHoverRule& rul
             child->style = t->revertStyle;
         }
         child->markDirty(PaintDirty);
-        child->markDirty(LayoutDirty);
+        if (hasLayoutDiff(layoutBefore, child->style))
+            child->markDirty(LayoutDirty);
     }
 }
 
@@ -237,28 +266,45 @@ void MorphNode::_applyAncestorHover(bool state) {
         child->_applyAncestorHover(state);
         for (auto& rule : child->m_ancestorHoverRules) {
             if (rule.ancestorTag.empty() || type == rule.ancestorTag) {
-                _applyOneAncestorRule(child, rule, state);
+                _applyOneAncestorRule(child, rule, child->m_ancestorHoverTransition, state);
             }
         }
     }
 }
 
-void MorphNode::updateHoverTransition(float dt) {
-    if (m_hoverTransition && m_hoverTransition->active) {
-        m_hoverTransition->elapsed += dt;
-        float t = m_hoverTransition->elapsed / m_transitionDuration;
-        if (t >= 1.0f) {
-            t = 1.0f;
-            style = m_hoverTransition->targetStyle;
-            m_hoverTransition->active = false;
-        } else {
-            interpolateStyles(style, m_hoverTransition->startStyle,
-                              m_hoverTransition->targetStyle,
-                              applyEasing(t, m_transitionEasing));
+void MorphNode::_applyAncestorActive(bool state) {
+    for (auto* child : children) {
+        child->_applyAncestorActive(state);
+        for (auto& rule : child->m_ancestorActiveRules) {
+            if (rule.ancestorTag.empty() || type == rule.ancestorTag) {
+                _applyOneAncestorRule(child, rule, child->m_ancestorActiveTransition, state);
+            }
         }
-        markDirty(PaintDirty);
-        markDirty(LayoutDirty);
     }
+}
+
+static void _updateStateTransition(MorphNode* node, HoverTransition*& trans, float dt) {
+    if (!trans || !trans->active) return;
+    trans->elapsed += dt;
+    float t = trans->elapsed / node->m_transitionDuration;
+    if (t >= 1.0f) {
+        t = 1.0f;
+        node->style = trans->targetStyle;
+        trans->active = false;
+    } else {
+        MorphNode::interpolateStyles(node->style, trans->startStyle,
+                                     trans->targetStyle,
+                                     applyEasing(t, node->m_transitionEasing));
+    }
+    node->markDirty(PaintDirty);
+}
+
+void MorphNode::updateHoverTransition(float dt) {
+    _updateStateTransition(this, m_hoverTransition, dt);
+}
+
+void MorphNode::updateActiveTransition(float dt) {
+    _updateStateTransition(this, m_activeTransition, dt);
 }
 
 void MorphNode::interpolateStyles(MorphStyle& out, const MorphStyle& a,
@@ -315,6 +361,11 @@ void MorphNode::interpolateStyles(MorphStyle& out, const MorphStyle& a,
     out.bottom = lerpIfSetPos(a.bottom, b.bottom);
 #endif
 
+#ifdef MORPH_FEATURE_ZINDEX
+    out.zIndex = b.zIndex;
+    out.zIndexSet = b.zIndexSet;
+#endif
+
 #ifdef MORPH_FEATURE_SCROLL
     out.scrollbarWidth = a.scrollbarWidth + (b.scrollbarWidth - a.scrollbarWidth) * t;
     for (int i = 0; i < 4; i++) {
@@ -329,31 +380,37 @@ void MorphNode::interpolateStyles(MorphStyle& out, const MorphStyle& a,
 #endif
 }
 
-void MorphNode::updateAncestorHoverTransition(float dt) {
-    if (m_ancestorHoverTransition && m_ancestorHoverTransition->active) {
-        float dur = m_transitionDuration > 0.0f ? m_transitionDuration : 0.3f;
-        m_ancestorHoverTransition->elapsed += dt;
-        float t = m_ancestorHoverTransition->elapsed / dur;
-        if (t >= 1.0f) {
-            t = 1.0f;
-            if (m_ancestorHoverTransition->applying) {
-                style = m_ancestorHoverTransition->targetStyle;
-            } else {
-                style = m_ancestorHoverTransition->revertStyle;
-            }
-            m_ancestorHoverTransition->active = false;
+static void _updateAncestorTransition(MorphNode* node, AncestorHoverTransition* t, float dt) {
+    if (!t || !t->active) return;
+    float dur = node->m_transitionDuration > 0.0f ? node->m_transitionDuration : 0.3f;
+    t->elapsed += dt;
+    float tt = t->elapsed / dur;
+    if (tt >= 1.0f) {
+        tt = 1.0f;
+        if (t->applying) {
+            node->style = t->targetStyle;
         } else {
-            const MorphStyle& from = m_ancestorHoverTransition->applying
-                ? m_ancestorHoverTransition->revertStyle
-                : m_ancestorHoverTransition->targetStyle;
-            const MorphStyle& to = m_ancestorHoverTransition->applying
-                ? m_ancestorHoverTransition->targetStyle
-                : m_ancestorHoverTransition->revertStyle;
-            interpolateStyles(style, from, to, applyEasing(t, m_transitionEasing));
+            node->style = t->revertStyle;
         }
-        markDirty(PaintDirty);
-        markDirty(LayoutDirty);
+        t->active = false;
+    } else {
+        const MorphStyle& from = t->applying
+            ? t->revertStyle
+            : t->targetStyle;
+        const MorphStyle& to = t->applying
+            ? t->targetStyle
+            : t->revertStyle;
+        MorphNode::interpolateStyles(node->style, from, to, applyEasing(tt, node->m_transitionEasing));
     }
+    node->markDirty(PaintDirty);
+}
+
+void MorphNode::updateAncestorHoverTransition(float dt) {
+    _updateAncestorTransition(this, m_ancestorHoverTransition, dt);
+}
+
+void MorphNode::updateAncestorActiveTransition(float dt) {
+    _updateAncestorTransition(this, m_ancestorActiveTransition, dt);
 }
 
 static bool hasLayoutDiff(const MorphStyle& a, const MorphStyle& b) {
@@ -388,7 +445,9 @@ void MorphNode::update(float dt) {
     m_hasLayoutTransition = false;
 
     updateHoverTransition(dt);
+    updateActiveTransition(dt);
     updateAncestorHoverTransition(dt);
+    updateAncestorActiveTransition(dt);
     updateAnimations(dt);
 
     if (m_hoverTransition && m_hoverTransition->active) {
@@ -396,9 +455,19 @@ void MorphNode::update(float dt) {
         if (hasLayoutDiff(m_hoverTransition->startStyle, m_hoverTransition->targetStyle))
             m_hasLayoutTransition = true;
     }
+    if (m_activeTransition && m_activeTransition->active) {
+        m_isTransitioning = true;
+        if (hasLayoutDiff(m_activeTransition->startStyle, m_activeTransition->targetStyle))
+            m_hasLayoutTransition = true;
+    }
     if (m_ancestorHoverTransition && m_ancestorHoverTransition->active) {
         m_isTransitioning = true;
         if (hasLayoutDiff(m_ancestorHoverTransition->revertStyle, m_ancestorHoverTransition->targetStyle))
+            m_hasLayoutTransition = true;
+    }
+    if (m_ancestorActiveTransition && m_ancestorActiveTransition->active) {
+        m_isTransitioning = true;
+        if (hasLayoutDiff(m_ancestorActiveTransition->revertStyle, m_ancestorActiveTransition->targetStyle))
             m_hasLayoutTransition = true;
     }
     for (auto& a : m_animations) {

@@ -50,6 +50,7 @@ CSS_REGISTRY = {
     "right":                  {"feature": "position", "type": "px"},
     "top":                    {"feature": "position", "type": "px"},
     "bottom":                 {"feature": "position", "type": "px"},
+    "z-index":                {"feature": "zindex", "type": "int"},
 
     # ── Scrollbar ──────────────────────────────────────────
     "scrollbar-width":         {"feature": "scroll", "type": "px"},

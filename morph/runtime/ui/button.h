@@ -61,7 +61,7 @@ public:
 #ifdef MORPH_FEATURE_SCROLL
             if (scrolling) r.pushScrollOffset(0, -scrollY);
 #endif
-            for (auto* child : children)
+            for (auto* child : paintOrder())
                 child->executeDisplayList(r);
 #ifdef MORPH_FEATURE_SCROLL
             if (scrolling) r.popScrollOffset(0, -scrollY);
@@ -69,7 +69,7 @@ public:
             if (needRadiusClip) r.endRoundedClip();
             if (needRectClip) r.endClip();
         } else {
-            for (auto* child : children)
+            for (auto* child : paintOrder())
                 child->executeDisplayList(r);
         }
 
@@ -102,7 +102,7 @@ public:
         if (scrollEnabled && contentH > sh) {
             r.beginClip(sx, sy, sw, sh);
             r.pushScrollOffset(0, -scrollY);
-            for (auto* child : children) {
+            for (auto* child : paintOrder()) {
                 float childVisY = child->y - scrollY;
                 if (childVisY + child->h > sy && childVisY < sy + sh)
                     child->draw(r);
@@ -113,7 +113,7 @@ public:
         } else
 #endif
         {
-            for (auto* child : children)
+            for (auto* child : paintOrder())
                 child->draw(r);
         }
     }

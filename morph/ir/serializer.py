@@ -85,6 +85,7 @@ class IRSerializer:
             "border_color":            list(s.border_color),
             "border_style":            s.border_style,
             "box_sizing":              s.box_sizing,
+            "z_index":                 s.z_index,
         }
 
     def _node(self, n) -> dict:
@@ -110,6 +111,8 @@ class IRSerializer:
             result["else_nodes"] = [self._node(en) for en in n.else_nodes]
         if n.hover_style is not None:
             result["hover_style"] = self._style_dict(n.hover_style)
+        if n.active_style is not None:
+            result["active_style"] = self._style_dict(n.active_style)
         if n.transition_duration > 0:
             result["transition_duration"] = n.transition_duration
             result["transition_easing"] = n.transition_easing
@@ -117,5 +120,10 @@ class IRSerializer:
             result["ancestor_hover_rules"] = [
                 {"ancestor_tag": tag, "style": self._style_dict(s)}
                 for tag, s in n.ancestor_hover_rules
+            ]
+        if n.ancestor_active_rules:
+            result["ancestor_active_rules"] = [
+                {"ancestor_tag": tag, "style": self._style_dict(s)}
+                for tag, s in n.ancestor_active_rules
             ]
         return result

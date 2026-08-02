@@ -484,10 +484,8 @@ class JSXWalker:
                             "text": inner,
                         })
                 elif child.type == "jsx_text":
-                    text = child.text.decode()
-                    if text.strip() == "":
-                        children.append({"tag": "__text__", "text": " "})
-                    else:
+                    text = _normalize_jsx_text(child.text.decode())
+                    if text is not None:
                         children.append({"tag": "__text__", "text": text})
                 elif child.type == "ERROR":
                     text = child.text.decode().strip()
@@ -584,6 +582,22 @@ class JSXWalker:
                             val = part.text.decode().strip("'\"")
                     elif part.type == "number":
                         val = part.text.decode()
+                    elif part.type == "unary_expression":
+                        # "-1" → signed numeric literal (static value), not a
+                        # dynamic expression. Any non-numeric operand (e.g.
+                        # -flag) falls through to the expression branch.
+                        sign = ""
+                        num = ""
+                        for sub in part.children:
+                            if sub.type in ("-", "+"):
+                                sign = sub.text.decode()
+                            elif sub.type == "number":
+                                num = sub.text.decode()
+                        if num:
+                            val = sign + num
+                        else:
+                            val = part.text.decode()
+                            val_is_expr = True
                     elif part.type == "template_string":
                         val = part.text.decode()
                         val_is_expr = True
@@ -631,7 +645,12 @@ class JSXWalker:
         return funcs
 
     def _extract_inner_functions(self, block_node: Node) -> list[dict]:
-        """Extract function declarations inside a component body."""
+        """Extract function declarations inside a component body.
+
+        Supports both:
+          function foo() { ... }
+          const foo = () => { ... }  / const foo = function() { ... }
+        """
         funcs = []
         for child in block_node.children:
             if child.type == "function_declaration":
@@ -646,6 +665,22 @@ class JSXWalker:
                         "name": name,
                         "source": child.text.decode(),
                     })
+            elif child.type == "lexical_declaration":
+                for decl in child.children:
+                    if decl.type == "variable_declarator":
+                        var_name = ""
+                        has_fn = False
+                        for c in decl.children:
+                            if c.type == "identifier":
+                                var_name = c.text.decode()
+                            elif c.type in ("arrow_function", "function_expression"):
+                                has_fn = True
+                        if var_name and has_fn:
+                            funcs.append({
+                                "id": id(decl),
+                                "name": var_name,
+                                "source": child.text.decode(),
+                            })
         return funcs
 
     # ── Generic helpers ───────────────────────────────────────
@@ -657,3 +692,40 @@ class JSXWalker:
         for child in node.children:
             results.extend(self._find_all(child, node_type))
         return results
+
+
+def _normalize_jsx_text(raw: str) -> str | None:
+    """Normalize JSX text whitespace the way browsers/React do.
+
+    Rules (per the JSX spec):
+      - Whitespace at the beginning/end of each line is removed.
+      - Whitespace-only multi-line text (newlines between elements) collapses
+        to a single space — the layout engine renders it as a gap between
+        inline elements and drops it between blocks.
+      - Newlines between text segments collapse to a single space.
+      - Single-line text is kept verbatim (its spaces are intentional):
+        'a, ' before an element stays 'a, ', and a lone space between
+        elements ('a <b/> c') is preserved.
+    Returns None when the text is whitespace-only across lines (dropped).
+    """
+    if "\n" not in raw:
+        return raw
+
+    lines = [ln.strip() for ln in raw.split("\n")]
+    first = last = -1
+    for i, ln in enumerate(lines):
+        if ln:
+            if first < 0:
+                first = i
+            last = i
+    if first < 0:
+        # Whitespace-only across lines (e.g. newline between elements):
+        # collapse to a single space — the layout engine turns it into a gap
+        # between inline elements (browser-like) and drops it between blocks.
+        return " "
+
+    parts = []
+    for i in range(first, last + 1):
+        if lines[i]:
+            parts.append(lines[i])
+    return " ".join(parts)

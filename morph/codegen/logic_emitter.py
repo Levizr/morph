@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from morph.ir.node import IRWindow, IRNode
 
 # CSS property → (C++ style field name, value type)
@@ -27,6 +29,7 @@ _CSS_TO_STYLE_FIELD: dict[str, tuple[str, str]] = {
     "scrollbar-width": ("scrollbarWidth", "float"),
     "scrollbar-border-radius": ("scrollbarBorderRadius", "float"),
     "border-width": ("borderWidth", "float"),
+    "z-index": ("zIndex", "int"),
     "font-weight": ("fontWeight", "string"),
     "text-align": ("textAlign", "string"),
     "display": ("display", "string"),
@@ -67,6 +70,7 @@ _DEFAULT_STYLE_VALUES: dict[str, float | tuple[float, float, float, float] | str
     "scrollbarWidth": 8.0,
     "scrollbarBorderRadius": 4.0,
     "borderWidth": 0.0,
+    "zIndex": 0,
     "fontWeight": "normal",
     "textAlign": "left",
     "display": "block",
@@ -110,6 +114,12 @@ def _css_val_to_cpp_assignments(css_prop: str, css_val: str) -> list[str]:
             return [f"{prefix} = {val}f;"]
         except Exception:
             return []
+    elif val_type == "int":
+        try:
+            val = 0 if css_val.strip().lower() == "auto" else int(float(css_val))
+            return [f"{prefix} = {val};", f"n->style.zIndexSet = true;"]
+        except Exception:
+            return []
     elif val_type == "string":
         return [f'{prefix} = "{css_val}";']
     return []
@@ -130,6 +140,11 @@ def _css_field_reset_assignments(field_name: str) -> list[str]:
         ]
     elif isinstance(default, float):
         return [f"{prefix} = {default}f;"]
+    elif isinstance(default, int):
+        lines = [f"{prefix} = {default};"]
+        if field_name == "zIndex":
+            lines.append("n->style.zIndexSet = false;")
+        return lines
     elif isinstance(default, str):
         return [f'{prefix} = "{default}";']
     return []
@@ -195,6 +210,24 @@ void morph_logic_cleanup() {
 """
 
 
+def _effect_dep_exprs(deps: str, state_getters: set[str]) -> list[str] | None:
+    """Return `__st_*.get()` expressions for deps if every dep is a known state var.
+
+    Returns None when the effect can't be guarded (no deps / unknown deps).
+    """
+    if not deps or deps == "[]":
+        return None
+    ids = re.findall(r"[A-Za-z_$][A-Za-z0-9_$]*", deps)
+    if not ids:
+        return None
+    exprs: list[str] = []
+    for name in dict.fromkeys(ids):
+        if name not in state_getters:
+            return None
+        exprs.append(f"__st_{name}.get()")
+    return exprs
+
+
 def _get_cpp_type(init: str) -> str:
     raw_init = init.strip()
     if raw_init.startswith("'") and raw_init.endswith("'"):
@@ -227,6 +260,7 @@ def emit_logic(windows: list[IRWindow]) -> str:
             name = sv.get("getter", "")
             if name and sv not in all_state_vars:
                 all_state_vars.append(sv)
+    state_getters: set[str] = {sv.get("getter", "") for sv in all_state_vars}
 
     # Extra headers required by transpiled code (task.h for coroutines, etc.)
     # These must go before extern "C" block because they may contain templates.
@@ -263,11 +297,67 @@ def emit_logic(windows: list[IRWindow]) -> str:
                 lines.append("")
                 lines.append(f)
 
+    # ── User morphEffect declarations ──
+    all_effect_decls: list[dict] = []
+    for w in windows:
+        all_effect_decls.extend(w.effect_decls)
+
+    # Effects with deps that map to known state vars can be guarded so they
+    # skip their initial run when hot-reloaded without any dep changing.
+    guarded_map: dict[int, list[str]] = {}
+    for idx, ed in enumerate(all_effect_decls):
+        exprs = _effect_dep_exprs(ed.get("deps", "").strip(), state_getters)
+        if exprs:
+            guarded_map[idx] = exprs
+
     lines.append(_EXTERN_C_START)
 
-    # Generate the init function
-    lines.append(f'void morph_logic_init(::NodeRegistry& nodes, ::SignalStore& store) {{')
-    lines.append(f'    fprintf(stderr, "[logic.so] init called, registry has %zu nodes\\n", nodes.size());')
+    for i in range(len(guarded_map)):
+        lines.append(f"static std::string __esig_{i};")
+    if guarded_map:
+        lines.append("")
+
+    # ── morph_logic_rewire: wire events + (re)create effects ──
+    lines.append("void morph_logic_rewire(::NodeRegistry& nodes, ::SignalStore& store) {")
+    lines.append("    (void)store;")
+
+    wired_events: set[tuple[str, str]] = set()
+    for w in windows:
+        for node in w.nodes:
+            _emit_node_events(lines, node, wired_events, indent="    ")
+
+    for w in windows:
+        for node in w.nodes:
+            _emit_node_effects(lines, node, indent="    ")
+
+    gidx = 0
+    for idx, ed in enumerate(all_effect_decls):
+        deps = ed.get("deps", "").strip()
+        if deps == "[]":
+            continue  # run-once, executed in morph_logic_init
+        cpp_lambda = ed["lambda"]
+        if idx in guarded_map:
+            sig_expr = " + \"|\" + ".join(
+                f"morph::str({e})" for e in guarded_map[idx]
+            )
+            lines.append("    {")
+            lines.append(f"        auto __ef = {cpp_lambda};")
+            lines.append(f"        __effects[__effect_count++] = morph::create_effect([&, __ef]() {{")
+            lines.append(f"            std::string __sig = {sig_expr};")
+            lines.append(f"            if (__sig == __esig_{gidx}) return;")
+            lines.append(f"            __esig_{gidx} = __sig;")
+            lines.append("            __ef();")
+            lines.append("        });")
+            lines.append("    }")
+            gidx += 1
+        else:
+            lines.append(f'    __effects[__effect_count++] = morph::create_effect({cpp_lambda});')
+
+    lines.append("}")
+    lines.append("")
+
+    # ── morph_logic_init: sync signals from store, run-once effects ──
+    lines.append("void morph_logic_init(::NodeRegistry& nodes, ::SignalStore& store) {")
 
     # Sync signal values from store (for hot-reload persistence)
     for sv in all_state_vars:
@@ -281,34 +371,76 @@ def emit_logic(windows: list[IRWindow]) -> str:
     if all_state_vars:
         lines.append("")
 
-    # Track which (node_id, member) pairs we've already wired up (avoid duplicate handlers)
-    wired_events: set[tuple[str, str]] = set()
+    # Run-once effects (no deps) — never re-run on in-place rewires
+    for ed in all_effect_decls:
+        if ed.get("deps", "").strip() != "[]":
+            continue
+        lines.append("    { // morphEffect (run once)")
+        lines.append(f"        auto __ef_fn = {ed['lambda']};")
+        lines.append("        __ef_fn();")
+        lines.append("    }")
 
-    for w in windows:
-        for node in w.nodes:
-            _emit_node_logic(lines, node, wired_events, indent="    ")
-
-    # ── morphEffect declarations ──
-    for w in windows:
-        for ed in w.effect_decls:
-            cpp_lambda = ed["lambda"]
-            deps = ed.get("deps", "").strip()
-            if deps == "[]":
-                lines.append(f'    {{ // morphEffect (run once)')
-                lines.append(f'        auto __ef_fn = {cpp_lambda};')
-                lines.append(f'        __ef_fn();')
-                lines.append(f'    }}')
-            else:
-                lines.append(f'    __effects[__effect_count++] = morph::create_effect({cpp_lambda});')
-
+    lines.append("    morph_logic_rewire(nodes, store);")
     lines.append("}")
     lines.append(_LOGIC_FOOTER)
 
     return "\n".join(lines)
 
 
-def _emit_node_logic(lines: list[str], node: IRNode, wired_events: set[tuple[str, str]],
-                     indent: str = "    ") -> None:
+def _emit_node_events(lines: list[str], node: IRNode, wired_events: set[tuple[str, str]],
+                      indent: str = "    ") -> None:
+    node_id = node.node_id
+
+    if node.node_type in ("__expr__", "__text__"):
+        return
+
+    if node.node_type == "__conditional__":
+        for tn in node.then_nodes:
+            _emit_node_events(lines, tn, wired_events, indent)
+        for en in node.else_nodes:
+            _emit_node_events(lines, en, wired_events, indent)
+        return
+
+    # Emit events for this node
+    _EVENT_MEMBER_MAP = {
+        "click": "onClick",
+        "keyup": "onKeyUp",
+        "keydown": "onKeyDown",
+        "dblclick": "onDoubleClick",
+        "mousedown": "onMouseDown",
+        "mouseup": "onMouseUp",
+        "mouseenter": "onMouseEnter",
+        "mouseleave": "onMouseLeave",
+    }
+
+    for event in node.events:
+        member = _EVENT_MEMBER_MAP.get(event.trigger, "onClick")
+        wire_key = (node_id, member)
+        if wire_key in wired_events:
+            continue
+        if event.action == "call":
+            rhs = event.target
+            lines.append(f'{indent}if (auto* n = nodes.get("{node_id}")) {{')
+            lines.append(f'{indent}    n->{member} = {rhs};')
+            lines.append(f'{indent}}}')
+            wired_events.add(wire_key)
+        elif event.action in ("open", "close", "navigate"):
+            # Note: open/close/navigate require multi-window management (build mode only)
+            # In dev mode, skip these actions silently.
+            wired_events.add(wire_key)
+        elif event.action == "log":
+            escaped = event.target.replace('"', '\\"')
+            lines.append(f'{indent}if (auto* n = nodes.get("{node_id}")) {{')
+            lines.append(f'{indent}    n->{member} = [](JsObject) {{ fprintf(stderr, "{escaped}\\n"); }};')
+            lines.append(f'{indent}}}')
+            wired_events.add(wire_key)
+
+    # Recurse children
+    for child in node.children:
+        _emit_node_events(lines, child, wired_events, indent)
+
+
+def _emit_node_effects(lines: list[str], node: IRNode, indent: str = "    ") -> None:
     node_id = node.node_id
 
     if node.node_type == "__expr__":
@@ -340,49 +472,11 @@ def _emit_node_logic(lines: list[str], node: IRNode, wired_events: set[tuple[str
                 lines.append(f'{indent}        if (child) container->addChild(child);')
             lines.append(f'{indent}    }}')
         lines.append(f'{indent}}});')
-        # Also wire events on nodes inside then/else branches
         for tn in node.then_nodes:
-            _emit_node_logic(lines, tn, wired_events, indent)
+            _emit_node_effects(lines, tn, indent)
         for en in node.else_nodes:
-            _emit_node_logic(lines, en, wired_events, indent)
+            _emit_node_effects(lines, en, indent)
         return
-
-    # Emit events for this node
-    _EVENT_MEMBER_MAP = {
-        "click": "onClick",
-        "keyup": "onKeyUp",
-        "keydown": "onKeyDown",
-        "dblclick": "onDoubleClick",
-        "mousedown": "onMouseDown",
-        "mouseup": "onMouseUp",
-        "mouseenter": "onMouseEnter",
-        "mouseleave": "onMouseLeave",
-    }
-
-    for event in node.events:
-        member = _EVENT_MEMBER_MAP.get(event.trigger, "onClick")
-        wire_key = (node_id, member)
-        if wire_key in wired_events:
-            continue
-        if event.action == "call":
-            rhs = event.target
-            lines.append(f'{indent}fprintf(stderr, "[logic.so] setting {member} on {node_id}\\n");')
-            lines.append(f'{indent}if (auto* n = nodes.get("{node_id}")) {{')
-            lines.append(f'{indent}    n->{member} = {rhs};')
-            lines.append(f'{indent}}} else {{')
-            lines.append(f'{indent}    fprintf(stderr, "[logic.so] node {node_id} NOT FOUND\\n");')
-            lines.append(f'{indent}}}')
-            wired_events.add(wire_key)
-        elif event.action in ("open", "close", "navigate"):
-            # Note: open/close/navigate require multi-window management (build mode only)
-            # In dev mode, skip these actions silently.
-            wired_events.add(wire_key)
-        elif event.action == "log":
-            escaped = event.target.replace('"', '\\"')
-            lines.append(f'{indent}if (auto* n = nodes.get("{node_id}")) {{')
-            lines.append(f'{indent}    n->{member} = [](JsObject) {{ fprintf(stderr, "{escaped}\\n"); }};')
-            lines.append(f'{indent}}}')
-            wired_events.add(wire_key)
 
     # ── Reactive style (inline style expressions) ──
     if node.reactive_style:
@@ -475,4 +569,4 @@ def _emit_node_logic(lines: list[str], node: IRNode, wired_events: set[tuple[str
 
     # Recurse children
     for child in node.children:
-        _emit_node_logic(lines, child, wired_events, indent)
+        _emit_node_effects(lines, child, indent)

@@ -53,15 +53,17 @@ class NodeEmitter:
             lines.append(f"{indent}{node.node_id}->h = {fmt(node.h)};")
             lines.append(self._set_style(node, indent, parent_style))
             lines.append(self._set_hover_style(node, indent))
+            lines.append(self._set_active_style(node, indent))
             lines.append(self._set_ancestor_hover_rules(node, indent))
+            lines.append(self._set_ancestor_active_rules(node, indent))
             if parent_id:
                 lines.append(self._set_transition(node, indent))
             if parent_id:
                 lines.append(f"{parent_id}->addChild({node.node_id});")
             if node.reactive_text:
-                lines.append(f"morph::create_effect([&]() {{")
+                lines.append(f"{node.node_id}->m_associatedEffects.push_back(morph::create_effect([{node.node_id}]() {{")
                 lines.append(f"{indent}{node.node_id}->setText(morph::str({node.reactive_text}));")
-                lines.append(f"}});")
+                lines.append(f"}}));")
             return "\n".join(lines)
 
         # ── Conditional node ─────────────────────────────────
@@ -141,12 +143,14 @@ class NodeEmitter:
 
         lines.append(self._set_style(node, indent, parent_style))
         lines.append(self._set_hover_style(node, indent))
+        lines.append(self._set_active_style(node, indent))
         lines.append(self._set_transition(node, indent))
 
         for event in node.events:
             lines.append(self._emit_event(event, node.node_id, indent))
 
         lines.append(self._set_ancestor_hover_rules(node, indent))
+        lines.append(self._set_ancestor_active_rules(node, indent))
 
         lines.append("")
 
@@ -278,6 +282,12 @@ class NodeEmitter:
             if s.bottom is not None:
                 lines.append(f"{prefix}.bottom = {fmt(s.bottom)};")
 
+        # ── Feature: ZINDEX ──
+        if "zindex" in self.features:
+            if s.z_index is not None:
+                lines.append(f"{prefix}.zIndex = {int(s.z_index)};")
+                lines.append(f"{prefix}.zIndexSet = true;")
+
         # ── Feature: CURSOR ──
         if "cursor" in self.features:
             if s.cursor != "default":
@@ -318,11 +328,20 @@ class NodeEmitter:
         return "\n".join(f"{indent}{l}" for l in lines)
 
     def _set_ancestor_hover_rules(self, node: IRNode, indent: str) -> str:
-        if not node.ancestor_hover_rules:
+        return self._set_ancestor_state_rules(node, "ancestor_hover_rules",
+                                              "m_ancestorHoverRules", indent)
+
+    def _set_ancestor_active_rules(self, node: IRNode, indent: str) -> str:
+        return self._set_ancestor_state_rules(node, "ancestor_active_rules",
+                                              "m_ancestorActiveRules", indent)
+
+    def _set_ancestor_state_rules(self, node: IRNode, attr: str, member: str, indent: str) -> str:
+        rules = getattr(node, attr)
+        if not rules:
             return ""
         lines = []
-        for tag, rule_style in node.ancestor_hover_rules:
-            var = f"_ah_{node.node_id}_{tag}"
+        for tag, rule_style in rules:
+            var = f"_st_{node.node_id}_{member}_{tag}"
             lines.append(f"AncestorHoverRule {var};")
             lines.append(f"{var}.ancestorTag = \"{tag}\";")
             s = rule_style
@@ -380,6 +399,9 @@ class NodeEmitter:
                     lines.append(f"{var}.style.borderColor[{i}] = {s.border_color[i]:.4f}f;")
             if s.border_style not in ("", "none"):
                 lines.append(f"{var}.style.borderStyle = \"{s.border_style}\";")
+            if "zindex" in self.features and s.z_index is not None:
+                lines.append(f"{var}.style.zIndex = {int(s.z_index)};")
+                lines.append(f"{var}.style.zIndexSet = true;")
             if "flex" in self.features:
                 if s.flex_dir != "row":
                     lines.append(f"{var}.style.flexDirection = \"{s.flex_dir}\";")
@@ -393,15 +415,21 @@ class NodeEmitter:
                     lines.append(f"{var}.style.flexGrow = {fmt(s.flex_grow)};")
                 if s.flex_shrink != 1.0:
                     lines.append(f"{var}.style.flexShrink = {fmt(s.flex_shrink)};")
-            lines.append(f"{node.node_id}->m_ancestorHoverRules.push_back({var});")
+            lines.append(f"{node.node_id}->{member}.push_back({var});")
         return "\n" + "\n".join(f"{indent}{l}" for l in lines)
 
     def _set_hover_style(self, node: IRNode, indent: str) -> str:
-        s = node.hover_style
+        return self._set_state_style(node, "hover_style", "hoverStyle", indent)
+
+    def _set_active_style(self, node: IRNode, indent: str) -> str:
+        return self._set_state_style(node, "active_style", "activeStyle", indent)
+
+    def _set_state_style(self, node: IRNode, attr: str, cpp_member: str, indent: str) -> str:
+        s = getattr(node, attr)
         if s is None:
             return ""
         base = node.style
-        hv = f"{node.node_id}->hoverStyle"
+        hv = f"{node.node_id}->{cpp_member}"
         overrides = []
 
         # Colors
@@ -488,6 +516,12 @@ class NodeEmitter:
                 overrides.append(f"{hv}->top = {fmt(s.top)};")
             if s.bottom is not None and s.bottom != base.bottom:
                 overrides.append(f"{hv}->bottom = {fmt(s.bottom)};")
+
+        # ── Feature: ZINDEX ──
+        if "zindex" in self.features:
+            if s.z_index is not None and s.z_index != base.z_index:
+                overrides.append(f"{hv}->zIndex = {int(s.z_index)};")
+                overrides.append(f"{hv}->zIndexSet = true;")
 
         # ── Feature: CURSOR ──
         if "cursor" in self.features:

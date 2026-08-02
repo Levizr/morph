@@ -59,6 +59,8 @@ def main():
     p_doctor = sub.add_parser("doctor", help="Check system dependencies")
     p_doctor.add_argument("-v", "--verbose", action="store_true",
                           help="Show detailed version info")
+    p_doctor.add_argument("-y", "--yes", action="store_true",
+                          help="Auto-install missing system packages without prompting")
 
     sub.add_parser("cache", help="Manage fetched CSS cache")
 

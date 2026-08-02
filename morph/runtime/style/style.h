@@ -15,6 +15,9 @@
 #ifdef MORPH_FEATURE_BORDER
 #include "features/border.h"
 #endif
+#ifdef MORPH_FEATURE_ZINDEX
+#include "features/zindex.h"
+#endif
 
 struct MorphStyle : StyleBase
 #ifdef MORPH_FEATURE_FLEX
@@ -31,5 +34,8 @@ struct MorphStyle : StyleBase
 #endif
 #ifdef MORPH_FEATURE_BORDER
     , BorderStyle
+#endif
+#ifdef MORPH_FEATURE_ZINDEX
+    , ZIndexStyle
 #endif
 {};

@@ -10,6 +10,7 @@ class IRNode:
     node_type: str                              # div, button, text, ...
     style: IRStyle = field(default_factory=IRStyle)
     hover_style: IRStyle | None = None          # style applied on :hover
+    active_style: IRStyle | None = None         # style applied on :active (pressed)
     children: list[IRNode] = field(default_factory=list)
     events: list[IREvent] = field(default_factory=list)
     text_content: str = ""
@@ -20,6 +21,9 @@ class IRNode:
     transition_easing: str = "ease-in-out"
 
     ancestor_hover_rules: list[tuple[str, IRStyle]] = field(default_factory=list)
+    # Each tuple: (ancestor_tag, resolved IRStyle)
+
+    ancestor_active_rules: list[tuple[str, IRStyle]] = field(default_factory=list)
     # Each tuple: (ancestor_tag, resolved IRStyle)
 
     # computed by LayoutEngine

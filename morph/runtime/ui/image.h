@@ -72,7 +72,7 @@ public:
                 default: break;
             }
         }
-        for (auto* c : children) c->executeDisplayList(r);
+        for (auto* c : paintOrder()) c->executeDisplayList(r);
     }
 
     void draw(Renderer& r) override {
@@ -103,7 +103,7 @@ public:
         }
 
         // Draw children on top (e.g., overlay text)
-        for (auto* c : children) c->draw(r);
+        for (auto* c : paintOrder()) c->draw(r);
     }
 
     void layout(float px, float py, float parentW, float parentH,

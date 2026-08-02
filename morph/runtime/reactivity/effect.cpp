@@ -61,6 +61,7 @@ void run_pending_effects() {
         std::lock_guard<std::mutex> lock(s_pending_mutex);
         batch.swap(s_pending);
     }
+    if (batch.empty()) return;
     for (auto* node : batch) {
         if (!node->dead) {
             node->run();
