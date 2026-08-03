@@ -1,0 +1,124 @@
+body {
+  background-color: #0d0f14;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  padding: 18px;
+  box-sizing: border-box;
+  background-color: #0d0f14;
+}
+
+/* ── Display ── */
+.display {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding: 10px 6px 22px;
+  flex-grow: 1;
+}
+
+.expr {
+  margin-top: 50px;
+  font-size: 50px;
+  color: #5f6b85;
+  min-height: 20px;
+  margin-bottom: 8px;
+  letter-spacing: 1px;
+}
+
+.value {
+  margin-top: 50px;
+  font-size: 56px;
+  font-weight: bold;
+  color: #f2f4fa;
+  max-width: 100%;
+  white-space: nowrap;
+}
+
+/* ── Keypad ── */
+.keys {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.row {
+  display: flex;
+  flex-direction: row;
+  gap: 10px;
+}
+
+.key {
+  flex-grow: 1;
+  height: 62px;
+  border-radius: 18px;
+  font-size: 22px;
+  font-weight: 600;
+  color: #e6e9f2;
+  background-color: #1b2130;
+  border: 1px solid #232b3d;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  text-align: center;
+
+}
+
+.key:hover {
+  background-color: #262e41;
+  transform: translateY(-1px);
+}
+
+.key:active {
+  background-color: #2e3852;
+  transform: translateY(1px);
+}
+
+.key.zero {
+  flex-grow: 2;
+}
+
+/* Function keys (AC, +/-, %) */
+.key.fn {
+  color: #aab6c9;
+  background-color: #141a26;
+  font-size: 18px;
+}
+
+.key.fn:hover {
+  background-color: #1e2532;
+}
+
+/* Operator keys */
+.key.op {
+  color: #ffb45c;
+  background-color: #2a210f;
+  border-color: #3a2c16;
+  font-size: 26px;
+}
+
+.key.op:hover {
+  background-color: #3a2d14;
+}
+
+.key.op:active {
+  background-color: #4a3a1a;
+}
+
+/* Equals */
+.key.eq {
+  color: #1d1a4a;
+  background-color: #6d7cff;
+  border-color: #7b89ff;
+  font-size: 26px;
+}
+
+.key.eq:hover {
+  background-color: #7d8cff;
+}
+
+.key.eq:active {
+  background-color: #5a66dd;
+}

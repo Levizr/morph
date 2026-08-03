@@ -5,6 +5,11 @@
 
 RepaintHookFn g_repaintHook = nullptr;
 
+#ifdef MORPH_FEATURE_DEV
+// Forward declaration: defined near recordPaintTree, used by commitFrame/render.
+static void syncPaintDirtyTree(MorphNode *n);
+#endif
+
 // Double-click detection: threshold in seconds
 static double s_lastClickTime = 0.0;
 static const double DBL_CLICK_THRESHOLD = 0.3;
@@ -272,6 +277,9 @@ void MorphWindow::commitFrame()
     m_root->layoutIfNeeded(0.0f, 0.0f, (float)m_width, (float)m_height,
                            &m_renderer, &m_dirtyStats);
     m_dirtyStats.fullTreeCount = countNodes(m_root);
+#ifdef MORPH_FEATURE_DEV
+    syncPaintDirtyTree(m_root);
+#endif
 
     recordPaintTree(m_root, m_renderer, m_dirtyStats);
 
@@ -525,6 +533,9 @@ void MorphWindow::render(std::function<void(GLRenderer &, DirtyStats &)> overlay
         m_root->layoutIfNeeded(0.0f, 0.0f, (float)m_width, (float)m_height,
                                &m_renderer, &m_dirtyStats);
         m_dirtyStats.fullTreeCount = countNodes(m_root);
+#ifdef MORPH_FEATURE_DEV
+        syncPaintDirtyTree(m_root);
+#endif
         recordPaintTree(m_root, m_renderer, m_dirtyStats);
         m_renderer.clear();
         m_renderer.setProjection(proj);
@@ -572,6 +583,15 @@ static void clearAllDirty(MorphNode *n)
     for (auto *c : n->children)
         clearAllDirty(c);
 }
+
+#ifdef MORPH_FEATURE_DEV
+static void syncPaintDirtyTree(MorphNode *n)
+{
+    n->syncPaintDirtyAfterLayout();
+    for (auto *c : n->children)
+        syncPaintDirtyTree(c);
+}
+#endif
 
 static void recordPaintTree(MorphNode *n, Renderer &r, DirtyStats &stats)
 {

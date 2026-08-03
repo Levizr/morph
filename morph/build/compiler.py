@@ -151,6 +151,7 @@ class Compiler:
             "MORPH_FEATURE_MARGIN_COLLAPSE", "MORPH_FEATURE_MIN_MAX",
             "MORPH_FEATURE_BORDER_BOX", "MORPH_FEATURE_IMAGE",
             "MORPH_FEATURE_DIRTY_RENDERING",
+            "MORPH_FEATURE_DEV",
         ]
         for d in _DEV_FEATURES:
             cmd.append(f"-D{d}")

@@ -896,5 +896,10 @@ after_children:
 
     clearDirty(LayoutDirty);
     clearDirty(StyleDirty);
+#ifdef MORPH_FEATURE_DEV
+    // Dev: paint dirtiness is established by the geometry diff after the
+    // layout pass (window.cpp syncPaintDirtyTree), not blanket here.
+#else
     markDirty(PaintDirty);
+#endif
 }

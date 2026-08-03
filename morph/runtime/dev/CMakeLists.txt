@@ -70,6 +70,7 @@ target_compile_definitions(morph_devrt PRIVATE
     MORPH_FEATURE_BORDER_BOX
     MORPH_FEATURE_IMAGE
     MORPH_FEATURE_DIRTY_RENDERING
+    MORPH_FEATURE_DEV
 )
 
 target_link_options(morph_devrt PRIVATE -rdynamic)

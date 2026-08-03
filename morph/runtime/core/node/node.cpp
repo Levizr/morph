@@ -32,7 +32,13 @@ void MorphNode::layoutIfNeeded(float px, float py, float parentW, float parentH,
         layout(px, py, parentW, parentH, r);
         clearDirty(LayoutDirty);
         clearDirty(StyleDirty);
+#ifdef MORPH_FEATURE_DEV
+        // Dev: paint dirtiness is decided by the geometry diff that runs after
+        // this layout pass (window.cpp syncPaintDirtyTree) so unchanged nodes
+        // that merely re-ran layout are not repainted.
+#else
         markDirty(PaintDirty);
+#endif
     }
 
     for (auto* c : children) {
@@ -48,6 +54,39 @@ void MorphNode::layoutIfNeeded(float px, float py, float parentW, float parentH,
     }
     if (needsLayout) clearDirty(SubtreeDirty);
 }
+
+#ifdef MORPH_FEATURE_DEV
+void MorphNode::syncPaintDirtyAfterLayout() {
+    // First pass (or freshly (re)attached node): never recorded this box, so
+    // force a fresh display list and snapshot the geometry.
+    if (!m_hasPaintedOnce) {
+        markDirty(PaintDirty);
+        m_hasPaintedOnce = true;
+        m_lastPaintX = x; m_lastPaintY = y;
+        m_lastPaintW = w; m_lastPaintH = h;
+        m_lastPaintContentH = contentH;
+        m_lastPaintScrollY = scrollY;
+        m_lastPaintScrollEnabled = scrollEnabled;
+        return;
+    }
+    // A node whose absolute box (or scrollport) moved during layout must
+    // re-record its display list — flatten() bakes absolute coordinates into
+    // its ops, so a stale list would render at the old position. Geometry that
+    // didn't change needs no repaint even though it may have re-run layout.
+    if (x != m_lastPaintX || y != m_lastPaintY ||
+        w != m_lastPaintW || h != m_lastPaintH ||
+        contentH != m_lastPaintContentH ||
+        scrollEnabled != m_lastPaintScrollEnabled ||
+        scrollY != m_lastPaintScrollY) {
+        markDirty(PaintDirty);
+        m_lastPaintX = x; m_lastPaintY = y;
+        m_lastPaintW = w; m_lastPaintH = h;
+        m_lastPaintContentH = contentH;
+        m_lastPaintScrollY = scrollY;
+        m_lastPaintScrollEnabled = scrollEnabled;
+    }
+}
+#endif
 
 float MorphNode::contentWidth(Renderer* r) {
     float pl = style.padding[3], pr = style.padding[1];

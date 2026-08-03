@@ -1,0 +1,133 @@
+import { CSS, morphState } from 'morph'
+
+CSS.load("style.css")
+
+export const windowConfig = {
+  title: "Calculator",
+  width: 340,
+  height: 500,
+}
+
+// opcodes: 0 none, 1 +, 2 -, 3 x, 4 /
+function compute(a:double, b:double, k:int):double {
+  if (k === 1) return a + b;
+  if (k === 2) return a - b;
+  if (k === 3) return a * b;
+  if (k === 4) return a / b; // divide by zero => inf/nan => "Error"
+  return b;                  // k=0: first operand, result is just b
+}
+
+export default function App() {
+  const [cur, setCur] = morphState(0.0);
+  const [acc, setAcc] = morphState(0.0);
+  const [op, setOp] = morphState(0);
+  const [opSym, setOpSym] = morphState("");
+  const [fresh, setFresh] = morphState(1);
+  const [dot, setDot] = morphState(0);
+  const [dp, setDp] = morphState(0.1);
+
+  function pressDigit(d:double):void {
+    if (fresh === 1) {
+      setCur(d);
+      setFresh(0);
+      setDot(0);
+      setDp(0.1);
+    } else if (dot === 1) {
+      setCur(cur + d * dp);
+      setDp(dp / 10);
+    } else {
+      setCur(cur * 10 + d);
+    }
+  }
+
+  function pressDot():void {
+    if (dot === 0) {
+      if (fresh === 1) {
+        setCur(0.0);
+        setFresh(0);
+      }
+      setDot(1);
+      setDp(0.1);
+    }
+  }
+
+  function pressOp(k:int):void {
+    setAcc(compute(acc, cur, op));
+    setOp(k);
+    setOpSym(k === 1 ? "+" : (k === 2 ? "-" : (k === 3 ? "x" : "/")));
+    setFresh(1);
+    setDot(0);
+    setDp(0.1);
+  }
+
+  function pressEquals():void {
+    setCur(compute(acc, cur, op));
+    setAcc(0);
+    setOp(0);
+    setOpSym("");
+    setFresh(1);
+    setDot(0);
+    setDp(0.1);
+  }
+
+  function pressClear():void {
+    setCur(0.0);
+    setAcc(0.0);
+    setOp(0);
+    setOpSym("");
+    setFresh(1);
+    setDot(0);
+    setDp(0.1);
+  }
+
+  function pressNeg():void {
+    if (cur !== 0) setCur(-cur);
+  }
+
+  function pressPct():void {
+    setCur(cur / 100);
+  }
+
+  return (
+    <body>
+      <div className="app" id="app">
+        <div className="display" id="display">
+          <div className="expr" id="expr">{op !== 0 && <span>{acc} {opSym}</span>}</div>
+          <div className="value" id="value">{cur}</div>
+        </div>
+
+        <div className="keys" id="keys">
+          <div className="row" id="row1">
+            <button className="key fn" id="k-clear" onClick={() => pressClear()}>AC</button>
+            <button className="key fn" id="k-neg"   onClick={() => pressNeg()}>+/−</button>
+            <button className="key fn" id="k-pct"   onClick={() => pressPct()}>%</button>
+            <button className="key op" id="k-div"   onClick={() => pressOp(4)}>÷</button>
+          </div>
+          <div className="row" id="row2">
+            <button className="key" id="k-7" onClick={() => pressDigit(7)}>7</button>
+            <button className="key" id="k-8" onClick={() => pressDigit(8)}>8</button>
+            <button className="key" id="k-9" onClick={() => pressDigit(9)}>9</button>
+            <button className="key op" id="kMul" onClick={() => pressOp(3)}>×</button>
+          </div>
+          <div className="row" id="row3">
+            <button className="key" id="k-4" onClick={() => pressDigit(4)}>4</button>
+            <button className="key" id="k-5" onClick={() => pressDigit(5)}>5</button>
+            <button className="key" id="k-6" onClick={() => pressDigit(6)}>6</button>
+            <button className="key op" id="kSub" onClick={() => pressOp(2)}>−</button>
+          </div>
+          <div className="row" id="row4">
+            <button className="key" id="k-1" onClick={() => pressDigit(1)}>1</button>
+            <button className="key" id="k-2" onClick={() => pressDigit(2)}>2</button>
+            <button className="key" id="k-3" onClick={() => pressDigit(3)}>3</button>
+            <button className="key op" id="kAdd" onClick={() => pressOp(1)}>+</button>
+          </div>
+          <div className="row" id="row5">
+            <button className="key zero" id="k-0"  onClick={() => pressDigit(0)}>0</button>
+            <button className="key" id="kDot" onClick={() => pressDot()}>.</button>
+            <button className="key eq"   id="kEq"  onClick={() => pressEquals()}>=</button>
+          </div>
+        </div>
+      </div>
+    </body>
+  )
+}

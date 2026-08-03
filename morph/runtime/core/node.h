@@ -156,6 +156,22 @@ public:
         return true;
     }
 
+    #ifdef MORPH_FEATURE_DEV
+    // Geometry that was current when this node's display list was last
+    // recorded. After a layout pass these are compared against the live box:
+    // only nodes whose absolute position/size (or scrollport) actually changed
+    // need to re-record their display list and repaint, instead of every node
+    // that merely ran layout. flatten() bakes absolute coordinates into the
+    // recorded ops, so any moved box MUST be re-recorded to stay correct.
+    float m_lastPaintX = 0.0f, m_lastPaintY = 0.0f;
+    float m_lastPaintW = 0.0f, m_lastPaintH = 0.0f;
+    float m_lastPaintContentH = 0.0f;
+    float m_lastPaintScrollY = 0.0f;
+    bool m_lastPaintScrollEnabled = false;
+    bool m_hasPaintedOnce = false;
+    void syncPaintDirtyAfterLayout();
+#endif
+
     virtual void layout(float px, float py, float parentW, float parentH,
                         Renderer* r = nullptr);
     virtual void draw(Renderer& r) = 0;
