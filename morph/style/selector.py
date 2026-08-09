@@ -52,9 +52,7 @@ class Selector:
     @staticmethod
     def _match_compound(comp: CompoundSelector, tag: str,
                         classes: list[str], id: str | None) -> bool:
-        if comp.universal:
-            return True
-        if comp.tag and comp.tag != tag:
+        if not comp.universal and comp.tag and comp.tag != tag:
             return False
         if comp.id and comp.id != id:
             return False
@@ -179,6 +177,14 @@ def _parse_compound(raw: str) -> CompoundSelector | None:
         return None
 
     comp = CompoundSelector()
+
+    def _flush(buf: list[str]) -> None:
+        s = "".join(buf)
+        if s == "*":
+            comp.universal = True
+        elif s:
+            comp.tag = s
+
     i = 0
     buf: list[str] = []
 
@@ -186,26 +192,29 @@ def _parse_compound(raw: str) -> CompoundSelector | None:
         ch = raw[i]
         if ch == ".":
             if buf:
-                comp.tag = "".join(buf)
+                _flush(buf)
                 buf = []
             i += 1
             cls_start = i
-            while i < len(raw) and raw[i] not in (".", "#", ":", "(", ")", "[", "]", " ", ">"):
+            while i < len(raw) and raw[i] not in (".", "#", ":", "(", ")", "[", "]", " ", ">", "*"):
                 i += 1
             if i > cls_start:
                 comp.classes.append(raw[cls_start:i])
         elif ch == "#":
             if buf:
-                comp.tag = "".join(buf)
+                _flush(buf)
                 buf = []
             i += 1
             id_start = i
-            while i < len(raw) and raw[i] not in (".", "#", ":", "(", ")", "[", "]", " ", ">"):
+            while i < len(raw) and raw[i] not in (".", "#", ":", "(", ")", "[", "]", " ", ">", "*"):
                 i += 1
             if i > id_start:
                 comp.id = raw[id_start:i]
         elif ch == ":":
             i += 1
+            if buf:
+                _flush(buf)
+                buf = []
             pseudo_start = i
             while i < len(raw) and raw[i] not in (".", "#", " ", ">"):
                 i += 1
@@ -218,11 +227,7 @@ def _parse_compound(raw: str) -> CompoundSelector | None:
             i += 1
 
     if buf:
-        tag_str = "".join(buf)
-        if tag_str == "*":
-            comp.universal = True
-        else:
-            comp.tag = tag_str
+        _flush(buf)
 
     return comp
 

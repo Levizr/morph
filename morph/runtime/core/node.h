@@ -26,7 +26,10 @@ struct DirtyStats {
     int paintCount = 0;
     int fullTreeCount = 0;
     int skippedCount = 0;
-    void reset() { layoutCount = 0; paintCount = 0; fullTreeCount = 0; skippedCount = 0; }
+    int damageArea = 0;      // forge: pixels repainted this frame (0 = no damage)
+    int presentBytes = 0;    // forge: bytes blitted to the backbuffer this frame
+    void reset() { layoutCount = 0; paintCount = 0; fullTreeCount = 0; skippedCount = 0;
+                   damageArea = 0; presentBytes = 0; }
 };
 
 enum class AnimProperty : uint8_t {

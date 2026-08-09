@@ -57,7 +57,7 @@ body {
   border-radius: 18px;
   font-size: 22px;
   font-weight: 600;
-  color: #e6e9f2;
+  color: #f2e6e6;
   background-color: #1b2130;
   border: 1px solid #232b3d;
   cursor: pointer;
@@ -122,3 +122,4 @@ body {
 .key.eq:active {
   background-color: #5a66dd;
 }
+

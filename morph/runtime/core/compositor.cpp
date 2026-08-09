@@ -27,9 +27,11 @@ double Compositor::getTime() const {
 
 void Compositor::run() {
     while (m_running.load()) {
-        // Wait for a pending frame (CPU-only, no GL)
+        // Wait for a pending frame (CPU-only, no GL). Sleep instead of
+        // spinning so idle uses ~0% CPU; interpolation latency stays under
+        // ~1 ms (negligible vs the 16 ms frame period).
         while (!g_framePending.load(std::memory_order_acquire) && m_running.load()) {
-            std::this_thread::yield();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
         if (!m_running.load()) break;
 

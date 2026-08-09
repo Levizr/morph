@@ -43,6 +43,9 @@ def main():
                          help="Override entry .mx file")
     p_build.add_argument("--output", type=str, default=None,
                          help="Output directory (default: .morph/)")
+    p_build.add_argument("--static", action="store_true",
+                         help="Statically link GLFW/FreeType/HarfBuzz into the binary "
+                              "(single self-contained file; needs the .a dev archives)")
 
     p_run = sub.add_parser("run", help="Run built production binary")
     p_run.add_argument("binary", nargs="?", default=None,

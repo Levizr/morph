@@ -70,6 +70,7 @@ class TSFunctionDeclaration(TSNode):
     return_type: Optional[TSType]
     body: TSBlockStatement
     type_parameters: Optional[list[TSTypeParameter]] = None
+    is_async: bool = False
 
 
 @dataclass
@@ -78,6 +79,7 @@ class TSArrowFunction(TSNode):
     return_type: Optional[TSType]
     body: TSBlockStatement | TSNode
     type_parameters: Optional[list[TSTypeParameter]] = None
+    is_async: bool = False
 
 
 @dataclass
@@ -152,6 +154,11 @@ class TSCallExpression(TSNode):
 
 
 @dataclass
+class TSAwaitExpression(TSNode):
+    argument: TSNode
+
+
+@dataclass
 class TSMemberExpression(TSNode):
     object: TSNode
     property: TSNode
@@ -185,6 +192,7 @@ class TSFunctionExpression(TSNode):
     return_type: Optional[TSType]
     body: TSBlockStatement | TSNode
     type_parameters: Optional[list[TSTypeParameter]] = None
+    is_async: bool = False
 
 
 # ── OOP & Advanced ─────────────────────────────────────────
@@ -231,6 +239,7 @@ class TSMethodDefinition(TSNode):
     body: TSBlockStatement
     access_modifier: str = ""
     static: bool = False
+    is_async: bool = False
 
 
 @dataclass

@@ -2,11 +2,13 @@
   "name": "calculator",
   "entry": "src/App.mx",
   "output": "dist/",
+
   "window": {
     "width": 340,
     "height": 560,
     "title": "Calculator"
   },
   "dependencies": {},
-  "cpp_sources": []
+  "cpp_sources": [],
+"renderer": "forge"
 }

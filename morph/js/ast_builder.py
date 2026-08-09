@@ -3,6 +3,7 @@ from __future__ import annotations
 from tree_sitter import Node
 
 from morph.js.ast import (
+    TSAwaitExpression,
     TSArrayLiteral,
     TSArrayType,
     TSArrowFunction,
@@ -68,6 +69,7 @@ _NODE_TYPES = frozenset([
     "template_string",
     "template_substitution",
     "call_expression",
+    "await_expression",
     "member_expression",
     "subscript_expression",
     "binary_expression",
@@ -187,9 +189,12 @@ class TSAstBuilder:
         return_type = None
         body = None
         type_params = None
+        is_async = False
 
         for child in node.children:
-            if child.type == "identifier":
+            if child.type == "async":
+                is_async = True
+            elif child.type == "identifier":
                 name = child.text.decode()
             elif child.type == "formal_parameters":
                 params = self._build_formal_parameters(child)
@@ -208,6 +213,7 @@ class TSAstBuilder:
             return_type=return_type,
             body=body,
             type_parameters=type_params,
+            is_async=is_async,
         )
 
     def _build_lexical_declaration(self, node: Node) -> TSNode | None:
@@ -333,9 +339,12 @@ class TSAstBuilder:
         params = []
         return_type = None
         body = None
+        is_async = False
 
         for child in node.children:
-            if child.type == "formal_parameters":
+            if child.type == "async":
+                is_async = True
+            elif child.type == "formal_parameters":
                 params = self._build_formal_parameters(child)
             elif child.type == "type_annotation":
                 return_type = self._build_type_annotation(child)
@@ -355,15 +364,19 @@ class TSAstBuilder:
             params=params,
             return_type=return_type,
             body=body,
+            is_async=is_async,
         )
 
     def _build_function_expression(self, node: Node) -> TSFunctionExpression:
         params = []
         return_type = None
         body = None
+        is_async = False
 
         for child in node.children:
-            if child.type == "formal_parameters":
+            if child.type == "async":
+                is_async = True
+            elif child.type == "formal_parameters":
                 params = self._build_formal_parameters(child)
             elif child.type == "type_annotation":
                 return_type = self._build_type_annotation(child)
@@ -379,6 +392,7 @@ class TSAstBuilder:
             params=params,
             return_type=return_type,
             body=body,
+            is_async=is_async,
         )
 
     # ── Statements ─────────────────────────────────────────────
@@ -751,6 +765,18 @@ class TSAstBuilder:
             type_arguments=type_args,
         )
 
+    def _build_await_expression(self, node: Node) -> TSAwaitExpression:
+        argument = None
+        for child in node.children:
+            if child.type == "await":
+                continue
+            candidate = self._build_node(child)
+            if candidate is not None:
+                argument = candidate
+        return TSAwaitExpression(
+            argument=argument or TSIdentifier(name="undefined"),
+        )
+
     def _build_member_expression(self, node: Node) -> TSMemberExpression:
         obj = None
         prop = None
@@ -1050,9 +1076,12 @@ class TSAstBuilder:
         body = None
         access = ""
         static_flag = False
+        is_async = False
 
         for child in node.children:
-            if child.type == "property_identifier":
+            if child.type == "async":
+                is_async = True
+            elif child.type == "property_identifier":
                 name = child.text.decode()
             elif child.type == "formal_parameters":
                 params = self._build_formal_parameters(child)
@@ -1078,6 +1107,7 @@ class TSAstBuilder:
             body=body or TSBlockStatement(statements=[]),
             access_modifier=access,
             static=static_flag,
+            is_async=is_async,
         )
 
     def _build_public_field_definition(self, node: Node) -> TSPropertyDefinition:

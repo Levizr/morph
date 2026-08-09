@@ -538,3 +538,80 @@ function identity<T extends string>(x: T): T {
 }
 """)
     assert "template" in code or "T" in code
+
+
+# ── Async / Await ─────────────────────────────────────────
+
+
+def test_await_in_async_function():
+    code = _translate("""
+async function fetchData(): Promise<string> {
+    let r = await fetch("https://example.com");
+    return r;
+}
+""")
+    assert "co_await morph::net::fetch(\"https://example.com\")" in code
+    assert "morph::Result<JsString>" in code
+    assert "co_return r" in code
+    assert "#include \"../../morph/runtime/net/net.h\"" in code
+    assert "#include \"../../morph/runtime/reactivity/promise.h\"" in code
+
+
+def test_await_fetch_no_annotation():
+    code = _translate("""
+async function foo() {
+    let x = await fetch("/api");
+}
+""")
+    assert "co_await morph::net::fetch(\"/api\")" in code
+
+
+def test_fetch_without_await():
+    code = _translate('fetch("https://example.com");')
+    assert "morph::net::fetch(\"https://example.com\")" in code
+    assert "#include \"../../morph/runtime/net/net.h\"" in code
+
+
+def test_async_main_becomes_coroutine():
+    code = _translate("""
+async function main() {
+    let data = await fetchData();
+    console.log(data);
+}
+""")
+    # async main is wrapped in a morph::Task lambda + event pump
+    assert "morph::Task _main_task" in code
+    assert "process_tasks()" in code
+    assert "co_await fetchData" in code
+
+
+def test_async_arrow_function():
+    code = _translate("""
+let f = async () => {
+    await task();
+};
+""")
+    assert "co_await task()" in code
+    assert "morph::Result<JsValue>" in code or "morph::Task" in code
+
+
+def test_async_method():
+    code = _translate("""
+class A {
+    async m(): Promise<void> {
+        await foo();
+    }
+}
+""")
+    assert "co_await foo()" in code
+    assert "morph::Task" in code or "morph::Result" in code
+
+
+def test_plain_await_expression_builds():
+    # await of a plain call (non-fetch) still translates to co_await
+    code = _translate("""
+async function run() {
+    await delay(100);
+}
+""")
+    assert "co_await delay(100)" in code

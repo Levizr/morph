@@ -89,6 +89,38 @@ def test_universal():
     assert matches_selector("*", "div", [])
 
 
+def test_universal_with_class():
+    selectors = parse_selector("*.foo")
+    assert selectors[0].specificity == (0, 1, 0)
+    assert matches_selector("*.foo", "div", ["foo"])
+    assert matches_selector(".foo*", "div", ["foo"])
+    assert not matches_selector("*.foo", "div", ["other"])
+
+
+def test_universal_with_id():
+    assert matches_selector("*#bar", "div", [], "bar")
+    assert matches_selector("#bar*", "div", [], "bar")
+    assert not matches_selector("*#bar", "div", [], "baz")
+
+
+def test_universal_descendant():
+    assert matches_selector("div *", "span", [], None, [("div", [])])
+    assert matches_selector("div *", "span", [], None, [("div", []), ("p", []), ("i", [])])
+    assert not matches_selector("div *", "span", [], None, [("nav", [])])
+
+
+def test_universal_child():
+    from morph.style.selector import Combinator
+    selectors = parse_selector("div > *")
+    assert selectors[0].combinators == [Combinator.CHILD]
+    assert matches_selector("div > *", "span", [], None, [("div", [])])
+    assert not matches_selector("div > *", "span", [], None, [("div", []), ("section", [])])
+
+
+def test_universal_pseudo():
+    assert matches_selector("*:hover", "div", [])
+
+
 def test_pseudo_class_ignored():
     selectors = parse_selector("div:hover")
     assert len(selectors) == 1

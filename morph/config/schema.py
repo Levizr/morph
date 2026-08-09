@@ -14,6 +14,7 @@ class MorphConfig:
     entry:        str          = "src/App.mx"      # .html → .mx
     output:       str          = ".morph/"
     window:       WindowConfig = field(default_factory=WindowConfig)
+    renderer:     str          = "flash"           # "flash" (default) | "forge"
     dependencies: dict         = field(default_factory=dict)
     cpp_sources:  list         = field(default_factory=list)
     node_bridge:  bool         = False
@@ -30,6 +31,7 @@ class MorphConfig:
                 height=win.get("height", 600),
                 title=win.get("title", "Morph App"),
             ),
+            renderer=d.get("renderer", "flash"),
             dependencies=d.get("dependencies", {}),
             cpp_sources=d.get("cpp_sources", []),
             node_bridge=d.get("node_bridge", False),
@@ -45,6 +47,7 @@ class MorphConfig:
                 "height": self.window.height,
                 "title":  self.window.title,
             },
+            "renderer":     self.renderer,
             "dependencies": self.dependencies,
             "cpp_sources":  self.cpp_sources,
         }

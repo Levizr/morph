@@ -1,14 +1,11 @@
 #include "window.h"
+#include "renderers/flash/flash.h"
+#include "renderers/forge/forge.h"
 #include <GLFW/glfw3.h>
 #include <algorithm>
 #include <print>
 
 RepaintHookFn g_repaintHook = nullptr;
-
-#ifdef MORPH_FEATURE_DEV
-// Forward declaration: defined near recordPaintTree, used by commitFrame/render.
-static void syncPaintDirtyTree(MorphNode *n);
-#endif
 
 // Double-click detection: threshold in seconds
 static double s_lastClickTime = 0.0;
@@ -218,9 +215,7 @@ void MorphWindow::setTitle(const std::string &title)
         glfwSetWindowTitle(m_handle, title.c_str());
 }
 
-// Forward declarations for dirty rendering helpers
-static int countNodes(MorphNode *n);
-static void recordPaintTree(MorphNode *n, Renderer &r, DirtyStats &stats);
+// Dirty-tree helpers are declared in window.h and shared with the flash renderer.
 
 void MorphWindow::setSize(int width, int height)
 {
@@ -270,39 +265,10 @@ void MorphWindow::commitFrame()
     if (!m_root)
         return;
 
-    // Phase 1-2: Layout + paint (GL context is already current on main thread)
-    m_renderer.ensureReady();
-
-    m_dirtyStats.reset();
-    m_root->layoutIfNeeded(0.0f, 0.0f, (float)m_width, (float)m_height,
-                           &m_renderer, &m_dirtyStats);
-    m_dirtyStats.fullTreeCount = countNodes(m_root);
-#ifdef MORPH_FEATURE_DEV
-    syncPaintDirtyTree(m_root);
-#endif
-
-    recordPaintTree(m_root, m_renderer, m_dirtyStats);
-
-    // Phase 3: Flatten into render frame (no GL needed)
-    int backIdx = g_backIndex.load();
-    RenderFrame &frame = g_backFrames[backIdx];
-    frame.nodes.clear();
-    frame.drawOps.clear();
-    frame.animations.clear();
-    frame.textOps.clear();
-    frame.frameId++;
-    auto now = std::chrono::steady_clock::now().time_since_epoch();
-    frame.timestamp = std::chrono::duration<double>(now).count();
-
-    m_root->flatten(frame, -1);
-
-    // Phase 4: Atomic swap — compositor will interpolate, then main thread renders
-    g_frontFrame.store(&frame, std::memory_order_release);
-    g_backIndex.store((backIdx + 1) % 2, std::memory_order_release);
-    g_framePending.store(true, std::memory_order_release);
-
-    // This frame has been consumed; only re-render on a new dirty event.
-    m_pendingRender = false;
+    if (activeRenderMode() == RenderMode::Forge)
+        forge::forgeCommit(*this);
+    else
+        flash::flashCommit(*this);
 }
 
 void MorphWindow::drawOpsForNode(GLRenderer &r, const RenderFrame *frame, int nodeIdx,
@@ -465,6 +431,12 @@ void MorphWindow::renderFrame(std::function<void(GLRenderer &, DirtyStats &)> ov
     if (!m_handle)
         return;
 
+    if (activeRenderMode() == RenderMode::Forge)
+    {
+        forge::forgePresent(*this, overlayFn);
+        return;
+    }
+
     // Wait for compositor to finish interpolation
     // (typically already done by the time we get here, but spin if not)
     while (!g_frameInterpolated.load(std::memory_order_acquire))
@@ -503,6 +475,27 @@ void MorphWindow::renderFrame(std::function<void(GLRenderer &, DirtyStats &)> ov
         m_renderer.flush(proj);
     }
     glfwSwapBuffers(m_handle);
+}
+
+void MorphWindow::drawFrameNodes()
+{
+    auto *frame = g_frontFrame.load(std::memory_order_acquire);
+    if (!frame)
+        return;
+
+    glViewport(0, 0, m_width, m_height);
+    m_renderer.setFBHeight(m_height);
+
+    float proj[16];
+    ortho(proj, 0.0f, (float)m_width, (float)m_height, 0.0f, -1.0f, 1.0f);
+    m_renderer.setProjection(proj);
+
+    for (size_t i = 0; i < frame->nodes.size(); i++)
+    {
+        if (frame->nodes[i].parentId == -1)
+            renderNode(frame, (int)i);
+    }
+    m_renderer.flush(proj);
 }
 
 // ── Legacy single-threaded render path ──
@@ -565,7 +558,7 @@ void MorphWindow::render(std::function<void(GLRenderer &, DirtyStats &)> overlay
     m_pendingRender = false;
 }
 
-static int countNodes(MorphNode *n)
+int countNodes(MorphNode *n)
 {
     int c = 1;
     for (auto *child : n->children)
@@ -585,7 +578,7 @@ static void clearAllDirty(MorphNode *n)
 }
 
 #ifdef MORPH_FEATURE_DEV
-static void syncPaintDirtyTree(MorphNode *n)
+void syncPaintDirtyTree(MorphNode *n)
 {
     n->syncPaintDirtyAfterLayout();
     for (auto *c : n->children)
@@ -593,7 +586,7 @@ static void syncPaintDirtyTree(MorphNode *n)
 }
 #endif
 
-static void recordPaintTree(MorphNode *n, Renderer &r, DirtyStats &stats)
+void recordPaintTree(MorphNode *n, Renderer &r, DirtyStats &stats)
 {
     if (n->isDirty(PaintDirty) || n->isDirty(ScrollDirty) || n->isDirty(StyleDirty))
     {

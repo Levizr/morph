@@ -14,10 +14,61 @@ class Compiler:
                     shutil.which("clang++") or "g++")
         self.silent = False
 
+    # Static link support: GLFW / FreeType / HarfBuzz are bundled into the
+    # binary so the app runs on a stock machine without system shared libs.
+    # Only the universal base (libc, libstdc++, X11, GL) stays dynamic.
+    _STATIC_ARCHIVE_NAMES = {
+        "glfw":     ("libglfw3.a", "libglfw.a"),
+        "harfbuzz": ("libharfbuzz.a",),
+        "freetype": ("libfreetype.a",),
+    }
+
+    # Transitive static closure for the freetype static archive on Debian/Ubuntu.
+    _STATIC_FREETYPE_CLOSURE = [
+        "-lbz2", "-lz", "-lpng16", "-lbrotlidec", "-lbrotlicommon",
+    ]
+
+    def _static_lib_dirs(self) -> list[str]:
+        dirs: list[str] = []
+        env = os.environ.get("MORPH_STATIC_LIBDIRS", "")
+        if env:
+            dirs.extend(p for p in env.split(os.pathsep) if p)
+        dirs.extend([
+            "/usr/lib/x86_64-linux-gnu",
+            "/usr/local/lib",
+            "/usr/lib",
+        ])
+        return dirs
+
+    def _find_static_archive(self, names: tuple[str, ...]) -> str | None:
+        for d in self._static_lib_dirs():
+            for n in names:
+                p = os.path.join(d, n)
+                if os.path.isfile(p):
+                    return p
+        return None
+
+    def _static_archives(self) -> tuple[str, str, str] | None:
+        """Locate glfw/harfbuzz/freetype static archives; None + log on failure."""
+        found: dict[str, str] = {}
+        for key, names in self._STATIC_ARCHIVE_NAMES.items():
+            p = self._find_static_archive(names)
+            if p is None:
+                log_error(
+                    f"Static build needs a static archive for {key} "
+                    f"({' / '.join(names)}). "
+                    f"Install it (e.g. libglfw3-dev, libharfbuzz-dev) or build it "
+                    f"and point MORPH_STATIC_LIBDIRS at its directory."
+                )
+                return None
+            found[key] = p
+        return found["glfw"], found["harfbuzz"], found["freetype"]
+
     def compile(self, source_path: str, binary_path: str,
                 needs_freetype: bool = True,
                 needs_harfbuzz: bool = True,
-                defines: list[str] | None = None) -> bool:
+                defines: list[str] | None = None,
+                static: bool = False) -> bool:
         if not os.path.exists(source_path):
             log_error(f"Source not found: {source_path}")
             return False
@@ -48,6 +99,13 @@ class Compiler:
             os.path.join(runtime_dir, "core", "compositor.cpp"),
             os.path.join(runtime_dir, "reactivity", "effect.cpp"),
             os.path.join(runtime_dir, "reactivity", "task.cpp"),
+            # Renderer seam + both backends (compile-time dispatch via
+            # MORPH_RENDERER_FORGE picks which one is live; the other is
+            # eliminated by -Wl,--gc-sections).
+            os.path.join(runtime_dir, "renderers", "renderer.cpp"),
+            os.path.join(runtime_dir, "renderers", "flash", "flash.cpp"),
+            os.path.join(runtime_dir, "renderers", "forge", "forge.cpp"),
+            os.path.join(runtime_dir, "renderers", "forge", "damage.cpp"),
         ]
 
         cmd = [
@@ -61,9 +119,30 @@ class Compiler:
             "-o", binary_path,
             "-I", runtime_dir,
             "-I", vendor_dir,
+            "-I", os.path.join(runtime_dir, "renderers"),
             "-Wl,--gc-sections",
-            "-lglfw", "-lGL", "-lX11", "-lpthread", "-ldl",
         ]
+
+        if static:
+            archives = self._static_archives()
+            if archives is None:
+                return False
+            glfw_a, harfbuzz_a, freetype_a = archives
+            # Statically bundle GLFW/HarfBuzz/FreeType (+ their freetype
+            # closure). Everything else (GL, X11, libc, libstdc++) stays
+            # dynamic — those are universal on any Linux.
+            cmd += [
+                "-Wl,-Bstatic",
+                freetype_a, "-lbz2", "-lz", "-lpng16", "-lm", "-lbrotlidec", "-lbrotlicommon",
+                harfbuzz_a,
+                glfw_a,
+                "-Wl,-Bdynamic",
+                "-lGL", "-lX11", "-lrt", "-lpthread", "-ldl",
+                "-Wl,-Bstatic", "-lz",
+                "-Wl,-Bdynamic", "-lm",
+            ]
+        else:
+            cmd += ["-lglfw", "-lGL", "-lX11", "-lpthread", "-ldl"]
 
         # Feature defines (visible to all translation units)
         if defines:
@@ -77,13 +156,15 @@ class Compiler:
                 ).strip().split()
             except Exception:
                 ft_cflags = ["-I/usr/include/freetype2"]
-            try:
-                ft_libs = subprocess.check_output(
-                    ["pkg-config", "--libs", "freetype2"], text=True
-                ).strip().split()
-            except Exception:
-                ft_libs = ["-lfreetype"]
-            cmd.extend([*ft_cflags, *ft_libs])
+            cmd.extend(ft_cflags)
+            if not static:
+                try:
+                    ft_libs = subprocess.check_output(
+                        ["pkg-config", "--libs", "freetype2"], text=True
+                    ).strip().split()
+                except Exception:
+                    ft_libs = ["-lfreetype"]
+                cmd.extend(ft_libs)
 
         if needs_harfbuzz:
             try:
@@ -92,13 +173,15 @@ class Compiler:
                 ).strip().split()
             except Exception:
                 hb_cflags = []
-            try:
-                hb_libs = subprocess.check_output(
-                    ["pkg-config", "--libs", "harfbuzz"], text=True
-                ).strip().split()
-            except Exception:
-                hb_libs = ["-lharfbuzz"]
-            cmd.extend([*hb_cflags, *hb_libs])
+            cmd.extend(hb_cflags)
+            if not static:
+                try:
+                    hb_libs = subprocess.check_output(
+                        ["pkg-config", "--libs", "harfbuzz"], text=True
+                    ).strip().split()
+                except Exception:
+                    hb_libs = ["-lharfbuzz"]
+                cmd.extend(hb_libs)
 
         if not self.silent:
             log_info(f"Compiling: {' '.join(cmd)}")

@@ -49,6 +49,8 @@ struct Task {
 
     explicit Task(std::coroutine_handle<promise_type> h) noexcept : handle(h) {}
 
+    bool done() const noexcept { return !handle || handle.done(); }
+
     ~Task() {
         // If the coroutine completed before we got here, clean up
         if (handle && handle.done()) {

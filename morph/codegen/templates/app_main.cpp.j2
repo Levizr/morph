@@ -46,6 +46,9 @@ int main() {
 
     // Enable vsync so present is capped at the refresh rate when we do render.
     glfwSwapInterval(1);
+{% for win in windows %}
+    win_{{ win.window_id }}->startCompositor(true);
+{% endfor %}
 
     while (!wm.allClosed()) {
         // Block until an input event arrives, or ~16ms elapses so timers,
@@ -67,16 +70,16 @@ int main() {
             // Dirty rendering: skip layout, paint and the GL swap entirely
             // unless something changed (input, effect, size, or animation).
             if (win_{{ win.window_id }}->hasPendingRender()) {
-                win_{{ win.window_id }}->render();
+                win_{{ win.window_id }}->commitFrame();
+                win_{{ win.window_id }}->renderFrame();
             }
         }
 {% endfor %}
     }
 
     morph::destroy_all_effects();
-
 {% for win in windows %}
-    delete win_{{ win.window_id }};
+    win_{{ win.window_id }}->stopCompositor();
 {% endfor %}
     glfwTerminate();
     return 0;

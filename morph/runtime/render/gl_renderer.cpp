@@ -520,7 +520,42 @@ void GLRenderer::drawText(const std::string &text, float x, float y,
         return;
 
     float penX = std::round(x + m_scrollX);
+
+    // Measure the run's glyph ink bounds (relative to the baseline) so the
+    // text is optically centered inside its line box (height = 1.4em).
+    // Placing the baseline at y + fontSize only centers the em box, which
+    // leaves the visible ink a few px above the middle.
+    float inkTop = 0.0f, inkBottom = 0.0f;
+    bool haveInk = false;
+    for (auto &sg : shaped)
+    {
+        ensureGlyph(atlas, sg.codepoint);
+        auto it = atlas.glyphs.find(sg.codepoint);
+        if (it == atlas.glyphs.end())
+            continue;
+        auto &g = it->second;
+        if (g.gw <= 0.0f || g.gh <= 0.0f)
+            continue;
+        float es = g.emojiScale;
+        float top = -g.by * es + sg.dy;
+        float bottom = top + g.gh * es;
+        if (!haveInk)
+        {
+            inkTop = top;
+            inkBottom = bottom;
+            haveInk = true;
+        }
+        else
+        {
+            if (top < inkTop) inkTop = top;
+            if (bottom > inkBottom) inkBottom = bottom;
+        }
+    }
+
     float penY = std::round(y + m_scrollY + fontSize);
+    if (haveInk)
+        penY = std::round(y + m_scrollY + fontSize * 1.4f * 0.5f
+                          - (inkTop + inkBottom) * 0.5f);
 
     // Measure total width for alignment
     float totalW = 0;

@@ -337,3 +337,40 @@ def test_z_index_serialization_roundtrip():
     auto = IRNode(node_id="n2", node_type="div", style=IRStyle(z_index=None))
     data2 = IRSerializer().to_dict([IRWindow(window_id="w2", title="T", width=1, height=1, nodes=[auto])])
     assert data2["windows"][0]["nodes"][0]["style"]["z_index"] is None
+
+
+def test_universal_selector_applies_to_all_nodes():
+    """* selector should apply color to every element in the tree."""
+    walked = {
+        "components": [{
+            "exported": True,
+            "jsx": {
+                "tag": "morph-window",
+                "props": {"title": "Test", "width": 400, "height": 300},
+                "children": [{
+                        "tag": "div",
+                        "props": {},
+                        "children": [
+                            {"tag": "h1", "props": {}, "children": []},
+                            {"tag": "button", "props": {}, "children": []},
+                        ],
+                    }],
+            },
+        }],
+    }
+    css_rules = {"*": {"color": "#ff0000"}}
+    tw = TailwindResolver(project_root=".")
+    windows = IRBuilder().build(walked, css_rules, tw)
+
+    def collect(nodes, acc):
+        for n in nodes:
+            acc.append(n)
+            collect(n.children, acc)
+        return acc
+
+    all_nodes = collect(windows[0].nodes, [])
+    assert len(all_nodes) >= 3
+    for n in all_nodes:
+        assert n.style.color == (1.0, 0.0, 0.0, 1.0), (
+            f"{n.node_type} should get red from * selector, got {n.style.color}"
+        )

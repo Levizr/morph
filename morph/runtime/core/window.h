@@ -7,6 +7,8 @@
 #include "../render/gl_renderer.h"
 #include "event.h"
 #include "compositor.h"
+#include "../renderers/renderer.h"
+#include "render_frame.h"
 
 // Optional hook for dev tools to observe which nodes are repainted each frame.
 // Left null in production builds — zero cost. Dev runtime sets it at startup.
@@ -85,6 +87,11 @@ public:
     // Render the latest interpolated frame (main thread, GL context current)
     void renderFrame(std::function<void(GLRenderer &, DirtyStats &)> overlayFn = {});
 
+    // Draw the flat node tree into the renderer's current target (used by the
+    // forge retained-FBO present path). GL context must be current; callers
+    // bind the target framebuffer beforehand.
+    void drawFrameNodes();
+
     // Start/stop compositor thread
     void startCompositor(bool vsync = true);
     void stopCompositor();
@@ -92,6 +99,8 @@ public:
     // Dirty rendering accessors (for devtools)
     DirtyStats &dirtyStats() { return m_dirtyStats; }
     GLRenderer &renderer() { return m_renderer; }
+    bool hasRoot() const { return m_root != nullptr; }
+    MorphNode* root() const { return m_root; }
 
 private:
     void renderNode(const RenderFrame *frame, int nodeIdx);
@@ -116,3 +125,11 @@ public:
     void clearPendingRender() { m_pendingRender = false; }
     void notifyPendingRender() { m_pendingRender = true; }
 };
+
+// Shared dirty-tree helpers used by both the fallback single-threaded path
+// (window.cpp) and the flash renderer. Non-static so renderers can call them.
+int countNodes(MorphNode *n);
+void recordPaintTree(MorphNode *n, Renderer &r, DirtyStats &stats);
+#ifdef MORPH_FEATURE_DEV
+void syncPaintDirtyTree(MorphNode *n);
+#endif

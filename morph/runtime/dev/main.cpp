@@ -278,6 +278,19 @@ int main() {
         return 1;
     }
 
+    // Handle renderer selection from config
+    if (config.renderer == "forge") {
+#ifdef MORPH_FEATURE_DEV_RENDERER_SWITCH
+        setRenderMode(RenderMode::Forge);
+#endif
+        fprintf(stderr, "[morph] renderer: forge (selected via config)\n");
+    } else {
+#ifdef MORPH_FEATURE_DEV_RENDERER_SWITCH
+        setRenderMode(RenderMode::Flash);
+#endif
+        fprintf(stderr, "[morph] renderer: flash (default)\n");
+    }
+
     // Create signals from state vars
     for (auto& sv : stateVars) {
         std::string raw = sv.init;
@@ -375,6 +388,10 @@ int main() {
             if (parseIR(newRoot, newNode, newConfig, newRegistry, newStateVars)) {
                 // Apply window config (title only; resizing disrupts dev flow)
                 window.setTitle(newConfig.title);
+                if (newConfig.renderer == "forge")
+                    setRenderMode(RenderMode::Forge);
+                else
+                    setRenderMode(RenderMode::Flash);
                 // Replace node tree
                 window.addChild(newNode);
                 deleteNodeTree(rootNode);

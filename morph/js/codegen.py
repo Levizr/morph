@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from morph.js.ast import (
+    TSAwaitExpression,
     TSArrayLiteral,
     TSArrayType,
     TSArrowFunction,
@@ -114,6 +115,10 @@ _TYPE_TO_HEADER: dict[str, str] = {
     "JsValue":          "\"../../morph/runtime/types/js_types.h\"",
     "JsUndefined":      "\"../../morph/runtime/types/js_types.h\"",
     "JsNull":           "\"../../morph/runtime/types/js_types.h\"",
+    "morph::Result":    "\"../../morph/runtime/reactivity/promise.h\"",
+    "morph::Task":      "\"../../morph/runtime/reactivity/task.h\"",
+    "morph::net":       "\"../../morph/runtime/net/net.h\"",
+    "morph::net::Response": "\"../../morph/runtime/net/net.h\"",
 }
 
 _STRING_TYPES = frozenset(["JsString", "const JsString", "std::string", "const std::string", "std::string_view", "const char*"])
@@ -218,6 +223,10 @@ class TSToCppTranslator:
         self._state_vars: dict[str, str] = state_vars or {}
         # Set to True when a while(true) loop is encountered within a function
         self._has_infinite_loop: bool = False
+        # Depth of enclosing `async` functions; >0 makes `return` → `co_return`
+        self._is_async_fn: int = 0
+        # Async main runs inside a void morph::Task; drop returned values
+        self._drop_return_value: bool = False
     
 
     def _need(self, cpp_type: str) -> None:
@@ -246,11 +255,15 @@ class TSToCppTranslator:
         sub._fn_expr_depth = self._fn_expr_depth
         sub._fn_body_depth = self._fn_body_depth
         sub._has_infinite_loop = self._has_infinite_loop
+        sub._is_async_fn = self._is_async_fn
+        sub._drop_return_value = self._drop_return_value
         return sub
 
     def _merge(self, child: TSToCppTranslator) -> None:
         self._needed |= child._needed
         self._has_infinite_loop = self._has_infinite_loop or child._has_infinite_loop
+        self._is_async_fn = max(self._is_async_fn, child._is_async_fn)
+        self._drop_return_value = self._drop_return_value or child._drop_return_value
 
     def _translate_node(self, node: TSNode) -> str:
         if isinstance(node, TSBlockStatement):
@@ -281,6 +294,8 @@ class TSToCppTranslator:
             return self._assignment_expression(node)
         if isinstance(node, TSCallExpression):
             return self._call_expression(node)
+        if isinstance(node, TSAwaitExpression):
+            return self._await_expression(node)
         if isinstance(node, TSMemberExpression):
             return self._member_expression(node)
         if isinstance(node, TSIdentifier):
@@ -393,10 +408,13 @@ class TSToCppTranslator:
         return f"{self._indent}{expr};"
 
     def _return_statement(self, node: TSReturnStatement) -> str:
+        if self._drop_return_value:
+            return f"{self._indent}co_return;"
+        kw = "co_return" if self._is_async_fn > 0 else "return"
         if node.argument is None:
-            return f"{self._indent}return;"
+            return f"{self._indent}{kw};"
         expr = self._translate_node(node.argument)
-        return f"{self._indent}return {expr};"
+        return f"{self._indent}{kw} {expr};"
 
     def _infer_type_from_init(self, node: TSNode) -> str | None:
         if isinstance(node, TSLiteral):
@@ -448,22 +466,36 @@ class TSToCppTranslator:
     def _function_declaration(self, node: TSFunctionDeclaration) -> str:
         self._has_infinite_loop = False  # reset for this function
 
+        is_async = node.is_async
         if node.return_type is None:
             if node.name == "main":
                 ret = "int"
+            elif is_async:
+                ret = "JsValue"
             elif self._has_return(node.body):
                 ret = "auto"
             else:
                 ret = "void"
         else:
             ret = _resolve_type(node.return_type, template_params=self._template_params)
-        self._need(ret)
+
         params = self._format_params(node.params)
+
+        if node.name == "main" and is_async:
+            return self._async_main(node, ret, params)
+
+        if is_async:
+            ret = self._async_result_type(ret)
+        self._need(ret)
         self._fn_body_depth += 1
+        if is_async:
+            self._is_async_fn += 1
         body = self._translate_node(node.body)
+        if is_async:
+            self._is_async_fn -= 1
         self._fn_body_depth -= 1
         # After body translation, check for infinite loops
-        if self._has_infinite_loop and node.name != "main":
+        if self._has_infinite_loop and node.name != "main" and not is_async:
             ret = "morph::Task"
             self._needed.add('"../../morph/runtime/reactivity/task.h"')
 
@@ -478,14 +510,61 @@ class TSToCppTranslator:
         lines.append(body)
         return "\n".join(lines)
 
+    def _async_main(self, node: TSFunctionDeclaration, ret: str, params: str) -> str:
+        """Generate an `int main()` that runs an async JS main as a coroutine."""
+        self._needed.add('"../../morph/runtime/reactivity/task.h"')
+        self._is_async_fn += 1
+        self._drop_return_value = True
+        body = self._translate_node(node.body).rstrip()
+        self._drop_return_value = False
+        self._is_async_fn -= 1
+        if body.endswith("}"):
+            body = body[:-1].rstrip()
+        body += "\nco_return;"
+        body += "\n}"
+        return (
+            "int main() {\n"
+            f"    morph::Task _main_task = [&]() -> morph::Task {{\n"
+            f"{body}\n"
+            "    }();\n"
+            "    while (!_main_task.done()) {\n"
+            "        morph::process_tasks();\n"
+            "    }\n"
+            "    return 0;\n"
+            "}"
+        )
+
+    def _async_result_type(self, resolved: str) -> str:
+        """Map a resolved C++ return type to a coroutine return type for async fns."""
+        if resolved in ("void", "auto"):
+            return "morph::Task"
+        if resolved.startswith("morph::Result") or resolved.startswith("morph::Task"):
+            return resolved
+        return f"morph::Result<{resolved}>"
+
     def _function_expression(self, node: TSFunctionExpression) -> str:
         self._fn_expr_depth += 1
+        is_async = node.is_async
+        ret = "JsValue"
+        if is_async:
+            ret = self._async_result_type(_resolve_type(node.return_type, "JsValue",
+                                                        template_params=self._template_params))
+            self._need(ret)
         if isinstance(node.body, TSBlockStatement):
-            body = self._translate_node(node.body)
+            if is_async:
+                self._is_async_fn += 1
+                body = self._translate_node(node.body)
+                self._is_async_fn -= 1
+            else:
+                body = self._translate_node(node.body)
         else:
-            body = f"{{ return {self._translate_node(node.body)}; }}"
+            expr = self._translate_node(node.body)
+            kw = "co_return" if is_async else "return"
+            body = f"{{ {kw} {expr}; }}"
         self._fn_expr_depth -= 1
         self._need("JsValue")
+        if is_async:
+            return f"+[](JsValue _jsThis) -> {ret} {body}"
         return f"+[](JsValue _jsThis) -> JsValue {body}"
 
     def _arrow_function(self, node: TSArrowFunction) -> str:
@@ -509,13 +588,22 @@ class TSToCppTranslator:
             return f"{capture}({params}) -> void {{ {expr}; }}"
 
         ret = _resolve_type(node.return_type, "auto", template_params=self._template_params)
+        is_async = node.is_async
+        if is_async:
+            ret = self._async_result_type(ret)
         self._need(ret)
         params = self._format_params(node.params)
         if isinstance(node.body, TSBlockStatement):
-            body = self._translate_node(node.body)
+            if is_async:
+                self._is_async_fn += 1
+                body = self._translate_node(node.body)
+                self._is_async_fn -= 1
+            else:
+                body = self._translate_node(node.body)
             return f"{capture}({params}) -> {ret} {body}"
         expr = self._translate_node(node.body)
-        return f"{capture}({params}) -> {ret} {{ return {expr}; }}"
+        kw = "co_return" if is_async else "return"
+        return f"{capture}({params}) -> {ret} {{ {kw} {expr}; }}"
 
     def _if_statement(self, node: TSIfStatement) -> str:
         cond = self._translate_node(node.condition)
@@ -777,6 +865,13 @@ class TSToCppTranslator:
     def _call_expression(self, node: TSCallExpression) -> str:
         callee = self._translate_node(node.callee)
 
+        # JS fetch() → morph::net::fetch() — awaitable HTTP GET
+        if (isinstance(node.callee, TSIdentifier)
+                and node.callee.name == "fetch"):
+            self._needed.add('"../../morph/runtime/net/net.h"')
+            args = [self._translate_node(a) for a in node.arguments]
+            return f"morph::net::fetch({', '.join(args)})"
+
         # Detect console.log
         if (isinstance(node.callee, TSMemberExpression)
                 and isinstance(node.callee.object, TSIdentifier)
@@ -850,6 +945,10 @@ class TSToCppTranslator:
             # JsObject function property — pass obj as this: obj["method"](obj, args)
             return f"{callee}({this_obj}{', ' + ', '.join(args) if args else ''})"
         return f"{callee}({', '.join(args)})"
+
+    def _await_expression(self, node: TSAwaitExpression) -> str:
+        arg = self._translate_node(node.argument)
+        return f"co_await {arg}"
 
     def _is_js_object_type(self, obj_node: TSNode) -> bool:
         if isinstance(obj_node, TSIdentifier):
@@ -1049,17 +1148,27 @@ class TSToCppTranslator:
     def _method_definition(self, node: TSMethodDefinition) -> str:
         wrap = bool(self._template_params)
         static_prefix = "static inline " if node.static else ""
+        is_async = node.is_async
         if node.return_type is None:
-            if TSToCppTranslator._has_return(node.body):
+            if is_async:
+                ret = "JsValue"
+            elif TSToCppTranslator._has_return(node.body):
                 ret = "auto"
             else:
                 ret = "void"
         else:
             ret = _resolve_type(node.return_type, "void", template_params=self._template_params, wrap_shared=wrap)
+        if is_async:
+            ret = self._async_result_type(ret)
         ret = self._wrap_type(ret)
         self._need(ret)
         params = self._format_params(node.params, wrap_shared=wrap)
-        body = self._translate_node(node.body)
+        if is_async:
+            self._is_async_fn += 1
+            body = self._translate_node(node.body)
+            self._is_async_fn -= 1
+        else:
+            body = self._translate_node(node.body)
 
         header = f'{static_prefix}{ret} {node.name}({params})'
 

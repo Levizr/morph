@@ -39,8 +39,9 @@ def _compute_source_hash() -> str:
     runtime_dir = os.path.abspath(os.path.join(dev_dir, ".."))
     paths = []
 
-    # Scan dev, core, render, ui, style, vendor directories for source changes
-    for sub in ["dev", "core", "render", "ui", "style", "vendor"]:
+    # Scan dev, core, render, renderers, ui, style, vendor directories for
+    # source changes (renderers holds the forge/flash renderers).
+    for sub in ["dev", "core", "render", "renderers", "ui", "style", "vendor"]:
         scan = os.path.join(runtime_dir, sub)
         if not os.path.isdir(scan):
             continue

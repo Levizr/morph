@@ -125,10 +125,14 @@ def run(args=None) -> None:
 
     t1 = time.time()
     compiler.silent = True
+    static = bool(getattr(args, "static", False))
+    if static:
+        log_bullet("Static linking enabled — bundling GLFW/FreeType/HarfBuzz")
     ok = compiler.compile(out_path, binary_path,
                           needs_freetype=freetype,
                           needs_harfbuzz=True,
-                          defines=features.required_defines())
+                          defines=features.required_defines(),
+                          static=static)
 
     if not ok:
         log_error("Compilation failed — run `morph doctor` to check dependencies")
@@ -164,6 +168,7 @@ def _deserialize(ir_dict: dict) -> list:
             width=w.get("width", 800),
             height=w.get("height", 600),
             visible=w.get("visible", True),
+            renderer=w.get("renderer", "flash"),
             nodes=[_deser_node(n) for n in w.get("nodes", [])],
             startup_logs=w.get("startup_logs", []),
             premain_functions=w.get("premain_functions", []),

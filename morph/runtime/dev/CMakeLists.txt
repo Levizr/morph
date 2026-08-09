@@ -39,17 +39,30 @@ set(RUNTIME_SOURCES
     ${RUNTIME_DIR}/render/gl_renderer.cpp
     ${RUNTIME_DIR}/reactivity/effect.cpp
     ${RUNTIME_DIR}/reactivity/task.cpp
+    ${RUNTIME_DIR}/net/net.cpp
     ${VENDOR_DIR}/glad/glad.c
     ${VENDOR_DIR}/stb_image.c
 )
 
-add_executable(morph_devrt ${DEV_SOURCES} ${RUNTIME_SOURCES})
+set(RENDERER_SOURCES
+    ${RUNTIME_DIR}/renderers/renderer.h
+    ${RUNTIME_DIR}/renderers/renderer.cpp
+    ${RUNTIME_DIR}/renderers/flash/flash.h
+    ${RUNTIME_DIR}/renderers/flash/flash.cpp
+    ${RUNTIME_DIR}/renderers/forge/forge.h
+    ${RUNTIME_DIR}/renderers/forge/forge.cpp
+    ${RUNTIME_DIR}/renderers/forge/damage.h
+    ${RUNTIME_DIR}/renderers/forge/damage.cpp
+)
+
+add_executable(morph_devrt ${DEV_SOURCES} ${RUNTIME_SOURCES} ${RENDERER_SOURCES})
 
 target_include_directories(morph_devrt PRIVATE
     ${RUNTIME_DIR}        # for "core/node.h", "render/gl_renderer.h"
     ${VENDOR_DIR}         # for "vendor/glad/glad.h"
     ${FREETYPE_INCLUDE_DIRS}
     ${HARFBUZZ_INCLUDE_DIRS}
+    ${RUNTIME_DIR}/renderers  # for flash.h, forge.h, damage.h, tile.h, etc.
 )
 
 # All features enabled for dev mode (dead code elimination not needed in dev)
@@ -71,6 +84,8 @@ target_compile_definitions(morph_devrt PRIVATE
     MORPH_FEATURE_IMAGE
     MORPH_FEATURE_DIRTY_RENDERING
     MORPH_FEATURE_DEV
+    MORPH_FEATURE_DEV_RENDERER_SWITCH
+    MORPH_RENDERER_FORGE
 )
 
 target_link_options(morph_devrt PRIVATE -rdynamic)

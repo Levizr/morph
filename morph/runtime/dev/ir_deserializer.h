@@ -319,6 +319,7 @@ struct DevWindowConfig {
     int width = 800;
     int height = 600;
     bool visible = true;
+    std::string renderer = "flash"; // "flash" (default) | "forge"
 };
 
 static bool parseIR(const JsonValue& root, MorphNode*& outRoot,
@@ -346,6 +347,8 @@ static bool parseIR(const JsonValue& root, MorphNode*& outRoot,
         config.height = win["height"].asInt();
     if (win.has("visible") && !win["visible"].isNull())
         config.visible = win["visible"].asBool();
+    if (win.has("renderer") && !win["renderer"].isNull())
+        config.renderer = win["renderer"].asString();
 
     // Extract state vars
     if (win.has("state_vars") && win["state_vars"].type() == JsonType::Array) {

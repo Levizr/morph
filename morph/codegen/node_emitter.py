@@ -123,6 +123,7 @@ class NodeEmitter:
 
         if node.node_type == "button":
             lines.append(f"ButtonNode* {node.node_id} = new ButtonNode();")
+            lines.append(f"{indent}{node.node_id}->type = \"button\";")
             lines.append(f"{indent}{node.node_id}->x = {fmt(node.x)};")
             lines.append(f"{indent}{node.node_id}->y = {fmt(node.y)};")
             lines.append(f"{indent}{node.node_id}->w = {fmt(node.w)};")

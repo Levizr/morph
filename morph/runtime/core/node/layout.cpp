@@ -882,6 +882,42 @@ after_children:
             m_computedMargin[2] = lastChildMbEff;
     }
 #endif
+    // Browsers vertically center button content. Buttons (tag type=="button")
+    // are laid out as plain block containers in the IR, so on their own the
+    // text stays pinned to the top. When the button is taller than its
+    // content (fixed height), shift the flow children down so the label sits
+    // centered. Flex buttons are left alone — flexbox handles their layout.
+    if (type == "button" && style.display != "flex")
+    {
+        float btnContentH = h - pt - pb - bw * 2.0f;
+        if (btnContentH > 0.0f)
+        {
+            float childTop = cy, childBottom = cy;
+            bool any = false;
+            for (auto* c : children)
+            {
+#ifdef MORPH_FEATURE_POSITION
+                if (c->style.position == "absolute" || c->style.position == "fixed") continue;
+#endif
+                if (c->isWhitespaceOnly()) continue;
+                float top = c->y, bottom = c->y + c->h;
+                if (!any) { childTop = top; childBottom = bottom; any = true; }
+                else { if (top < childTop) childTop = top; if (bottom > childBottom) childBottom = bottom; }
+            }
+            if (any) {
+                float offset = (btnContentH - (childBottom - childTop)) * 0.5f;
+                if (offset > 0.0f)
+                    for (auto* c : children) {
+#ifdef MORPH_FEATURE_POSITION
+                        if (c->style.position == "absolute" || c->style.position == "fixed") continue;
+#endif
+                        if (c->isWhitespaceOnly()) continue;
+                        c->y += offset;
+                    }
+            }
+        }
+    }
+
     scrollEnabled = (style.overflow == "scroll") ||
                     (style.overflow == "auto" && contentH > h);
     if (scrollEnabled) {

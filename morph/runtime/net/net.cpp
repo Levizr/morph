@@ -1,0 +1,180 @@
+#include "net.h"
+
+#include <netdb.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
+#include <cstring>
+#include <sstream>
+#include <thread>
+
+namespace morph::net {
+
+namespace detail {
+
+void HttpAwaitable::await_suspend(std::coroutine_handle<> h) noexcept {
+    std::shared_ptr<SharedState> st = state;
+    std::thread([st, h]() mutable {
+        st->response = http_get(st->url);
+        h.resume();
+    }).detach();
+}
+
+} // namespace detail
+
+namespace {
+
+struct UrlParts {
+    std::string host;
+    int port = 80;
+    std::string path = "/";
+};
+
+bool parse_url(const std::string& raw, UrlParts& out) {
+    std::string rest = raw;
+    std::string scheme;
+    auto scheme_pos = rest.find("://");
+    if (scheme_pos != std::string::npos) {
+        scheme = rest.substr(0, scheme_pos);
+        rest = rest.substr(scheme_pos + 3);
+    }
+    if (scheme == "https") {
+        out.port = 443;
+    }
+    auto slash = rest.find('/');
+    std::string authority = (slash == std::string::npos) ? rest : rest.substr(0, slash);
+    if (slash != std::string::npos) {
+        out.path = rest.substr(slash);
+        if (out.path.empty()) {
+            out.path = "/";
+        }
+    }
+    auto colon = authority.find(':');
+    if (colon != std::string::npos) {
+        out.host = authority.substr(0, colon);
+        try {
+            out.port = std::stoi(authority.substr(colon + 1));
+        } catch (...) {
+            return false;
+        }
+    } else {
+        out.host = authority;
+    }
+    return !out.host.empty();
+}
+
+std::string build_request(const UrlParts& parts, const std::string& host_header) {
+    std::ostringstream req;
+    req << "GET " << parts.path << " HTTP/1.1\r\n";
+    req << "Host: " << host_header << "\r\n";
+    req << "User-Agent: morph-net/0.1\r\n";
+    req << "Accept: */*\r\n";
+    req << "Connection: close\r\n\r\n";
+    return req.str();
+}
+
+std::string recv_all(int fd) {
+    std::string data;
+    char buf[16384];
+    ssize_t n;
+    while ((n = ::recv(fd, buf, sizeof(buf), 0)) > 0) {
+        data.append(buf, static_cast<size_t>(n));
+    }
+    return data;
+}
+
+} // anonymous namespace
+
+Response http_get(const std::string& url) {
+    Response resp;
+    UrlParts parts;
+    if (!parse_url(url, parts)) {
+        return resp;
+    }
+
+    addrinfo hints{};
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+
+    addrinfo* res = nullptr;
+    std::string port_str = std::to_string(parts.port);
+    int gai = ::getaddrinfo(parts.host.c_str(), port_str.c_str(), &hints, &res);
+    if (gai != 0) {
+        return resp;
+    }
+
+    int fd = -1;
+    for (addrinfo* it = res; it != nullptr; it = it->ai_next) {
+        fd = ::socket(it->ai_family, it->ai_socktype, it->ai_protocol);
+        if (fd < 0) {
+            continue;
+        }
+        if (::connect(fd, it->ai_addr, it->ai_addrlen) == 0) {
+            break;
+        }
+        ::close(fd);
+        fd = -1;
+    }
+    ::freeaddrinfo(res);
+    if (fd < 0) {
+        return resp;
+    }
+
+    std::string host_header = parts.host;
+    if (parts.port != 80) {
+        host_header += ":" + std::to_string(parts.port);
+    }
+    std::string req = build_request(parts, host_header);
+    if (::send(fd, req.data(), req.size(), 0) < 0) {
+        ::close(fd);
+        return resp;
+    }
+
+    std::string raw = recv_all(fd);
+    ::close(fd);
+    if (raw.empty()) {
+        return resp;
+    }
+
+    // Split headers from body.
+    auto sep = raw.find("\r\n\r\n");
+    std::string head = (sep == std::string::npos) ? raw : raw.substr(0, sep);
+    std::string body = (sep == std::string::npos) ? "" : raw.substr(sep + 4);
+
+    // Status line: HTTP/1.1 200 OK
+    std::istringstream hs(head);
+    std::string line;
+    if (std::getline(hs, line)) {
+        std::istringstream ls(line);
+        std::string http_ver;
+        int status = 0;
+        if (ls >> http_ver >> status) {
+            resp.status = status;
+        }
+    }
+    while (std::getline(hs, line)) {
+        if (line.empty() || line == "\r") {
+            continue;
+        }
+        auto colon = line.find(':');
+        if (colon == std::string::npos) {
+            continue;
+        }
+        std::string key = line.substr(0, colon);
+        std::string val = line.substr(colon + 1);
+        while (!val.empty() && (val.front() == ' ' || val.front() == '\t')) {
+            val.erase(val.begin());
+        }
+        while (!val.empty() && (val.back() == '\r' || val.back() == '\n')) {
+            val.pop_back();
+        }
+        resp.headers[key] = val;
+    }
+
+    resp.body = std::move(body);
+    return resp;
+}
+
+} // namespace morph::net

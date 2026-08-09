@@ -35,6 +35,7 @@ class IRSerializer:
             "width":        w.width,
             "height":       w.height,
             "visible":      w.visible,
+            "renderer":     w.renderer,
             "nodes":        [self._node(n) for n in w.nodes],
             "startup_logs": w.startup_logs,
             "premain_functions": w.premain_functions,

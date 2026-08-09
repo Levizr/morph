@@ -87,6 +87,8 @@ class FeatureSet:
 
     def scan(self, windows: list[IRWindow]) -> None:
         for win in windows:
+            if getattr(win, "renderer", "flash") == "forge":
+                self.features.add("forge")
             for node in self._walk(win.nodes):
                 if node.node_type == "__text__":
                     self.features.add("text")
@@ -166,6 +168,10 @@ class FeatureSet:
             defines.append("MORPH_FEATURE_IMAGE")
         if "dirty_rendering" in self.features or "scroll" in self.features:
             defines.append("MORPH_FEATURE_DIRTY_RENDERING")
+        # ── Renderer selection defines ──
+        # Default to flash; forge is explicitly enabled via "forge" key in config
+        if "forge" in self.features:
+            defines.append("MORPH_RENDERER_FORGE")
         return defines
 
     def needs_freetype(self) -> bool:
