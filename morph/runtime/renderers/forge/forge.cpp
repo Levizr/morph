@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <functional>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace forge {
 
@@ -37,8 +38,14 @@ static GLuint g_fbo = 0, g_fboTex = 0, g_fboRbo = 0;
 static int g_fboW = 0, g_fboH = 0;
 static bool g_surfaceReady = false;
 
-// Live-node rects from the last commit (old-position damage recovery).
-static std::unordered_map<const MorphNode*, DamageRect> g_prevRects;
+// Live-node geometry from the last commit (old-position damage recovery).
+// Tracks scroll too so a changed scrollport is detected as a box move.
+struct PrevRect {
+    DamageRect box;
+    float scrollY = 0;
+    float contentH = 0;
+};
+static std::unordered_map<const MorphNode*, PrevRect> g_prevRects;
 static int g_prevNodeCount = -1;
 static bool g_firstFrame = true;
 
@@ -114,6 +121,18 @@ void forgeCommit(MorphWindow& win)
 
     auto& stats = win.dirtyStats();
     stats.reset();
+
+    // Snapshot genuine paint dirt BEFORE layout: production layoutIfNeeded()
+    // blanket-marks every re-laid node PaintDirty, which would otherwise widen
+    // damage to the whole reflowed region. These pre-layout marks are the real
+    // "content changed but the box didn't" signal (setText at a stable width,
+    // hover/active styles, etc.).
+    std::unordered_set<MorphNode*> paintBefore;
+    walkTree(win.root(), [&](MorphNode* n) {
+        if (n->isDirty(PaintDirty))
+            paintBefore.insert(n);
+    });
+
     win.root()->layoutIfNeeded(0.0f, 0.0f, (float)win.width(), (float)win.height(),
                                &win.renderer(), &stats);
     stats.fullTreeCount = countNodes(win.root());
@@ -123,7 +142,7 @@ void forgeCommit(MorphWindow& win)
 #endif
 
     // Phase 3: Accumulate damage BEFORE recordPaintTree clears the dirty flags
-    // that addAll() inspects.
+    // that the sweep below inspects.
     int vw = win.width(), vh = win.height();
     int nodeCount = stats.fullTreeCount;
     DamageSet damage;
@@ -149,19 +168,39 @@ void forgeCommit(MorphWindow& win)
     }
     else
     {
-        // Old rects of moved nodes (retained surface keeps their old pixels).
+        // Mirrors the dev-mode geometry diff: repaint a node iff its box moved
+        // (old + new) or it was genuinely paint-dirty before layout. Drop the
+        // blanket PaintDirty production layout() stamps on re-laid nodes whose
+        // pixels are actually unchanged, so a local change stays local instead
+        // of widening damage to the whole reflowed region.
         walkTree(win.root(), [&](MorphNode* n) {
             auto it = g_prevRects.find(n);
-            if (it != g_prevRects.end())
+            bool boxChanged = it == g_prevRects.end();
+            if (!boxChanged)
             {
-                const DamageRect& prev = it->second;
-                if ((int)n->x != prev.x || (int)n->y != prev.y ||
-                    (int)n->w != prev.w || (int)n->h != prev.h)
-                    damage.add(prev);
+                const PrevRect& prev = it->second;
+                boxChanged = ((int)n->x != prev.box.x || (int)n->y != prev.box.y ||
+                              (int)n->w != prev.box.w || (int)n->h != prev.box.h ||
+                              (int)n->scrollY != (int)prev.scrollY ||
+                              (int)n->contentH != (int)prev.contentH);
+            }
+            if (boxChanged)
+            {
+                if (it != g_prevRects.end())
+                    damage.add(it->second.box); // old position
+                damage.add({(int)n->x, (int)n->y, (int)n->w, (int)n->h});
+                n->markDirty(PaintDirty);       // force display-list re-record
+            }
+            else if (paintBefore.count(n))
+            {
+                damage.add({(int)n->x, (int)n->y, (int)n->w, (int)n->h});
+            }
+            else
+            {
+                n->clearDirty(PaintDirty);
+                n->clearDirty(ScrollDirty);
             }
         });
-        // Current rects of paint/style/scroll-dirty nodes.
-        damage.addAll(win.root());
         // 1px safety margin past the rounded clip boundary, then clip to view.
         for (auto& r : damage.rects)
         {
@@ -178,7 +217,8 @@ void forgeCommit(MorphWindow& win)
     g_firstFrame = false;
     g_prevNodeCount = nodeCount;
     walkTree(win.root(), [&](MorphNode* n) {
-        g_prevRects[n] = {(int)n->x, (int)n->y, (int)n->w, (int)n->h};
+        g_prevRects[n] = {{(int)n->x, (int)n->y, (int)n->w, (int)n->h},
+                          n->scrollY, n->contentH};
     });
 
     stats.damageArea = damage.totalArea();
@@ -247,9 +287,9 @@ void forgePresent(MorphWindow& win,
 
     if (!fullscreen && g_damage.empty())
     {
-        // Nothing visually changed: untouched pixels already live in the FBO
-        // and the backbuffer holds the same frame. Blit it over and swap so a
-        // pending commit is never silently dropped.
+        // Nothing visually changed: the retained surface and the (now-empty
+        // after swap) backbuffer both need the full frame pushed through.
+        // Blit the whole FBO and swap so a pending commit is never dropped.
         glBindFramebuffer(GL_READ_FRAMEBUFFER, g_fbo);
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
         glReadBuffer(GL_COLOR_ATTACHMENT0);
@@ -280,65 +320,48 @@ void forgePresent(MorphWindow& win,
         r.setProjection(proj);
         win.drawFrameNodes();
         stats.damageArea = w * h;
-        stats.presentBytes = w * h * 4;
     }
     else
     {
-        // Union of all damage rects (top-left origin).
-        int minX = 1 << 30, minY = 1 << 30, maxR = 0, maxB = 0;
-        for (const auto& dmg : g_damage.rects)
-        {
-            minX = std::min(minX, dmg.x);
-            minY = std::min(minY, dmg.y);
-            maxR = std::max(maxR, dmg.right());
-            maxB = std::max(maxB, dmg.bottom());
-        }
-        int cw = maxR - minX, ch = maxB - minY;
-
         // Reset depth+stencil for the WHOLE surface (cheap, no color write) so
         // rounded-clip masks start from 0 every frame regardless of region.
         glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
         glClear(GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
         glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
-        // Color-clear only the damaged bbox, then re-raster the full frame
-        // (scissor clips the fill; correctness never depends on fill limiting).
+        // Color-clear each damage rect individually (the rects are disjoint,
+        // so no pixel outside them is erased — anything outside gets retained).
         r.setClearColor(1.0f, 1.0f, 1.0f, 1.0f);
         glEnable(GL_SCISSOR_TEST);
-        glScissor(minX, h - (minY + ch), cw, ch);
-        glClear(GL_COLOR_BUFFER_BIT);
+        for (const auto& dmg : g_damage.rects)
+        {
+            glScissor(dmg.x, h - (dmg.y + dmg.h), dmg.w, dmg.h);
+            glClear(GL_COLOR_BUFFER_BIT);
+        }
         glDisable(GL_SCISSOR_TEST);
 
+        // Re-raster only nodes that touch the damage; everything else is
+        // retained in the surface as-is.
         r.setProjection(proj);
-        win.drawFrameNodes();
+        win.drawFrameNodes(&g_damage);
 
         stats.damageArea = g_damage.totalArea();
-        stats.presentBytes = g_damage.totalArea() * 4;
     }
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
-    // Copy only the damaged regions from the retained surface to the
-    // backbuffer. Non-damaged pixels were presented unchanged last frame.
+    // The swapchain back buffer is UNDEFINED after each swap, so we can never
+    // blit only a sub-rect — present the whole retained surface every frame.
+    // The savings come from the retained re-raster above, not from the blit.
     glBindFramebuffer(GL_READ_FRAMEBUFFER, g_fbo);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
     glReadBuffer(GL_COLOR_ATTACHMENT0);
     glDrawBuffer(GL_BACK);
-    if (fullscreen)
-    {
-        glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-    }
-    else
-    {
-        for (const auto& dmg : g_damage.rects)
-        {
-            glBlitFramebuffer(dmg.x, h - (dmg.y + dmg.h), dmg.right(), h - dmg.y,
-                              dmg.x, h - (dmg.y + dmg.h), dmg.right(), h - dmg.y,
-                              GL_COLOR_BUFFER_BIT, GL_NEAREST);
-        }
-    }
+    glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
     glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+
+    stats.presentBytes = w * h * 4;
 
     if (overlayFn)
     {

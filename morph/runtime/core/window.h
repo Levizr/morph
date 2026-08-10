@@ -10,6 +10,10 @@
 #include "../renderers/renderer.h"
 #include "render_frame.h"
 
+// Forward-declared (used only as an optional pointer in render signatures).
+// Full definition lives in renderers/forge/damage.h.
+struct DamageSet;
+
 // Optional hook for dev tools to observe which nodes are repainted each frame.
 // Left null in production builds — zero cost. Dev runtime sets it at startup.
 using RepaintHookFn = void (*)(MorphNode *);
@@ -90,7 +94,10 @@ public:
     // Draw the flat node tree into the renderer's current target (used by the
     // forge retained-FBO present path). GL context must be current; callers
     // bind the target framebuffer beforehand.
-    void drawFrameNodes();
+    // damageClip (optional): when set, nodes whose drawn rect does not touch
+    // the damage are skipped — their pixels are already correct in the retained
+    // surface. Clipping nodes never skip (their clip reveals descendants).
+    void drawFrameNodes(const DamageSet *damageClip = nullptr);
 
     // Start/stop compositor thread
     void startCompositor(bool vsync = true);
@@ -103,7 +110,8 @@ public:
     MorphNode* root() const { return m_root; }
 
 private:
-    void renderNode(const RenderFrame *frame, int nodeIdx);
+    void renderNode(const RenderFrame *frame, int nodeIdx,
+                    const DamageSet *damageClip = nullptr);
     static void drawOpsForNode(GLRenderer &r, const RenderFrame *frame, int nodeIdx,
                                float ox, float oy);
     static void drawScrollbar(GLRenderer &r, const FlatRenderNode &node,

@@ -7,7 +7,7 @@
 #include <string>
 #include <utility>
 
-#include "../types/js_string.h"
+#include "../types/js_types.h"
 
 namespace morph::net {
 
@@ -32,6 +32,9 @@ namespace detail {
 struct SharedState {
     std::string url;
     Response response;
+    // Set when the request failed at the transport level (DNS, connect,
+    // timeout, or empty reply) rather than returning an HTTP error status.
+    std::string error;
 };
 
 // Performs a blocking HTTP GET on a worker thread, then resumes the
@@ -44,7 +47,13 @@ struct HttpAwaitable {
 
     void await_suspend(std::coroutine_handle<> h) noexcept;
 
-    Response await_resume() noexcept { return state->response; }
+    Response await_resume() {
+        if (!state->error.empty()) {
+            throw JsValue(JsObject{{"name", JsString("Error")},
+                                   {"message", JsString(state->error)}});
+        }
+        return state->response;
+    }
 };
 
 } // namespace detail

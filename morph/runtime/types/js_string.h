@@ -101,7 +101,7 @@ struct JsString {
     bool operator<(const JsString& o) const { return value < o.value; }
 
     JsString toString() const { return value; }
-    explicit operator std::string() const { return value; }
+    operator std::string() const { return value; }
 };
 
 // ── Mixed-type comparison operators ──

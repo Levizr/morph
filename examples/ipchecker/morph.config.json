@@ -1,0 +1,14 @@
+{
+  "name": "ipchecker",
+  "entry": "src/App.mx",
+  "output": "dist/",
+
+  "window": {
+    "width": 360,
+    "height": 220,
+    "title": "IP Checker"
+  },
+  "dependencies": {},
+  "cpp_sources": [],
+  "renderer": "flash"
+}

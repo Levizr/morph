@@ -692,6 +692,7 @@ class TSToCppTranslator:
         # catch clause
         if node.handler is not None:
             param = node.handler.param.name
+            self._var_types[param] = "JsValue"
             h = self._translate_node(node.handler.body)
             h_lines = h.split("\n")
             lines.append(f"{self._indent}}} catch (JsValue& {param}) {{")
@@ -1004,7 +1005,7 @@ class TSToCppTranslator:
 
     def _should_use_bracket_access(self, obj_node: TSNode, obj_str: str) -> bool:
         if isinstance(obj_node, TSIdentifier):
-            return self._var_types.get(obj_node.name) in ("JsObject",)
+            return self._var_types.get(obj_node.name) in ("JsObject", "JsValue")
         if isinstance(obj_node, TSMemberExpression):
             return True
         return False

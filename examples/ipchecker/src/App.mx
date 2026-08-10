@@ -1,0 +1,48 @@
+import { CSS, morphState } from 'morph'
+
+CSS.load("style.css")
+
+export const windowConfig = {
+  title: "IP Checker",
+  width: 360,
+  height: 240,
+}
+
+export default function App() {
+  const [ip, setIp] = morphState("");
+  const [err, setErr] = morphState("");
+  const [loading, setLoading] = morphState(0);
+
+  async function fetchIp():Promise<string> {
+    setLoading(1);
+    setErr("");
+    try {
+      let r = await fetch("http://api.ipify.org");
+      if (!r.ok()) {
+        setErr("HTTP error " + r.status);
+        setLoading(0);
+        return "";
+      }
+      let body = r.text();
+      setIp(body);
+    } catch (e) {
+      setErr("Network error: " + e.message);
+    }
+    setLoading(0);
+    return "";
+  }
+
+  return (
+    <body>
+      <div className="app" id="app">
+        <div className="title" id="title">Your public IP</div>
+        <button className="btn" id="btn" onClick={() => fetchIp()}>Fetch my IP</button>
+        <div className="status" id="status">
+          {loading === 1 && <span>Fetching…</span>}
+        </div>
+        <div className="result" id="result">{ip}</div>
+        <div className="error" id="error">{err}</div>
+      </div>
+    </body>
+  )
+}

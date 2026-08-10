@@ -9,6 +9,7 @@
 #include "../core/node.h"
 #include "../render/gl_renderer.h"
 #include "dev_log.h"
+#include "dev_net.h"
 
 struct DevTools {
     bool open = false;
@@ -16,7 +17,7 @@ struct DevTools {
     MorphNode* hoveredNode = nullptr;
     MorphNode* selectedNode = nullptr;
     float mouseX = 0.0f, mouseY = 0.0f;
-    int m_activeTab = 0; // 0 = Elements, 1 = Rendering, 2 = Logs
+    int m_activeTab = 0; // 0 = Elements, 1 = Rendering, 2 = Logs, 3 = Network
     DirtyStats m_lastStats;
     int m_frameCount = 0;
 
@@ -38,6 +39,11 @@ struct DevTools {
     float m_logViewH = 0.0f;
     bool m_logDragging = false;
     float m_logDragGrabY = 0.0f;
+
+    // ── Network tab scrolling ──
+    float m_netScroll = 0.0f;
+    float m_netContentH = 0.0f;
+    float m_netViewH = 0.0f;
 
     // ── Toast ──
     std::string m_toastText;
@@ -91,43 +97,70 @@ struct DevTools {
     }
 
     void scroll(float dy) {
-        if (!open || m_activeTab != 2) return;
-        m_logScroll -= dy * 36.0f;
-        float maxScroll = std::max(0.0f, m_logContentH - m_logViewH);
-        if (m_logScroll < 0.0f) m_logScroll = 0.0f;
-        if (m_logScroll > maxScroll) m_logScroll = maxScroll;
+        if (!open) return;
+        if (m_activeTab == 2) {
+            m_logScroll -= dy * 36.0f;
+            float maxScroll = std::max(0.0f, m_logContentH - m_logViewH);
+            if (m_logScroll < 0.0f) m_logScroll = 0.0f;
+            if (m_logScroll > maxScroll) m_logScroll = maxScroll;
+        } else if (m_activeTab == 3) {
+            m_netScroll -= dy * 36.0f;
+            float maxScroll = std::max(0.0f, m_netContentH - m_netViewH);
+            if (m_netScroll < 0.0f) m_netScroll = 0.0f;
+            if (m_netScroll > maxScroll) m_netScroll = maxScroll;
+        }
     }
 
-    void beginLogDrag(float mx, float my, float winW, float winH) {
-        if (!open || m_activeTab != 2 || m_logContentH <= m_logViewH) return;
+    void adjustScroll(float& scroll, float& contentH, float& viewH,
+                      float my, float winH, float grabY) {
+        float top = contentTop();
+        float view = winH - 8.0f - top;
+        float thumbH = std::max(24.0f, (view / contentH) * view);
+        float maxScroll = std::max(0.0f, contentH - view);
+        float thumbY = my - grabY;
+        if (thumbY < top) thumbY = top;
+        if (thumbY > top + view - thumbH) thumbY = top + view - thumbH;
+        scroll = (thumbY - top) / (view - thumbH) * maxScroll;
+        if (scroll < 0.0f) scroll = 0.0f;
+        if (scroll > maxScroll) scroll = maxScroll;
+    }
+
+    void beginScrollDrag(float mx, float my, float winW, float winH,
+                         float& scroll, float& contentH, float& viewH) {
+        if (contentH <= viewH) return;
         float px = winW - kPanelW;
         float trackX = px + kPanelW - 10.0f;
-        float top = logViewTop();
-        float viewH = winH - 8.0f - top;
-        float thumbH = std::max(24.0f, (viewH / m_logContentH) * viewH);
-        float maxScroll = m_logContentH - viewH;
-        float thumbY = top + (m_logScroll / maxScroll) * (viewH - thumbH);
-        if (mx < trackX || mx > trackX + 6.0f || my < top || my > top + viewH) return;
+        float top = contentTop();
+        float view = winH - 8.0f - top;
+        float thumbH = std::max(24.0f, (view / contentH) * view);
+        float maxScroll = std::max(0.0f, contentH - view);
+        float thumbY = top + (maxScroll > 0.0f ? (scroll / maxScroll) * (view - thumbH) : top);
+        if (mx < trackX || mx > trackX + 6.0f || my < top || my > top + view) return;
         if (my >= thumbY && my <= thumbY + thumbH)
             m_logDragGrabY = my - thumbY;
         else
             m_logDragGrabY = thumbH * 0.5f;
         m_logDragging = true;
-        dragLogScroll(my, winH);
+        adjustScroll(scroll, contentH, viewH, my, winH, m_logDragGrabY);
+    }
+
+    void beginLogDrag(float mx, float my, float winW, float winH) {
+        if (!open) return;
+        if (m_activeTab == 2) {
+            if (m_logContentH <= m_logViewH) return;
+            beginScrollDrag(mx, my, winW, winH, m_logScroll, m_logContentH, m_logViewH);
+        } else if (m_activeTab == 3) {
+            if (m_netContentH <= m_netViewH) return;
+            beginScrollDrag(mx, my, winW, winH, m_netScroll, m_netContentH, m_netViewH);
+        }
     }
 
     void dragLogScroll(float my, float winH) {
         if (!m_logDragging) return;
-        float top = logViewTop();
-        float viewH = winH - 8.0f - top;
-        float thumbH = std::max(24.0f, (viewH / m_logContentH) * viewH);
-        float maxScroll = m_logContentH - viewH;
-        float thumbY = my - m_logDragGrabY;
-        if (thumbY < top) thumbY = top;
-        if (thumbY > top + viewH - thumbH) thumbY = top + viewH - thumbH;
-        m_logScroll = (thumbY - top) / (viewH - thumbH) * maxScroll;
-        if (m_logScroll < 0.0f) m_logScroll = 0.0f;
-        if (m_logScroll > maxScroll) m_logScroll = maxScroll;
+        if (m_activeTab == 2)
+            adjustScroll(m_logScroll, m_logContentH, m_logViewH, my, winH, m_logDragGrabY);
+        else if (m_activeTab == 3)
+            adjustScroll(m_netScroll, m_netContentH, m_netViewH, my, winH, m_logDragGrabY);
     }
 
     void endLogDrag() { m_logDragging = false; }
@@ -147,12 +180,13 @@ struct DevTools {
     bool handleClick(float mx, float my, float winW, float winH) {
         if (!open) return false;
         float pw = kPanelW, px = winW - pw;
-        float tabY = 40.0f, tabH = 28.0f, tabW = pw / 3.0f;
+        float tabY = 40.0f, tabH = 28.0f, tabW = pw / 4.0f;
         // Tab clicks
         if (my >= tabY && my <= tabY + tabH) {
             if (mx >= px && mx <= px + tabW) { m_activeTab = 0; return true; }
             if (mx >= px + tabW && mx <= px + tabW * 2) { m_activeTab = 1; return true; }
-            if (mx >= px + tabW * 2 && mx <= px + pw) { m_activeTab = 2; return true; }
+            if (mx >= px + tabW * 2 && mx <= px + tabW * 3) { m_activeTab = 2; return true; }
+            if (mx >= px + tabW * 3 && mx <= px + pw) { m_activeTab = 3; return true; }
             return false;
         }
 
@@ -187,6 +221,17 @@ struct DevTools {
             if (mx >= cbx && mx <= cbx + cw && my >= contentY && my <= contentY + ch) {
                 devLogClear();
                 m_logScroll = 0.0f;
+                return true;
+            }
+            // Scrollbar drag
+            beginLogDrag(mx, my, winW, winH);
+            if (m_logDragging) return true;
+        } else if (m_activeTab == 3) {
+            // Clear network button (top-right of Network tab)
+            float cbx = px + pw - 76.0f, cw = 64.0f, ch = 22.0f;
+            if (mx >= cbx && mx <= cbx + cw && my >= contentY && my <= contentY + ch) {
+                devNetClear();
+                m_netScroll = 0.0f;
                 return true;
             }
             // Scrollbar drag
@@ -389,14 +434,14 @@ private:
         // ── Tabs ──
         float tabY = 40.0f;
         float tabH = 28.0f;
-        float tabW = pw / 3.0f;
+        float tabW = pw / 4.0f;
         float tabActiveBg[4] = {0.15f, 0.15f, 0.18f, 1.0f};
         float tabInactiveBg[4] = {0.10f, 0.10f, 0.12f, 1.0f};
         float tabActiveCol[4] = {0.9f, 0.9f, 0.95f, 1.0f};
         float tabInactiveCol[4] = {0.5f, 0.5f, 0.55f, 1.0f};
-        const char* labels[3] = {"Elements", "Rendering", "Logs"};
+        const char* labels[4] = {"Elements", "Rendering", "Logs", "Network"};
 
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < 4; i++) {
             float tx = px + tabW * i;
             r.drawRect(tx, tabY, tabW, tabH,
                        m_activeTab == i ? tabActiveBg : tabInactiveBg);
@@ -411,8 +456,10 @@ private:
             drawElementsTab(r, px, contentY, pw);
         else if (m_activeTab == 1)
             drawRenderingTab(r, px, contentY, pw, winH);
-        else
+        else if (m_activeTab == 2)
             drawLogsTab(r, px, contentY, pw, winH);
+        else
+            drawNetworkTab(r, px, contentY, pw, winH);
     }
 
     void drawElementsTab(GLRenderer& r, float px, float y0, float pw) {
@@ -541,7 +588,7 @@ private:
                    px + 16, by + 7.0f, btnText, 12.0f, "normal");
     }
 
-    static float logViewTop() {
+    static float contentTop() {
         return 40.0f + 28.0f + 6.0f + 30.0f;
     }
 
@@ -670,6 +717,111 @@ private:
             float thumbH = std::max(24.0f, (viewH / contentH) * viewH);
             float maxScroll = contentH - viewH;
             float thumbY = top + (m_logScroll / maxScroll) * (viewH - thumbH);
+            r.drawRoundedRect(trackX, thumbY, 6.0f, thumbH, 3.0f, thumbCol);
+        }
+    }
+
+    void drawNetworkTab(GLRenderer& r, float px, float y0, float pw, float winH) {
+        float colLbl[4] = {0.5f, 0.5f, 0.6f, 1.0f};
+        float colBtn[4] = {0.9f, 0.9f, 0.95f, 1.0f};
+
+        // ── Toolbar: title + Clear button ──
+        drawSectionHeader(r, px, y0, pw, "REQUESTS");
+        float clearBg[4] = {0.22f, 0.22f, 0.26f, 1.0f};
+        r.drawRoundedRect(px + pw - 76.0f, y0, 64.0f, 22.0f, 4, clearBg);
+        drawTextAt(r, "Clear", px + pw - 66.0f, y0 + 4.0f, colBtn, 11.0f, "normal");
+
+        float top = y0 + 30.0f;
+        float bottom = winH - 8.0f;
+        float viewH = bottom - top;
+        auto& entries = devNetEntries();
+
+        float rowH = 30.0f;
+        float contentH = 4.0f + entries.size() * rowH;
+        m_netContentH = contentH;
+        m_netViewH = viewH;
+        if (contentH > viewH && m_netScroll > contentH - viewH)
+            m_netScroll = contentH - viewH;
+        if (m_netScroll < 0.0f) m_netScroll = 0.0f;
+
+        // ── Scrollable content ──
+        r.beginClip(px, top, pw, viewH);
+
+        float colOk[4]     = {0.20f, 0.80f, 0.30f, 1.0f};
+        float colWarn[4]   = {0.95f, 0.70f, 0.20f, 1.0f};
+        float colErr[4]    = {0.95f, 0.30f, 0.25f, 1.0f};
+        float colPending[4]= {0.50f, 0.50f, 0.58f, 1.0f};
+        float colTime[4]   = {0.38f, 0.38f, 0.46f, 1.0f};
+        float colUrl[4]    = {0.72f, 0.72f, 0.82f, 1.0f};
+        float rowDiv[4]    = {0.14f, 0.14f, 0.16f, 1.0f};
+        float colBar[4]    = {0.4f, 0.7f, 1.0f, 1.0f};
+
+        char buf[160];
+        float lineY = top - m_netScroll + 2.0f;
+        for (size_t k = 0; k < entries.size(); k++) {
+            auto& e = entries[k];
+            if (lineY > bottom) break;
+            if (lineY + rowH < top) { lineY += rowH; continue; }
+
+            if (k > 0)
+                r.drawRect(px + 6, lineY, pw - 12, 1, rowDiv);
+
+            // Status color
+            float* col = e.done ? (e.status >= 400 ? colErr : colOk) : colPending;
+            if (e.done && e.status == 0) col = colErr;
+
+            // Status badge + method
+            const char* method = "GET";
+            if (!e.method.empty()) method = e.method.c_str();
+            snprintf(buf, sizeof(buf), "%s  %s", method,
+                     e.done ? (e.status == 0 ? "ERR" : std::to_string(e.status).c_str()) : "…");
+            float statusW = r.measureTextWidth(buf, 10.0f, "bold");
+            drawTextAt(r, buf, px + 6, lineY + 3.0f, col, 10.0f, "bold");
+
+            // Timing on the right
+            std::string tstr;
+            if (e.done) {
+                char tb[64];
+                snprintf(tb, sizeof(tb), "%.0f ms  %zu B", e.duration * 1000.0, e.bytes);
+                tstr = tb;
+            } else {
+                tstr = "…";
+            }
+            float w = r.measureTextWidth(tstr, 9.0f, "normal");
+            drawTextAt(r, tstr, px + pw - 14 - w, lineY + 4.0f, colTime, 9.0f, "normal");
+
+            // URL (truncate)
+            std::string url = e.url;
+            float urlMaxW = px + pw - 14.0f - (px + statusW + 20.0f) - w;
+            if (r.measureTextWidth(url, 9.0f, "normal") > urlMaxW) {
+                while (!url.empty() && r.measureTextWidth(url + "...", 9.0f, "normal") > urlMaxW)
+                    url.pop_back();
+                url += "...";
+            }
+            drawTextAt(r, url, px + statusW + 20.0f, lineY + 4.0f, colUrl, 9.0f, "normal");
+
+            // Small progress/status bar
+            float barW = pw - 20.0f;
+            r.drawRect(px + 6, lineY + rowH - 3.0f, barW, 1.0f, rowDiv);
+            if (e.done && e.status != 0) {
+                float frac = std::min(1.0f, (float)(e.duration * 10.0));
+                r.drawRect(px + 6, lineY + rowH - 3.0f, barW * frac, 1.0f, colBar);
+            }
+
+            lineY += rowH;
+        }
+
+        r.endClip();
+
+        // ── Scrollbar ──
+        if (contentH > viewH) {
+            float trackBg[4] = {0.16f, 0.16f, 0.19f, 1.0f};
+            float thumbCol[4] = {0.35f, 0.35f, 0.42f, 1.0f};
+            float trackX = px + pw - 10.0f;
+            r.drawRect(trackX, top, 6.0f, viewH, trackBg);
+            float thumbH = std::max(24.0f, (viewH / contentH) * viewH);
+            float maxScroll = contentH - viewH;
+            float thumbY = top + (m_netScroll / maxScroll) * (viewH - thumbH);
             r.drawRoundedRect(trackX, thumbY, 6.0f, thumbH, 3.0f, thumbCol);
         }
     }

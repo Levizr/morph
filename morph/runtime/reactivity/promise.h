@@ -5,6 +5,7 @@
 #include <optional>
 #include <utility>
 #include <type_traits>
+#include <exception>
 
 namespace morph {
 
@@ -13,6 +14,7 @@ class Result {
 public:
     struct promise_type {
         std::optional<std::remove_cv_t<T>> value;
+        std::exception_ptr eptr = nullptr;
 
         Result get_return_object() noexcept {
             return Result{std::coroutine_handle<promise_type>::from_promise(*this)};
@@ -27,7 +29,7 @@ public:
             value = std::forward<U>(v);
         }
 
-        void unhandled_exception() noexcept { std::terminate(); }
+        void unhandled_exception() noexcept { eptr = std::current_exception(); }
     };
 
     std::coroutine_handle<promise_type> handle = nullptr;
@@ -57,7 +59,10 @@ public:
 
         void await_suspend(std::coroutine_handle<>) noexcept {}
 
-        T await_resume() noexcept {
+        T await_resume() {
+            if (handle.promise().eptr) {
+                std::rethrow_exception(handle.promise().eptr);
+            }
             if (!handle.promise().value) {
                 return T{};
             }

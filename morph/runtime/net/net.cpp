@@ -10,6 +10,8 @@
 #include <sstream>
 #include <thread>
 
+#include "../dev/dev_net.h"
+
 namespace morph::net {
 
 namespace detail {
@@ -17,8 +19,22 @@ namespace detail {
 void HttpAwaitable::await_suspend(std::coroutine_handle<> h) noexcept {
     std::shared_ptr<SharedState> st = state;
     std::thread([st, h]() mutable {
+        int netId = devNetBegin("GET", st->url);
         st->response = http_get(st->url);
+        std::string err;
+        if (st->response.status == 0) {
+            err = "Failed to fetch " + st->url +
+                  " (network error: no connection or empty reply)";
+            st->error = err;
+        }
+        devNetEnd(netId, st->response.status, st->response.body.size(), err);
         h.resume();
+        // If the coroutine completed during resume, reclaim its frame.
+        // Covers the common fire-and-forget pattern where the caller
+        // discards the morph::Result without awaiting it.
+        if (h.done()) {
+            h.destroy();
+        }
     }).detach();
 }
 

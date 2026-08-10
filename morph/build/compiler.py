@@ -99,6 +99,7 @@ class Compiler:
             os.path.join(runtime_dir, "core", "compositor.cpp"),
             os.path.join(runtime_dir, "reactivity", "effect.cpp"),
             os.path.join(runtime_dir, "reactivity", "task.cpp"),
+            os.path.join(runtime_dir, "net", "net.cpp"),
             # Renderer seam + both backends (compile-time dispatch via
             # MORPH_RENDERER_FORGE picks which one is live; the other is
             # eliminated by -Wl,--gc-sections).

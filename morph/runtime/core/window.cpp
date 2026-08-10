@@ -1,6 +1,7 @@
 #include "window.h"
 #include "renderers/flash/flash.h"
 #include "renderers/forge/forge.h"
+#include "renderers/forge/damage.h"
 #include <GLFW/glfw3.h>
 #include <algorithm>
 #include <print>
@@ -348,7 +349,8 @@ void MorphWindow::drawScrollbar(GLRenderer &r, const FlatRenderNode &node,
     r.drawRoundedRect(trackX, thumbY, sbw, thumbH, radius, (float *)node.scrollbarThumbColor);
 }
 
-void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx)
+void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx,
+                             const DamageSet *damageClip)
 {
     const auto &node = frame->nodes[nodeIdx];
 
@@ -362,6 +364,25 @@ void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx)
     bool overflowClipped = (node.overflow == 1 || node.overflow == 2 || node.overflow == 3);
     bool radiusClip = node.borderRadius > 0.0f;
     bool scrolling = node.scrollEnabled && node.contentH > sh;
+
+    // Damage-limited re-raster: skip anything whose own box can't touch the
+    // repaint region — its pixels are already correct in the retained surface.
+    if (damageClip)
+    {
+        DamageRect box{(int)sx, (int)sy, (int)sw, (int)sh};
+        if (!damageClip->intersects(box))
+        {
+            // Clipping nodes fully contain their descendants, so skipping the
+            // whole subtree is safe. Unclipped nodes can have overflowed
+            // children that DO reach the damage — recurse them without
+            // touching this node's pixels.
+            if (overflowClipped || radiusClip)
+                return;
+            for (int childIdx : node.children)
+                renderNode(frame, childIdx, damageClip);
+            return;
+        }
+    }
 
     // 1. Draw self (background from display list)
     drawOpsForNode(m_renderer, frame, nodeIdx, node.animOffsetX, node.animOffsetY);
@@ -399,12 +420,12 @@ void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx)
             float childVisY = child.y + child.animOffsetY - node.scrollY;
             if (childVisY + child.h > sy && childVisY < sy + sh)
             {
-                renderNode(frame, childIdx);
+                renderNode(frame, childIdx, damageClip);
             }
         }
         else
         {
-            renderNode(frame, childIdx);
+            renderNode(frame, childIdx, damageClip);
         }
     }
     if (scrolling)
@@ -477,7 +498,7 @@ void MorphWindow::renderFrame(std::function<void(GLRenderer &, DirtyStats &)> ov
     glfwSwapBuffers(m_handle);
 }
 
-void MorphWindow::drawFrameNodes()
+void MorphWindow::drawFrameNodes(const DamageSet *damageClip)
 {
     auto *frame = g_frontFrame.load(std::memory_order_acquire);
     if (!frame)
@@ -493,7 +514,7 @@ void MorphWindow::drawFrameNodes()
     for (size_t i = 0; i < frame->nodes.size(); i++)
     {
         if (frame->nodes[i].parentId == -1)
-            renderNode(frame, (int)i);
+            renderNode(frame, (int)i, damageClip);
     }
     m_renderer.flush(proj);
 }

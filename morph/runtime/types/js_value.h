@@ -235,6 +235,11 @@ struct JsValue {
         return JsString("[object Object]");
     }
 
+    // ── String conversion (JS implicit coercion) ──
+    // Needed so `setErr(e.message)` / `"" + e` work when the JS value flows
+    // into a std::string state. Defined after _js_to_string below.
+    operator std::string() const;
+
     // ── Array method forwarding ──
 
     void push(const JsValue& item) {
@@ -391,6 +396,10 @@ static std::string _js_to_string(const JsValue& v) {
     if (v.is_object()) return "[object Object]";
     if (v.is_function()) return "function";
     return "undefined";
+}
+
+inline JsValue::operator std::string() const {
+    return _js_to_string(*this);
 }
 
 // ── JsValue + JsValue (JS semantics: string concat if either is string) ──
