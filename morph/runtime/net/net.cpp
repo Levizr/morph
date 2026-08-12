@@ -27,7 +27,16 @@ void HttpAwaitable::await_suspend(std::coroutine_handle<> h) noexcept {
                   " (network error: no connection or empty reply)";
             st->error = err;
         }
-        devNetEnd(netId, st->response.status, st->response.body.size(), err);
+        std::string respHead;
+        respHead += "HTTP/1.1 " + std::to_string(st->response.status) + "\r\n";
+        for (const auto& [k, v] : st->response.headers)
+            respHead += k + ": " + v + "\r\n";
+        static const size_t kMaxPreview = 8192;
+        std::string preview = st->response.body;
+        if (preview.size() > kMaxPreview)
+            preview.resize(kMaxPreview);
+        devNetEnd(netId, st->response.status, st->response.body.size(), err,
+                  st->response.requestHead, respHead, preview);
         h.resume();
         // If the coroutine completed during resume, reclaim its frame.
         // Covers the common fire-and-forget pattern where the caller
@@ -143,6 +152,7 @@ Response http_get(const std::string& url) {
         host_header += ":" + std::to_string(parts.port);
     }
     std::string req = build_request(parts, host_header);
+    resp.requestHead = req;
     if (::send(fd, req.data(), req.size(), 0) < 0) {
         ::close(fd);
         return resp;

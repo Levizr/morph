@@ -107,13 +107,27 @@ static bool reload_logic(const std::string& path, NodeRegistry& registry, Signal
 // ── DevTools (global for GLFW callbacks) ────────────────
 static DevTools* g_devtools = nullptr;
 
+// Lazily-created horizontal-resize cursor for the DevTools panel resize handle.
+static GLFWcursor* s_ewCursor = nullptr;
+static GLFWcursor* ewResizeCursor() {
+    if (!s_ewCursor)
+        s_ewCursor = glfwCreateStandardCursor(GLFW_HRESIZE_CURSOR);
+    return s_ewCursor;
+}
+
 static void collectRepaint(MorphNode* n) {
     if (g_devtools) g_devtools->noteRepaint(n);
 }
 
 static void keyCb(GLFWwindow* win, int key, int scancode, int action, int mods) {
     if (g_devtools && action == GLFW_PRESS) {
-        if (key == GLFW_KEY_F12) { g_devtools->toggle(); return; }
+        if (key == GLFW_KEY_F12) {
+            g_devtools->toggle();
+            auto* mwin = (MorphWindow*)glfwGetWindowUserPointer(win);
+            if (mwin)
+                mwin->setDevtoolsWidth(g_devtools->open ? g_devtools->m_panelW : 0.0f);
+            return;
+        }
         if (key == GLFW_KEY_F2 && g_devtools->open) { g_devtools->toggleInspect(); return; }
         if (key == GLFW_KEY_ESCAPE && (g_devtools->open || g_devtools->inspecting)) {
             g_devtools->cancelInspect();
@@ -132,12 +146,25 @@ static void mouseCb(GLFWwindow* win, int btn, int act, int mods) {
     glfwGetCursorPos(win, &mx, &my);
     int w = 0, h = 0;
     glfwGetWindowSize(win, &w, &h);
-    if (g_devtools->open && mx >= w - DevTools::kPanelW) {
-        if (act == GLFW_PRESS)
-            g_devtools->handleClick((float)mx, (float)my, (float)w, (float)h);
-        else if (act == GLFW_RELEASE)
-            g_devtools->endLogDrag();
-        return; // consumed by the panel
+    if (g_devtools->open) {
+        float px = (float)w - g_devtools->m_panelW;
+        // Resize handle strip (spans 8px across the panel's left edge)
+        if (mx >= px - 5.0f && mx <= px + 3.0f) {
+            if (act == GLFW_PRESS) {
+                g_devtools->m_resizing = true;
+                g_devtools->m_resizeGrabX = (float)mx;
+            } else if (act == GLFW_RELEASE) {
+                g_devtools->m_resizing = false;
+            }
+            return; // consumed by the resize handle
+        }
+        if (mx >= px) {
+            if (act == GLFW_PRESS)
+                g_devtools->handleClick((float)mx, (float)my, (float)w, (float)h);
+            else if (act == GLFW_RELEASE)
+                g_devtools->endLogDrag();
+            return; // consumed by the panel
+        }
     }
     if (g_devtools->inspecting && act == GLFW_PRESS) {
         g_devtools->selectHovered();
@@ -152,7 +179,7 @@ static void scrollCb(GLFWwindow* win, double dx, double dy) {
         glfwGetCursorPos(win, &mx, nullptr);
         int w = 0;
         glfwGetWindowSize(win, &w, nullptr);
-        if (mx >= w - DevTools::kPanelW) {
+        if (mx >= w - g_devtools->m_panelW) {
             g_devtools->scroll((float)dy);
             return;
         }
@@ -161,11 +188,34 @@ static void scrollCb(GLFWwindow* win, double dx, double dy) {
 }
 
 static void cursorCb(GLFWwindow* win, double mx, double my) {
-    if (g_devtools && g_devtools->open) {
-        int w = 0, h = 0;
-        glfwGetWindowSize(win, &w, &h);
-        if (mx >= w - DevTools::kPanelW)
-            g_devtools->handleCursorPos((float)mx, (float)my, (float)w, (float)h);
+    if (g_devtools) {
+        if (g_devtools->m_resizing) {
+            int w = 0, h = 0;
+            glfwGetWindowSize(win, &w, &h);
+            float pw = (float)w - (float)mx;
+            float maxPw = (float)w - 360.0f; // keep the app at least ~360px wide
+            if (pw < DevTools::kMinPanelW) pw = DevTools::kMinPanelW;
+            if (pw > maxPw) pw = maxPw;
+            if (pw != g_devtools->m_panelW) {
+                g_devtools->m_panelW = pw;
+                auto* mwin = (MorphWindow*)glfwGetWindowUserPointer(win);
+                if (mwin) mwin->setDevtoolsWidth(pw);
+            }
+            glfwSetCursor(win, ewResizeCursor());
+            return;
+        }
+        if (g_devtools->open) {
+            int w = 0, h = 0;
+            glfwGetWindowSize(win, &w, &h);
+            float px = (float)w - g_devtools->m_panelW;
+            // Resize handle hover → horizontal-resize cursor
+            if (mx >= px - 5.0f && mx <= px + 3.0f) {
+                glfwSetCursor(win, ewResizeCursor());
+                return;
+            }
+            if (mx >= px)
+                g_devtools->handleCursorPos((float)mx, (float)my, (float)w, (float)h);
+        }
     }
     MorphWindow::cursorPosCb(win, mx, my);
 }

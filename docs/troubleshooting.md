@@ -16,32 +16,35 @@
 
 ### `morph dev` — "morph_devrt: command not found"
 
-**Cause**: The dev mode runtime binary (`morph/bin/morph_devrt`) does not exist in the repository.
+**Cause**: The dev mode runtime binary (`morph_devrt`) has not been compiled yet.
 
-**Status**: Not yet built. Dev mode is blocked until the C++ dev runtime is compiled. Use `morph build` to compile a standalone binary instead.
+**Fix**: `morph dev` auto-builds the binary via CMake on first run (and rebuilds it whenever shared runtime sources change, tracked via a source hash). It needs `cmake`, `g++`, and `make` on your PATH — run `morph doctor` to verify.
 
-### ImportError: `morph.lexer`
+### `morph translate` — unexpected TS output
 
-**Cause**: Old test files (`test_html_lexer.py`, `test_css_lexer.py`) import from `morph.lexer` which was removed when the project switched to tree-sitter-based parsing.
+**Cause**: The translator (`morph/js/`) targets the TypeScript grammar via tree-sitter. Mixing plain-JS constructs the TS grammar parses differently (e.g. implicit coercion patterns) can produce surprising C++.
 
-**Fix**: Delete or rewrite these tests for the current architecture.
+**Fix**: Check the emitted `.cpp` (translate writes it next to the source). The supported surface is documented in the README's JS/TS Runtime section.
 
 ### `morph doctor` — Missing dependencies
 
 Run `morph doctor` to check for:
 
-| Dependency | Linux Check | Install |
+| Dependency | Linux Install | Notes |
 |---|---|---|
-| Python 3.10+ | `python3 --version` | `apt install python3` |
-| g++ 11+ | `g++ --version` | `apt install g++` |
-| GLFW | `pkg-config --libs glfw3` | `apt install libglfw3-dev` |
-| OpenGL | `glxinfo` or `pkg-config --libs gl` | `apt install libgl1-mesa-dev` |
-| Node.js (optional) | `node --version` | `apt install nodejs` |
-| npm (optional) | `npm --version` | `apt install npm` |
+| Python 3.10+ | `apt install python3` | toolchain |
+| g++ 11+ (C++23) | `apt install g++` | toolchain |
+| cmake / make / pkg-config | `apt install cmake make pkg-config` | dev binary build |
+| GLFW | `apt install libglfw3-dev` | graphics |
+| OpenGL / X11 | `apt install libgl1-mesa-dev libx11-dev` | graphics |
+| FreeType | `apt install libfreetype-dev` | text |
+| HarfBuzz | `apt install libharfbuzz-dev` | text |
+
+`morph doctor` knows the package name per manager (apt/dnf/pacman/zypper/apk/brew/winget/choco) and can auto-install missing packages with `-y`. Use `-v` for detailed version output.
 
 ### `MorphParseError` on valid-looking `.mx` code
 
-**Cause**: The tree-sitter JavaScript grammar has specific syntax requirements. Common issues:
+**Cause**: The tree-sitter TypeScript grammar has specific syntax requirements. Common issues:
 
 1. **Missing quotes on attribute values**: `<div class=container>` → `<div class="container">`
 2. **Self-closing tags without `/`**: `<br>` → `<br />`

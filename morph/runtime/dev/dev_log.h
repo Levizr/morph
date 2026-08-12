@@ -2,6 +2,7 @@
 #include <string>
 #include <deque>
 #include <mutex>
+#include <vector>
 #include <cstddef>
 #include <chrono>
 
@@ -57,4 +58,13 @@ inline void devLogClear() {
     static std::mutex mtx;
     std::lock_guard<std::mutex> lock(mtx);
     entries.clear();
+}
+
+// Snapshot of the live log entries, safe for the UI thread to iterate while
+// a worker thread may still be appending to the real deque.
+inline std::vector<DevLogEntry> devLogSnapshot() {
+    auto& entries = devLogEntries();
+    static std::mutex mtx;
+    std::lock_guard<std::mutex> lock(mtx);
+    return std::vector<DevLogEntry>(entries.begin(), entries.end());
 }

@@ -133,7 +133,7 @@ void forgeCommit(MorphWindow& win)
             paintBefore.insert(n);
     });
 
-    win.root()->layoutIfNeeded(0.0f, 0.0f, (float)win.width(), (float)win.height(),
+    win.root()->layoutIfNeeded(0.0f, 0.0f, win.contentWidth(), win.contentHeight(),
                                &win.renderer(), &stats);
     stats.fullTreeCount = countNodes(win.root());
 

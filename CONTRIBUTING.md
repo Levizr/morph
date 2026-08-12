@@ -16,13 +16,12 @@ morph doctor
 The most impactful areas right now:
 
 | Area | Difficulty | Impact | Guide |
-|---|---|---|---|---|
-| **C++ Node Emitter** (`morph/codegen/node_emitter.py`) | Medium | Generates actual C++ from IR | [Pipeline Deep-Dive](docs/pipeline.md) |
-| **CSS Style Resolver** (`morph/style/resolver.py`) | Medium | CSS cascade + specificity | [Development Guide](docs/development.md) |
-| **JS Interpreter** (`morph/js/interpreter.py`) | Hard | JS expressions → C++ lambdas | [Development Guide](docs/development.md) |
-| **`morph_devrt` binary** (`runtime/`) | Hard | Dev mode renderer | — |
-| **`flex-wrap` / `position: relative` / `border`** | Medium | Layout and rendering features | [Development Guide](docs/development.md) |
-| **Tests** | Easy | Increase coverage | [Testing Guide](docs/testing.md) |
+|---|---|---|---|
+| **CSS Style Resolver** (`morph/style/`) | Medium | Full cascade + selector matching at runtime | [Development Guide](docs/development.md) |
+| **TS→C++ translator coverage** (`morph/js/`) | Medium | Broaden supported JS surface (built-ins, arrays/objects in UI logic) | [Development Guide](docs/development.md) |
+| **Forge tile pool** (`runtime/renderers/forge/`) | Hard | Content-keyed tile caching, LRU budget, scroll-shift remap | `arch/renderer-flash-forge.md` |
+| **`position: relative/fixed` + sticky** | Medium | Offset and viewport-relative positioning | [Development Guide](docs/development.md) |
+| **Tests** | Easy | Increase coverage (esp. layout, JS→C++, C++ runtime) | [Testing Guide](docs/testing.md) |
 | **Bug fixes** | Varies | Any open issue | — |
 
 ## Code Conventions

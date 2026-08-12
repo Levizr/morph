@@ -82,6 +82,23 @@ public:
     bool shouldClose() const { return m_handle && glfwWindowShouldClose(m_handle); }
     bool isVisible() const { return m_visible && m_handle && !glfwWindowShouldClose(m_handle); }
 
+    // Docked devtools: the panel occupies the right side of the window and the
+    // app's layout is constrained to the remaining content area, so the panel
+    // never covers app elements (browser-style docking).
+    void setDevtoolsWidth(float w) {
+        m_devtoolsWidth = w < 0.0f ? 0.0f : w;
+        m_pendingRender = true;
+        if (m_root) m_root->markDirty(SubtreeDirty);
+    }
+    float devtoolsWidth() const { return m_devtoolsWidth; }
+    // App content area (window minus the devtools strip). Clamped so the app
+    // never collapses to zero even if the user drags the panel very wide.
+    float contentWidth() const {
+        float cw = (float)m_width - m_devtoolsWidth;
+        return cw < 120.0f ? 120.0f : cw;
+    }
+    float contentHeight() const { return (float)m_height; }
+
     // Single-threaded render (legacy / fallback)
     void render(std::function<void(GLRenderer &, DirtyStats &)> overlayFn = {});
 
@@ -120,6 +137,7 @@ private:
     DirtyStats m_dirtyStats;
     bool m_prevHadDirty = true;
     bool m_pendingRender = true;
+    float m_devtoolsWidth = 0.0f;
 
 public:
     bool hasPendingRender() const

@@ -18,6 +18,9 @@ struct Response {
     int status = 0;
     std::map<std::string, std::string> headers;
     std::string body;
+    // Raw request head (request line + headers) actually sent over the wire.
+    // Populated by http_get for the DevTools Network tab.
+    std::string requestHead;
 
     bool ok() const noexcept { return status >= 200 && status < 300; }
 

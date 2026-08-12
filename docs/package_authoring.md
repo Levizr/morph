@@ -1,6 +1,6 @@
 # Writing a Morph Package
 
-**Status: Package CLI (`morph pkg add/list/install`) works. JS/C++ integration pipeline is stubbed — packages can be downloaded but not yet compiled into the binary.**
+**Status: Package CLI (`morph pkg add/remove/install/list/search`) works. JS/C++ integration pipeline is stubbed — packages can be downloaded but not yet compiled into the binary.**
 
 ## Required Files
 
@@ -48,12 +48,13 @@ public:
 ## Current Implementation
 
 | Component | Status |
-|---|---|
+|---|---|---|
 | `morph pkg add <name>` — download + extract | ✅ |
 | Registry fetch (registry.levizr.com/morph) | ✅ |
 | Manifest parsing (`morph.pkg.json`) | ✅ |
-| `morph pkg list` — show installed | ⚠️ Stub |
-| `morph pkg install` — restore from config | ⚠️ Stub |
-| `morph pkg remove` | ⚠️ Stub |
+| `morph pkg list` — show installed | ✅ |
+| `morph pkg install` — restore from config | ✅ |
+| `morph pkg remove` | ✅ |
+| `morph pkg search <query>` — registry search | ✅ |
 | Dependency resolver (versions, topological sort) | ⚠️ Stub |
 | JS → C++ bridge at build time | ❌ Not implemented |

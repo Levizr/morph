@@ -544,7 +544,7 @@ void MorphWindow::render(std::function<void(GLRenderer &, DirtyStats &)> overlay
 
 #ifdef MORPH_FEATURE_DIRTY_RENDERING
         m_renderer.ensureReady();
-        m_root->layoutIfNeeded(0.0f, 0.0f, (float)m_width, (float)m_height,
+        m_root->layoutIfNeeded(0.0f, 0.0f, contentWidth(), contentHeight(),
                                &m_renderer, &m_dirtyStats);
         m_dirtyStats.fullTreeCount = countNodes(m_root);
 #ifdef MORPH_FEATURE_DEV
@@ -556,7 +556,7 @@ void MorphWindow::render(std::function<void(GLRenderer &, DirtyStats &)> overlay
         m_root->executeDisplayList(m_renderer);
 #else
         m_renderer.ensureReady();
-        m_root->layout(0.0f, 0.0f, (float)m_width, (float)m_height, &m_renderer);
+        m_root->layout(0.0f, 0.0f, contentWidth(), contentHeight(), &m_renderer);
         m_renderer.clear();
         m_renderer.setProjection(proj);
         m_root->draw(m_renderer);

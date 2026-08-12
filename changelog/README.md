@@ -1,5 +1,81 @@
 # Changelog
 
+## [0.0.6] - 2026-08-13
+
+### Added
+- **Flexbox `flex-wrap`** — multi-line flex layout (Python + C++) with line wrapping, per-line flex-grow/shrink distribution, and `justify-content: space-between` / `space-around` handling across wrapped lines
+- **Flex shorthand parsing** — `flex: 1` → `grow: 1 shrink: 1 basis: 0%`, `flex: none` → `0 0 auto`, `flex: auto` → `1 1 auto`; individual `flex-grow` / `flex-shrink` / `flex-basis` properties
+- **`display: inline` fix + whitespace preservation** — text nodes default to inline; JSX whitespace-only nodes preserved as a single space for inter-element spacing (no more aggressive stripping); inline measure pass with line-breaking simulation; `estimate_text_width` treats `\n`/`\t`/`\r` as zero-width
+- **Z-index + paint order** — `z-index` CSS property with negative / block / inline / auto / positive stacking layers per CSS 2.1 Appendix E; `MorphNode::paintOrder()` drives both rendering order and hit-testing; `MORPH_FEATURE_ZINDEX` gate; Tailwind `z-*` + negative z-index utilities
+- **Ancestor-hover rules and transitions** — `AncestorHoverRule` / `AncestorHoverTransition` structs let `.parent:hover .child` rules apply and transition styles on descendants; selector parser gains ancestor-hover syntax; inherited color fixes on `MorphButton` / `MorphText`
+- **Compositor thread architecture** — `Compositor` runs the render loop on a dedicated thread that owns the GL context exclusively; main thread handles events/style/layout/paint, flattens a lock-free `RenderFrame` (flat nodes + display-list `DrawOp`s + `AnimationState`s), and atomically swaps frame pointers; compositor interpolates compositor-safe animations (X/Y offset, opacity, bg color, text color, border-radius) at vsync and pushes completion events back through a lock-free SPSC queue; idle waits on `g_framePending` instead of spinning
+- **Flash / Forge dual renderers** — `flash` (lightweight direct renderer = previous full-clear path) and `forge` (hybrid retained tile compositor). Production resolves the renderer at compile time (`constexpr` `if`, unselected renderer fully eliminated, zero dead code); dev compiles both (`MORPH_FEATURE_DEV_RENDERER_SWITCH`) and hot-switches at runtime via the DevTools Rendering tab. Config key: `"renderer": "flash" | "forge"`.
+- **Forge damage tracking** — `DamageSet` accumulates dirty rectangles from a live prev-frame geometry map (old + new positions for moved nodes), pre-layout paint dirt, running non-geometry compositor animations, and scroll/content-height changes; fullscreen damage forced on first frame, running X/Y compositor anims, or node-count changes; retained FBO surface (`ensureSurface`) with scissored color clears + depth/stencil reset per damage rect; only nodes touching damage re-rastered; full-surface `glBlitFramebuffer` present; idle frames blit only; conservative 1px expansion past rounded-clip boundaries; stale prev-rect pruning
+- **Core JavaScript runtime types** — `JsValue` variant type (undefined, null, boolean, number, string, array, object, function) with `typeof_()`, truthiness, JS `==`/`!=` semantics, property/array access, `toString()`, implicit `std::string` coercion, and `std::formatter`; `JsNumber` (int64 / double / big-string variants + arithmetic + `as_int()`/`as_double()`/`as_string()`); `JsString` (toUpperCase, toLowerCase, trim, charAt, indexOf, substring, slice, replace, split + `+` concatenation overloads); `JsArray` (push/pop/index, shared-ptr storage); `JsObject` (map-backed, has/keys/index); `JsBoolean`, `JsUndefined`, `JsNull`
+- **TypeScript → C++ compiler** — `TSAstBuilder` builds a TS AST from tree-sitter; `TSToCppTranslator` emits C++ with automatic `#include` detection; new `morph translate <file.ts>` CLI command outputs `.cpp`. Supports: variable declarations, functions + arrow functions, classes & interfaces (inheritance, `super`, `this`, constructors, methods, property definitions), `if`/`while`/`for`/`do-while`/`switch`/`try-catch`/`throw`, template literals, ternary/sequence/update/assignment expressions, array/object literals, `new`, member access, `await`, TS type annotations (`int`, `int32/64`, `uint*`, `float`, `double`, `bool`, `string`, `number`, `boolean`, `any`, generics, unions, contextual `MouseEvent`→`MorphEvent*`, `Element`→`MorphNode*`, `Promise`→`auto`); state-variable awareness for event handlers; every project template ships a `node_modules/morph` TypeScript module with `.d.ts` definitions (`morphState`, `morphEffect`, `CSS.load`, `WindowConfig`, global `JSX` namespace) for editor autocomplete
+- **Reactivity system** — `Signal<T>` with thread-local `EffectContext` auto-subscription (reads during an effect subscribe automatically), mutex-guarded subscriber lists, `notify_all()`; `create_effect()`, `run_pending_effects()`, `destroy_all_effects()`, effect cleanup functions; `fmt_double()` renders `8` / `2.5` / `Error` (never `nan`/`inf`); `str()` overloads for reactive text
+- **`morphState` / `morphEffect`** — compiler-level support: `const [get, set] = morphState(0)` maps to a `Signal` getter/setter pair with typed init detection (bool/string/double/int); `morphEffect(fn, deps)` becomes `morph::create_effect` with auto-subscription (empty deps → run once)
+- **Coroutine task scheduler** — `morph::Task` (eager coroutine, `suspend_never` start, `suspend_always` final, scheduler-owned frame), `co_await next_frame` resumes on the next `process_tasks()` tick, `schedule_coroutine()`, and JS-compatible `setTimeout` / `setInterval` / `clearTimeout` timers
+- **Async HTTP `fetch()`** — `morph::net` namespace: `await fetch(url)` runs a blocking HTTP GET on a worker thread and resumes the awaiting coroutine; `Response` mirrors the JS API (`status`, `headers`, `ok()`, `text()`); `morph::Result<T>` promise-like coroutine return type rethrows exceptions from `await_resume`; errors surface as JS `Error` objects with `.name`/`.message`; URL parsing with default ports, custom ports, and path handling
+- **Dev-mode `logic.so`** — component JS logic is compiled to a content-hash-addressed shared library (`logic.<hash>.so`) loaded via `dlopen`; `morph_logic_init`/`morph_logic_cleanup`/`morph_logic_rewire` symbols let hot reload re-wire signals/effects in place (file-scope signal statics and effect signatures survive tree swaps); `NodeRegistry` + `SignalStore` keep node/state references across reloads; stale `.so` cleanup keeps the last 3
+- **Dev file watcher hardening** — `_wait_settle()` waits for file content to stop changing (editors truncate-then-rewrite); content-hash skip for unchanged files; retry-once on mid-write parse failure; spinner + real-time stdout/stderr streaming with buffered output during rebuilds
+- **`morph doctor` overhaul** — checks OS info, toolchain (Python 3.10+, g++ C++23, cmake, make, pkg-config), graphics (GLFW, OpenGL, X11), text (FreeType, HarfBuzz); per-package-manager install maps (apt/dnf/pacman/zypper/apk/brew/winget/choco) with `-y` auto-install; `-v` for detailed version info
+- **`morph build --static`** — statically links GLFW/FreeType/HarfBuzz into a single self-contained binary (needs the `.a` dev archives); `--output` directory override
+- **DevTools Logs tab** — thread-safe ring buffer (`dev_log.h`) of `info`/`ok`/`warn`/`error` entries with relative timestamps; clear button
+- **DevTools Network tab** — request log of every `fetch()` call: summary (total / ok / err / bytes), per-request status dot + code, method, URL, duration, body size; pending requests live-update; detail view with GENERAL / RESPONSE HEADERS / REQUEST HEADERS / BODY preview cards; raw request head captured from the actual socket; 100-entry ring buffer with thread-safe snapshot for the UI thread
+- **Docked DevTools panel** — the panel occupies the right side of the window; app layout is constrained to the remaining content area (`contentWidth()` accounts for the docked strip) so the panel never covers app elements; drag-resize handle; clamped minimum content width
+- **Examples** — `examples/calculator` (reactive-state calculator with typed functions and conditional JSX) and `examples/ipchecker` (async `fetch` to `api.ipify.org` with loading/error states)
+- **`input` element** — `MorphInput` widget (`runtime/ui/input.h`) with the `MORPH_FEATURE_INPUT` gate
+- **PyPI publishing workflow** — GitHub Actions release workflow (`.github/workflows/python-publish.yml`) builds the sdist/wheel and publishes `levizr-morph` to PyPI via trusted publishing on every GitHub release
+- **`tree-sitter-typescript`** — JS/TSX parsing swapped from `tree-sitter-javascript` to `tree-sitter-typescript` (TS grammar, superset of JS) so `.mx` / `.tsx` files parse with full TypeScript syntax
+
+### Fixed
+- **Stencil buffer management** — border-radius clipping stencil state now managed correctly across frames in `GLRenderer` (ancestor-hover work)
+- **Inherited color on hover** — `MorphButton` / `MorphText` respect parent-inherited `color` styles during hover/transition (text color walks the parent chain)
+- **Logic `.so` load/unload** — dev runtime verifies a genuinely-unloaded library via `dlopen(..., RTLD_NOLOAD)` before proceeding; retries `dlclose`
+- **`JsNumber` display** — `fmt_double()` strips trailing zeros and prints `"Error"` for non-finite values instead of leaking `nan`/`inf` into the UI
+
+### Known Issues
+- **Forge renderer (in progress)** — the `forge` retained-FBO renderer is still **beta/buggy**: known issues around damage-rect edges, scroll-shift, and some compositor-animation paths. **Flash remains the recommended/default production renderer.** Forge can be toggled live in dev from the DevTools Rendering tab for testing.
+
+### Changed
+- **Code structure refactor** — `runtime/core/node.cpp` split into `node/node.cpp`, `layout.cpp`, `style.cpp`, `events.cpp`, `flatten.cpp`, `paint_order.cpp`; widget classes extracted to `runtime/ui/` (`rect.h`, `text.h`, `button.h`, `image.h`, `input.h`, `radius.h`, `viewport_node.h`, `viewport_driver.h`); `glad.c` moved under `runtime/vendor/glad/`; shared shader sources relocated to `runtime/shaders/`
+- **Text rendering & styling** — `morph_text.h` uses effective font size/weight (`_effFontSize()`, `_effFontWeight()`) for alignment, `wrapParagraph`, and `contentWidth`; center/right alignment calculations fixed
+- **IR deserializer** — parses ancestor-hover rules, active styles, reactive style maps, and node registry references from JSON IR
+- **Selector engine** — `morph/style/selector.py` supports descendant, child (`>`), adjacent (`+`), sibling (`~`) combinators, tag/class/id/universal compounds, `:pseudo`, specificity computation, and ancestor-hover syntax
+- **Renderer dispatch** — `commitFrame`/`renderFrame` branch on `activeRenderMode()`; production uses `constexpr` mode (no runtime branch), dev uses a relaxed atomic read for the live toggle
+- **Window compositor integration** — `MorphWindow` gains `startCompositor()`/`stopCompositor()`, `commitFrame()`, `renderFrame()`, `drawFrameNodes(damageClip)`, and `RepaintHookFn` (`g_repaintHook`) for DevTools repaint highlighting
+
+### How CSS Transitions Work
+Transitions animate style changes when `:hover` activates. Configured via standard CSS on any element:
+
+```css
+.card {
+  transition: all 0.3s ease-in-out;
+}
+/* or individually: */
+.swatch {
+  transition-duration: 0.2s;
+  transition-timing-function: ease;
+}
+```
+
+**Pipeline:**
+1. Python IR builder parses `transition`, `transition-duration`, `transition-timing-function` from CSS merged cascade and stores them as `IRNode.transition_duration` / `transition_easing`.
+2. In dev mode, the C++ deserializer reads these fields from JSON IR and sets `m_transitionDuration` / `m_transitionEasing` on the node.
+3. In build mode, the C++ codegen emits `node->m_transitionDuration = 0.2f;` / `node->m_transitionEasing = Easing::EaseInOut;` for each node.
+4. At runtime, `onHover()` allocates a `HoverTransition` struct (heap pointer `m_hoverTransition`, null when idle) capturing current style as start and the target (`hoverStyle` on enter, `m_baseStyle` on leave).
+5. `updateHoverTransition(dt)` runs each frame: advances `elapsed`, applies easing function, calls `interpolateStyles(startStyle, targetStyle, t, &out)`.
+6. `interpolateStyles()` lerps all numeric/color properties (`bgColor`, `color`, `margin`, `padding`, `border`, `borderRadius`, `fontSize`, `gap`, `width`/`height`, position offsets, scrollbar props). String/bool properties (`display`, `position`, `flexDirection`, `fontWeight`, `overflow`, `textAlign`, `boxSizing`, `borderStyle`, `cursor`, `marginAuto`) snap to target immediately. Width/height lerp only when both start and target are explicit (≥ 0).
+7. `HoverTransition` is deleted on completion. Mid-transition direction changes (hover leave during entry) capture current interpolated style as new start for smooth reversal.
+8. Easing: `Easing::Linear`, `EaseIn`, `EaseOut`, `EaseInOut` (extensible enum). Duration 0 disables transitions (backward-compatible snap behavior).
+
+Key design decisions:
+- Heap-allocated `HoverTransition` only during active transition — zero memory overhead when idle.
+- Transitions run per-node: parent and child can transition independently.
+- String/display properties snap instantly because changing layout mode mid-animation produces undefined intermediate states.
+- `updateHoverTransition()` runs before `updateAnimations()` in `update()` — explicit animations win if both target the same property.
+
 ## [0.0.6] - 2026-05-28
 ### Changed
 - **Default `<body>` margin → padding** — `_UA_DEFAULTS["body"]` switched from `margin: 8px` to `padding: 8px`. In browsers the margin creates white gaps around the window edges because the body background doesn't paint into margin space. Since Morph has zero backward-compat constraints, padding is the better default: the body background fills edge-to-edge, and internal spacing still works. Users can override with any CSS rule (e.g. `body { margin: 8px; padding: 0; }`).

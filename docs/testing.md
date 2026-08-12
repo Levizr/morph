@@ -10,7 +10,7 @@ python -m pytest tests/ -v
 python -m pytest tests/unit/test_jsx_walker.py -v
 
 # Specific test
-python -m pytest tests/ -v -k "test_tailwind"
+python -m pytest tests/ -v -k "tailwind"
 
 # With coverage
 python -m pytest tests/ -v --cov=morph
@@ -21,17 +21,20 @@ python -m pytest tests/ -v --cov=morph
 ```
 tests/
 ├── unit/
-│   ├── test_morph_parser.py     # .mx parsing
-│   ├── test_jsx_walker.py       # AST walking
-│   ├── test_css_parser.py       # CSS parsing
-│   ├── test_tailwind.py         # Tailwind resolution
-│   ├── test_ir_builder.py       # IR building (trivial)
-│   ├── test_layout.py           # layout engine (trivial)
-│   └── test_color_utils.py      # color parsing
+│   ├── test_morph_parser.py     # .mx parsing (tree-sitter)
+│   ├── test_jsx_walker.py       # AST walking (imports, components, JSX, styles)
+│   ├── test_css_parser.py       # CSS parsing (rules, selectors, properties)
+│   ├── test_tailwind.py         # Tailwind resolution (+ z-index utilities)
+│   ├── test_selector.py         # selector parsing, combinators, specificity, ancestor-hover
+│   ├── test_ir_builder.py       # IR building (styles, events, hover/active rules, z-index, flex)
+│   ├── test_layout.py           # layout engine (box model, flex)
+│   ├── test_layout_units.py     # unit conversion in layout
+│   ├── test_color_utils.py      # color parsing
+│   ├── test_feature_set.py      # MORPH_FEATURE_* detection
+│   └── test_js_codegen.py       # TS → C++ translation (types, control flow, expressions)
 ├── integration/
-│   └── test_full_pipeline.py    # end-to-end (expects None currently)
-├── test_html_lexer.py           # BROKEN — depends on non-existent morph.lexer
-└── test_css_lexer.py            # BROKEN — depends on non-existent morph.lexer
+│   └── test_full_pipeline.py    # end-to-end pipeline
+└── fixtures/                    # HTML fixtures for pipeline tests
 ```
 
 ## What's Tested vs What's Not
@@ -43,37 +46,31 @@ tests/
 | `MorphParser` | `test_morph_parser.py` | Valid syntax, syntax errors, edge cases |
 | `JSXWalker` | `test_jsx_walker.py` | Imports, components, JSX structure, props, styles, camelCase→kebab |
 | `CSSParser` | `test_css_parser.py` | Empty input, single rule, multiple rules, file vs string |
-| `TailwindResolver` | `test_tailwind.py` | Static classes, arbitrary values, unknown classes skipped |
+| `TailwindResolver` | `test_tailwind.py` | Static classes, arbitrary values, unknown classes skipped, `z-*` |
+| `SelectorEngine` | `test_selector.py` | Combinators (descendant/child/adjacent/sibling), specificity, ancestor-hover syntax |
 | `ColorUtils` | `test_color_utils.py` | Hex, shorthand, named colors, parse_color |
+| `IRBuilder` | `test_ir_builder.py` | Inline styles, Tailwind, hover/active rules, ancestor-hover, z-index, flex props, events |
+| `TS→C++` | `test_js_codegen.py` | Variable/const/let, functions, arrow functions, classes, control flow, template literals, type annotations, JS semantics |
+| `FeatureSet` | `test_feature_set.py` | Feature detection across IR trees |
 
 ### ⚠️ Needs Better Tests
 
 | Module | Test File | What It Actually Checks |
 |---|---|---|
-| `IRBuilder` | `test_ir_builder.py` | Empty input returns `[]` (needs tests for inline styles, Tailwind, events, etc.) |
-| `LayoutEngine` | `test_layout.py` | Empty windows doesn't crash (needs position/size assertions) |
+| `LayoutEngine` | `test_layout.py` | Box model basics — flex-wrap / flex shorthand / inline measure paths need more assertions |
 
-### ❌ Not Tested
+### ❌ Not Covered
 
 | Module | Reason |
 |---|---|
-| `CSSFetcher` | No tests |
-| `StyleResolver` | Stub — nothing to test |
-| `FlexLayout` | Stub — nothing to test |
-| `JSInterpreter` | Stub — nothing to test |
-| `NodeEmitter` | Stub — nothing to test |
-| `EventEmitter` | Stub — nothing to test |
-| `Dev Pipeline` | No tests for the orchestration |
-| `DevRT` | No tests, binary doesn't exist yet |
-| `IPC Server` | No tests |
-| `Package Manager` | Only `add` works, no tests |
-| `Package Installer` | No tests |
-| `Package Resolver` | Stub — nothing to test |
-| `CLI commands` | No tests for argparse dispatch |
+| `CSSFetcher` | No tests (network path) |
+| `Dev Pipeline` | Orchestration tested only via integration test |
+| `DevRT binary` | Requires a GLFW/OpenGL environment; not unit-tested |
+| `IPC / socket protocol` | No tests |
+| `C++ runtime` | `tests/test_slice_ts.cpp` compiles a sample translation manually — the C++ runtime itself isn't in CI |
+| `Package manager` | No tests |
 
 ## Writing Tests
-
-### Style Guidelines
 
 Tests use plain `pytest` (no unittest). Follow the existing patterns:
 
@@ -83,9 +80,9 @@ from morph.parser.morph_parser import MorphParser
 
 def test_valid_mx_parses_without_error():
     source = """
-    <morph-window title="Test" width="800" height="600">
-        <div>Hello</div>
-    </morph-window>
+    <body>
+      <div>Hello</div>
+    </body>
     """
     result = MorphParser().parse(source)
     assert result is not None
@@ -96,38 +93,21 @@ def test_valid_mx_parses_without_error():
 
 The most valuable tests right now:
 
-1. **`IRBuilder.build()`** — Now implemented, needs tests for:
-   - Empty component tree → empty list
-   - Single div → single IRNode with correct type
-   - Inline styles → correct IRStyle values (color parsing, unit conversion)
-   - Tailwind classes → resolved to CSS properties
-   - `morph-open` attribute → IREvent created
-   - `morph-window` → IRWindow with config
-   - CSS cascade order (inline > Tailwind > tag rules)
-   - Style shorthand parsing (padding: 4 values → 4 sides)
+1. **`IRBuilder.build()`** — Already has a good suite; extend for:
+   - `windowConfig` export parsing
+   - `morphState`/`morphEffect` usage detection
+   - Conditional JSX (`{cond && <JSX>}`, `{cond ? <A/> : <B/>}`)
+   - Flex shorthand (`flex: 1` → `1 1 0%`)
 
-2. **`LayoutEngine`** — Test:
-   - Single node at origin
-   - Vertical stacking with gap
-   - Margin/padding affects position
-   - Flex layout (when implemented)
+2. **`LayoutEngine`** — Extend `test_layout.py`:
+   - Multi-line flex wrap with per-line justify
+   - Flex grow/shrink distribution
+   - Inline measure pass and whitespace handling
+   - `max-width`/`min-width` constraints
 
-3. **`StyleResolver`** — When implemented, test:
-   - Tag selector matching (`h1` matches `<h1>`)
-   - Class selector matching (`.foo` matches `<div class="foo">`)
-   - Specificity ordering
-   - Inline style override
+3. **`TS→C++`** — Extend `test_js_codegen.py`:
+   - `await fetch()` → coroutine/resume codegen
+   - `morphEffect` cleanup functions
+   - Error rethrow from `morph::Result<T>`
 
-4. **Pipeline integration** — Test:
-   - Full .mx → IR dict end-to-end
-   - CSS import resolution
-   - Error handling for malformed input
-
-### Running Broken Tests
-
-Two test files import the non-existent `morph.lexer` module and will fail:
-
-- `tests/test_html_lexer.py`
-- `tests/test_css_lexer.py`
-
-These are remnants of an older architecture. They should either be removed or rewritten for the current tree-sitter-based approach.
+4. **C++ runtime** — The most impactful gap: exercise `signal.h`, `task.h`, `net.h`, and the renderer dispatch against mocked GLFW.
