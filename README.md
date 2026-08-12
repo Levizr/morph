@@ -19,7 +19,7 @@ No browser. No Electron. No WebView. Just a lightweight native binary.
 
 [![License](https://img.shields.io/badge/license-Apache-7c6af5?style=flat-square?logo=apache)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10+-1dc98a?style=flat-square&logo=python&logoColor=white)](https://python.org)
-[![C++](https://img.shields.io/badge/C++-17-4da6ff?style=flat-square&logo=cplusplus&logoColor=white)](https://isocpp.org)
+[![C++](https://img.shields.io/badge/C++-23-4da6ff?style=flat-square&logo=cplusplus&logoColor=white)](https://isocpp.org)
 [![OpenGL](https://img.shields.io/badge/OpenGL-3.3-f06449?style=flat-square)](https://opengl.org)
 [![Version](https://img.shields.io/badge/version-0.0.6-7c6af5?style=flat-square)]()
 
