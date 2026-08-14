@@ -229,7 +229,13 @@ def run(args) -> None:
         if cmake_ok and gpp_ok:
             log_dim("  cmake and g++ available — will build on first `morph dev`")
         else:
-            log_dim("  Install build tools: sudo apt install cmake g++")
+            if system == "Windows":
+                hint = "choco install mingw cmake make pkgconfiglite"
+            elif system == "Darwin":
+                hint = "brew install gcc cmake make pkg-config"
+            else:
+                hint = "sudo apt install cmake g++"
+            log_dim(f"  Install build tools: {hint}")
 
     # ── Optional Tools ─────────────────────────────────────
     log_step("Optional Tools")
@@ -446,10 +452,16 @@ def _check_version(exe: str, args: list[str]) -> tuple[bool, str]:
 
 
 def _check_lib(pkg: str) -> bool:
-    result = subprocess.run(
-        ["pkg-config", "--exists", pkg],
-        capture_output=True, timeout=5,
-    )
+    pkg_config = shutil.which("pkg-config")
+    if pkg_config is None:
+        return False
+    try:
+        result = subprocess.run(
+            [pkg_config, "--exists", pkg],
+            capture_output=True, timeout=5,
+        )
+    except Exception:
+        return False
     return result.returncode == 0
 
 
