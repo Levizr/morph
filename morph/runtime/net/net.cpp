@@ -1,16 +1,40 @@
 #include "net.h"
+#include "../dev/dev_net.h"
 
+// ── Socket portability ────────────────────────────────────────────
+// One implementation of the HTTP stack serves every OS; only the socket
+// primitives differ (WinSock vs POSIX sockets).
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <winsock2.h>
+#include <ws2tcpip.h>
+using SocketT = SOCKET;
+static constexpr SocketT kInvalidSocket = INVALID_SOCKET;
+inline bool validSocket(SocketT s) { return s != kInvalidSocket; }
+inline void closeSocket(SocketT s) { ::closesocket(s); }
+namespace {
+struct WinsockInit {
+    WinsockInit() {
+        WSADATA data;
+        WSAStartup(MAKEWORD(2, 2), &data);
+    }
+} g_winsockInit;
+} // anonymous namespace
+#else
 #include <netdb.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <unistd.h>
+using SocketT = int;
+static constexpr SocketT kInvalidSocket = -1;
+inline bool validSocket(SocketT s) { return s >= 0; }
+inline void closeSocket(SocketT s) { ::close(s); }
+#endif
 
 #include <cstring>
 #include <sstream>
 #include <thread>
-
-#include "../dev/dev_net.h"
 
 namespace morph::net {
 
@@ -100,11 +124,11 @@ std::string build_request(const UrlParts& parts, const std::string& host_header)
     return req.str();
 }
 
-std::string recv_all(int fd) {
+std::string recv_all(SocketT fd) {
     std::string data;
     char buf[16384];
-    ssize_t n;
-    while ((n = ::recv(fd, buf, sizeof(buf), 0)) > 0) {
+    int n;
+    while ((n = ::recv(fd, buf, static_cast<int>(sizeof(buf)), 0)) > 0) {
         data.append(buf, static_cast<size_t>(n));
     }
     return data;
@@ -130,20 +154,20 @@ Response http_get(const std::string& url) {
         return resp;
     }
 
-    int fd = -1;
+    SocketT fd = kInvalidSocket;
     for (addrinfo* it = res; it != nullptr; it = it->ai_next) {
         fd = ::socket(it->ai_family, it->ai_socktype, it->ai_protocol);
-        if (fd < 0) {
+        if (!validSocket(fd)) {
             continue;
         }
-        if (::connect(fd, it->ai_addr, it->ai_addrlen) == 0) {
+        if (::connect(fd, it->ai_addr, static_cast<int>(it->ai_addrlen)) == 0) {
             break;
         }
-        ::close(fd);
-        fd = -1;
+        closeSocket(fd);
+        fd = kInvalidSocket;
     }
     ::freeaddrinfo(res);
-    if (fd < 0) {
+    if (!validSocket(fd)) {
         return resp;
     }
 
@@ -153,13 +177,13 @@ Response http_get(const std::string& url) {
     }
     std::string req = build_request(parts, host_header);
     resp.requestHead = req;
-    if (::send(fd, req.data(), req.size(), 0) < 0) {
-        ::close(fd);
+    if (::send(fd, req.data(), static_cast<int>(req.size()), 0) < 0) {
+        closeSocket(fd);
         return resp;
     }
 
     std::string raw = recv_all(fd);
-    ::close(fd);
+    closeSocket(fd);
     if (raw.empty()) {
         return resp;
     }

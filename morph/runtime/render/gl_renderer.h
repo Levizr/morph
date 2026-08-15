@@ -17,10 +17,60 @@
 #include FT_FREETYPE_H
 #include <hb.h>
 #include <hb-ft.h>
+#include <cstdio>
+#include <string>
 
-static const char *kDefaultFont = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
-static const char *kDefaultFontBold = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf";
-static const char *kDefaultEmojiFont = "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf";
+// Font files live in different places on each OS, so resolve the first
+// existing candidate at runtime. This keeps a single binary rendering text
+// correctly on Linux, macOS and Windows.
+static inline bool morphFontExists(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (f) {
+        fclose(f);
+        return true;
+    }
+    return false;
+}
+
+static inline std::string morphResolveFont(const char *const *candidates) {
+    for (int i = 0; candidates[i] != nullptr; i++) {
+        if (morphFontExists(candidates[i])) {
+            return candidates[i];
+        }
+    }
+    return candidates[0] ? candidates[0] : "";
+}
+
+static const char *const kRegularFontCandidates[] = {
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    "/System/Library/Fonts/Supplemental/Arial.ttf",
+    "/System/Library/Fonts/Helvetica.ttc",
+    "/Library/Fonts/Arial.ttf",
+    "C:/Windows/Fonts/arial.ttf",
+    "C:/Windows/Fonts/segoeui.ttf",
+    nullptr,
+};
+
+static const char *const kBoldFontCandidates[] = {
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+    "/System/Library/Fonts/Supplemental/Helvetica Bold.ttf",
+    "/Library/Fonts/Arial Bold.ttf",
+    "C:/Windows/Fonts/arialbd.ttf",
+    "C:/Windows/Fonts/segoeuib.ttf",
+    nullptr,
+};
+
+static const char *const kEmojiFontCandidates[] = {
+    "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
+    "/System/Library/Fonts/Apple Color Emoji.ttc",
+    "C:/Windows/Fonts/seguiemj.ttf",
+    nullptr,
+};
 #endif
 
 class GLRenderer : public Renderer
@@ -133,6 +183,11 @@ private:
     // Emoji font atlas (shared across all sizes, re-created per size on demand)
     std::unordered_map<int, FontAtlas> m_emojiAtlases; // keyed by fontSize
 
+    // Resolved font file paths (populated on first use per-OS)
+    std::string m_fontPath;
+    std::string m_fontPathBold;
+    std::string m_emojiFontPath;
+
     // UTF-8 decode helper
     static unsigned int utf8ToCodepoint(const std::string &text, size_t &pos);
 #endif
@@ -149,7 +204,7 @@ private:
     void createQuadBuffers();
 #ifdef MORPH_FEATURE_TEXT
     void createTextBuffers();
-    static const char *fontPathForWeight(const std::string &weight);
+    const std::string &fontPathForWeight(const std::string &weight);
     static std::string atlasKey(int fontSize, const std::string &fontWeight);
 
     // Atlas management

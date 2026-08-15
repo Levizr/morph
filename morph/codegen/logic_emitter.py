@@ -150,8 +150,10 @@ def _css_field_reset_assignments(field_name: str) -> list[str]:
     return []
 
 _LOGIC_PREHEADER = """#include <cstdio>
-#include <print>
 #include <string>
+#if __has_include(<print>)
+#include <print>
+#endif
 #include "core/node.h"
 #include "reactivity/signal.h"
 #include "core/event.h"

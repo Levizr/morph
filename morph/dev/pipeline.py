@@ -16,6 +16,7 @@ from morph.ir.node import IRWindow
 from morph.layout.engine import LayoutEngine
 from morph.codegen.emitter import Emitter
 from morph.build.compiler import Compiler
+from morph.build.platform import shared_lib_ext
 from morph.utils.logger import log_error, log_parse_error, log_dim, log_warn, log_success
 
 _tw_resolver: TailwindResolver | None = None
@@ -158,7 +159,7 @@ def get_logic_so_path() -> str | None:
 
 
 def compile_logic(windows: list[IRWindow], verbose: bool = True) -> bool:
-    """Generate and compile the JS logic to a .so shared library."""
+    """Generate and compile the JS logic to a native shared library."""
     global _last_logic_hash, _last_logic_so_path, _last_error
     try:
         os.makedirs(LOGIC_CACHE_DIR, exist_ok=True)
@@ -177,8 +178,9 @@ def compile_logic(windows: list[IRWindow], verbose: bool = True) -> bool:
                 log_dim("logic source unchanged — skipping compilation")
             return True
 
-        # Use a content-hash-based unique filename so dlopen always gets a fresh file
-        so_filename = f"logic.{cur_hash[:16]}.so"
+        # Use a content-hash-based unique filename so loading always gets a fresh file
+        ext = shared_lib_ext()
+        so_filename = f"logic.{cur_hash[:16]}{ext}"
         so_path = os.path.join(LOGIC_CACHE_DIR, so_filename)
 
         # Only compile if the target file doesn't already exist
@@ -186,23 +188,23 @@ def compile_logic(windows: list[IRWindow], verbose: bool = True) -> bool:
             _last_logic_hash = cur_hash
             _last_logic_so_path = so_path
             if verbose:
-                log_dim("logic.so already compiled — reusing")
+                log_dim(f"logic already compiled — reusing")
             return True
 
         compiler = Compiler()
         compiler.silent = True
         t = time.time()
-        # Compile to a temp file, then atomically rename to .so.<hash>
+        # Compile to a temp file, then atomically rename to the final name
         so_tmp = so_path + ".tmp." + str(os.getpid())
         ok = compiler.compile_shared(LOGIC_SOURCE_PATH, so_tmp)
         if ok:
             os.rename(so_tmp, so_path)
-            # Clean up old .so files (keep last 3)
+            # Clean up old logic libraries (keep last 3)
             _cleanup_old_sos(LOGIC_CACHE_DIR, so_filename, keep=3)
             _last_logic_hash = cur_hash
             _last_logic_so_path = so_path
             if verbose:
-                log_dim(f"compiled logic.so  in {_fmt(time.time() - t)}")
+                log_dim(f"compiled logic  in {_fmt(time.time() - t)}")
             return True
         _last_logic_hash = None
         _last_logic_so_path = None
@@ -220,11 +222,13 @@ def compile_logic(windows: list[IRWindow], verbose: bool = True) -> bool:
 
 
 def _cleanup_old_sos(cache_dir: str, keep_name: str, keep: int = 3) -> None:
-    """Remove old logic.<hash>.so files, keeping the `keep` most recent."""
+    """Remove old logic.<hash>.<ext> files, keeping the `keep` most recent."""
     import re
+    ext = shared_lib_ext()
+    pattern = re.compile(rf"logic\.([a-f0-9]+){re.escape(ext)}$")
     sos = []
     for f in os.listdir(cache_dir):
-        m = re.match(r"logic\.([a-f0-9]+)\.so", f)
+        m = pattern.match(f)
         if m and f != keep_name:
             path = os.path.join(cache_dir, f)
             sos.append((os.path.getmtime(path), path))

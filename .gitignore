@@ -6,8 +6,9 @@ dist/
 .morph/css-cache/
 .vscode
 .morph/packages/
-build/
-build_dev/
+/build/
+/build_dev/
+/morph/runtime/dev/build/
 .pytest_cache/
 *.so
 *.dylib
@@ -24,3 +25,5 @@ morph/bin/.devrt_source_hash
 temp/
 .opencode/
 future.md
+
+*.log

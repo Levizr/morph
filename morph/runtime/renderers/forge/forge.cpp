@@ -320,7 +320,9 @@ void forgePresent(MorphWindow& win,
 
     if (fullscreen)
     {
-        r.setClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+        float clear[4];
+        win.bodyClearColor(clear);
+        r.setClearColor(clear[0], clear[1], clear[2], clear[3]);
         r.clear();
         r.setProjection(proj);
         win.drawFrameNodes();
@@ -336,7 +338,10 @@ void forgePresent(MorphWindow& win,
 
         // Color-clear each damage rect individually (the rects are disjoint,
         // so no pixel outside them is erased — anything outside gets retained).
-        r.setClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+        // Clear with the body color so retained regions match the repaint.
+        float clear[4];
+        win.bodyClearColor(clear);
+        r.setClearColor(clear[0], clear[1], clear[2], clear[3]);
         glEnable(GL_SCISSOR_TEST);
         for (const auto& dmg : g_damage.rects)
         {

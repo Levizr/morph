@@ -114,11 +114,15 @@ void GLRenderer::createTextBuffers()
     glBindVertexArray(0);
 }
 
-const char *GLRenderer::fontPathForWeight(const std::string &weight)
+const std::string &GLRenderer::fontPathForWeight(const std::string &weight)
 {
+    if (m_fontPath.empty())
+        m_fontPath = morphResolveFont(kRegularFontCandidates);
+    if (m_fontPathBold.empty())
+        m_fontPathBold = morphResolveFont(kBoldFontCandidates);
     if (weight == "bold" || weight == "700" || weight == "800" || weight == "900")
-        return kDefaultFontBold;
-    return kDefaultFont;
+        return m_fontPathBold;
+    return m_fontPath;
 }
 
 std::string GLRenderer::atlasKey(int fontSize, const std::string &fontWeight)
@@ -171,7 +175,7 @@ GLRenderer::FontAtlas &GLRenderer::getOrCreateAtlas(int fontSize, const std::str
     atlas.w = 256;
     atlas.h = 256;
 
-    const char *fontPath = fontPathForWeight(fontWeight);
+    const char *fontPath = fontPathForWeight(fontWeight).c_str();
     FT_Face face;
     if (FT_New_Face(m_ft, fontPath, 0, &face))
     {
@@ -215,8 +219,10 @@ GLRenderer::FontAtlas &GLRenderer::getOrCreateEmojiAtlas(int fontSize)
     atlas.h = 256;
     atlas.isColor = true;
 
+    if (m_emojiFontPath.empty())
+        m_emojiFontPath = morphResolveFont(kEmojiFontCandidates);
     FT_Face face;
-    if (FT_New_Face(m_ft, kDefaultEmojiFont, 0, &face))
+    if (m_emojiFontPath.empty() || FT_New_Face(m_ft, m_emojiFontPath.c_str(), 0, &face))
     {
         fprintf(stderr, "[GLRenderer] failed to load emoji font\n");
         return m_emojiAtlases[fontSize] = atlas;

@@ -13,6 +13,10 @@ public:
     ~WindowManager() {
         for (auto& [_, w] : m_windows) delete w;
         m_windows.clear();
+        // All windows (and their GLFW handles/cursors) are gone now, so this
+        // is the last safe moment to shut down the GLFW library. Terminating
+        // earlier (e.g. in main()) makes ~MorphWindow call into a dead GLFW.
+        glfwTerminate();
     }
 
     static WindowManager& get() {

@@ -6,6 +6,7 @@ import subprocess
 import sys
 
 from morph.utils.logger import log_info, log_error, log_success, log_warn
+from morph.build.platform import pick_cpp, shared_lib_ext
 
 
 def _get_devrt_dir() -> str:
@@ -118,8 +119,7 @@ def ensure_built() -> bool:
     build_dir = os.path.join(dev_dir, "build")
 
     log_info("Configuring CMake...")
-    # Prefer g++-14 for C++23 support
-    cxx = shutil.which("g++-14") or "g++"
+    cxx = pick_cpp()
     r = subprocess.run(["cmake", "-S", dev_dir, "-B", build_dir,
                         f"-DCMAKE_CXX_COMPILER={cxx}"],
                        capture_output=True, text=True)
@@ -127,13 +127,12 @@ def ensure_built() -> bool:
         sys.stdout.write(r.stdout)
         sys.stderr.write(r.stderr)
         log_error("CMake configuration failed")
-        log_info("Ensure cmake is installed: sudo apt install cmake")
+        log_info("Ensure cmake and a C++23 compiler are installed (run `morph doctor`)")
         return False
 
     import multiprocessing
-    nproc = multiprocessing.cpu_count()
     log_info("Compiling morph_devrt (this may take a minute)...")
-    r = subprocess.run(["cmake", "--build", build_dir, "--", f"-j{nproc}"],
+    r = subprocess.run(["cmake", "--build", build_dir, "--parallel"],
                        capture_output=True, text=True)
     if r.returncode != 0:
         sys.stdout.write(r.stdout)
@@ -154,14 +153,14 @@ def launch() -> subprocess.Popen:
     path = get_devrt_path()
 
     if not ensure_built():
-        log_error("Failed to build morph_devrt. Make sure cmake and g++ are installed:")
-        log_info("  sudo apt install cmake g++ libglfw3-dev")
+        log_error("Failed to build morph_devrt. Make sure cmake and a C++23 compiler are installed.")
+        log_info("Run `morph doctor` for install diagnostics.")
         raise FileNotFoundError(
             f"morph_devrt binary missing at {path} and auto-build failed. "
             "Run `morph doctor` for diagnostics."
         )
 
-    logic_so_path = os.path.abspath(".morph/cache/logic.so")
+    logic_so_path = os.path.abspath(f".morph/cache/logic{shared_lib_ext()}")
     env = os.environ.copy()
     env["MORPH_LOGIC_PATH"] = logic_so_path
     return subprocess.Popen([path], stdout=subprocess.PIPE, stderr=subprocess.PIPE,

@@ -111,8 +111,10 @@ inline bool operator==(const JsString& a, const std::string& b) { return a.value
 inline bool operator!=(const std::string& a, const JsString& b) { return a != b.value; }
 inline bool operator!=(const JsString& a, const std::string& b) { return a.value != b; }
 
-// ── std::formatter for std::println / std::format ──
+// ── std::formatter for std::format ──
+// Guarded so older libc++ (macOS Xcode <= 16) still compiles.
 
+#if __has_include(<format>)
 #include <format>
 
 template <>
@@ -122,3 +124,4 @@ struct std::formatter<JsString> {
         return std::format_to(ctx.out(), "{}", v.value);
     }
 };
+#endif

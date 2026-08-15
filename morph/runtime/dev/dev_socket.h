@@ -1,13 +1,15 @@
 #pragma once
 #include <string>
-#include <functional>
 
+// Cross-platform loopback-TCP IPC between morph's Python dev driver and the
+// morph_devrt runtime. 127.0.0.1 keeps it working on Linux, macOS and Windows
+// without OS-specific socket APIs (no Unix sockets, no named pipes).
 class DevSocket {
 public:
     DevSocket();
     ~DevSocket();
 
-    bool listen(const std::string& path = "/tmp/morph_dev.sock");
+    bool listen();
     bool acceptClient();
     bool readMessage(std::string& out, int timeoutMs = 0);
     bool sendMessage(const std::string& msg);
@@ -17,6 +19,5 @@ public:
 private:
     int m_sock = -1;
     int m_client = -1;
-    std::string m_path;
     std::string m_recvBuf;
 };

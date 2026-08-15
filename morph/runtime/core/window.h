@@ -108,6 +108,11 @@ public:
     // Render the latest interpolated frame (main thread, GL context current)
     void renderFrame(std::function<void(GLRenderer &, DirtyStats &)> overlayFn = {});
 
+    // Background color for glClear: the body node's bgColor in every render
+    // mode (flash/forge/dev), falling back to white when nothing is visible.
+    // out receives {r,g,b,a} in 0..1.
+    void bodyClearColor(float out[4]) const;
+
     // Draw the flat node tree into the renderer's current target (used by the
     // forge retained-FBO present path). GL context must be current; callers
     // bind the target framebuffer beforehand.

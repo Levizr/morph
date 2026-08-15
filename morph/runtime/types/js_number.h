@@ -176,8 +176,10 @@ inline bool operator<=(size_t a, const JsNumber& b) { return (int64_t)a <= b.as_
 inline bool operator>(size_t a, const JsNumber& b) { return (int64_t)a > b.as_int(); }
 inline bool operator>=(size_t a, const JsNumber& b) { return (int64_t)a >= b.as_int(); }
 
-// ── std::formatter for std::println / std::format ──
+// ── std::formatter for std::format ──
+// Guarded so older libc++ (macOS Xcode <= 16) still compiles.
 
+#if __has_include(<format>)
 #include <format>
 
 template <>
@@ -191,6 +193,7 @@ struct std::formatter<JsNumber> {
         return std::format_to(ctx.out(), "{}", std::get<double>(v.value));
     }
 };
+#endif
 
 inline std::string JsNumber::as_string() const {
     if (is_int()) return std::to_string(std::get<int64_t>(value));

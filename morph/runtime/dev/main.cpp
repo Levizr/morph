@@ -2,11 +2,17 @@
 #include <cstring>
 #include <cstdlib>
 #include <csignal>
-#include <unistd.h>
 #include <chrono>
-#include <dlfcn.h>
+#include <thread>
 #include <string>
 #include <functional>
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <unistd.h>
+#include <dlfcn.h>
+#endif
 
 #include "vendor/glad/glad.h"
 #include <GLFW/glfw3.h>
@@ -28,14 +34,50 @@
 static volatile bool g_running = true;
 static void signalHandler(int) { g_running = false; }
 
-// ── Logic .so loading ──
+// ── Logic library loading (dlopen on POSIX, LoadLibrary on Windows) ──
 static void* g_logic_handle = nullptr;
 static std::string g_logic_path;
 
+static bool fileExists(const char* path) {
+    FILE* f = fopen(path, "rb");
+    if (f) {
+        fclose(f);
+        return true;
+    }
+    return false;
+}
+
+static void* libraryLoad(const char* path) {
+#ifdef _WIN32
+    return (void*)LoadLibraryA(path);
+#else
+    return dlopen(path, RTLD_NOW);
+#endif
+}
+
+static void* librarySym(void* handle, const char* name) {
+#ifdef _WIN32
+    return (void*)GetProcAddress((HMODULE)handle, name);
+#else
+    return dlsym(handle, name);
+#endif
+}
+
+static const char* libraryError() {
+#ifdef _WIN32
+    return "LoadLibrary failed";
+#else
+    return dlerror();
+#endif
+}
+
 static void close_logic() {
     if (g_logic_handle) {
-        void (*cleanup)() = (void (*)())dlsym(g_logic_handle, "morph_logic_cleanup");
+        void (*cleanup)() = (void (*)())librarySym(g_logic_handle, "morph_logic_cleanup");
         if (cleanup) cleanup();
+#ifdef _WIN32
+        FreeLibrary((HMODULE)g_logic_handle);
+#else
         for (int i = 0; i < 5; i++) {
             int rc = dlclose(g_logic_handle);
             if (rc == 0) {
@@ -48,8 +90,9 @@ static void close_logic() {
                     break;
                 }
             }
-            usleep(10000);
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
+#endif
         g_logic_handle = nullptr;
     }
 }
@@ -57,44 +100,48 @@ static void close_logic() {
 static void open_logic(const std::string& path, NodeRegistry& registry, SignalStore& store) {
     close_logic();
     g_logic_path = path;
-    void* handle = dlopen(path.c_str(), RTLD_NOW);
+    void* handle = libraryLoad(path.c_str());
     if (!handle) {
-        fprintf(stderr, "[morph] failed to load logic.so: %s\n", dlerror());
-        devLogAdd(LOG_ERROR, "logic.so failed to load: " + std::string(dlerror()));
+        fprintf(stderr, "[morph] failed to load logic library: %s\n", libraryError());
+        devLogAdd(LOG_ERROR, "logic library failed to load: " + std::string(libraryError()));
         return;
     }
     void (*init)(NodeRegistry&, SignalStore&) =
-        (void (*)(NodeRegistry&, SignalStore&))dlsym(handle, "morph_logic_init");
+        (void (*)(NodeRegistry&, SignalStore&))librarySym(handle, "morph_logic_init");
     if (!init) {
-        fprintf(stderr, "[morph] morph_logic_init not found in logic.so: %s\n", dlerror());
-        devLogAdd(LOG_ERROR, "logic.so missing morph_logic_init: " + std::string(dlerror()));
+        fprintf(stderr, "[morph] morph_logic_init not found in logic library: %s\n", libraryError());
+        devLogAdd(LOG_ERROR, "logic library missing morph_logic_init: " + std::string(libraryError()));
+#ifdef _WIN32
+        FreeLibrary((HMODULE)handle);
+#else
         dlclose(handle);
+#endif
         return;
     }
     init(registry, store);
     g_logic_handle = handle;
-    devLogAdd(LOG_OK, "logic.so loaded & initialized (registry has " +
+    devLogAdd(LOG_OK, "logic library loaded & initialized (registry has " +
               std::to_string(registry.size()) + " nodes)");
 }
 
-// Re-initialize logic in place when the same .so is already loaded.
-// Avoids dlclose/dlopen so file-scope state (signal statics, effect
+// Re-initialize logic in place when the same library is already loaded.
+// Avoids unload/reload so file-scope state (signal statics, effect
 // signatures) survives hot reloads of styles/tree without re-running effects.
 static void reinit_logic(NodeRegistry& registry, SignalStore& store) {
     if (!g_logic_handle) {
         open_logic(g_logic_path, registry, store);
         return;
     }
-    void (*cleanup)() = (void (*)())dlsym(g_logic_handle, "morph_logic_cleanup");
+    void (*cleanup)() = (void (*)())librarySym(g_logic_handle, "morph_logic_cleanup");
     if (cleanup) cleanup();
     void (*rewire)(NodeRegistry&, SignalStore&) =
-        (void (*)(NodeRegistry&, SignalStore&))dlsym(g_logic_handle, "morph_logic_rewire");
+        (void (*)(NodeRegistry&, SignalStore&))librarySym(g_logic_handle, "morph_logic_rewire");
     if (rewire) {
         rewire(registry, store);
         return;
     }
     void (*init)(NodeRegistry&, SignalStore&) =
-        (void (*)(NodeRegistry&, SignalStore&))dlsym(g_logic_handle, "morph_logic_init");
+        (void (*)(NodeRegistry&, SignalStore&))librarySym(g_logic_handle, "morph_logic_init");
     if (init) init(registry, store);
 }
 
@@ -271,14 +318,14 @@ int main() {
 
     // ── Socket server ──────────────────────────────────────
     DevSocket sock;
-    if (!sock.listen("/tmp/morph_dev.sock")) {
+    if (!sock.listen()) {
         fprintf(stderr, "[morph] dev server: failed to create socket\n");
         return 1;
     }
 
     // ── Wait for first client connection ───────────────────
     while (g_running && !sock.acceptClient()) {
-        usleep(100000); // 100ms — no GLFW yet
+        std::this_thread::sleep_for(std::chrono::milliseconds(100)); // no GLFW yet
     }
     if (!g_running) return 0;
     if (!sock.isConnected()) {
@@ -357,19 +404,27 @@ int main() {
             signalStore.get_or_create<std::string>(sv.getter, raw);
     }
 
-    // Load logic.so — prefer path from IR, fallback to env var
+    // Load the logic library — prefer path from IR, fallback to env var
     std::string logicSoPath;
     if (root.has("logic_so_path")) {
         logicSoPath = root["logic_so_path"].asString();
     }
     if (logicSoPath.empty()) {
         const char* logicPath = getenv("MORPH_LOGIC_PATH");
-        logicSoPath = logicPath ? logicPath : "/tmp/morph_cache/logic.so";
+        if (logicPath && *logicPath) {
+            logicSoPath = logicPath;
+        } else {
+#ifdef _WIN32
+            logicSoPath = "logic.dll";
+#else
+            logicSoPath = "/tmp/morph_cache/logic.so";
+#endif
+        }
     }
-    if (access(logicSoPath.c_str(), F_OK) == 0) {
+    if (fileExists(logicSoPath.c_str())) {
         open_logic(logicSoPath, registry, signalStore);
     } else {
-        fprintf(stderr, "[morph] no logic.so found at %s (interactivity disabled)\n",
+        fprintf(stderr, "[morph] no logic library found at %s (interactivity disabled)\n",
                 logicSoPath.c_str());
     }
 

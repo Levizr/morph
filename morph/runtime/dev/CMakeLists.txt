@@ -88,14 +88,35 @@ target_compile_definitions(morph_devrt PRIVATE
     MORPH_RENDERER_FORGE
 )
 
-target_link_options(morph_devrt PRIVATE -rdynamic)
+# Symbol visibility for dynamic logic loading (POSIX only; Windows/MinGW
+# export everything by default and Apple clang rejects -rdynamic).
+if(NOT APPLE)
+    target_link_options(morph_devrt PRIVATE -rdynamic)
+endif()
 
-target_link_libraries(morph_devrt PRIVATE
-    glfw
-    OpenGL::GL
-    X11
-    pthread
-    dl
-    ${FREETYPE_LIBRARIES}
-    ${HARFBUZZ_LIBRARIES}
-)
+if(WIN32)
+    target_link_libraries(morph_devrt PRIVATE
+        glfw
+        OpenGL::GL
+        ws2_32
+        ${FREETYPE_LIBRARIES}
+        ${HARFBUZZ_LIBRARIES}
+    )
+elseif(APPLE)
+    target_link_libraries(morph_devrt PRIVATE
+        glfw
+        OpenGL::GL
+        ${FREETYPE_LIBRARIES}
+        ${HARFBUZZ_LIBRARIES}
+    )
+else()
+    target_link_libraries(morph_devrt PRIVATE
+        glfw
+        OpenGL::GL
+        X11
+        pthread
+        dl
+        ${FREETYPE_LIBRARIES}
+        ${HARFBUZZ_LIBRARIES}
+    )
+endif()

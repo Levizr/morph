@@ -16,8 +16,10 @@ struct JsBoolean {
     JsString toString() const { return value ? JsString("true") : JsString("false"); }
 };
 
-// ── std::formatter for std::println / std::format ──
+// ── std::formatter for std::format ──
+// Guarded so older libc++ (macOS Xcode <= 16) still compiles.
 
+#if __has_include(<format>)
 #include <format>
 
 template <>
@@ -27,3 +29,4 @@ struct std::formatter<JsBoolean> {
         return std::format_to(ctx.out(), "{}", v.value ? "true" : "false");
     }
 };
+#endif

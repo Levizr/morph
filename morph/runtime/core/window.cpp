@@ -4,7 +4,11 @@
 #include "renderers/forge/damage.h"
 #include <GLFW/glfw3.h>
 #include <algorithm>
+// <print> is C++23 but not in libc++ until LLVM 17 (macOS Xcode 16 and
+// older lack it), so include it only where the toolchain provides it.
+#if __has_include(<print>)
 #include <print>
+#endif
 
 RepaintHookFn g_repaintHook = nullptr;
 
@@ -532,7 +536,9 @@ void MorphWindow::renderFrame(std::function<void(GLRenderer &, DirtyStats &)> ov
     float proj[16];
     ortho(proj, 0.0f, (float)m_width, (float)m_height, 0.0f, -1.0f, 1.0f);
 
-    m_renderer.setClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+    float clear[4];
+    bodyClearColor(clear);
+    m_renderer.setClearColor(clear[0], clear[1], clear[2], clear[3]);
     m_renderer.clear();
     m_renderer.setProjection(proj);
 
@@ -591,11 +597,9 @@ void MorphWindow::render(std::function<void(GLRenderer &, DirtyStats &)> overlay
     if (m_root)
     {
         {
-            auto &bg = m_root->style.bgColor;
-            if (bg[3] > 0.0f)
-                m_renderer.setClearColor(bg[0], bg[1], bg[2], bg[3]);
-            else
-                m_renderer.setClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+            float clear[4];
+            bodyClearColor(clear);
+            m_renderer.setClearColor(clear[0], clear[1], clear[2], clear[3]);
         }
 
 #ifdef MORPH_FEATURE_DIRTY_RENDERING
@@ -633,6 +637,35 @@ void MorphWindow::render(std::function<void(GLRenderer &, DirtyStats &)> overlay
     m_prevHadDirty = !m_root || !m_root->isFullyClean();
 #endif
     m_pendingRender = false;
+}
+
+void MorphWindow::bodyClearColor(float out[4]) const
+{
+    // Prefer the committed frame's body node (matches what the compositor /
+    // forge paths draw). Fall back to the live tree, then opaque white.
+    auto *frame = g_frontFrame.load(std::memory_order_acquire);
+    if (frame)
+    {
+        for (const auto &n : frame->nodes)
+        {
+            if (n.parentId == -1 && n.bgColor[3] > 0.0f)
+            {
+                out[0] = n.bgColor[0]; out[1] = n.bgColor[1];
+                out[2] = n.bgColor[2]; out[3] = n.bgColor[3];
+                return;
+            }
+        }
+    }
+    if (m_root)
+    {
+        auto &bg = m_root->style.bgColor;
+        if (bg[3] > 0.0f)
+        {
+            out[0] = bg[0]; out[1] = bg[1]; out[2] = bg[2]; out[3] = bg[3];
+            return;
+        }
+    }
+    out[0] = 1.0f; out[1] = 1.0f; out[2] = 1.0f; out[3] = 1.0f;
 }
 
 int countNodes(MorphNode *n)

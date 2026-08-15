@@ -4,7 +4,7 @@ import os
 import shlex
 import subprocess
 import shutil
-from morph.build.platform import current, is_macos
+from morph.build.platform import current, is_macos, is_windows, shared_lib_flag
 from morph.utils.logger import log_info, log_error
 
 
@@ -35,12 +35,34 @@ class Compiler:
         env = os.environ.get("MORPH_STATIC_LIBDIRS", "")
         if env:
             dirs.extend(p for p in env.split(os.pathsep) if p)
-        dirs.extend([
-            "/usr/lib/x86_64-linux-gnu",
-            "/usr/local/lib",
-            "/usr/lib",
-        ])
+        if is_macos():
+            dirs.extend(["/opt/homebrew/lib", "/usr/local/lib", "/usr/lib"])
+        elif is_windows():
+            # MinGW static archives live alongside the compiler install.
+            exe = shutil.which(self.gpp) or self.gpp
+            base = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(exe))))
+            for cand in [os.path.join(base, "lib"),
+                         os.path.join(base, "x86_64-w64-mingw32", "lib"),
+                         "/mingw64/lib", "/mingw32/lib"]:
+                if os.path.isdir(cand):
+                    dirs.append(cand)
+        else:
+            dirs.extend([
+                "/usr/lib/x86_64-linux-gnu",
+                "/usr/lib/aarch64-linux-gnu",
+                "/usr/lib/arm-linux-gnueabihf",
+                "/usr/local/lib",
+                "/usr/lib",
+            ])
         return dirs
+
+    def _system_include_dirs(self) -> list[str]:
+        """OS-appropriate fallback include roots when pkg-config is missing."""
+        if is_macos():
+            return ["/opt/homebrew/include", "/usr/local/include"]
+        if is_windows():
+            return []
+        return ["/usr/include"]
 
     def _find_static_archive(self, names: tuple[str, ...]) -> str | None:
         for d in self._static_lib_dirs():
@@ -130,7 +152,7 @@ class Compiler:
 
         if not shutil.which(self.gpp):
             log_error(f"Compiler not found: {self.gpp}")
-            log_error("Install g++-14: sudo apt install g++-14")
+            log_error("Install a C++23 compiler (run `morph doctor` for per-OS instructions)")
             return False
 
         vendor_dir = os.path.join(runtime_dir, "vendor")
@@ -216,7 +238,7 @@ class Compiler:
                            "-lpthread"]
             elif plat == "windows":
                 dynamic = ["-lopengl32", "-lgdi32", "-lshell32", "-luser32",
-                           "-lcomdlg32", "-lole32", "-lsetupapi",
+                           "-lcomdlg32", "-lole32", "-lsetupapi", "-lws2_32",
                            "-lpthread", "-lm"]
             else:
                 dynamic = ["-lGL", "-lX11", "-lXrandr", "-lXinerama",
@@ -240,7 +262,8 @@ class Compiler:
                         "-lpthread"]
             elif plat == "windows":
                 cmd += ["-lglfw3", "-lopengl32", "-lgdi32", "-lshell32",
-                        "-luser32", "-lcomdlg32", "-lole32", "-lpthread"]
+                        "-luser32", "-lcomdlg32", "-lole32", "-lws2_32",
+                        "-lpthread"]
             else:
                 cmd += ["-lglfw", "-lGL", "-lX11", "-lpthread", "-ldl"]
 
@@ -259,7 +282,7 @@ class Compiler:
                         ["pkg-config", "--cflags", "freetype2"], text=True
                     ).strip().split()
                 except Exception:
-                    ft_cflags = ["-I/usr/include/freetype2"]
+                    ft_cflags = [f"-I{d}/freetype2" for d in self._system_include_dirs()]
             cmd.extend(ft_cflags)
             if not static:
                 try:
@@ -280,7 +303,7 @@ class Compiler:
                         ["pkg-config", "--cflags", "harfbuzz"], text=True
                     ).strip().split()
                 except Exception:
-                    hb_cflags = []
+                    hb_cflags = [f"-I{d}/harfbuzz" for d in self._system_include_dirs()]
             cmd.extend(hb_cflags)
             if not static:
                 try:
@@ -323,7 +346,7 @@ class Compiler:
             self.gpp,
             "-std=c++23",
             "-O0", "-g",  # fast compilation, debug symbols for dev
-            "-shared", "-fPIC",
+            shared_lib_flag(), "-fPIC",
             source_path,
             "-o", output_path,
             "-I", runtime_dir,
@@ -351,16 +374,15 @@ class Compiler:
                 cmd.append(f"-D{d}")
 
         # FreeType and HarfBuzz headers (needed by node.h → gl_renderer.h)
-        try:
-            ft_cflags = subprocess.check_output(
-                ["pkg-config", "--cflags", "freetype2"], text=True
-            ).strip().split()
-            hb_cflags = subprocess.check_output(
-                ["pkg-config", "--cflags", "harfbuzz"], text=True
-            ).strip().split()
-            cmd.extend([*ft_cflags, *hb_cflags])
-        except Exception:
-            pass
+        cflags: list[str] = []
+        for pkg, sub in (("freetype2", "freetype2"), ("harfbuzz", "harfbuzz")):
+            try:
+                cflags.extend(subprocess.check_output(
+                    ["pkg-config", "--cflags", pkg], text=True
+                ).strip().split())
+            except Exception:
+                cflags.extend(f"-I{d}/{sub}" for d in self._system_include_dirs())
+        cmd.extend(cflags)
 
         if not self.silent:
             log_info(f"Compiling shared library: {' '.join(cmd)}")

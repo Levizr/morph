@@ -4,11 +4,12 @@ import os
 import time
 
 
-SOCKET_PATH = "/tmp/morph_dev.sock"
+HOST = "127.0.0.1"
+PORT = 39573
 
 
 class IPCClient:
-    """Sends IR updates from Python to morph_devrt over Unix socket."""
+    """Sends IR updates from Python to morph_devrt over loopback TCP."""
 
     def __init__(self):
         self.sock: socket.socket | None = None
@@ -17,15 +18,13 @@ class IPCClient:
         last_err = None
         for i in range(retries):
             try:
-                self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-                self.sock.settimeout(5)
-                self.sock.connect(SOCKET_PATH)
+                self.sock = socket.create_connection((HOST, PORT), timeout=5)
                 return
-            except (FileNotFoundError, ConnectionRefusedError, OSError) as e:
+            except OSError as e:
                 last_err = e
                 if i < retries - 1:
                     time.sleep(delay)
-        raise ConnectionError(f"Could not connect to morph_devrt at {SOCKET_PATH} "
+        raise ConnectionError(f"Could not connect to morph_devrt at {HOST}:{PORT} "
                               f"after {retries} retries: {last_err}")
 
     def send_ir(self, ir: dict) -> None:

@@ -1,68 +1,108 @@
 #include "dev_socket.h"
+
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#pragma comment(lib, "ws2_32.lib")
+#else
 #include <sys/socket.h>
-#include <sys/un.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <unistd.h>
-#include <cstring>
 #include <cerrno>
 #include <fcntl.h>
-#include <poll.h>
+#endif
+#include <cstring>
 #include <cstdio>
+
+// Fixed loopback port shared with morph/dev/server.py (IPCClient).
+static const int kDevPort = 39573;
+
+static int lastError() {
+#ifdef _WIN32
+    return WSAGetLastError();
+#else
+    return errno;
+#endif
+}
+
+static bool wouldBlock(int err) {
+#ifdef _WIN32
+    return err == WSAEWOULDBLOCK || err == WSAEINPROGRESS;
+#else
+    return err == EAGAIN || err == EWOULDBLOCK;
+#endif
+}
+
+static void setNonBlocking(int fd) {
+#ifdef _WIN32
+    u_long mode = 1;
+    ioctlsocket(fd, FIONBIO, &mode);
+#else
+    int flags = fcntl(fd, F_GETFL, 0);
+    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+#endif
+}
+
+static void closeFd(int fd) {
+#ifdef _WIN32
+    closesocket(fd);
+#else
+    ::close(fd);
+#endif
+}
 
 DevSocket::DevSocket() {}
 
 DevSocket::~DevSocket() { close(); }
 
-bool DevSocket::listen(const std::string& path) {
-    m_path = path;
-    m_sock = socket(AF_UNIX, SOCK_STREAM, 0);
+bool DevSocket::listen() {
+#ifdef _WIN32
+    WSADATA wsa;
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+        fprintf(stderr, "[morph] dev socket: WSAStartup failed\n");
+        return false;
+    }
+#endif
+    m_sock = (int)socket(AF_INET, SOCK_STREAM, 0);
     if (m_sock < 0) {
-        perror("[morph] dev socket");
+        fprintf(stderr, "[morph] dev socket: socket failed\n");
         return false;
     }
 
     int opt = 1;
-    setsockopt(m_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    setsockopt(m_sock, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt));
 
-    struct sockaddr_un addr;
+    struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
-    addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, path.c_str(), sizeof(addr.sun_path) - 1);
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons((u_short)kDevPort);
+    addr.sin_addr.s_addr = inet_addr("127.0.0.1");
 
-    unlink(path.c_str());
     if (bind(m_sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        perror("[morph] dev socket bind");
+        fprintf(stderr, "[morph] dev socket: bind failed\n");
         close();
         return false;
     }
-
     if (::listen(m_sock, 1) < 0) {
-        perror("[morph] dev socket listen");
+        fprintf(stderr, "[morph] dev socket: listen failed\n");
         close();
         return false;
     }
 
-    // Non-blocking accept
-    int flags = fcntl(m_sock, F_GETFL, 0);
-    fcntl(m_sock, F_SETFL, flags | O_NONBLOCK);
-
+    setNonBlocking(m_sock);
     return true;
 }
 
 bool DevSocket::acceptClient() {
     if (m_client >= 0) return true;
-    struct sockaddr_un addr;
-    socklen_t len = sizeof(addr);
-    m_client = accept(m_sock, (struct sockaddr*)&addr, &len);
+    m_client = (int)accept(m_sock, nullptr, nullptr);
     if (m_client < 0) {
-        if (errno != EAGAIN && errno != EWOULDBLOCK)
-            perror("[morph] dev socket accept");
+        if (!wouldBlock(lastError()))
+            fprintf(stderr, "[morph] dev socket: accept failed\n");
         return false;
     }
-
-    // Non-blocking reads
-    int flags = fcntl(m_client, F_GETFL, 0);
-    fcntl(m_client, F_SETFL, flags | O_NONBLOCK);
-
+    setNonBlocking(m_client);
     return true;
 }
 
@@ -72,13 +112,21 @@ bool DevSocket::readMessage(std::string& out, int timeoutMs) {
         return false;
     }
 
-    // Poll for data
-    struct pollfd pfd;
-    pfd.fd = m_client;
-    pfd.events = POLLIN;
-    int ret = poll(&pfd, 1, timeoutMs);
+    // select() is available on both POSIX and Winsock, so polling stays
+    // portable while the socket itself remains non-blocking.
+    fd_set rfds;
+    FD_ZERO(&rfds);
+#ifdef _WIN32
+    FD_SET((SOCKET)m_client, &rfds);
+#else
+    FD_SET(m_client, &rfds);
+#endif
+    timeval tv;
+    tv.tv_sec = timeoutMs / 1000;
+    tv.tv_usec = (timeoutMs % 1000) * 1000;
+
+    int ret = select(m_client + 1, &rfds, nullptr, nullptr, &tv);
     if (ret < 0) {
-        perror("[morph] dev socket poll");
         return false;
     }
     if (ret == 0) {
@@ -86,17 +134,8 @@ bool DevSocket::readMessage(std::string& out, int timeoutMs) {
         return false; // timeout, no data
     }
 
-    // Check for errors
-    if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) {
-        ::close(m_client);
-        m_client = -1;
-        out.clear();
-        return false;
-    }
-
-    // Read available data
     char buf[65536];
-    int n = (int)::read(m_client, buf, sizeof(buf));
+    int n = (int)recv(m_client, buf, sizeof(buf), 0);
     if (n > 0) {
         m_recvBuf.append(buf, n);
 
@@ -108,11 +147,10 @@ bool DevSocket::readMessage(std::string& out, int timeoutMs) {
             return true;
         }
     } else if (n == 0) {
-        ::close(m_client);
+        closeFd(m_client);
         m_client = -1;
-    } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
-        perror("[morph] dev socket read");
-        ::close(m_client);
+    } else if (!wouldBlock(lastError())) {
+        closeFd(m_client);
         m_client = -1;
     }
 
@@ -123,22 +161,18 @@ bool DevSocket::readMessage(std::string& out, int timeoutMs) {
 bool DevSocket::sendMessage(const std::string& msg) {
     if (m_client < 0) return false;
     std::string payload = msg + "\0";
-    int n = (int)::write(m_client, payload.data(), payload.size());
+    int n = (int)send(m_client, payload.data(), (int)payload.size(), 0);
     return n > 0;
 }
 
 void DevSocket::close() {
     if (m_client >= 0) {
-        ::close(m_client);
+        closeFd(m_client);
         m_client = -1;
     }
     if (m_sock >= 0) {
-        ::close(m_sock);
+        closeFd(m_sock);
         m_sock = -1;
-    }
-    if (!m_path.empty()) {
-        unlink(m_path.c_str());
-        m_path.clear();
     }
     m_recvBuf.clear();
 }
