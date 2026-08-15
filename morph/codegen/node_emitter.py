@@ -198,21 +198,21 @@ class NodeEmitter:
                 field_name, val_type = field_info
                 if val_type == "float":
                     lines.append(f"{node_id}->m_associatedEffects.push_back(morph::create_effect([{node_id}]() {{")
-                    lines.append(f"{indent}{node_id}->style.{field_name} = (float)({cpp_expr});")
                     lines.append(f"{indent}{node_id}->interruptStateTransitions();")
+                    lines.append(f"{indent}{node_id}->style.{field_name} = (float)({cpp_expr});")
                     lines.append(f"{indent}{node_id}->markDirty(LayoutDirty);")
                     lines.append(f"{indent}{node_id}->markDirty(PaintDirty);")
                     lines.append(f"}}));")
                 elif val_type == "string":
                     lines.append(f"{node_id}->m_associatedEffects.push_back(morph::create_effect([{node_id}]() {{")
-                    lines.append(f"{indent}{node_id}->style.{field_name} = morph::str({cpp_expr});")
                     lines.append(f"{indent}{node_id}->interruptStateTransitions();")
+                    lines.append(f"{indent}{node_id}->style.{field_name} = morph::str({cpp_expr});")
                     lines.append(f"{indent}{node_id}->markDirty(PaintDirty);")
                     lines.append(f"}}));")
                 elif val_type == "color":
                     lines.append(f"{node_id}->m_associatedEffects.push_back(morph::create_effect([{node_id}]() {{")
-                    lines.append(f"{indent}morph::setColor({node_id}->style.{field_name}, morph::str({cpp_expr}));")
                     lines.append(f"{indent}{node_id}->interruptStateTransitions();")
+                    lines.append(f"{indent}morph::setColor({node_id}->style.{field_name}, morph::str({cpp_expr}));")
                     lines.append(f"{indent}{node_id}->markDirty(PaintDirty);")
                     lines.append(f"}}));")
 
@@ -227,8 +227,8 @@ class NodeEmitter:
                 for child in node.children:
                     if child.node_type == "__text__":
                         lines.append(f"{child.node_id}->m_associatedEffects.push_back(morph::create_effect([{child.node_id}]() {{")
-                        lines.append(f"{indent}{child.node_id}->style.fontSize = (float)({cpp_expr});")
                         lines.append(f"{indent}{child.node_id}->interruptStateTransitions();")
+                        lines.append(f"{indent}{child.node_id}->style.fontSize = (float)({cpp_expr});")
                         lines.append(f"{indent}{child.node_id}->markDirty(LayoutDirty);")
                         lines.append(f"{indent}{child.node_id}->markDirty(PaintDirty);")
                         lines.append(f"}}));")
@@ -261,6 +261,7 @@ class NodeEmitter:
                 return out
 
             lines.append(f"{node_id}->m_associatedEffects.push_back(morph::create_effect([{node_id}]() {{")
+            lines.append(f"{indent}{node_id}->interruptStateTransitions();")
             lines.append(f"{indent}if ({cond_cpp}) {{")
             for a in _assigns(on_styles):
                 lines.append(f"{indent}    {a}")
@@ -272,7 +273,6 @@ class NodeEmitter:
                 for a in _resets(on_styles):
                     lines.append(f"{indent}    {a}")
             lines.append(f"{indent}}}")
-            lines.append(f"{indent}{node_id}->interruptStateTransitions();")
             lines.append(f"{indent}{node_id}->markDirty(PaintDirty);")
             lines.append(f"}}));")
 

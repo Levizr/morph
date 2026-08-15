@@ -489,8 +489,8 @@ def _emit_node_effects(lines: list[str], node: IRNode, indent: str = "    ") -> 
                 lines.append(f'{indent}__effects[__effect_count++] = morph::create_effect([&]() {{')
                 lines.append(f'{indent}    auto* n = nodes.get("{node_id}");')
                 lines.append(f'{indent}    if (!n) return;')
-                lines.append(f'{indent}    n->style.{field_name} = (float)({cpp_expr});')
                 lines.append(f'{indent}    n->interruptStateTransitions();')
+                lines.append(f'{indent}    n->style.{field_name} = (float)({cpp_expr});')
                 lines.append(f'{indent}    n->markDirty(LayoutDirty);')
                 lines.append(f'{indent}    n->markDirty(PaintDirty);')
                 lines.append(f'{indent}}});')
@@ -498,16 +498,16 @@ def _emit_node_effects(lines: list[str], node: IRNode, indent: str = "    ") -> 
                 lines.append(f'{indent}__effects[__effect_count++] = morph::create_effect([&]() {{')
                 lines.append(f'{indent}    auto* n = nodes.get("{node_id}");')
                 lines.append(f'{indent}    if (!n) return;')
-                lines.append(f'{indent}    n->style.{field_name} = morph::str({cpp_expr});')
                 lines.append(f'{indent}    n->interruptStateTransitions();')
+                lines.append(f'{indent}    n->style.{field_name} = morph::str({cpp_expr});')
                 lines.append(f'{indent}    n->markDirty(PaintDirty);')
                 lines.append(f'{indent}}});')
             elif val_type == "color":
                 lines.append(f'{indent}__effects[__effect_count++] = morph::create_effect([&]() {{')
                 lines.append(f'{indent}    auto* n = nodes.get("{node_id}");')
                 lines.append(f'{indent}    if (!n) return;')
-                lines.append(f'{indent}    morph::setColor(n->style.{field_name}, morph::str({cpp_expr}));')
                 lines.append(f'{indent}    n->interruptStateTransitions();')
+                lines.append(f'{indent}    morph::setColor(n->style.{field_name}, morph::str({cpp_expr}));')
                 lines.append(f'{indent}    n->markDirty(PaintDirty);')
                 lines.append(f'{indent}}});')
 
@@ -529,8 +529,8 @@ def _emit_node_effects(lines: list[str], node: IRNode, indent: str = "    ") -> 
                     lines.append(f'{indent}__effects[__effect_count++] = morph::create_effect([&]() {{')
                     lines.append(f'{indent}    auto* n = nodes.get("{child.node_id}");')
                     lines.append(f'{indent}    if (!n) return;')
-                    lines.append(f'{indent}    n->style.fontSize = (float)({cpp_expr});')
                     lines.append(f'{indent}    n->interruptStateTransitions();')
+                    lines.append(f'{indent}    n->style.fontSize = (float)({cpp_expr});')
                     lines.append(f'{indent}    n->markDirty(LayoutDirty);')
                     lines.append(f'{indent}    n->markDirty(PaintDirty);')
                     lines.append(f'{indent}}});')
@@ -548,6 +548,7 @@ def _emit_node_effects(lines: list[str], node: IRNode, indent: str = "    ") -> 
         lines.append(f'{indent}__effects[__effect_count++] = morph::create_effect([&]() {{')
         lines.append(f'{indent}    auto* n = nodes.get("{node_id}");')
         lines.append(f'{indent}    if (!n) return;')
+        lines.append(f'{indent}    n->interruptStateTransitions();')
         lines.append(f'{indent}    if ({cond_cpp}) {{')
         for css_prop, css_val in on_styles.items():
             for a in _css_val_to_cpp_assignments(css_prop, css_val):
@@ -568,7 +569,6 @@ def _emit_node_effects(lines: list[str], node: IRNode, indent: str = "    ") -> 
                 for a in _css_field_reset_assignments(fname):
                     lines.append(f'{indent}        {a}')
         lines.append(f'{indent}    }}')
-        lines.append(f'{indent}    n->interruptStateTransitions();')
         lines.append(f'{indent}    n->markDirty(PaintDirty);')
         lines.append(f'{indent}}});')
 
