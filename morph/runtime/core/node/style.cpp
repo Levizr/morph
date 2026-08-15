@@ -168,6 +168,89 @@ static void invalidatePaintOrderOnZ(MorphNode* n) {
 }
 #endif
 
+// Build the release target for a hover/active state: start from the current
+// style, then for every field the state delta touched at press, revert it to
+// its pre-state value — but only if it was left untouched (still equal to the
+// press value). Fields that reactive effects updated during the state keep
+// their current value, so effect-driven style changes are never clobbered by
+// the pre-state snapshot.
+static void buildReleaseStyle(MorphStyle& target, const MorphStyle& current,
+                              const MorphStyle& pressStyle, const MorphStyle& preState) {
+    target = current;
+    auto arrDiff = [](const float* a, const float* b) {
+        return std::memcmp(a, b, sizeof(float) * 4) != 0;
+    };
+    auto arrSame = [](const float* a, const float* b) {
+        return std::memcmp(a, b, sizeof(float) * 4) == 0;
+    };
+    if (arrDiff(pressStyle.bgColor, preState.bgColor) && arrSame(current.bgColor, pressStyle.bgColor))
+        memcpy(target.bgColor, preState.bgColor, sizeof(float) * 4);
+    if (arrDiff(pressStyle.color, preState.color) && arrSame(current.color, pressStyle.color))
+        memcpy(target.color, preState.color, sizeof(float) * 4);
+    if (arrDiff(pressStyle.padding, preState.padding) && arrSame(current.padding, pressStyle.padding))
+        memcpy(target.padding, preState.padding, sizeof(float) * 4);
+    if (arrDiff(pressStyle.margin, preState.margin) && arrSame(current.margin, pressStyle.margin))
+        memcpy(target.margin, preState.margin, sizeof(float) * 4);
+    if (std::memcmp(pressStyle.marginAuto, preState.marginAuto, sizeof(bool) * 4) != 0
+        && std::memcmp(current.marginAuto, pressStyle.marginAuto, sizeof(bool) * 4) == 0)
+        memcpy(target.marginAuto, preState.marginAuto, sizeof(bool) * 4);
+#define SCALAR_REVERT(field)                                                        \
+    if (pressStyle.field != preState.field && current.field == pressStyle.field)   \
+        target.field = preState.field
+    SCALAR_REVERT(borderRadius);
+    SCALAR_REVERT(fontSize);
+    SCALAR_REVERT(fontWeight);
+    SCALAR_REVERT(textAlign);
+    SCALAR_REVERT(display);
+    SCALAR_REVERT(overflow);
+    SCALAR_REVERT(position);
+    SCALAR_REVERT(boxSizing);
+    SCALAR_REVERT(explicitWidth);
+    SCALAR_REVERT(explicitHeight);
+    SCALAR_REVERT(minWidth);
+    SCALAR_REVERT(maxWidth);
+    SCALAR_REVERT(minHeight);
+    SCALAR_REVERT(maxHeight);
+#ifdef MORPH_FEATURE_BORDER
+    SCALAR_REVERT(borderWidth);
+    SCALAR_REVERT(borderStyle);
+    if (arrDiff(pressStyle.borderColor, preState.borderColor) && arrSame(current.borderColor, pressStyle.borderColor))
+        memcpy(target.borderColor, preState.borderColor, sizeof(float) * 4);
+#endif
+#ifdef MORPH_FEATURE_FLEX
+    SCALAR_REVERT(flexDirection);
+    SCALAR_REVERT(gap);
+    SCALAR_REVERT(justifyContent);
+    SCALAR_REVERT(alignItems);
+    SCALAR_REVERT(flexWrap);
+    SCALAR_REVERT(flexGrow);
+    SCALAR_REVERT(flexShrink);
+    SCALAR_REVERT(flexBasis);
+#endif
+#ifdef MORPH_FEATURE_POSITION
+    SCALAR_REVERT(left);
+    SCALAR_REVERT(right);
+    SCALAR_REVERT(top);
+    SCALAR_REVERT(bottom);
+#endif
+#ifdef MORPH_FEATURE_ZINDEX
+    SCALAR_REVERT(zIndex);
+    SCALAR_REVERT(zIndexSet);
+#endif
+#ifdef MORPH_FEATURE_SCROLL
+    SCALAR_REVERT(scrollbarWidth);
+    SCALAR_REVERT(scrollbarBorderRadius);
+    if (arrDiff(pressStyle.scrollbarTrackColor, preState.scrollbarTrackColor) && arrSame(current.scrollbarTrackColor, pressStyle.scrollbarTrackColor))
+        memcpy(target.scrollbarTrackColor, preState.scrollbarTrackColor, sizeof(float) * 4);
+    if (arrDiff(pressStyle.scrollbarThumbColor, preState.scrollbarThumbColor) && arrSame(current.scrollbarThumbColor, pressStyle.scrollbarThumbColor))
+        memcpy(target.scrollbarThumbColor, preState.scrollbarThumbColor, sizeof(float) * 4);
+#endif
+#ifdef MORPH_FEATURE_CURSOR
+    SCALAR_REVERT(cursor);
+#endif
+#undef SCALAR_REVERT
+}
+
 static void _applyStateStyle(MorphNode* node, bool state,
                              MorphStyle* stateStyle, HoverTransition*& trans) {
     if (!stateStyle) return;
@@ -175,25 +258,45 @@ static void _applyStateStyle(MorphNode* node, bool state,
         trans = new HoverTransition();
     MorphStyle layoutBefore = node->style;
     if (state) {
-        if (!trans->active)
+        if (!trans->active) {
             trans->preHoverStyle = node->style;
+            trans->pressStyle = node->style;
+        }
         if (node->m_transitionDuration > 0.0f) {
             trans->startStyle = node->style;
             trans->targetStyle = node->style;
             applyStyleDelta(trans->targetStyle, *stateStyle);
+            trans->pressStyle = trans->targetStyle;
             trans->elapsed = 0.0f;
             trans->active = true;
         } else {
             applyStyleDelta(node->style, *stateStyle);
+            trans->pressStyle = node->style;
         }
     } else {
+        MorphStyle releaseTarget;
+        if (trans->active) {
+            // State transition still in flight — it never reached its target,
+            // so the current style is just a mid-interpolation value. A
+            // settled reactive-effect value cannot exist here: every effect
+            // calls interruptStateTransitions(), which clears `active`. Revert
+            // cleanly to the pre-state snapshot.
+            releaseTarget = trans->preHoverStyle;
+        } else {
+            // State was fully applied (or interrupted by an effect): start
+            // from the current style and revert only the fields the state
+            // delta touched (when they were left untouched since the press).
+            // Fields modified by reactive effects keep their effect value
+            // instead of being clobbered by the pre-state snapshot.
+            buildReleaseStyle(releaseTarget, node->style, trans->pressStyle, trans->preHoverStyle);
+        }
         if (node->m_transitionDuration > 0.0f) {
             trans->startStyle = node->style;
-            trans->targetStyle = trans->preHoverStyle;
+            trans->targetStyle = releaseTarget;
             trans->elapsed = 0.0f;
             trans->active = true;
         } else {
-            node->style = trans->preHoverStyle;
+            node->style = releaseTarget;
         }
     }
     node->markDirty(PaintDirty);
@@ -204,11 +307,24 @@ static void _applyStateStyle(MorphNode* node, bool state,
 void MorphNode::onHover(bool state) {
     _applyStateStyle(this, state, hoverStyle, m_hoverTransition);
     _applyAncestorHover(state);
+    // CSS semantics: :hover also matches ancestors of the pointer. Hovering a
+    // descendant (e.g. a button label) must apply the ancestor's hover style
+    // too, so walk up and apply each ancestor's hover state.
+    for (MorphNode* a = parent; a; a = a->parent) {
+        _applyStateStyle(a, state, a->hoverStyle, a->m_hoverTransition);
+        a->_applyAncestorHover(state);
+    }
 }
 
 void MorphNode::onActive(bool state) {
     _applyStateStyle(this, state, activeStyle, m_activeTransition);
     _applyAncestorActive(state);
+    // Same bubbling for :active — pressing a child (button label) activates
+    // the ancestor button as well.
+    for (MorphNode* a = parent; a; a = a->parent) {
+        _applyStateStyle(a, state, a->activeStyle, a->m_activeTransition);
+        a->_applyAncestorActive(state);
+    }
 }
 
 static void _applyOneAncestorRule(MorphNode* child, const AncestorHoverRule& rule,
@@ -305,6 +421,17 @@ void MorphNode::updateHoverTransition(float dt) {
 
 void MorphNode::updateActiveTransition(float dt) {
     _updateStateTransition(this, m_activeTransition, dt);
+}
+
+void MorphNode::interruptStateTransitions() {
+    if (m_hoverTransition && m_hoverTransition->active) {
+        m_hoverTransition->active = false;
+        m_hoverTransition->targetStyle = style;
+    }
+    if (m_activeTransition && m_activeTransition->active) {
+        m_activeTransition->active = false;
+        m_activeTransition->targetStyle = style;
+    }
 }
 
 void MorphNode::interpolateStyles(MorphStyle& out, const MorphStyle& a,

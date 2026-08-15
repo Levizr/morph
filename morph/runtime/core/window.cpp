@@ -365,6 +365,25 @@ void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx,
     bool radiusClip = node.borderRadius > 0.0f;
     bool scrolling = node.scrollEnabled && node.contentH > sh;
 
+    // Viewport cull (flash + forge): skip anything fully outside the scene —
+    // its pixels can't be seen and the GPU never needs to touch them.
+    // sx/sy already include the interpolated animOffset, so nodes animating
+    // into view are never culled.
+    float cw = contentWidth();
+    float ch = contentHeight();
+    if (sx + sw <= 0.0f || sx >= cw || sy + sh <= 0.0f || sy >= ch)
+    {
+        // Clipping nodes fully contain their descendants, so skipping the
+        // whole subtree is safe. Unclipped nodes can have overflowed
+        // children that DO reach the view — recurse them without touching
+        // this node's pixels.
+        if (overflowClipped || radiusClip)
+            return;
+        for (int childIdx : node.children)
+            renderNode(frame, childIdx, damageClip);
+        return;
+    }
+
     // Damage-limited re-raster: skip anything whose own box can't touch the
     // repaint region — its pixels are already correct in the retained surface.
     if (damageClip)

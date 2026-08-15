@@ -26,10 +26,11 @@ struct DirtyStats {
     int paintCount = 0;
     int fullTreeCount = 0;
     int skippedCount = 0;
-    int damageArea = 0;      // forge: pixels repainted this frame (0 = no damage)
-    int presentBytes = 0;    // forge: bytes blitted to the backbuffer this frame
+    int culledCount = 0;       // nodes skipped by off-screen flatten culling
+    int damageArea = 0;        // forge: pixels repainted this frame (0 = no damage)
+    int presentBytes = 0;      // forge: bytes blitted to the backbuffer this frame
     void reset() { layoutCount = 0; paintCount = 0; fullTreeCount = 0; skippedCount = 0;
-                   damageArea = 0; presentBytes = 0; }
+                   culledCount = 0; damageArea = 0; presentBytes = 0; }
 };
 
 enum class AnimProperty : uint8_t {
@@ -54,6 +55,7 @@ struct HoverTransition {
     MorphStyle startStyle;
     MorphStyle targetStyle;
     MorphStyle preHoverStyle; // snapshot before hover, for restore on exit
+    MorphStyle pressStyle;    // snapshot with the state delta applied, at press
     float elapsed = 0.0f;
     bool active = false;
 };
@@ -254,6 +256,11 @@ public:
     // ── Hover transitions ──
     HoverTransition* m_hoverTransition = nullptr;
     void updateHoverTransition(float dt);
+    // Cancel any in-flight hover/active state transitions. Reactive style
+    // effects call this after writing style values so a stale state
+    // animation (snapshotted before the effect ran) cannot clobber the
+    // effect's value.
+    void interruptStateTransitions();
     static void interpolateStyles(MorphStyle& out, const MorphStyle& a,
                                   const MorphStyle& b, float t);
 
@@ -326,6 +333,12 @@ public:
     // Flatten into a lock-free render frame for the compositor thread
     virtual int flatten(RenderFrame& frame, int parentId);
     virtual int flattenExtra(RenderFrame& frame, FlatRenderNode& fn);
+
+    // True if this subtree could change its screen position this frame
+    // (running compositor animations or transitions). Guards the off-screen
+    // culling: such subtrees must stay in the frame or the compositor would
+    // freeze their interpolation and stall the completion event.
+    bool subtreeMayMove() const;
 
     virtual ~MorphNode() {
         if (this == s_lastHoveredNode) s_lastHoveredNode = nullptr;

@@ -122,6 +122,13 @@ struct RenderFrame {
     std::vector<FlatTextOp> textOps;
     uint64_t frameId;
     double timestamp;
+
+    // Scene viewport in screen space (set by the commit path before flatten;
+    // used for off-screen culling at flatten time).
+    float viewW = 0.0f;
+    float viewH = 0.0f;
+    // Nodes whose draw/text payload was skipped this frame (off-screen cull).
+    int culledCount = 0;
 };
 
 // ── Global double-buffered frame state (main thread writes, compositor reads) ──

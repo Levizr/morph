@@ -20,6 +20,23 @@ static void glfw_error_cb(int code, const char* msg) {
     fprintf(stderr, "[GLFW] error %d: %s\n", code, msg);
 }
 
+// Runtime color parser for reactive inline style color expressions
+namespace morph {
+inline void setColor(float rgba[4], const std::string& c) {
+    if (c.size() == 7 && c[0] == '#') {
+        rgba[0] = std::stoi(c.substr(1,2), nullptr, 16) / 255.0f;
+        rgba[1] = std::stoi(c.substr(3,2), nullptr, 16) / 255.0f;
+        rgba[2] = std::stoi(c.substr(5,2), nullptr, 16) / 255.0f;
+        rgba[3] = 1.0f;
+    } else if (c.size() == 4 && c[0] == '#') {
+        rgba[0] = std::stoi(c.substr(1,1) + c[1], nullptr, 16) / 255.0f;
+        rgba[1] = std::stoi(c.substr(2,1) + c[2], nullptr, 16) / 255.0f;
+        rgba[2] = std::stoi(c.substr(3,1) + c[3], nullptr, 16) / 255.0f;
+        rgba[3] = 1.0f;
+    }
+}
+}
+
 {% if state_decls %}
 // ── morphState signals ──
 {% for s in state_decls %}

@@ -636,7 +636,7 @@ private:
         y += cardH + 8.0f;
 
         // ── PAINT card ──
-        cardH = 34.0f + 2 * 17.0f;
+        cardH = 34.0f + 3 * 17.0f;
         drawCard(r, cardX, y, cardW, cardH);
         drawSectionLabel(r, px + 22, y + 6, "PAINT");
         ry = y + 26.0f;
@@ -645,7 +645,9 @@ private:
         float saved = ds.fullTreeCount - ds.paintCount;
         snprintf(buf, sizeof(buf), "%d (%.0f%%)", (int)(saved > 0 ? saved : 0),
                  ds.fullTreeCount > 0 ? (saved * 100.0f / ds.fullTreeCount) : 0);
-        drawRow(r, px + 22, ry, "Cache hit", buf, green);
+        drawRow(r, px + 22, ry, "Cache hit", buf, green); ry += 17.0f;
+        snprintf(buf, sizeof(buf), "%d", ds.culledCount);
+        drawRow(r, px + 22, ry, "Culled", buf, ds.culledCount > 0 ? green : valCol);
         y += cardH + 8.0f;
 
         // ── SAVINGS card ──

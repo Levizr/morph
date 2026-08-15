@@ -233,11 +233,16 @@ void forgeCommit(MorphWindow& win)
     frame.drawOps.clear();
     frame.animations.clear();
     frame.textOps.clear();
+    frame.culledCount = 0;
     frame.frameId++;
     auto now = std::chrono::steady_clock::now().time_since_epoch();
     frame.timestamp = std::chrono::duration<double>(now).count();
 
+    frame.viewW = win.contentWidth();
+    frame.viewH = win.contentHeight();
+
     win.root()->flatten(frame, -1);
+    stats.culledCount = frame.culledCount;
 
     // Phase 4: Atomic swap — compositor interpolates, then main thread presents
     g_frontFrame.store(&frame, std::memory_order_release);

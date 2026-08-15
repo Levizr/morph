@@ -40,7 +40,41 @@ int MorphNode::flattenExtra(RenderFrame& frame, FlatRenderNode& fn) {
     return 0;
 }
 
+bool MorphNode::subtreeMayMove() const {
+    if (m_isTransitioning || m_hasLayoutTransition)
+        return true;
+    for (const auto& a : m_animations)
+        if (a.running && !a.finished)
+            return true;
+    for (auto* c : children)
+        if (c->subtreeMayMove())
+            return true;
+    return false;
+}
+
 int MorphNode::flatten(RenderFrame& frame, int parentId) {
+    // Off-screen culling: skip anything whose box is fully outside the scene
+    // viewport. Node coords are absolute root-space (they already include
+    // ancestor scroll offsets), so each subtree can be tested independently.
+    bool offscreen = frame.viewW > 0.0f && frame.viewH > 0.0f &&
+                     (x + w <= 0.0f || x >= frame.viewW ||
+                      y + h <= 0.0f || y >= frame.viewH);
+    if (offscreen)
+    {
+        bool clips = style.overflow == "hidden" || style.overflow == "scroll" ||
+                     style.overflow == "auto" || style.borderRadius > 0.0f;
+        // Clipping nodes fully contain their descendants. If nothing in the
+        // subtree can move (running animation/transition), it can never
+        // become visible — drop the whole subtree. Non-clipping nodes still
+        // emit an empty shell below so overflowed descendants keep their
+        // parent structure (and their own cull test).
+        if (clips && !subtreeMayMove())
+        {
+            frame.culledCount++;
+            return -1;
+        }
+    }
+
     int idx = (int)frame.nodes.size();
     FlatRenderNode fn;
     fn.id = idx;
@@ -85,12 +119,21 @@ int MorphNode::flatten(RenderFrame& frame, int parentId) {
 #endif
 
     int dlStart = (int)frame.drawOps.size();
-    frame.drawOps.insert(frame.drawOps.end(), m_displayList.begin(), m_displayList.end());
+    if (offscreen)
+    {
+        // Shell node: keep the tree structure but skip the draw payload.
+        frame.culledCount++;
+    }
+    else
+    {
+        frame.drawOps.insert(frame.drawOps.end(), m_displayList.begin(), m_displayList.end());
+    }
     fn.dlOffset = dlStart;
-    fn.dlCount = (int)m_displayList.size();
+    fn.dlCount = (int)frame.drawOps.size() - dlStart;
 
     fn.textOpOffset = (int)frame.textOps.size();
-    fn.textOpCount = flattenExtra(frame, fn);
+    if (!offscreen)
+        fn.textOpCount = flattenExtra(frame, fn);
 
     auto now = std::chrono::steady_clock::now().time_since_epoch().count();
     double nowSec = (double)now / 1000000000.0;
@@ -120,7 +163,8 @@ int MorphNode::flatten(RenderFrame& frame, int parentId) {
 
     for (auto* child : paintOrder()) {
         int childIdx = child->flatten(frame, idx);
-        frame.nodes[idx].children.push_back(childIdx);
+        if (childIdx >= 0)
+            frame.nodes[idx].children.push_back(childIdx);
     }
 
     return idx;

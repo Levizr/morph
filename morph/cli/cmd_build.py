@@ -273,6 +273,12 @@ def _deser_node(d: dict) -> IRNode:
         h=_float("h"),
         text_content=d.get("text", ""),
         reactive_text=d.get("reactive_text", ""),
+        reactive_class=d.get("reactive_class", ""),
+        reactive_style=d.get("reactive_style", {}),
+        class_conditional_effects=[
+            (str(c), dict(o), dict(f))
+            for c, o, f in d.get("class_conditional_effects", [])
+        ],
         condition_expr=d.get("condition_expr", ""),
         then_nodes=then_nodes,
         else_nodes=else_nodes,

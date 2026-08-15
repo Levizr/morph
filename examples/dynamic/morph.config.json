@@ -1,0 +1,14 @@
+{
+  "name": "dynamic",
+  "entry": "src/App.mx",
+  "output": "dist/",
+
+  "window": {
+    "width": 500,
+    "height": 480,
+    "title": "Morph Studio — Dynamic Styles"
+  },
+  "dependencies": {},
+  "cpp_sources": [],
+  "renderer": "flash"
+}

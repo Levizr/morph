@@ -1,0 +1,75 @@
+import { CSS, morphState } from 'morph'
+
+CSS.load("style.css")
+
+export const windowConfig = {
+  title: "Morph Studio — Dynamic Styles",
+  width: 500,
+  height: 480,
+}
+
+export default function App() {
+  const [theme, setTheme] = morphState("light");
+  const [bodyWidth, setBodyWidth] = morphState(220.0);
+  const [accent, setAccent] = morphState("#6d7cff");
+
+  return (
+    <body>
+      <div className="app" id="app">
+
+        {/* ── 1. Dynamic className via template literal ──
+             The ternary picks which Tailwind class exists at runtime;
+             each branch becomes a reactive style effect on the node. */}
+        <div className={`header ${theme == "light" ? "bg-white" : "bg-gray-900"}`}
+             style={{ padding: 14, borderRadius: 16, display: "flex", flexDirection: "row",
+                      justifyContent: "space-between", alignItems: "center" }} id="hero">
+          <div className="hero-text" id="heroText">
+            <div className="hero-title" id="heroTitle"
+                 style={{ color: theme == "light" ? "#0f172a" : "#f1f5f9" }}>Morph Studio</div>
+            <div className="hero-sub" id="heroSub"
+                 style={{ color: theme == "light" ? "#64748b" : "#8b94a7" }}>Dynamic classes · inline styles</div>
+          </div>
+
+          <div className="pill" id="pill">
+            <button className="pill-opt" id="pillLight"
+                    style={{ backgroundColor: theme == "light" ? "#6d7cff" : "#141926",
+                             color: theme == "light" ? "#ffffff" : "#8b94a7" }}
+                    onClick={() => setTheme("light")}>Light</button>
+            <button className="pill-opt" id="pillDark"
+                    style={{ backgroundColor: theme == "dark" ? "#6d7cff" : "#141926",
+                             color: theme == "dark" ? "#ffffff" : "#8b94a7" }}
+                    onClick={() => setTheme("dark")}>Dark</button>
+          </div>
+        </div>
+
+        {/* ── 2. Direct state values in inline style ──
+             width: bodyWidth  → the morphState number drives layout width (px)
+             backgroundColor: accent → the state color drives the fill */}
+        <div className="card" id="card">
+          <div className="card-head" id="cardHead">
+            <div className="card-label" id="cardLabel">Layout panel</div>
+            <div className="badge" id="badge">width: {bodyWidth}px</div>
+          </div>
+
+          <div className="canvas" id="canvas">
+            <div className="panel" id="panel" style={{ width: bodyWidth, backgroundColor: accent }}>
+              <div className="panel-label" id="panelLabel">flex · reactive</div>
+            </div>
+            <div className="canvas-hint" id="canvasHint">click Wider / Narrower to resize</div>
+          </div>
+
+          <div className="row" id="row">
+            <button className="btn ghost" id="b-minus"   onClick={() => setBodyWidth(bodyWidth > 60 ? bodyWidth - 20 : bodyWidth)}>− Narrower</button>
+            <button className="btn ghost" id="b-plus"    onClick={() => setBodyWidth(bodyWidth + 20)}>Wider +</button>
+            <button className="btn primary" id="b-accent" onClick={() => setAccent(accent == "#6d7cff" ? "#22c55e" : "#6d7cff")}>Swap accent</button>
+          </div>
+        </div>
+
+        <div className="notes" id="notes">
+          <div className="chip" id="chip1"><span className="chip-num" id="chipNum1">01</span> template-literal className — bg-white ↔ bg-gray-900</div>
+          <div className="chip" id="chip2"><span className="chip-num" id="chipNum2">02</span> inline style — width + backgroundColor driven by state</div>
+        </div>
+      </div>
+    </body>
+  )
+}

@@ -1,0 +1,196 @@
+body {
+  background-color: #0b0e14;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+  box-sizing: border-box;
+}
+
+/* ── Hero — bg comes from the template-literal className (bg-white / bg-gray-900) ── */
+.header {
+  color: #0f172a;
+}
+
+.hero-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.hero-title {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.hero-sub {
+  font-size: 11px;
+}
+
+/* ── Theme pill ── */
+.pill {
+  display: flex;
+  flex-direction: row;
+  border-radius: 999px;
+  padding: 3px;
+  background-color: #141926;
+  border: 1px solid #232b3d;
+}
+
+.pill-opt {
+  width: 74px;
+  height: 28px;
+  border-radius: 999px;
+  border: 0px solid transparent;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: center;
+}
+
+/* ── Card ── */
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  box-sizing: border-box;
+  background-color: #10141f;
+  border: 1px solid #232b3d;
+  border-radius: 16px;
+}
+
+.card-head {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.card-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #c7cede;
+}
+
+.badge {
+  padding: 6px 12px;
+  border-radius: 999px;
+  background-color: #1a2132;
+  font-size: 12px;
+  font-weight: 600;
+  color: #6d7cff;
+}
+
+/* ── Canvas ── */
+.canvas {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 150px;
+  border-radius: 12px;
+  background-color: #0b0e14;
+  border: 1px solid #1c2333;
+}
+
+.panel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 64px;
+  border-radius: 12px;
+  transition: width 0.15s ease;
+}
+
+.panel-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.canvas-hint {
+  font-size: 10px;
+  color: #5b6472;
+}
+
+/* ── Buttons ── */
+.row {
+  display: flex;
+  flex-direction: row;
+  gap: 10px;
+}
+
+.btn {
+  flex-grow: 1;
+  height: 42px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: center;
+}
+
+.btn.ghost {
+  color: #c7cede;
+  background-color: #141926;
+  border: 1px solid #232b3d;
+}
+
+.btn.ghost:hover {
+  background-color: #1a2132;
+  transform: translateY(-1px);
+}
+
+.btn.ghost:active {
+  background-color: #232b3d;
+  transform: translateY(1px);
+}
+
+.btn.primary {
+  color: #ffffff;
+  background-color: #6d7cff;
+  border: 1px solid #7b89ff;
+}
+
+.btn.primary:hover {
+  background-color: #7d8cff;
+  transform: translateY(-1px);
+}
+
+.btn.primary:active {
+  background-color: #5a66dd;
+  transform: translateY(1px);
+}
+
+/* ── Notes ── */
+.notes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chip {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background-color: #141926;
+  border: 1px solid #232b3d;
+  font-size: 12px;
+  color: #8b94a7;
+}
+
+.chip-num {
+  font-size: 11px;
+  font-weight: 700;
+  color: #6d7cff;
+}

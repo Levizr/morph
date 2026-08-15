@@ -368,6 +368,7 @@ Morph ships ready-to-run example apps under `examples/`:
 |---|---|
 | **calculator** | Full working calculator UI — `morphState` reactive state, conditional JSX rendering (`{op !== 0 && <span>…</span>}`), typed functions (`:double`, `:int`), flexbox keypad |
 | **ipchecker** | Async networking — `await fetch("http://api.ipify.org")`, `Response.ok()`/`status`/`text()`, try/catch error handling, loading/error states |
+| **dynamic** | Dynamic classes & styles — template-literal `className` (`className={\`header ${theme == "light" ? "" : "bg-gray-900"}\`}`) with conditional Tailwind effects, and direct state values in inline `style` (`style={{ width: bodyWidth }}`) |
 
 ```bash
 cd examples/calculator

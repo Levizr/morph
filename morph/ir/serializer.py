@@ -106,6 +106,14 @@ class IRSerializer:
         }
         if n.reactive_text:
             result["reactive_text"] = n.reactive_text
+        if n.reactive_class:
+            result["reactive_class"] = n.reactive_class
+        if n.reactive_style:
+            result["reactive_style"] = n.reactive_style
+        if n.class_conditional_effects:
+            result["class_conditional_effects"] = [
+                [cond, on, off] for cond, on, off in n.class_conditional_effects
+            ]
         if n.condition_expr:
             result["condition_expr"] = n.condition_expr
             result["then_nodes"] = [self._node(tn) for tn in n.then_nodes]

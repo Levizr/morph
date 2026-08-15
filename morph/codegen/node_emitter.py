@@ -174,6 +174,108 @@ class NodeEmitter:
         for child in node.children:
             lines.append(self.emit_node(child, node.node_id, resolved))
 
+        lines.append(self._emit_reactive_effects(node, indent))
+
+        return "\n".join(lines)
+
+    def _emit_reactive_effects(self, node: IRNode, indent: str = "    ") -> str:
+        """Emit reactive className / inline style / conditional class effects
+        (prod mode). Mirrors logic_emitter._emit_node_effects but captures node
+        pointers directly instead of going through the dev NodeRegistry."""
+        from morph.codegen.logic_emitter import (
+            _CSS_TO_STYLE_FIELD, _css_field_reset_assignments,
+            _css_val_to_cpp_assignments,
+        )
+        lines = []
+        node_id = node.node_id
+
+        # ── Reactive inline style ──
+        if node.reactive_style:
+            for css_prop, cpp_expr in node.reactive_style.items():
+                field_info = _CSS_TO_STYLE_FIELD.get(css_prop)
+                if field_info is None:
+                    continue
+                field_name, val_type = field_info
+                if val_type == "float":
+                    lines.append(f"{node_id}->m_associatedEffects.push_back(morph::create_effect([{node_id}]() {{")
+                    lines.append(f"{indent}{node_id}->style.{field_name} = (float)({cpp_expr});")
+                    lines.append(f"{indent}{node_id}->interruptStateTransitions();")
+                    lines.append(f"{indent}{node_id}->markDirty(LayoutDirty);")
+                    lines.append(f"{indent}{node_id}->markDirty(PaintDirty);")
+                    lines.append(f"}}));")
+                elif val_type == "string":
+                    lines.append(f"{node_id}->m_associatedEffects.push_back(morph::create_effect([{node_id}]() {{")
+                    lines.append(f"{indent}{node_id}->style.{field_name} = morph::str({cpp_expr});")
+                    lines.append(f"{indent}{node_id}->interruptStateTransitions();")
+                    lines.append(f"{indent}{node_id}->markDirty(PaintDirty);")
+                    lines.append(f"}}));")
+                elif val_type == "color":
+                    lines.append(f"{node_id}->m_associatedEffects.push_back(morph::create_effect([{node_id}]() {{")
+                    lines.append(f"{indent}morph::setColor({node_id}->style.{field_name}, morph::str({cpp_expr}));")
+                    lines.append(f"{indent}{node_id}->interruptStateTransitions();")
+                    lines.append(f"{indent}{node_id}->markDirty(PaintDirty);")
+                    lines.append(f"}}));")
+
+        # ── Propagate reactive font-size to direct TextNode children ──
+        if node.reactive_style:
+            for css_prop, cpp_expr in node.reactive_style.items():
+                if css_prop != "font-size":
+                    continue
+                field_info = _CSS_TO_STYLE_FIELD.get(css_prop)
+                if field_info is None or field_info[1] != "float":
+                    continue
+                for child in node.children:
+                    if child.node_type == "__text__":
+                        lines.append(f"{child.node_id}->m_associatedEffects.push_back(morph::create_effect([{child.node_id}]() {{")
+                        lines.append(f"{indent}{child.node_id}->style.fontSize = (float)({cpp_expr});")
+                        lines.append(f"{indent}{child.node_id}->interruptStateTransitions();")
+                        lines.append(f"{indent}{child.node_id}->markDirty(LayoutDirty);")
+                        lines.append(f"{indent}{child.node_id}->markDirty(PaintDirty);")
+                        lines.append(f"}}));")
+
+        # ── Reactive className (stores string on node) ──
+        if node.reactive_class:
+            lines.append(f"{node_id}->m_associatedEffects.push_back(morph::create_effect([{node_id}]() {{")
+            lines.append(f"{indent}{node_id}->setClassName(morph::str({node.reactive_class}));")
+            lines.append(f"}}));")
+
+        # ── Conditional class style effects (direct condition → style) ──
+        for cond_cpp, on_styles, off_styles in node.class_conditional_effects:
+            def _assigns(styles: dict[str, str]) -> list[str]:
+                out: list[str] = []
+                for css_prop, css_val in styles.items():
+                    for a in _css_val_to_cpp_assignments(css_prop, css_val):
+                        out.append(a.replace("n->", f"{node_id}->"))
+                return out
+
+            def _resets(styles: dict[str, str]) -> list[str]:
+                out: list[str] = []
+                reset_fields = set()
+                for css_prop in styles:
+                    fi = _CSS_TO_STYLE_FIELD.get(css_prop)
+                    if fi:
+                        reset_fields.add(fi[0])
+                for fname in sorted(reset_fields):
+                    for a in _css_field_reset_assignments(fname):
+                        out.append(a.replace("n->", f"{node_id}->"))
+                return out
+
+            lines.append(f"{node_id}->m_associatedEffects.push_back(morph::create_effect([{node_id}]() {{")
+            lines.append(f"{indent}if ({cond_cpp}) {{")
+            for a in _assigns(on_styles):
+                lines.append(f"{indent}    {a}")
+            lines.append(f"{indent}}} else {{")
+            if off_styles:
+                for a in _assigns(off_styles):
+                    lines.append(f"{indent}    {a}")
+            else:
+                for a in _resets(on_styles):
+                    lines.append(f"{indent}    {a}")
+            lines.append(f"{indent}}}")
+            lines.append(f"{indent}{node_id}->interruptStateTransitions();")
+            lines.append(f"{indent}{node_id}->markDirty(PaintDirty);")
+            lines.append(f"}}));")
+
         return "\n".join(lines)
 
     def _set_style(self, node: IRNode, indent: str,
