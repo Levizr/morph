@@ -8,7 +8,8 @@ from morph.utils.logger import log_banner, log_step, log_error, log_success, log
 def run(args=None) -> None:
     config = load_config()
     out_dir = config.output
-    binary = os.path.join(out_dir, "app")
+    from morph.build.platform import exe_suffix
+    binary = os.path.join(out_dir, "app" + exe_suffix())
 
     if args and getattr(args, "binary", None):
         binary = args.binary

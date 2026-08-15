@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
 import shutil
+from morph.build.platform import current, is_macos
 from morph.utils.logger import log_info, log_error
 
 
@@ -10,8 +12,8 @@ class Compiler:
     """Invokes g++ to compile generated C++ into a native binary."""
 
     def __init__(self):
-        self.gpp = (shutil.which("g++-14") or shutil.which("g++") or
-                    shutil.which("clang++") or "g++")
+        from morph.build.platform import pick_cpp
+        self.gpp = pick_cpp()
         self.silent = False
 
     # Static link support: GLFW / FreeType / HarfBuzz are bundled into the
@@ -48,27 +50,77 @@ class Compiler:
                     return p
         return None
 
-    def _static_archives(self) -> tuple[str, str, str] | None:
-        """Locate glfw/harfbuzz/freetype static archives; None + log on failure."""
-        found: dict[str, str] = {}
-        for key, names in self._STATIC_ARCHIVE_NAMES.items():
-            p = self._find_static_archive(names)
-            if p is None:
+    def _static_archives(self, needs_freetype: bool,
+                         needs_harfbuzz: bool,
+                         wayland: bool = False,
+                         system_freetype: bool = False) -> dict | None:
+        """Locate (or build from source) the static archives morph needs.
+
+        Order matters: freetype must be resolved before harfbuzz, because a
+        self-built freetype is what harfbuzz links its shape engine against.
+        """
+        from morph.build.static_deps import StaticDeps
+        deps = StaticDeps(self.gpp, wayland=wayland)
+        info: dict = {}
+
+        def _resolve(key: str, force_build: bool = False) -> bool:
+            names = self._STATIC_ARCHIVE_NAMES[key]
+            if not force_build:
+                found = self._find_static_archive(names)
+                if found is not None:
+                    info[key] = {"archive": found, "self_built": False}
+                    return True
+            if os.environ.get("MORPH_NO_BUILD_DEPS"):
                 log_error(
                     f"Static build needs a static archive for {key} "
                     f"({' / '.join(names)}). "
                     f"Install it (e.g. libglfw3-dev, libharfbuzz-dev) or build it "
                     f"and point MORPH_STATIC_LIBDIRS at its directory."
                 )
+                return False
+            built = deps.build(key)
+            if built is not None:
+                info[key] = built
+                return True
+            # Fall back to a system archive if the source build failed.
+            fallback = self._find_static_archive(names)
+            if fallback is not None:
+                log_error(
+                    f"Could not build {key} from source — falling back to "
+                    f"{fallback} (bigger binary, fewer size optimizations)."
+                )
+                info[key] = {"archive": fallback, "self_built": False}
+                return True
+            return False
+
+        if not _resolve("glfw"):
+            return None
+        # Default: build the trimmed freetype ourselves (smallest result).
+        # system_freetype: true prefers the system archive instead.
+        if needs_freetype:
+            if not _resolve("freetype", force_build=not system_freetype):
                 return None
-            found[key] = p
-        return found["glfw"], found["harfbuzz"], found["freetype"]
+        if needs_harfbuzz:
+            if not _resolve("harfbuzz"):
+                return None
+        return info
+
+    def _static_size_flags(self) -> tuple[str, list[str]]:
+        override = os.environ.get("MORPH_STATIC_CFLAGS")
+        if override:
+            return "", shlex.split(override)
+        flags = ["-s"]
+        if "clang" not in self.gpp:
+            flags.insert(0, "-flto")
+        return "-Os", flags
 
     def compile(self, source_path: str, binary_path: str,
                 needs_freetype: bool = True,
                 needs_harfbuzz: bool = True,
                 defines: list[str] | None = None,
-                static: bool = False) -> bool:
+                static: bool = False,
+                wayland: bool = False,
+                system_freetype: bool = False) -> bool:
         if not os.path.exists(source_path):
             log_error(f"Source not found: {source_path}")
             return False
@@ -109,11 +161,23 @@ class Compiler:
             os.path.join(runtime_dir, "renderers", "forge", "damage.cpp"),
         ]
 
+        if static:
+            opt, size_flags = self._static_size_flags()
+            timeout = 300
+        else:
+            opt, size_flags = "-O2", []
+            timeout = 120
+
         cmd = [
             self.gpp,
             "-std=c++23",
-            "-O2",
+        ]
+        if opt:
+            cmd.append(opt)
+        gc_flag = "-Wl,-dead_strip" if is_macos() else "-Wl,--gc-sections"
+        cmd += [
             "-ffunction-sections", "-fdata-sections",
+            *size_flags,
             source_path,
             *runtime_sources,
             glad_c, stb_c,
@@ -121,29 +185,64 @@ class Compiler:
             "-I", runtime_dir,
             "-I", vendor_dir,
             "-I", os.path.join(runtime_dir, "renderers"),
-            "-Wl,--gc-sections",
+            gc_flag,
         ]
 
+        archives: dict = {}
         if static:
-            archives = self._static_archives()
+            archives = self._static_archives(
+                needs_freetype, needs_harfbuzz,
+                wayland=wayland, system_freetype=system_freetype,
+            )
             if archives is None:
                 return False
-            glfw_a, harfbuzz_a, freetype_a = archives
+            static_libs: list[str] = []
+            if "freetype" in archives:
+                static_libs.append(archives["freetype"]["archive"])
+                if not archives["freetype"].get("self_built"):
+                    static_libs += [
+                        "-lbz2", "-lz", "-lpng16", "-lbrotlidec", "-lbrotlicommon",
+                    ]
+            if "harfbuzz" in archives:
+                static_libs.append(archives["harfbuzz"]["archive"])
+            static_libs.append(archives["glfw"]["archive"])
             # Statically bundle GLFW/HarfBuzz/FreeType (+ their freetype
-            # closure). Everything else (GL, X11, libc, libstdc++) stays
-            # dynamic — those are universal on any Linux.
-            cmd += [
-                "-Wl,-Bstatic",
-                freetype_a, "-lbz2", "-lz", "-lpng16", "-lm", "-lbrotlidec", "-lbrotlicommon",
-                harfbuzz_a,
-                glfw_a,
-                "-Wl,-Bdynamic",
-                "-lGL", "-lX11", "-lrt", "-lpthread", "-ldl",
-                "-Wl,-Bstatic", "-lz",
-                "-Wl,-Bdynamic", "-lm",
-            ]
+            # closure). Everything else (GL, X11/Cocoa/Win32, libc, libstdc++)
+            # stays dynamic — those are universal on any desktop OS.
+            plat = current()
+            if plat == "macos":
+                dynamic = ["-framework", "Cocoa", "-framework", "OpenGL",
+                           "-framework", "IOKit", "-framework", "CoreVideo",
+                           "-lpthread"]
+            elif plat == "windows":
+                dynamic = ["-lopengl32", "-lgdi32", "-lshell32", "-luser32",
+                           "-lcomdlg32", "-lole32", "-lsetupapi",
+                           "-lpthread", "-lm"]
+            else:
+                dynamic = ["-lGL", "-lX11", "-lXrandr", "-lXinerama",
+                           "-lXcursor", "-lXi", "-lrt", "-lpthread", "-ldl",
+                           "-lm"]
+                if wayland:
+                    # GLFW Wayland backend: EGL + wayland-client/xkbcommon
+                    # stay dynamic (they are system libs, like X11/GL).
+                    dynamic[1:1] = ["-lwayland-client", "-lwayland-cursor",
+                                    "-lwayland-egl", "-lxkbcommon", "-lEGL"]
+            if plat == "macos":
+                # ld64 has no -Bstatic; pass the archives directly.
+                cmd += static_libs + dynamic
+            else:
+                cmd += ["-Wl,-Bstatic", *static_libs, "-Wl,-Bdynamic", *dynamic]
         else:
-            cmd += ["-lglfw", "-lGL", "-lX11", "-lpthread", "-ldl"]
+            plat = current()
+            if plat == "macos":
+                cmd += ["-lglfw", "-framework", "Cocoa", "-framework", "OpenGL",
+                        "-framework", "IOKit", "-framework", "CoreVideo",
+                        "-lpthread"]
+            elif plat == "windows":
+                cmd += ["-lglfw3", "-lopengl32", "-lgdi32", "-lshell32",
+                        "-luser32", "-lcomdlg32", "-lole32", "-lpthread"]
+            else:
+                cmd += ["-lglfw", "-lGL", "-lX11", "-lpthread", "-ldl"]
 
         # Feature defines (visible to all translation units)
         if defines:
@@ -151,12 +250,16 @@ class Compiler:
                 cmd.append(f"-D{d}")
 
         if needs_freetype:
-            try:
-                ft_cflags = subprocess.check_output(
-                    ["pkg-config", "--cflags", "freetype2"], text=True
-                ).strip().split()
-            except Exception:
-                ft_cflags = ["-I/usr/include/freetype2"]
+            ft_self_built = static and archives.get("freetype", {}).get("self_built")
+            if ft_self_built:
+                ft_cflags = [f"-I{archives['freetype']['include_dir']}"]
+            else:
+                try:
+                    ft_cflags = subprocess.check_output(
+                        ["pkg-config", "--cflags", "freetype2"], text=True
+                    ).strip().split()
+                except Exception:
+                    ft_cflags = ["-I/usr/include/freetype2"]
             cmd.extend(ft_cflags)
             if not static:
                 try:
@@ -168,12 +271,16 @@ class Compiler:
                 cmd.extend(ft_libs)
 
         if needs_harfbuzz:
-            try:
-                hb_cflags = subprocess.check_output(
-                    ["pkg-config", "--cflags", "harfbuzz"], text=True
-                ).strip().split()
-            except Exception:
-                hb_cflags = []
+            hb_self_built = static and archives.get("harfbuzz", {}).get("self_built")
+            if hb_self_built:
+                hb_cflags = [f"-I{archives['harfbuzz']['include_dir']}"]
+            else:
+                try:
+                    hb_cflags = subprocess.check_output(
+                        ["pkg-config", "--cflags", "harfbuzz"], text=True
+                    ).strip().split()
+                except Exception:
+                    hb_cflags = []
             cmd.extend(hb_cflags)
             if not static:
                 try:
@@ -186,7 +293,7 @@ class Compiler:
 
         if not self.silent:
             log_info(f"Compiling: {' '.join(cmd)}")
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
         if result.returncode != 0:
             log_error("Compilation failed:")

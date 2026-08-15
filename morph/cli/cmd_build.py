@@ -120,23 +120,54 @@ def run(args=None) -> None:
     # ── 4. Compile ─────────────────────────────────────
     log_step("Compiling binary")
     from morph.build.compiler import Compiler
+    from morph.build.platform import exe_suffix
     compiler = Compiler()
-    binary_path = os.path.join(out_dir, "app")
+    binary_path = os.path.join(out_dir, "app" + exe_suffix())
 
     t1 = time.time()
     compiler.silent = True
     static = bool(getattr(args, "static", False))
     if static:
-        log_bullet("Static linking enabled — bundling GLFW/FreeType/HarfBuzz")
+        log_bullet("Static linking enabled — bundling GLFW/FreeType/HarfBuzz "
+                   "(auto-built from source if missing)")
+        log_bullet(f"GLFW backend: {'Wayland + X11' if config.build.wayland else 'X11 only (Wayland off)'}")
+        if config.build.system_freetype:
+            log_bullet("FreeType: system archive (config.build.system_freetype)")
+        else:
+            log_bullet("FreeType: trimmed self-build (zlib/png/brotli off)")
+
+    # UPX compression: config default is on; --upx / --no-upx override.
+    upx_enabled = config.build.upx
+    if getattr(args, "upx", None) is not None:
+        upx_enabled = args.upx
+    upx_version = config.build.upx_version or None
+    if getattr(args, "upx_version", None):
+        upx_version = args.upx_version
+    upx_bin = None
+    if upx_enabled:
+        from morph.build.upx import ensure_upx
+        log_bullet("UPX: enabled — compressing binary after link"
+                   + (f" (version {upx_version})" if upx_version else ""))
+        upx_bin = ensure_upx(upx_version)
+
     ok = compiler.compile(out_path, binary_path,
                           needs_freetype=freetype,
-                          needs_harfbuzz=True,
+                          needs_harfbuzz=freetype,
                           defines=features.required_defines(),
-                          static=static)
+                          static=static,
+                          wayland=config.build.wayland,
+                          system_freetype=config.build.system_freetype)
 
     if not ok:
         log_error("Compilation failed — run `morph doctor` to check dependencies")
         return
+
+    if upx_bin:
+        log_info("Compressing binary with UPX ...")
+        from morph.build.upx import compress
+        compressed = compress(binary_path, upx_bin)
+    else:
+        compressed = False
 
     compile_time = _fmt_duration(time.time() - t1)
     bin_size = os.path.getsize(binary_path)
@@ -147,13 +178,15 @@ def run(args=None) -> None:
 
     log_banner("Build complete")
 
-    if sections:
+    if sections and sections["total"] > 0:
         log_key("Binary",  f"{binary_path}  ({_fmt_bytes(bin_size)})")
         log_key("Code",    f"{_fmt_bytes(sections['text'])}")
         log_key("Data",    f"{_fmt_bytes(sections['data'])}")
         log_key("BSS",     f"{_fmt_bytes(sections['bss'])}")
     else:
-        log_key("Output",  f"{binary_path}  ({_fmt_bytes(bin_size)})")
+        # UPX-compressed ELF has no section table, so `size` reads 0.
+        note = "  (UPX-compressed)" if compressed else ""
+        log_key("Output",  f"{binary_path}  ({_fmt_bytes(bin_size)}){note}")
 
     log_key("Compile", compile_time)
     log_key("Total",   total_time)

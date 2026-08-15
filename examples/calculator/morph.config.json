@@ -10,5 +10,11 @@
   },
   "dependencies": {},
   "cpp_sources": [],
-"renderer": "flash"
+  "renderer": "flash",
+  "build": {
+    "wayland": false,
+    "system_freetype": false,
+    "upx": true,
+    "upx_version": ""
+  }
 }

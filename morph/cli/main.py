@@ -46,6 +46,13 @@ def main():
     p_build.add_argument("--static", action="store_true",
                          help="Statically link GLFW/FreeType/HarfBuzz into the binary "
                               "(single self-contained file; needs the .a dev archives)")
+    p_build.add_argument("--upx", dest="upx", action="store_true", default=None,
+                         help="Compress the binary with UPX (default: build.upx in config)")
+    p_build.add_argument("--no-upx", dest="upx", action="store_false",
+                         help="Skip UPX compression")
+    p_build.add_argument("--upx-version", type=str, default=None,
+                         help="Pin a specific UPX release to use (e.g. 4.2.4); "
+                              "overrides build.upx_version in config")
 
     p_run = sub.add_parser("run", help="Run built production binary")
     p_run.add_argument("binary", nargs="?", default=None,

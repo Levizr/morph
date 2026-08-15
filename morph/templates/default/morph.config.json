@@ -8,5 +8,11 @@
     "title": "My App"
   },
   "dependencies": {},
-  "cpp_sources": []
+  "cpp_sources": [],
+  "build": {
+    "wayland": false,
+    "system_freetype": false,
+    "upx": true,
+    "upx_version": ""
+  }
 }
