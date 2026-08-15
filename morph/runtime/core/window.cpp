@@ -14,6 +14,38 @@ static const double DBL_CLICK_THRESHOLD = 0.3;
 // Node currently :active (pressed) — cleared on release / tree rebuild
 static MorphNode* s_activeNode = nullptr;
 
+// :hover / :active match a *set*: the pointer node plus every ancestor. These
+// helpers only fire onHover/onActive on nodes whose membership in the set
+// actually changed, so the pointer sliding from a button into its own label
+// does not re-trigger the button's hover/active transition.
+static int _chainOf(MorphNode* n, MorphNode* out[64]) {
+    int len = 0;
+    while (n && len < 64) {
+        out[len++] = n;
+        n = n->parent;
+    }
+    return len;
+}
+
+static void _fireHoverDelta(MorphNode* oldNode, MorphNode* newNode) {
+    MorphNode* oldChain[64];
+    MorphNode* newChain[64];
+    int ol = _chainOf(oldNode, oldChain);
+    int nl = _chainOf(newNode, newChain);
+    int common = 0;
+    while (common < ol && common < nl && oldChain[ol - 1 - common] == newChain[nl - 1 - common])
+        common++;
+    for (int i = 0; i < ol - common; ++i)
+        oldChain[i]->onHover(false);
+    for (int i = 0; i < nl - common; ++i)
+        newChain[i]->onHover(true);
+}
+
+static void _applyActiveChain(MorphNode* n, bool state) {
+    for (MorphNode* a = n; a; a = a->parent)
+        a->onActive(state);
+}
+
 void MorphWindow::mouseButtonCb(GLFWwindow *win, int btn, int act, int mods)
 {
     if (btn == GLFW_MOUSE_BUTTON_1)
@@ -35,15 +67,15 @@ void MorphWindow::mouseButtonCb(GLFWwindow *win, int btn, int act, int mods)
         if (act == GLFW_PRESS)
         {
             if (s_activeNode)
-                s_activeNode->onActive(false);
+                _applyActiveChain(s_activeNode, false);
             s_activeNode = self->m_root->hitTest((float)mx, (float)my);
             if (s_activeNode)
-                s_activeNode->onActive(true);
+                _applyActiveChain(s_activeNode, true);
         }
         else
         {
             if (s_activeNode)
-                s_activeNode->onActive(false);
+                _applyActiveChain(s_activeNode, false);
             s_activeNode = nullptr;
         }
 
@@ -96,6 +128,7 @@ void MorphWindow::cursorPosCb(GLFWwindow *win, double mx, double my)
     auto*& hovered = MorphNode::s_lastHoveredNode;
     if (newHover != hovered)
     {
+        _fireHoverDelta(hovered, newHover);
         if (hovered)
         {
             if (hovered->onMouseLeave)
@@ -106,7 +139,6 @@ void MorphWindow::cursorPosCb(GLFWwindow *win, double mx, double my)
                 evt.set("type", JsString("mouseleave"));
                 hovered->onMouseLeave(evt);
             }
-            hovered->onHover(false);
         }
         if (newHover)
         {
@@ -118,7 +150,6 @@ void MorphWindow::cursorPosCb(GLFWwindow *win, double mx, double my)
                 evt.set("type", JsString("mouseenter"));
                 newHover->onMouseEnter(evt);
             }
-            newHover->onHover(true);
         }
         hovered = newHover;
     }

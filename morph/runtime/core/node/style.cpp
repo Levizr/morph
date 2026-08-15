@@ -307,24 +307,11 @@ static void _applyStateStyle(MorphNode* node, bool state,
 void MorphNode::onHover(bool state) {
     _applyStateStyle(this, state, hoverStyle, m_hoverTransition);
     _applyAncestorHover(state);
-    // CSS semantics: :hover also matches ancestors of the pointer. Hovering a
-    // descendant (e.g. a button label) must apply the ancestor's hover style
-    // too, so walk up and apply each ancestor's hover state.
-    for (MorphNode* a = parent; a; a = a->parent) {
-        _applyStateStyle(a, state, a->hoverStyle, a->m_hoverTransition);
-        a->_applyAncestorHover(state);
-    }
 }
 
 void MorphNode::onActive(bool state) {
     _applyStateStyle(this, state, activeStyle, m_activeTransition);
     _applyAncestorActive(state);
-    // Same bubbling for :active — pressing a child (button label) activates
-    // the ancestor button as well.
-    for (MorphNode* a = parent; a; a = a->parent) {
-        _applyStateStyle(a, state, a->activeStyle, a->m_activeTransition);
-        a->_applyAncestorActive(state);
-    }
 }
 
 static void _applyOneAncestorRule(MorphNode* child, const AncestorHoverRule& rule,
@@ -424,13 +411,20 @@ void MorphNode::updateActiveTransition(float dt) {
 }
 
 void MorphNode::interruptStateTransitions() {
+    // A reactive effect is about to (or just did) write style fields. Any
+    // running state transition must be completed to its target first: a
+    // mid-interpolation value is neither the state's full style nor the
+    // effect's value, so a later hover/active release would misread it as an
+    // effect-write and keep it stuck. Snapping to the target leaves non-effect
+    // fields equal to `pressStyle`, so `buildReleaseStyle` reverts them cleanly
+    // while effect-written fields (set after this call) keep their value.
     if (m_hoverTransition && m_hoverTransition->active) {
+        style = m_hoverTransition->targetStyle;
         m_hoverTransition->active = false;
-        m_hoverTransition->targetStyle = style;
     }
     if (m_activeTransition && m_activeTransition->active) {
+        style = m_activeTransition->targetStyle;
         m_activeTransition->active = false;
-        m_activeTransition->targetStyle = style;
     }
 }
 
