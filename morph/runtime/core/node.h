@@ -331,7 +331,8 @@ public:
     virtual void executeDisplayList(Renderer& r);
 
     // Flatten into a lock-free render frame for the compositor thread
-    virtual int flatten(RenderFrame& frame, int parentId);
+    virtual int flatten(RenderFrame& frame, int parentId,
+                        float scrollOffset = 0.0f);
     virtual int flattenExtra(RenderFrame& frame, FlatRenderNode& fn);
 
     // True if this subtree could change its screen position this frame

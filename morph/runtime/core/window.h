@@ -128,7 +128,8 @@ public:
 
 private:
     void renderNode(const RenderFrame *frame, int nodeIdx,
-                    const DamageSet *damageClip = nullptr);
+                    const DamageSet *damageClip = nullptr,
+                    float scrollOffset = 0.0f);
     static void drawOpsForNode(GLRenderer &r, const RenderFrame *frame, int nodeIdx,
                                float ox, float oy);
     static void drawScrollbar(GLRenderer &r, const FlatRenderNode &node,

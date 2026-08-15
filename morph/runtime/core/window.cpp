@@ -381,7 +381,7 @@ void MorphWindow::drawScrollbar(GLRenderer &r, const FlatRenderNode &node,
 }
 
 void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx,
-                             const DamageSet *damageClip)
+                             const DamageSet *damageClip, float scrollOffset)
 {
     const auto &node = frame->nodes[nodeIdx];
 
@@ -396,13 +396,18 @@ void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx,
     bool radiusClip = node.borderRadius > 0.0f;
     bool scrolling = node.scrollEnabled && node.contentH > sh;
 
+    // Effective screen position: node coords are absolute root-space but do
+    // NOT include scroll — a scrolling ancestor shifts the whole subtree via
+    // pushScrollOffset(0, -scrollY), accumulated in scrollOffset.
+    float screenY = sy - scrollOffset;
+
     // Viewport cull (flash + forge): skip anything fully outside the scene —
     // its pixels can't be seen and the GPU never needs to touch them.
     // sx/sy already include the interpolated animOffset, so nodes animating
     // into view are never culled.
     float cw = contentWidth();
     float ch = contentHeight();
-    if (sx + sw <= 0.0f || sx >= cw || sy + sh <= 0.0f || sy >= ch)
+    if (sx + sw <= 0.0f || sx >= cw || screenY + sh <= 0.0f || screenY >= ch)
     {
         // Clipping nodes fully contain their descendants, so skipping the
         // whole subtree is safe. Unclipped nodes can have overflowed
@@ -411,7 +416,7 @@ void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx,
         if (overflowClipped || radiusClip)
             return;
         for (int childIdx : node.children)
-            renderNode(frame, childIdx, damageClip);
+            renderNode(frame, childIdx, damageClip, scrollOffset);
         return;
     }
 
@@ -429,7 +434,7 @@ void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx,
             if (overflowClipped || radiusClip)
                 return;
             for (int childIdx : node.children)
-                renderNode(frame, childIdx, damageClip);
+                renderNode(frame, childIdx, damageClip, scrollOffset);
             return;
         }
     }
@@ -462,6 +467,7 @@ void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx,
     // 3. Scroll push + children
     if (scrolling)
         m_renderer.pushScrollOffset(0, -node.scrollY);
+    float childScroll = scrollOffset + (scrolling ? node.scrollY : 0.0f);
     for (int childIdx : node.children)
     {
         if (scrolling)
@@ -470,12 +476,12 @@ void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx,
             float childVisY = child.y + child.animOffsetY - node.scrollY;
             if (childVisY + child.h > sy && childVisY < sy + sh)
             {
-                renderNode(frame, childIdx, damageClip);
+                renderNode(frame, childIdx, damageClip, childScroll);
             }
         }
         else
         {
-            renderNode(frame, childIdx, damageClip);
+            renderNode(frame, childIdx, damageClip, childScroll);
         }
     }
     if (scrolling)

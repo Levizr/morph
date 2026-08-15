@@ -52,13 +52,17 @@ bool MorphNode::subtreeMayMove() const {
     return false;
 }
 
-int MorphNode::flatten(RenderFrame& frame, int parentId) {
+int MorphNode::flatten(RenderFrame& frame, int parentId, float scrollOffset) {
     // Off-screen culling: skip anything whose box is fully outside the scene
-    // viewport. Node coords are absolute root-space (they already include
-    // ancestor scroll offsets), so each subtree can be tested independently.
+    // viewport. Node coords are absolute root-space but do NOT include scroll:
+    // a scrolling ancestor shifts the whole subtree at draw time via
+    // pushScrollOffset(0, -scrollY). So the effective screen Y is
+    // y - scrollOffset, where scrollOffset accumulates the scrollY of every
+    // scrolling ancestor on the path (set per-child below).
+    float sy = y - scrollOffset;
     bool offscreen = frame.viewW > 0.0f && frame.viewH > 0.0f &&
                      (x + w <= 0.0f || x >= frame.viewW ||
-                      y + h <= 0.0f || y >= frame.viewH);
+                      sy + h <= 0.0f || sy >= frame.viewH);
     if (offscreen)
     {
         bool clips = style.overflow == "hidden" || style.overflow == "scroll" ||
@@ -161,8 +165,14 @@ int MorphNode::flatten(RenderFrame& frame, int parentId) {
 
     frame.nodes.push_back(fn);
 
+    // Accumulate this node's scroll for descendants: matches the renderer's
+    // pushScrollOffset, which is applied only when the content overflows
+    // (scrollEnabled && contentH > h).
+    float childScroll = scrollOffset +
+                        (scrollEnabled && contentH > h ? scrollY : 0.0f);
+
     for (auto* child : paintOrder()) {
-        int childIdx = child->flatten(frame, idx);
+        int childIdx = child->flatten(frame, idx, childScroll);
         if (childIdx >= 0)
             frame.nodes[idx].children.push_back(childIdx);
     }
