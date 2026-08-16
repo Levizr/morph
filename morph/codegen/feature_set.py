@@ -48,6 +48,8 @@ class FeatureSet:
             self.features.add("cursor")
         if (s.border_width is not None and s.border_width > 0) or s.border_style not in ("", "none"):
             self.features.add("border")
+        if s.transform_ops or s.transform_origin:
+            self.features.add("transform")
 
     # CSS property (from reactive inline styles) → feature(s) it needs. These
     # matter because feature-gated style fields (zIndex, position offsets,
@@ -78,6 +80,7 @@ class FeatureSet:
         "min-height": ("min_max",), "max-height": ("min_max",),
         "box-sizing": ("border_box",),
         "margin": ("margin_collapse",),
+        "transform": ("transform",),
     }
 
     def _scan_reactive(self, reactive_style: dict[str, str]) -> None:
@@ -153,6 +156,8 @@ class FeatureSet:
             defines.append("MORPH_FEATURE_CURSOR")
         if "border" in self.features:
             defines.append("MORPH_FEATURE_BORDER")
+        if "transform" in self.features:
+            defines.append("MORPH_FEATURE_TRANSFORM")
         # ── Layout feature defines ──
         if "display_none" in self.features:
             defines.append("MORPH_FEATURE_DISPLAY_NONE")

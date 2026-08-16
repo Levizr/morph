@@ -46,6 +46,10 @@ public:
         float sw = sc(w), sh = sc(h);
         float rad = m_isTransitioning ? style.borderRadius : snapRadius(style.borderRadius);
 
+#ifdef MORPH_FEATURE_TRANSFORM
+        bool pushedSelf = pushSelfTransform(r, sx, sy);
+#endif
+
         // 1. Render self (background)
         for (auto& op : m_displayList) {
             switch (op.type) {
@@ -67,7 +71,16 @@ public:
 #endif
 
         if (needRectClip || needRadiusClip) {
+#ifdef MORPH_FEATURE_TRANSFORM
+            if (needRectClip) {
+                if (pushedSelf)
+                    r.beginRoundedClip(sx, sy, sw, sh, 0.0f);
+                else
+                    r.beginClip(sx, sy, sw, sh);
+            }
+#else
             if (needRectClip) r.beginClip(sx, sy, sw, sh);
+#endif
             if (needRadiusClip) r.beginRoundedClip(sx, sy, sw, sh, rad);
 #ifdef MORPH_FEATURE_SCROLL
             if (scrolling) r.pushScrollOffset(0, -scrollY);
@@ -87,6 +100,10 @@ public:
 #ifdef MORPH_FEATURE_SCROLL
         if (scrolling) drawScrollbar(r);
 #endif
+
+#ifdef MORPH_FEATURE_TRANSFORM
+        if (pushedSelf) r.popTransform();
+#endif
     }
 
     void draw(Renderer& r) override {
@@ -94,6 +111,9 @@ public:
         float sx = sc(x), sy = sc(y);
         float sw = sc(w), sh = sc(h);
         float rad = m_isTransitioning ? (style.borderRadius > 0.0f ? style.borderRadius : 6.0f) : snapRadius(style.borderRadius > 0.0f ? style.borderRadius : 6.0f);
+#ifdef MORPH_FEATURE_TRANSFORM
+        bool pushedSelf = pushSelfTransform(r, sx, sy);
+#endif
 #ifdef MORPH_FEATURE_BORDER
         if (style.borderWidth > 0.0f && style.borderStyle == "solid") {
             float bw = m_isTransitioning ? style.borderWidth : snapBorderWidth(style.borderWidth);
@@ -111,7 +131,14 @@ public:
             r.drawRoundedRect(sx, sy, sw, sh, rad, style.bgColor);
 #ifdef MORPH_FEATURE_SCROLL
         if (scrollEnabled && contentH > sh) {
+#ifdef MORPH_FEATURE_TRANSFORM
+            if (pushedSelf)
+                r.beginRoundedClip(sx, sy, sw, sh, 0.0f);
+            else
+                r.beginClip(sx, sy, sw, sh);
+#else
             r.beginClip(sx, sy, sw, sh);
+#endif
             r.pushScrollOffset(0, -scrollY);
             for (auto* child : children) {
                 float childVisY = child->y - scrollY;
@@ -127,6 +154,10 @@ public:
             for (auto* child : children)
                 child->draw(r);
         }
+
+#ifdef MORPH_FEATURE_TRANSFORM
+        if (pushedSelf) r.popTransform();
+#endif
     }
 
 #ifdef MORPH_FEATURE_SCROLL

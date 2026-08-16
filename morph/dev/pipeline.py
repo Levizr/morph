@@ -158,6 +158,18 @@ def get_logic_so_path() -> str | None:
     return _last_logic_so_path
 
 
+def _runtime_headers_hash() -> str:
+    """Hash of the runtime C++ headers the logic .so is compiled against.
+
+    The generated logic source calls into MorphNode/MorphStyle, so any
+    change to the runtime layout (e.g. a new style field) invalidates
+    previously compiled logic libraries — reusing them would read stale
+    member offsets and crash.
+    """
+    from morph.dev import devrt
+    return devrt._compute_source_hash()
+
+
 def compile_logic(windows: list[IRWindow], verbose: bool = True) -> bool:
     """Generate and compile the JS logic to a native shared library."""
     global _last_logic_hash, _last_logic_so_path, _last_error
@@ -170,9 +182,13 @@ def compile_logic(windows: list[IRWindow], verbose: bool = True) -> bool:
         if verbose:
             log_dim(f"generated logic  in {_fmt(time.time() - t)}")
 
-        # Skip compilation if source unchanged
+        # Skip compilation if source unchanged.  The hash covers both the
+        # generated logic source and the runtime headers it compiles
+        # against, so runtime layout changes force a rebuild.
         with open(LOGIC_SOURCE_PATH, "rb") as f:
-            cur_hash = hashlib.sha256(f.read()).hexdigest()
+            logic_hash = hashlib.sha256(f.read()).hexdigest()
+        cur_hash = hashlib.sha256(
+            (logic_hash + _runtime_headers_hash()).encode()).hexdigest()
         if cur_hash == _last_logic_hash:
             if verbose:
                 log_dim("logic source unchanged — skipping compilation")

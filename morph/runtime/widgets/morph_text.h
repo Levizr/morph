@@ -187,6 +187,9 @@ public:
     }
 
     void draw(Renderer& r) override {
+#ifdef MORPH_FEATURE_TRANSFORM
+        bool pushedSelf = pushSelfTransform(r, x, y);
+#endif
         float lh = _effFontSize() * 1.4f;
         float py = y;
         for (auto& line : lines) {
@@ -216,6 +219,9 @@ public:
         }
         for (auto* child : children)
             child->draw(r);
+#ifdef MORPH_FEATURE_TRANSFORM
+        if (pushedSelf) r.popTransform();
+#endif
     }
 
     float contentWidth(Renderer* r) override {

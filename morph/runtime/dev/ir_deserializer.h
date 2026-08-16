@@ -119,6 +119,28 @@ static void applyStyle(MorphStyle& s, const JsonValue& styleVal) {
         s.cursor = styleVal["cursor"].asString();
     if (!styleVal["box_sizing"].isNull())
         s.boxSizing = styleVal["box_sizing"].asString();
+
+#ifdef MORPH_FEATURE_TRANSFORM
+    // Serialized only when the feature is compiled in; a null value means
+    // "no transform" (identity).
+    if (!styleVal["transform_matrix"].isNull()) {
+        const JsonValue& m = styleVal["transform_matrix"];
+        if (m.type() == JsonType::Array && m.size() >= 16) {
+            for (int i = 0; i < 16; i++)
+                s.matrix[i] = m[i].asFloat();
+            s.transformSet = true;
+        }
+    }
+    // transform-origin as fractions of the border box (default center).
+    if (!styleVal["transform_origin"].isNull()) {
+        const JsonValue& o = styleVal["transform_origin"];
+        if (o.type() == JsonType::Array && o.size() >= 2) {
+            s.originX = o[0].asFloat();
+            s.originY = o[1].asFloat();
+            s.originSet = true;
+        }
+    }
+#endif
     if (!styleVal["border_style"].isNull())
         s.borderStyle = styleVal["border_style"].asString();
     if (!styleVal["flex_wrap"].isNull())

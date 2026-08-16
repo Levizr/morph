@@ -7,6 +7,9 @@
 #include "../core/renderer.h"
 #include "../core/draw_op.h"
 #include "shader.h"
+#ifdef MORPH_FEATURE_TRANSFORM
+#include "../core/mat4.h"
+#endif
 
 #ifdef MORPH_FEATURE_IMAGE
 #include "../vendor/stb_image.h"
@@ -84,6 +87,9 @@ public:
         float borderWidth;
         float br, bg, bb, ba;
         float borderOnly;
+#ifdef MORPH_FEATURE_TRANSFORM
+        float model[16];
+#endif
     };
 
     std::vector<Instance> m_borderBatch;
@@ -95,6 +101,9 @@ public:
         float u1, v1, u2, v2;
         float r, g, b, a;
         float isColor; // 0.0 = R8 atlas, 1.0 = RGBA atlas
+#ifdef MORPH_FEATURE_TRANSFORM
+        float model[16];
+#endif
     };
 
     struct FontAtlas; // forward decl
@@ -155,6 +164,9 @@ public:
         float x, y, w, h;
         float u1, v1, u2, v2;
         float tintR, tintG, tintB, tintA;
+#ifdef MORPH_FEATURE_TRANSFORM
+        float model[16];
+#endif
     };
 #endif
 
@@ -169,6 +181,37 @@ private:
     bool m_ready = false;
     std::vector<Instance> m_batch;
     float m_proj[16] = {};
+
+#ifdef MORPH_FEATURE_TRANSFORM
+    // Model-path transform stack (see Renderer::pushTransform).
+    // m_model is the accumulated absolute transform of the node currently
+    // being drawn; while m_transformDepth > 0 every instance's model is
+    // computed as m_model * T(-anchor) so the baked absolute instance
+    // coords cancel out and the shape renders in node-local space.
+    float m_model[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+    float m_modelStack[32][16];
+    float m_anchorStackX[32], m_anchorStackY[32];
+    float m_anchorX = 0.0f, m_anchorY = 0.0f;
+    int m_modelDepth = 0;
+    int m_transformDepth = 0;
+
+    template <typename Inst>
+    void applyModel(Inst &inst)
+    {
+        if (m_transformDepth <= 0)
+        {
+            morph::mat4Identity(inst.model);
+            return;
+        }
+        float t[16];
+        morph::mat4Identity(t);
+        t[12] = -(m_anchorX + m_scrollX);
+        t[13] = -(m_anchorY + m_scrollY);
+        float tmp[16];
+        morph::mat4Multiply(tmp, m_model, t);
+        memcpy(inst.model, tmp, sizeof(float) * 16);
+    }
+#endif
 
 #ifdef MORPH_FEATURE_TEXT
     // Text batch — unified VAO for both R8 and RGBA glyphs
@@ -232,11 +275,72 @@ public:
     void beginRoundedClip(float x, float y, float w, float h, float radius) override;
     void endRoundedClip() override;
 
+#ifdef MORPH_FEATURE_TRANSFORM
+    void pushTransform(const float m[16], float anchorX, float anchorY) override
+    {
+        memcpy(m_modelStack[m_modelDepth], m_model, sizeof(float) * 16);
+        m_anchorStackX[m_modelDepth] = m_anchorX;
+        m_anchorStackY[m_modelDepth] = m_anchorY;
+        float tmp[16];
+        morph::mat4Multiply(tmp, m_model, m);
+        memcpy(m_model, tmp, sizeof(float) * 16);
+        m_anchorX = anchorX;
+        m_anchorY = anchorY;
+        m_modelDepth++;
+        m_transformDepth++;
+    }
+
+    void popTransform() override
+    {
+        if (m_modelDepth > 0)
+        {
+            m_modelDepth--;
+            memcpy(m_model, m_modelStack[m_modelDepth], sizeof(float) * 16);
+            m_anchorX = m_anchorStackX[m_modelDepth];
+            m_anchorY = m_anchorStackY[m_modelDepth];
+            m_transformDepth--;
+        }
+    }
+
+    bool transformStackActive() const override { return m_transformDepth > 0; }
+
+    // Scroll push composes UNDER the node's transform (scrolls move content
+    // inside the node's local space). On the model path the offset becomes a
+    // matrix push so the anchor (and thus the baked-coord cancellation) is
+    // preserved for the children.
+    void pushScrollOffset(float dx, float dy) override
+    {
+        if (m_transformDepth > 0)
+        {
+            float t[16];
+            morph::mat4Identity(t);
+            t[12] = dx;
+            t[13] = dy;
+            pushTransform(t, m_anchorX, m_anchorY);
+            return;
+        }
+        Renderer::pushScrollOffset(dx, dy);
+    }
+
+    void popScrollOffset(float dx, float dy) override
+    {
+        if (m_transformDepth > 0)
+        {
+            popTransform();
+            return;
+        }
+        Renderer::popScrollOffset(dx, dy);
+    }
+#endif
+
     void drawRect(float x, float y, float w, float h, float color[4]) override
     {
         m_batch.push_back({x + m_scrollX, y + m_scrollY, w, h,
                            color[0], color[1], color[2], color[3],
                            0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f});
+#ifdef MORPH_FEATURE_TRANSFORM
+        applyModel(m_batch.back());
+#endif
     }
 
 #ifdef MORPH_FEATURE_RADIUS
@@ -246,6 +350,9 @@ public:
         m_batch.push_back({x + m_scrollX, y + m_scrollY, w, h,
                            color[0], color[1], color[2], color[3],
                            radius, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f});
+#ifdef MORPH_FEATURE_TRANSFORM
+        applyModel(m_batch.back());
+#endif
     }
 #endif
 
@@ -264,6 +371,10 @@ public:
                                  borderColor[0], borderColor[1],
                                  borderColor[2], borderColor[3],
                                  1.0f});
+#ifdef MORPH_FEATURE_TRANSFORM
+        applyModel(m_batch.back());
+        applyModel(m_borderBatch.back());
+#endif
     }
 
     void drawBorderedRoundedRect(float x, float y, float w, float h,
@@ -282,6 +393,10 @@ public:
                                  borderColor[0], borderColor[1],
                                  borderColor[2], borderColor[3],
                                  1.0f});
+#ifdef MORPH_FEATURE_TRANSFORM
+        applyModel(m_batch.back());
+        applyModel(m_borderBatch.back());
+#endif
     }
 
     void drawBorderRing(float x, float y, float w, float h,
@@ -294,6 +409,9 @@ public:
                                  borderColor[0], borderColor[1],
                                  borderColor[2], borderColor[3],
                                  1.0f});
+#ifdef MORPH_FEATURE_TRANSFORM
+        applyModel(m_borderBatch.back());
+#endif
     }
 
 #ifdef MORPH_FEATURE_TEXT
@@ -311,6 +429,9 @@ public:
         m_imageBatches[tex].push_back({x + m_scrollX, y + m_scrollY, w, h,
                                        0.0f, 0.0f, 1.0f, 1.0f,
                                        1.0f, 1.0f, 1.0f, 1.0f});
+#ifdef MORPH_FEATURE_TRANSFORM
+        applyModel(m_imageBatches[tex].back());
+#endif
 #else
         (void)tex;
         (void)x;

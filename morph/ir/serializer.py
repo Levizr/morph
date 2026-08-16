@@ -87,6 +87,10 @@ class IRSerializer:
             "border_style":            s.border_style,
             "box_sizing":              s.box_sizing,
             "z_index":                 s.z_index,
+            "transform_ops":           list(s.transform_ops) if s.transform_ops else None,
+            "transform_matrix":        list(s.transform_matrix) if s.transform_matrix else None,
+            "transform_origin":        list(s.transform_origin_resolved) if s.transform_origin_resolved else None,
+            "transform_origin_raw":    list(s.transform_origin) if s.transform_origin else None,
         }
 
     def _node(self, n) -> dict:

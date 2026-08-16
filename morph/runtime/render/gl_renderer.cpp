@@ -29,6 +29,21 @@ void GLRenderer::createImageBuffers()
     glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, sizeof(ImageInstance), (void *)offsetof(ImageInstance, tintR));
     glVertexAttribDivisor(3, 1);
 
+#ifdef MORPH_FEATURE_TRANSFORM
+    glEnableVertexAttribArray(7);
+    glVertexAttribPointer(7, 4, GL_FLOAT, GL_FALSE, sizeof(ImageInstance), (void *)(offsetof(ImageInstance, model) + 0));
+    glVertexAttribDivisor(7, 1);
+    glEnableVertexAttribArray(8);
+    glVertexAttribPointer(8, 4, GL_FLOAT, GL_FALSE, sizeof(ImageInstance), (void *)(offsetof(ImageInstance, model) + 16));
+    glVertexAttribDivisor(8, 1);
+    glEnableVertexAttribArray(9);
+    glVertexAttribPointer(9, 4, GL_FLOAT, GL_FALSE, sizeof(ImageInstance), (void *)(offsetof(ImageInstance, model) + 32));
+    glVertexAttribDivisor(9, 1);
+    glEnableVertexAttribArray(10);
+    glVertexAttribPointer(10, 4, GL_FLOAT, GL_FALSE, sizeof(ImageInstance), (void *)(offsetof(ImageInstance, model) + 48));
+    glVertexAttribDivisor(10, 1);
+#endif
+
     glBindVertexArray(0);
 }
 #endif
@@ -76,6 +91,21 @@ void GLRenderer::createQuadBuffers()
     glVertexAttribPointer(6, 1, GL_FLOAT, GL_FALSE, sizeof(Instance), (void *)offsetof(Instance, borderOnly));
     glVertexAttribDivisor(6, 1);
 
+#ifdef MORPH_FEATURE_TRANSFORM
+    glEnableVertexAttribArray(7);
+    glVertexAttribPointer(7, 4, GL_FLOAT, GL_FALSE, sizeof(Instance), (void *)(offsetof(Instance, model) + 0));
+    glVertexAttribDivisor(7, 1);
+    glEnableVertexAttribArray(8);
+    glVertexAttribPointer(8, 4, GL_FLOAT, GL_FALSE, sizeof(Instance), (void *)(offsetof(Instance, model) + 16));
+    glVertexAttribDivisor(8, 1);
+    glEnableVertexAttribArray(9);
+    glVertexAttribPointer(9, 4, GL_FLOAT, GL_FALSE, sizeof(Instance), (void *)(offsetof(Instance, model) + 32));
+    glVertexAttribDivisor(9, 1);
+    glEnableVertexAttribArray(10);
+    glVertexAttribPointer(10, 4, GL_FLOAT, GL_FALSE, sizeof(Instance), (void *)(offsetof(Instance, model) + 48));
+    glVertexAttribDivisor(10, 1);
+#endif
+
     glBindVertexArray(0);
 }
 
@@ -110,6 +140,21 @@ void GLRenderer::createTextBuffers()
     glEnableVertexAttribArray(4);
     glVertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE, sizeof(TextInstance), (void *)offsetof(TextInstance, isColor));
     glVertexAttribDivisor(4, 1);
+
+#ifdef MORPH_FEATURE_TRANSFORM
+    glEnableVertexAttribArray(7);
+    glVertexAttribPointer(7, 4, GL_FLOAT, GL_FALSE, sizeof(TextInstance), (void *)(offsetof(TextInstance, model) + 0));
+    glVertexAttribDivisor(7, 1);
+    glEnableVertexAttribArray(8);
+    glVertexAttribPointer(8, 4, GL_FLOAT, GL_FALSE, sizeof(TextInstance), (void *)(offsetof(TextInstance, model) + 16));
+    glVertexAttribDivisor(8, 1);
+    glEnableVertexAttribArray(9);
+    glVertexAttribPointer(9, 4, GL_FLOAT, GL_FALSE, sizeof(TextInstance), (void *)(offsetof(TextInstance, model) + 32));
+    glVertexAttribDivisor(9, 1);
+    glEnableVertexAttribArray(10);
+    glVertexAttribPointer(10, 4, GL_FLOAT, GL_FALSE, sizeof(TextInstance), (void *)(offsetof(TextInstance, model) + 48));
+    glVertexAttribDivisor(10, 1);
+#endif
 
     glBindVertexArray(0);
 }
@@ -604,6 +649,9 @@ void GLRenderer::drawText(const std::string &text, float x, float y,
                              u1, v1, u2, v2,
                              color[0], color[1], color[2], color[3],
                              g.isColor ? 1.0f : 0.0f});
+#ifdef MORPH_FEATURE_TRANSFORM
+            applyModel(batch.back());
+#endif
         }
         penX += es != 1.0f ? g.ax * es : sg.ax;
     }
@@ -708,6 +756,13 @@ void GLRenderer::clear()
         return;
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+#ifdef MORPH_FEATURE_TRANSFORM
+    // 3D transforms write real depth; 2D content stays at z=0 and passes
+    // GL_LEQUAL, so the painter's algorithm for untransformed content is
+    // unaffected while rotated/translated 3D layers occlude correctly.
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LEQUAL);
+#endif
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
     m_stencilClipDepth = 0;
 }
@@ -754,6 +809,9 @@ void GLRenderer::beginRoundedClip(float x, float y, float w, float h, float radi
                      w, h,
                      1.0f, 1.0f, 1.0f, 1.0f,
                      radius, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+#ifdef MORPH_FEATURE_TRANSFORM
+    applyModel(inst);
+#endif
     glBindVertexArray(m_vao);
     glBindBuffer(GL_ARRAY_BUFFER, m_instVBO);
     glBufferData(GL_ARRAY_BUFFER, sizeof(Instance), &inst, GL_DYNAMIC_DRAW);

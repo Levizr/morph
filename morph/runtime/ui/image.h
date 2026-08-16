@@ -61,6 +61,10 @@ public:
     }
 
     void executeDisplayList(Renderer& r) override {
+#ifdef MORPH_FEATURE_TRANSFORM
+        auto sc = [&](float v) { return m_hasLayoutTransition ? v : std::round(v); };
+        bool pushedSelf = pushSelfTransform(r, sc(x), sc(y));
+#endif
         for (auto& op : m_displayList) {
             switch (op.type) {
                 case DrawOp::BeginClip: r.beginClip(op.x,op.y,op.w,op.h); break;
@@ -73,14 +77,20 @@ public:
             }
         }
         for (auto* c : paintOrder()) c->executeDisplayList(r);
+#ifdef MORPH_FEATURE_TRANSFORM
+        if (pushedSelf) r.popTransform();
+#endif
     }
 
     void draw(Renderer& r) override {
         ensureLoaded(r);
+        auto sc = [&](float v) { return m_hasLayoutTransition ? v : std::round(v); };
+        float sx = sc(x), sy = sc(y);
+#ifdef MORPH_FEATURE_TRANSFORM
+        bool pushedSelf = pushSelfTransform(r, sx, sy);
+#endif
 
         if (textureId && imgW > 0 && imgH > 0) {
-            auto sc = [&](float v) { return m_hasLayoutTransition ? v : std::round(v); };
-            float sx = sc(x), sy = sc(y);
             float sw = sc(w), sh = sc(h);
             float br = m_isTransitioning ? style.borderRadius : snapRadius(style.borderRadius);
             if (br > 0.0f) {
@@ -104,6 +114,10 @@ public:
 
         // Draw children on top (e.g., overlay text)
         for (auto* c : paintOrder()) c->draw(r);
+
+#ifdef MORPH_FEATURE_TRANSFORM
+        if (pushedSelf) r.popTransform();
+#endif
     }
 
     void layout(float px, float py, float parentW, float parentH,

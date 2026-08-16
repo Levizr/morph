@@ -53,16 +53,119 @@ bool MorphNode::subtreeMayMove() const {
 }
 
 int MorphNode::flatten(RenderFrame& frame, int parentId, float scrollOffset) {
+    float identity[16];
+#ifdef MORPH_FEATURE_TRANSFORM
+    morph::mat4Identity(identity);
+#endif
+    return flattenImpl(frame, parentId, scrollOffset, identity);
+}
+
+int MorphNode::flattenImpl(RenderFrame& frame, int parentId, float scrollOffset,
+                           const float* parentAcc) {
+#ifdef MORPH_FEATURE_TRANSFORM
+    // Accumulated model transform of this node, matching the renderer's push
+    // order in renderNode():
+    //   A(node) = A(parent) × T(rel) × M(node)
+    // where T(rel) = T(x - parent.x, y - parent.y) and the ancestor scroll
+    // translate is already baked into parentAcc (see passAcc below). The
+    // screen-space AABB of A(node) × (0,0,w,h) is the exact cull box.
+    float acc[16];
+    bool hasOwnTransform = style.transformSet;
+    {
+        float rel[16], own[16], tmp[16];
+        float parentX = 0.0f, parentY = 0.0f;
+        if (parentId >= 0 && parentId < (int)frame.nodes.size())
+        {
+            parentX = frame.nodes[parentId].x;
+            parentY = frame.nodes[parentId].y;
+        }
+        morph::mat4Identity(rel);
+        rel[12] = x - parentX;
+        rel[13] = y - parentY;
+        morph::mat4Multiply(acc, parentAcc, rel);
+        // A(node) = A(parent) × T(rel) × T(origin) × M(node) × T(-origin):
+        // the transform-origin is baked around the node's own matrix, so the
+        // box rotates about originX/originY of its own size (browser default:
+        // center).  An identity node stays exactly at its layout position.
+        if (hasOwnTransform)
+        {
+            float ox = style.originX * w, oy = style.originY * h;
+            float t0[16], t1[16], t2[16];
+            morph::mat4Identity(t0);
+            t0[12] = ox; t0[13] = oy;
+            morph::mat4Identity(t1);
+            t1[12] = -ox; t1[13] = -oy;
+            morph::mat4Multiply(t2, acc, t0);      // A×T(rel)×T(o)
+            morph::mat4Multiply(t0, t2, style.matrix);  // ×M
+            morph::mat4Multiply(tmp, t0, t1);      // ×T(-o)
+        }
+        else
+        {
+            morph::mat4Identity(own);
+            morph::mat4Multiply(tmp, acc, own);
+        }
+        memcpy(acc, tmp, sizeof(float) * 16);
+    }
+    bool hasTransform = hasOwnTransform || !morph::mat4IsIdentity(parentAcc);
+
+    // Accumulated transform passed to children: A(child) = A(node) ×
+    // S(node) × T(rel_child) × M(child) — the node's own scroll translate
+    // composes between the node and its children, exactly like the
+    // renderer's pushScrollOffset(0, -scrollY) under the model path.
+    float passAcc[16];
+    {
+        float nodeScroll = (scrollEnabled && contentH > h) ? scrollY : 0.0f;
+        float s[16];
+        morph::mat4Identity(s);
+        s[13] = -nodeScroll;
+        morph::mat4Multiply(passAcc, acc, s);
+    }
+#else
+    (void)parentAcc;
+    float acc[16] = {0};
+    const float* passAcc = parentAcc;
+    bool hasTransform = false;
+#endif
+
     // Off-screen culling: skip anything whose box is fully outside the scene
     // viewport. Node coords are absolute root-space but do NOT include scroll:
     // a scrolling ancestor shifts the whole subtree at draw time via
     // pushScrollOffset(0, -scrollY). So the effective screen Y is
     // y - scrollOffset, where scrollOffset accumulates the scrollY of every
-    // scrolling ancestor on the path (set per-child below).
+    // scrolling ancestor on the path (set per-child below).  When a transform
+    // is involved, the test uses the screen-space AABB of the transformed
+    // corners instead.
     float sy = y - scrollOffset;
     bool offscreen = frame.viewW > 0.0f && frame.viewH > 0.0f &&
                      (x + w <= 0.0f || x >= frame.viewW ||
                       sy + h <= 0.0f || sy >= frame.viewH);
+#ifdef MORPH_FEATURE_TRANSFORM
+    float cullX = 0, cullY = 0, cullW = 0, cullH = 0;
+    if (hasTransform) {
+        float minX = 1e30f, minY = 1e30f, maxX = -1e30f, maxY = -1e30f;
+        bool ok = true;
+        const float corners[4][2] = {{0, 0}, {w, 0}, {0, h}, {w, h}};
+        for (int i = 0; i < 4 && ok; i++) {
+            float ox, oy, oz;
+            if (!morph::mat4TransformPoint(acc, corners[i][0], corners[i][1],
+                                           0.0f, ox, oy, oz))
+                ok = false;
+            else {
+                if (ox < minX) minX = ox;
+                if (oy < minY) minY = oy;
+                if (ox > maxX) maxX = ox;
+                if (oy > maxY) maxY = oy;
+            }
+        }
+        if (ok) {
+            cullX = minX; cullY = minY;
+            cullW = maxX - minX; cullH = maxY - minY;
+            offscreen = frame.viewW > 0.0f && frame.viewH > 0.0f &&
+                        (maxX <= 0.0f || minX >= frame.viewW ||
+                         maxY <= 0.0f || minY >= frame.viewH);
+        }
+    }
+#endif
     if (offscreen)
     {
         bool clips = style.overflow == "hidden" || style.overflow == "scroll" ||
@@ -122,6 +225,16 @@ int MorphNode::flatten(RenderFrame& frame, int parentId, float scrollOffset) {
     fn.scrollbarBorderRadius = style.scrollbarBorderRadius;
 #endif
 
+#ifdef MORPH_FEATURE_TRANSFORM
+    fn.transformSet = hasOwnTransform;
+    if (hasOwnTransform)
+        memcpy(fn.matrix, style.matrix, sizeof(float) * 16);
+    fn.originX = style.originX;
+    fn.originY = style.originY;
+    fn.cullX = cullX; fn.cullY = cullY;
+    fn.cullW = cullW; fn.cullH = cullH;
+#endif
+
     int dlStart = (int)frame.drawOps.size();
     if (offscreen)
     {
@@ -172,7 +285,7 @@ int MorphNode::flatten(RenderFrame& frame, int parentId, float scrollOffset) {
                         (scrollEnabled && contentH > h ? scrollY : 0.0f);
 
     for (auto* child : paintOrder()) {
-        int childIdx = child->flatten(frame, idx, childScroll);
+        int childIdx = child->flattenImpl(frame, idx, childScroll, passAcc);
         if (childIdx >= 0)
             frame.nodes[idx].children.push_back(childIdx);
     }

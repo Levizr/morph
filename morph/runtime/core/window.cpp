@@ -405,12 +405,42 @@ void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx,
     // pushScrollOffset(0, -scrollY), accumulated in scrollOffset.
     float screenY = sy - scrollOffset;
 
+#ifdef MORPH_FEATURE_TRANSFORM
+    // Transform model path: once any ancestor (or this node) has a transform,
+    // the whole subtree renders through the accumulated model matrix. The
+    // flatten pass computed a screen-space AABB (cullX/Y/W/H) that already
+    // accounts for every ancestor transform and scroll, so cull against that
+    // instead of the untransformed box.
+    bool underTransform = m_renderer.transformStackActive();
+    bool transformed = underTransform || node.transformSet;
+#else
+    bool transformed = false;
+#endif
+
     // Viewport cull (flash + forge): skip anything fully outside the scene —
     // its pixels can't be seen and the GPU never needs to touch them.
     // sx/sy already include the interpolated animOffset, so nodes animating
     // into view are never culled.
     float cw = contentWidth();
     float ch = contentHeight();
+#ifdef MORPH_FEATURE_TRANSFORM
+    if (transformed)
+    {
+        // Skip the cull entirely while a layout transition is interpolating:
+        // the AABB was computed from the non-interpolated layout position.
+        if (!node.hasLayoutTransition &&
+            (node.cullX + node.cullW <= 0.0f || node.cullX >= cw ||
+             node.cullY + node.cullH <= 0.0f || node.cullY >= ch))
+        {
+            if (overflowClipped || radiusClip)
+                return;
+            for (int childIdx : node.children)
+                renderNode(frame, childIdx, damageClip, scrollOffset);
+            return;
+        }
+    }
+    else
+#endif
     if (sx + sw <= 0.0f || sx >= cw || screenY + sh <= 0.0f || screenY >= ch)
     {
         // Clipping nodes fully contain their descendants, so skipping the
@@ -429,6 +459,14 @@ void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx,
     if (damageClip)
     {
         DamageRect box{(int)sx, (int)sy, (int)sw, (int)sh};
+#ifdef MORPH_FEATURE_TRANSFORM
+        if (transformed)
+        {
+            if (!node.hasLayoutTransition)
+                box = DamageRect{(int)node.cullX, (int)node.cullY,
+                                 (int)node.cullW, (int)node.cullH};
+        }
+#endif
         if (!damageClip->intersects(box))
         {
             // Clipping nodes fully contain their descendants, so skipping the
@@ -442,6 +480,56 @@ void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx,
             return;
         }
     }
+
+#ifdef MORPH_FEATURE_TRANSFORM
+    // Model-path push: the stack telescopes accumulated absolute transforms,
+    // so rel (this node's position delta from its parent) × own matrix.
+    // The anchor is this node's (interpolated) layout position, which every
+    // draw call on the model path cancels against.
+    bool pushedTransform = false;
+    if (transformed)
+    {
+        float parentX = 0.0f, parentY = 0.0f;
+        if (node.parentId >= 0)
+        {
+            const auto &p = frame->nodes[node.parentId];
+            parentX = sc(p.x + p.animOffsetX);
+            parentY = sc(p.y + p.animOffsetY);
+        }
+        float rel[16], m[16], tmp[16];
+        morph::mat4Identity(rel);
+        // The anchor cancellation maps baked absolute instance coords through
+        // m_model × T(-anchor).  m_model telescopes the absolute transform of
+        // every transformed ancestor, so a node entering the transform path
+        // (stack inactive) must bake its ABSOLUTE position; only nodes
+        // already under the stack bake the parent-relative delta.
+        rel[12] = underTransform ? (sx - parentX) : sx;
+        rel[13] = underTransform ? (sy - parentY) : sy;
+        if (node.transformSet)
+        {
+            // T(rel) × T(o) × M × T(-o) — the transform-origin is baked in so
+            // the box rotates about its own origin point (default center);
+            // the anchor stays the node's position, which every instance's
+            // model cancels against.
+            float ox = node.originX * node.w, oy = node.originY * node.h;
+            float t0[16], t1[16];
+            morph::mat4Identity(t0);
+            t0[12] = ox; t0[13] = oy;
+            morph::mat4Identity(t1);
+            t1[12] = -ox; t1[13] = -oy;
+            morph::mat4Multiply(m, rel, t0);          // T(rel)×T(o)
+            morph::mat4Multiply(t0, m, node.matrix);  // ×M
+            morph::mat4Multiply(tmp, t0, t1);         // ×T(-o)
+        }
+        else
+        {
+            morph::mat4Identity(m);
+            morph::mat4Multiply(tmp, rel, m);
+        }
+        m_renderer.pushTransform(tmp, sx, sy);
+        pushedTransform = true;
+    }
+#endif
 
     // 1. Draw self (background from display list)
     drawOpsForNode(m_renderer, frame, nodeIdx, node.animOffsetX, node.animOffsetY);
@@ -462,8 +550,17 @@ void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx,
     // 2. Clip setup
     if (overflowClipped || radiusClip)
     {
+        // Under a transform the scissor rect would be axis-aligned in root
+        // space while the content is transformed, so fall back to the stencil
+        // clip (draws the node's box through the model path, masking the
+        // transformed shape exactly).
         if (overflowClipped)
-            m_renderer.beginClip(sx, sy, sw, sh);
+        {
+            if (transformed)
+                m_renderer.beginRoundedClip(sx, sy, sw, sh, 0.0f);
+            else
+                m_renderer.beginClip(sx, sy, sw, sh);
+        }
         if (radiusClip)
             m_renderer.beginRoundedClip(sx, sy, sw, sh, node.borderRadius);
     }
@@ -474,7 +571,7 @@ void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx,
     float childScroll = scrollOffset + (scrolling ? node.scrollY : 0.0f);
     for (int childIdx : node.children)
     {
-        if (scrolling)
+        if (scrolling && !transformed)
         {
             const auto &child = frame->nodes[childIdx];
             float childVisY = child.y + child.animOffsetY - node.scrollY;
@@ -505,6 +602,11 @@ void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx,
     {
         drawScrollbar(m_renderer, node, sx, sy, sw, sh);
     }
+
+#ifdef MORPH_FEATURE_TRANSFORM
+    if (pushedTransform)
+        m_renderer.popTransform();
+#endif
 }
 
 void MorphWindow::renderFrame(std::function<void(GLRenderer &, DirtyStats &)> overlayFn)

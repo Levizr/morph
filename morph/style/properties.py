@@ -25,4 +25,5 @@ KNOWN_PROPERTIES: dict[str, str] = {
     "font-size":        "16px",
     "font-weight":      "normal",
     "text-align":       "left",
+    "transform":        "none",
 }

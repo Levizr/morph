@@ -239,6 +239,102 @@ STATIC_MAP: dict[str, dict[str, str]] = {
     "select-none": {"user-select": "none"},
     "select-text": {"user-select": "text"},
     "select-all":  {"user-select": "all"},
+
+    # ── Transforms ─────────────────────────────────────────
+    # translate (spacing scale: n × 4px)
+    "translate-x-0":  {"transform": "translateX(0px)"},
+    "translate-x-1":  {"transform": "translateX(4px)"},
+    "translate-x-2":  {"transform": "translateX(8px)"},
+    "translate-x-3":  {"transform": "translateX(12px)"},
+    "translate-x-4":  {"transform": "translateX(16px)"},
+    "translate-x-5":  {"transform": "translateX(20px)"},
+    "translate-x-6":  {"transform": "translateX(24px)"},
+    "translate-x-8":  {"transform": "translateX(32px)"},
+    "translate-x-10": {"transform": "translateX(40px)"},
+    "translate-x-12": {"transform": "translateX(48px)"},
+    "translate-x-16": {"transform": "translateX(64px)"},
+    "translate-x-20": {"transform": "translateX(80px)"},
+    "translate-x-24": {"transform": "translateX(96px)"},
+    "translate-x-32": {"transform": "translateX(128px)"},
+    "translate-x-40": {"transform": "translateX(160px)"},
+    "translate-x-48": {"transform": "translateX(192px)"},
+    "translate-x-56": {"transform": "translateX(224px)"},
+    "translate-x-64": {"transform": "translateX(256px)"},
+    "translate-y-0":  {"transform": "translateY(0px)"},
+    "translate-y-1":  {"transform": "translateY(4px)"},
+    "translate-y-2":  {"transform": "translateY(8px)"},
+    "translate-y-3":  {"transform": "translateY(12px)"},
+    "translate-y-4":  {"transform": "translateY(16px)"},
+    "translate-y-5":  {"transform": "translateY(20px)"},
+    "translate-y-6":  {"transform": "translateY(24px)"},
+    "translate-y-8":  {"transform": "translateY(32px)"},
+    "translate-y-10": {"transform": "translateY(40px)"},
+    "translate-y-12": {"transform": "translateY(48px)"},
+    "translate-y-16": {"transform": "translateY(64px)"},
+    "translate-y-20": {"transform": "translateY(80px)"},
+    "translate-y-24": {"transform": "translateY(96px)"},
+    "translate-y-32": {"transform": "translateY(128px)"},
+    "translate-y-40": {"transform": "translateY(160px)"},
+    "translate-y-48": {"transform": "translateY(192px)"},
+    "translate-y-56": {"transform": "translateY(224px)"},
+    "translate-y-64": {"transform": "translateY(256px)"},
+
+    # rotate (degrees)
+    "rotate-0":   {"transform": "rotate(0deg)"},
+    "rotate-1":   {"transform": "rotate(1deg)"},
+    "rotate-2":   {"transform": "rotate(2deg)"},
+    "rotate-3":   {"transform": "rotate(3deg)"},
+    "rotate-6":   {"transform": "rotate(6deg)"},
+    "rotate-12":  {"transform": "rotate(12deg)"},
+    "rotate-45":  {"transform": "rotate(45deg)"},
+    "rotate-90":  {"transform": "rotate(90deg)"},
+    "rotate-180": {"transform": "rotate(180deg)"},
+
+    # scale (percent)
+    "scale-0":    {"transform": "scale(0)"},
+    "scale-50":   {"transform": "scale(0.5)"},
+    "scale-75":   {"transform": "scale(0.75)"},
+    "scale-90":   {"transform": "scale(0.9)"},
+    "scale-95":   {"transform": "scale(0.95)"},
+    "scale-100":  {"transform": "scale(1)"},
+    "scale-105":  {"transform": "scale(1.05)"},
+    "scale-110":  {"transform": "scale(1.1)"},
+    "scale-125":  {"transform": "scale(1.25)"},
+    "scale-150":  {"transform": "scale(1.5)"},
+    "scale-x-0":  {"transform": "scaleX(0)"},
+    "scale-x-50": {"transform": "scaleX(0.5)"},
+    "scale-x-75": {"transform": "scaleX(0.75)"},
+    "scale-x-90": {"transform": "scaleX(0.9)"},
+    "scale-x-95": {"transform": "scaleX(0.95)"},
+    "scale-x-100":{"transform": "scaleX(1)"},
+    "scale-x-105":{"transform": "scaleX(1.05)"},
+    "scale-x-110":{"transform": "scaleX(1.1)"},
+    "scale-x-125":{"transform": "scaleX(1.25)"},
+    "scale-x-150":{"transform": "scaleX(1.5)"},
+    "scale-y-0":  {"transform": "scaleY(0)"},
+    "scale-y-50": {"transform": "scaleY(0.5)"},
+    "scale-y-75": {"transform": "scaleY(0.75)"},
+    "scale-y-90": {"transform": "scaleY(0.9)"},
+    "scale-y-95": {"transform": "scaleY(0.95)"},
+    "scale-y-100":{"transform": "scaleY(1)"},
+    "scale-y-105":{"transform": "scaleY(1.05)"},
+    "scale-y-110":{"transform": "scaleY(1.1)"},
+    "scale-y-125":{"transform": "scaleY(1.25)"},
+    "scale-y-150":{"transform": "scaleY(1.5)"},
+
+    # skew (degrees)
+    "skew-x-0":  {"transform": "skewX(0deg)"},
+    "skew-x-1":  {"transform": "skewX(1deg)"},
+    "skew-x-2":  {"transform": "skewX(2deg)"},
+    "skew-x-3":  {"transform": "skewX(3deg)"},
+    "skew-x-6":  {"transform": "skewX(6deg)"},
+    "skew-x-12": {"transform": "skewX(12deg)"},
+    "skew-y-0":  {"transform": "skewY(0deg)"},
+    "skew-y-1":  {"transform": "skewY(1deg)"},
+    "skew-y-2":  {"transform": "skewY(2deg)"},
+    "skew-y-3":  {"transform": "skewY(3deg)"},
+    "skew-y-6":  {"transform": "skewY(6deg)"},
+    "skew-y-12": {"transform": "skewY(12deg)"},
 }
 
 # ── Arbitrary value prefixes ──────────────────────────────────
@@ -269,6 +365,30 @@ ARBITRARY_PREFIX: dict[str, str] = {
     "z":       "z-index",
     "font":    "font-weight",
 }
+
+# ── Transform utility helpers ─────────────────────────────────
+# Arbitrary transform utilities wrap the value in a CSS transform
+# function, e.g. translate-x-[50%] → transform: translateX(50%).
+_TRANSFORM_ARBITRARY: dict[str, str] = {
+    "translate-x": "translateX",
+    "translate-y": "translateY",
+    "rotate":      "rotate",
+    "scale-x":     "scaleX",
+    "scale-y":     "scaleY",
+    "scale":       "scale",
+    "skew-x":      "skewX",
+    "skew-y":      "skewY",
+}
+
+
+def _negate_transform_value(value: str) -> str:
+    """Negate an arbitrary transform value: '45deg' → '-45deg', '50%' → '-50%'."""
+    v = value.strip()
+    if v.startswith("-"):
+        return v[1:]
+    if v.startswith("+"):
+        return "-" + v[1:]
+    return "-" + v
 
 
 class TailwindResolver:
@@ -309,6 +429,12 @@ class TailwindResolver:
             self._cache[cls] = {"z-index": str(val)}
             return self._cache[cls]
 
+        # 0b. Negative transform utilities (-translate-x-4, -rotate-45, ...)
+        neg = self._resolve_negative_transform(cls)
+        if neg:
+            self._cache[cls] = neg
+            return neg
+
         # 1. Static map
         if cls in STATIC_MAP:
             self._cache[cls] = STATIC_MAP[cls]
@@ -331,11 +457,32 @@ class TailwindResolver:
         self._cache[cls] = {}
         return {}
 
+    def _resolve_negative_transform(self, cls: str) -> dict | None:
+        """-translate-x-4 → translateX(-16px), -rotate-45 → rotate(-45deg)."""
+        m = re.match(r"^-(translate-[xy])-(\d+)$", cls)
+        if m:
+            fn = "translateX" if m.group(1) == "translate-x" else "translateY"
+            return {"transform": f"{fn}(-{int(m.group(2)) * 4}px)"}
+        m = re.match(r"^-(rotate)-(\d+)$", cls)
+        if m:
+            return {"transform": f"rotate(-{int(m.group(2))}deg)"}
+        m = re.match(r"^-(skew-[xy])-(\d+)$", cls)
+        if m:
+            fn = "skewX" if m.group(1) == "skew-x" else "skewY"
+            return {"transform": f"{fn}(-{int(m.group(2))}deg)"}
+        return None
+
     def _resolve_arbitrary(self, cls: str) -> dict | None:
         match = re.match(r"^([\w-]+)-\[(.+)\]$", cls)
         if not match:
             return None
         prefix, value = match.groups()
+        # Negative arbitrary transform: -translate-x-[50%] → translateX(-50%)
+        if prefix.startswith("-") and prefix[1:] in _TRANSFORM_ARBITRARY:
+            fn = _TRANSFORM_ARBITRARY[prefix[1:]]
+            return {"transform": f"{fn}({_negate_transform_value(value)})"}
+        if prefix in _TRANSFORM_ARBITRARY:
+            return {"transform": f"{_TRANSFORM_ARBITRARY[prefix]}({value})"}
         if prefix in ARBITRARY_PREFIX:
             return {ARBITRARY_PREFIX[prefix]: value}
         return None

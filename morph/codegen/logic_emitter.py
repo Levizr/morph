@@ -43,6 +43,7 @@ _CSS_TO_STYLE_FIELD: dict[str, tuple[str, str]] = {
     "overflow": ("overflow", "string"),
     "position": ("position", "string"),
     "flex-basis": ("flexBasis", "string"),
+    "transform": ("transform", "transform"),
 }
 
 # Default/clean values for each style field (used when resetting class-based styles)
@@ -122,11 +123,17 @@ def _css_val_to_cpp_assignments(css_prop: str, css_val: str) -> list[str]:
             return []
     elif val_type == "string":
         return [f'{prefix} = "{css_val}";']
+    elif val_type == "transform":
+        # Literal CSS value → parse at runtime via the feature-gated parser.
+        escaped = css_val.replace("\\", "\\\\").replace('"', '\\"')
+        return [f"morph::setCssTransform(n->style, \"{escaped}\", n->w, n->h);"]
     return []
 
 
 def _css_field_reset_assignments(field_name: str) -> list[str]:
     """Generate C++ assignments to reset a style field to its default."""
+    if field_name == "transform":
+        return ["morph::resetCssTransform(n->style);"]
     default = _DEFAULT_STYLE_VALUES.get(field_name)
     if default is None:
         return []
@@ -179,14 +186,6 @@ inline void setColor(float rgba[4], const std::string& c) {
     }
 }
 }
-
-"""
-
-_EXTERN_C_START = """
-extern "C" {
-
-static morph::EffectNode* __effects[64];
-static int __effect_count = 0;
 
 """
 
@@ -312,7 +311,10 @@ def emit_logic(windows: list[IRWindow]) -> str:
         if exprs:
             guarded_map[idx] = exprs
 
-    lines.append(_EXTERN_C_START)
+    lines.append('extern "C" {')
+    lines.append("")
+    lines.append("static int __effect_count = 0;")
+    lines.append("")
 
     for i in range(len(guarded_map)):
         lines.append(f"static std::string __esig_{i};")
@@ -385,6 +387,14 @@ def emit_logic(windows: list[IRWindow]) -> str:
     lines.append("    morph_logic_rewire(nodes, store);")
     lines.append("}")
     lines.append(_LOGIC_FOOTER)
+
+    # The effects array must hold every effect created in morph_logic_rewire.
+    # Count the exact number of emission sites and size the array accordingly
+    # so large apps (hundreds of reactive-style nodes) don't overflow a
+    # fixed-size buffer.
+    effect_count = sum(1 for ln in lines if "__effects[__effect_count++]" in ln)
+    extern_idx = next(i for i, ln in enumerate(lines) if ln.strip() == 'extern "C" {')
+    lines.insert(extern_idx + 1, f"static morph::EffectNode* __effects[{max(effect_count, 1)}];")
 
     return "\n".join(lines)
 
@@ -510,6 +520,14 @@ def _emit_node_effects(lines: list[str], node: IRNode, indent: str = "    ") -> 
                 lines.append(f'{indent}    if (!n) return;')
                 lines.append(f'{indent}    n->interruptStateTransitions();')
                 lines.append(f'{indent}    morph::setColor(n->style.{field_name}, morph::str({cpp_expr}));')
+                lines.append(f'{indent}    n->markDirty(PaintDirty);')
+                lines.append(f'{indent}}});')
+            elif val_type == "transform":
+                lines.append(f'{indent}__effects[__effect_count++] = morph::create_effect([&]() {{')
+                lines.append(f'{indent}    auto* n = nodes.get("{node_id}");')
+                lines.append(f'{indent}    if (!n) return;')
+                lines.append(f'{indent}    n->interruptStateTransitions();')
+                lines.append(f'{indent}    morph::setCssTransform(n->style, morph::str({cpp_expr}), n->w, n->h);')
                 lines.append(f'{indent}    n->markDirty(PaintDirty);')
                 lines.append(f'{indent}}});')
 

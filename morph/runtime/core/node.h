@@ -50,12 +50,17 @@ struct MorphAnimation {
     bool finished;
 };
 
-// ── Hover transition state (heap-allocated only when active) ──
+// ── Combined hover/active transition state (heap-allocated only when active) ──
+// Hover and active share ONE transition so the two state deltas cannot fight
+// over `style` while interpolating concurrently. Each state keeps its own
+// press/pre snapshots so the release unwinds them independently.
 struct HoverTransition {
     MorphStyle startStyle;
     MorphStyle targetStyle;
     MorphStyle preHoverStyle; // snapshot before hover, for restore on exit
-    MorphStyle pressStyle;    // snapshot with the state delta applied, at press
+    MorphStyle pressStyle;    // snapshot at hover press
+    MorphStyle preActiveStyle; // snapshot before active, for restore on release
+    MorphStyle pressActiveStyle; // snapshot at active press
     float elapsed = 0.0f;
     bool active = false;
 };
@@ -253,20 +258,18 @@ public:
     virtual void onHover(bool state);
     virtual void onActive(bool state);
 
-    // ── Hover transitions ──
-    HoverTransition* m_hoverTransition = nullptr;
-    void updateHoverTransition(float dt);
-    // Cancel any in-flight hover/active state transitions. Reactive style
+    // ── Combined hover/active state transition ──
+    HoverTransition* m_stateTransition = nullptr;
+    void updateStateTransition(float dt);
+    bool m_hoverState = false;  // current :hover state
+    bool m_activeState = false; // current :active state
+    // Cancel any in-flight hover/active state transition. Reactive style
     // effects call this after writing style values so a stale state
     // animation (snapshotted before the effect ran) cannot clobber the
     // effect's value.
     void interruptStateTransitions();
     static void interpolateStyles(MorphStyle& out, const MorphStyle& a,
                                   const MorphStyle& b, float t);
-
-    // ── Active (pressed) transitions ──
-    HoverTransition* m_activeTransition = nullptr;
-    void updateActiveTransition(float dt);
 
     // ── Ancestor-hover rules + transitions ──
     std::vector<AncestorHoverRule> m_ancestorHoverRules;
@@ -285,6 +288,10 @@ public:
     virtual float contentWidth(Renderer* r);
     virtual bool isWhitespaceOnly() const { return false; }
     MorphNode* hitTest(float ex, float ey);
+    // Recursive hit test carrying the inverse accumulated transform
+    // (nullptr when no transform is compiled, else the identity for the
+    // root). Screen coords are mapped into each node's local space.
+    MorphNode* hitTestImpl(float ex, float ey, const float* accInv);
     void addChild(MorphNode* child) {
         children.push_back(child);
         child->parent = this;
@@ -333,7 +340,34 @@ public:
     // Flatten into a lock-free render frame for the compositor thread
     virtual int flatten(RenderFrame& frame, int parentId,
                         float scrollOffset = 0.0f);
+    // Recursive flatten with the accumulated parent transform matrix
+    // (identity when MORPH_FEATURE_TRANSFORM is off or no ancestor
+    // carries a transform).
+    int flattenImpl(RenderFrame& frame, int parentId, float scrollOffset,
+                    const float* parentAcc);
     virtual int flattenExtra(RenderFrame& frame, FlatRenderNode& fn);
+
+#ifdef MORPH_FEATURE_TRANSFORM
+    // Legacy-path model push: composes rel (this node's position delta from
+    // its parent) × own matrix onto the renderer's transform stack, anchored
+    // at the node's (interpolated) layout position. Returns true when a
+    // matching popTransform is required. Only relevant on the model path —
+    // when neither this node nor any ancestor has a transform it is a no-op.
+    bool pushSelfTransform(Renderer& r, float sx, float sy)
+    {
+        bool pushSelf = style.transformSet || r.transformStackActive();
+        if (pushSelf)
+        {
+            float rel[16], tmp[16];
+            morph::mat4Identity(rel);
+            rel[12] = sx - (parent ? parent->x : 0.0f);
+            rel[13] = sy - (parent ? parent->y : 0.0f);
+            morph::mat4Multiply(tmp, rel, style.matrix);
+            r.pushTransform(tmp, sx, sy);
+        }
+        return pushSelf;
+    }
+#endif
 
     // True if this subtree could change its screen position this frame
     // (running compositor animations or transitions). Guards the off-screen
@@ -346,8 +380,8 @@ public:
         for (auto* ef : m_associatedEffects) ef->dead = true;
         m_associatedEffects.clear();
         delete hoverStyle; delete activeStyle;
-        delete m_hoverTransition; delete m_ancestorHoverTransition;
-        delete m_activeTransition; delete m_ancestorActiveTransition;
+        delete m_stateTransition; delete m_ancestorHoverTransition;
+        delete m_ancestorActiveTransition;
         for (auto* child : children) delete child;
     }
 };

@@ -43,3 +43,16 @@ class IRStyle:
     border_style:               str   = "none"
     box_sizing:                 str   = "content-box"
     z_index:                    int | None = None   # None = auto (no explicit z-index)
+    # ── Transform (feature: "transform") ────────────────────────
+    # Parsed CSS transform ops (see morph/style/transforms.py). None = not set.
+    transform_ops:   list[tuple] | None = None
+    # Resolved column-major 4x4 matrix (16 floats), set by the layout engine
+    # once the element's own border-box size is known. None = no transform.
+    transform_matrix: tuple[float, ...] | None = None
+    # Raw `transform-origin` value: ((x, is_pct_x), (y, is_pct_y)) in the CSS
+    # unit space (keywords left/top/center/right/bottom mapped to 0/0.5/1).
+    # None = not set (defaults to 50% 50%).
+    transform_origin: tuple | None = None
+    # Resolved transform-origin as fractions of the element's own border-box
+    # (0..1), set by the layout engine. None = not set (center default).
+    transform_origin_resolved: tuple[float, float] | None = None

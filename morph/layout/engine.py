@@ -46,6 +46,18 @@ from morph.layout.inline import (
 )
 from morph.layout.flex import apply_flex
 from morph.style.units import resolve, DEFERRED
+from morph.style.transforms import compose_transform
+
+
+def _resolve_transform_origin(raw: tuple, w: float, h: float) -> tuple[float, float]:
+    """Resolve a raw transform-origin into fractions of the box (0..1).
+
+    ``raw`` is ((x, is_pct_x), (y, is_pct_y)) from the builder.
+    """
+    (xv, xp), (yv, yp) = raw
+    fx = (xv / 100.0) if xp else (xv / w if w > 1e-6 else 0.0)
+    fy = (yv / 100.0) if yp else (yv / h if h > 1e-6 else 0.0)
+    return (fx, fy)
 
 
 class LayoutEngine:
@@ -114,6 +126,32 @@ class LayoutEngine:
                     s.top = val
                 elif css_key == "bottom":
                     s.bottom = val
+
+    @staticmethod
+    def _resolve_transforms(node: IRNode) -> None:
+        if not node.style.transform_ops and not node.style.transform_origin and not (
+            node.hover_style and node.hover_style.transform_ops
+        ) and not (node.active_style and node.active_style.transform_ops) \
+                and not any(s.transform_ops for _, s in node.ancestor_hover_rules) \
+                and not any(s.transform_ops for _, s in node.ancestor_active_rules):
+            return
+
+        def resolve_style(s) -> None:
+            if s is not None:
+                if s.transform_ops:
+                    s.transform_matrix = compose_transform(s.transform_ops,
+                                                           node.w, node.h)
+                if s.transform_origin:
+                    s.transform_origin_resolved = _resolve_transform_origin(
+                        s.transform_origin, node.w, node.h)
+
+        resolve_style(node.style)
+        resolve_style(node.hover_style)
+        resolve_style(node.active_style)
+        for _, s in node.ancestor_hover_rules:
+            resolve_style(s)
+        for _, s in node.ancestor_active_rules:
+            resolve_style(s)
 
     # ═══════════════════════════════════════════════════════════
     #  Pass 1 — Measure (bottom-up)
@@ -331,6 +369,7 @@ class LayoutEngine:
                 if desired > node.h:
                     node.h = desired
             apply_min_max(node)
+            self._resolve_transforms(node)
             return
 
         i = 0
@@ -395,6 +434,9 @@ class LayoutEngine:
         # ── 7. Min / max clamping (final) ───────────────────
         apply_min_max(node)
 
+        # ── 8. Resolve transform matrices (needs final box) ─
+        self._resolve_transforms(node)
+
     # ── Inline group helper ─────────────────────────────────
 
     def _layout_inline_group(self, children: list[IRNode], cx: float, cy: float,
@@ -458,6 +500,12 @@ class LayoutEngine:
                     self._layout(sub, ccx, ccy, ccw, cch)
                 # Re-apply min/max now that children are laid out
                 apply_min_max(child)
+
+        # Resolve transform matrices for inline-block children — their
+        # border-box is final only after line placement above.
+        for child in children:
+            if child.node_type != "__text__":
+                self._resolve_transforms(child)
 
         if not lines:
             return cy

@@ -158,6 +158,17 @@ static void applyStyleDelta(MorphStyle& target, const MorphStyle& delta) {
         memcpy(target.scrollbarThumbColor, delta.scrollbarThumbColor, sizeof(float)*4);
     if (delta.scrollbarBorderRadius != 4.0f) target.scrollbarBorderRadius = delta.scrollbarBorderRadius;
 #endif
+#ifdef MORPH_FEATURE_TRANSFORM
+    if (delta.transformSet) {
+        memcpy(target.matrix, delta.matrix, sizeof(float) * 16);
+        target.transformSet = true;
+    }
+    if (delta.originSet) {
+        target.originX = delta.originX;
+        target.originY = delta.originY;
+        target.originSet = true;
+    }
+#endif
 }
 
 #ifdef MORPH_FEATURE_ZINDEX
@@ -248,56 +259,86 @@ static void buildReleaseStyle(MorphStyle& target, const MorphStyle& current,
 #ifdef MORPH_FEATURE_CURSOR
     SCALAR_REVERT(cursor);
 #endif
+#ifdef MORPH_FEATURE_TRANSFORM
+    SCALAR_REVERT(transformSet);
+    if (memcmp(pressStyle.matrix, preState.matrix, sizeof(float) * 16) != 0
+        && memcmp(current.matrix, pressStyle.matrix, sizeof(float) * 16) == 0)
+        memcpy(target.matrix, preState.matrix, sizeof(float) * 16);
+    SCALAR_REVERT(originSet);
+    if (pressStyle.originSet && !preState.originSet
+        && current.originSet == pressStyle.originSet) {
+        target.originSet = false;
+    }
+    if ((pressStyle.originX != preState.originX || pressStyle.originY != preState.originY)
+        && current.originX == pressStyle.originX && current.originY == pressStyle.originY) {
+        target.originX = preState.originX;
+        target.originY = preState.originY;
+    }
+#endif
 #undef SCALAR_REVERT
 }
 
-static void _applyStateStyle(MorphNode* node, bool state,
-                             MorphStyle* stateStyle, HoverTransition*& trans) {
-    if (!stateStyle) return;
-    if (!trans)
+static void _retargetState(MorphNode* node, bool hover, bool on) {
+    MorphStyle* delta = hover ? node->hoverStyle : node->activeStyle;
+    if (!delta) return;
+    if (hover)
+        node->m_hoverState = on;
+    else
+        node->m_activeState = on;
+
+    HoverTransition*& trans = node->m_stateTransition;
+    if (!trans) {
         trans = new HoverTransition();
+        // States that are never pressed must still unwind cleanly on release,
+        // so seed every snapshot with the current style (press == pre → the
+        // release reverts are no-ops).
+        trans->preHoverStyle = node->style;
+        trans->pressStyle = node->style;
+        trans->preActiveStyle = node->style;
+        trans->pressActiveStyle = node->style;
+    }
     MorphStyle layoutBefore = node->style;
-    if (state) {
-        if (!trans->active) {
+
+    // Complete any in-flight transition first. A mid-interpolation value is
+    // neither the state's full style nor a settled value, so the release
+    // equality tests below could not unwind it (that froze the style
+    // permanently under rapid clicks). Snapping to the target leaves the
+    // state fields equal to `pressStyle`, so reverts match cleanly.
+    if (trans->active) {
+        node->style = trans->targetStyle;
+        trans->active = false;
+    }
+
+    MorphStyle target = node->style;
+    if (on) {
+        applyStyleDelta(target, *delta);
+        // Snapshot the pre-state at press and the press target (delta
+        // applied) so the release equality tests match the settled style.
+        if (hover) {
             trans->preHoverStyle = node->style;
-            trans->pressStyle = node->style;
-        }
-        if (node->m_transitionDuration > 0.0f) {
-            trans->startStyle = node->style;
-            trans->targetStyle = node->style;
-            applyStyleDelta(trans->targetStyle, *stateStyle);
-            trans->pressStyle = trans->targetStyle;
-            trans->elapsed = 0.0f;
-            trans->active = true;
+            trans->pressStyle = target;
         } else {
-            applyStyleDelta(node->style, *stateStyle);
-            trans->pressStyle = node->style;
+            trans->preActiveStyle = node->style;
+            trans->pressActiveStyle = target;
         }
     } else {
-        MorphStyle releaseTarget;
-        if (trans->active) {
-            // State transition still in flight — it never reached its target,
-            // so the current style is just a mid-interpolation value. A
-            // settled reactive-effect value cannot exist here: every effect
-            // calls interruptStateTransitions(), which clears `active`. Revert
-            // cleanly to the pre-state snapshot.
-            releaseTarget = trans->preHoverStyle;
-        } else {
-            // State was fully applied (or interrupted by an effect): start
-            // from the current style and revert only the fields the state
-            // delta touched (when they were left untouched since the press).
-            // Fields modified by reactive effects keep their effect value
-            // instead of being clobbered by the pre-state snapshot.
-            buildReleaseStyle(releaseTarget, node->style, trans->pressStyle, trans->preHoverStyle);
-        }
-        if (node->m_transitionDuration > 0.0f) {
-            trans->startStyle = node->style;
-            trans->targetStyle = releaseTarget;
-            trans->elapsed = 0.0f;
-            trans->active = true;
-        } else {
-            node->style = releaseTarget;
-        }
+        // Unwind the OFF states in reverse delta-stack order (active sits on
+        // top of hover), so each revert restores the values the next revert's
+        // equality check expects. Fields a reactive effect changed (never
+        // equal to the press snapshot) keep their effect value.
+        if (!node->m_activeState)
+            buildReleaseStyle(target, target, trans->pressActiveStyle, trans->preActiveStyle);
+        if (!node->m_hoverState)
+            buildReleaseStyle(target, target, trans->pressStyle, trans->preHoverStyle);
+    }
+
+    if (node->m_transitionDuration > 0.0f) {
+        trans->startStyle = node->style;
+        trans->targetStyle = target;
+        trans->elapsed = 0.0f;
+        trans->active = true;
+    } else {
+        node->style = target;
     }
     node->markDirty(PaintDirty);
     if (hasLayoutDiff(layoutBefore, node->style))
@@ -305,12 +346,12 @@ static void _applyStateStyle(MorphNode* node, bool state,
 }
 
 void MorphNode::onHover(bool state) {
-    _applyStateStyle(this, state, hoverStyle, m_hoverTransition);
+    _retargetState(this, true, state);
     _applyAncestorHover(state);
 }
 
 void MorphNode::onActive(bool state) {
-    _applyStateStyle(this, state, activeStyle, m_activeTransition);
+    _retargetState(this, false, state);
     _applyAncestorActive(state);
 }
 
@@ -402,12 +443,8 @@ static void _updateStateTransition(MorphNode* node, HoverTransition*& trans, flo
     node->markDirty(PaintDirty);
 }
 
-void MorphNode::updateHoverTransition(float dt) {
-    _updateStateTransition(this, m_hoverTransition, dt);
-}
-
-void MorphNode::updateActiveTransition(float dt) {
-    _updateStateTransition(this, m_activeTransition, dt);
+void MorphNode::updateStateTransition(float dt) {
+    _updateStateTransition(this, m_stateTransition, dt);
 }
 
 void MorphNode::interruptStateTransitions() {
@@ -418,13 +455,9 @@ void MorphNode::interruptStateTransitions() {
     // effect-write and keep it stuck. Snapping to the target leaves non-effect
     // fields equal to `pressStyle`, so `buildReleaseStyle` reverts them cleanly
     // while effect-written fields (set after this call) keep their value.
-    if (m_hoverTransition && m_hoverTransition->active) {
-        style = m_hoverTransition->targetStyle;
-        m_hoverTransition->active = false;
-    }
-    if (m_activeTransition && m_activeTransition->active) {
-        style = m_activeTransition->targetStyle;
-        m_activeTransition->active = false;
+    if (m_stateTransition && m_stateTransition->active) {
+        style = m_stateTransition->targetStyle;
+        m_stateTransition->active = false;
     }
 }
 
@@ -499,6 +532,28 @@ void MorphNode::interpolateStyles(MorphStyle& out, const MorphStyle& a,
 #ifdef MORPH_FEATURE_CURSOR
     out.cursor = b.cursor;
 #endif
+
+#ifdef MORPH_FEATURE_TRANSFORM
+    // Transition between transforms: interpolate the matrices; a missing
+    // (none) side interpolates against identity.  The origin interpolates
+    // linearly (browsers interpolate it as a simple pair).
+    if (a.transformSet || b.transformSet) {
+        float ma[16], mb[16];
+        morph::mat4Identity(ma);
+        morph::mat4Identity(mb);
+        if (a.transformSet) memcpy(ma, a.matrix, sizeof(float) * 16);
+        if (b.transformSet) memcpy(mb, b.matrix, sizeof(float) * 16);
+        morph::mat4Interpolate(ma, mb, t, out.matrix);
+        out.transformSet = true;
+    } else {
+        out.transformSet = false;
+    }
+    if (a.originSet || b.originSet) {
+        out.originX = a.originX + (b.originX - a.originX) * t;
+        out.originY = a.originY + (b.originY - a.originY) * t;
+        out.originSet = true;
+    }
+#endif
 }
 
 static void _updateAncestorTransition(MorphNode* node, AncestorHoverTransition* t, float dt) {
@@ -565,20 +620,14 @@ void MorphNode::update(float dt) {
     m_isTransitioning = false;
     m_hasLayoutTransition = false;
 
-    updateHoverTransition(dt);
-    updateActiveTransition(dt);
+    updateStateTransition(dt);
     updateAncestorHoverTransition(dt);
     updateAncestorActiveTransition(dt);
     updateAnimations(dt);
 
-    if (m_hoverTransition && m_hoverTransition->active) {
+    if (m_stateTransition && m_stateTransition->active) {
         m_isTransitioning = true;
-        if (hasLayoutDiff(m_hoverTransition->startStyle, m_hoverTransition->targetStyle))
-            m_hasLayoutTransition = true;
-    }
-    if (m_activeTransition && m_activeTransition->active) {
-        m_isTransitioning = true;
-        if (hasLayoutDiff(m_activeTransition->startStyle, m_activeTransition->targetStyle))
+        if (hasLayoutDiff(m_stateTransition->startStyle, m_stateTransition->targetStyle))
             m_hasLayoutTransition = true;
     }
     if (m_ancestorHoverTransition && m_ancestorHoverTransition->active) {

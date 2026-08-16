@@ -66,6 +66,9 @@ CSS_REGISTRY = {
     "border-color":           {"feature": "border", "type": "color"},
     "border-style":           {"feature": "border", "type": "keyword"},
     "border":                 {"feature": "border", "type": "shorthand"},
+
+    # ── Transform ──────────────────────────────────────────
+    "transform":              {"feature": "transform", "type": "transform"},
 }
 
 

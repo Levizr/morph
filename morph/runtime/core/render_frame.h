@@ -79,6 +79,17 @@ struct FlatRenderNode {
     float animOffsetY = 0;
     float animOpacity = 1.0f;
 
+#ifdef MORPH_FEATURE_TRANSFORM
+    // Resolved transform (identity when transformSet == false)
+    bool transformSet = false;
+    float matrix[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+    // transform-origin as fractions of this node's box (CSS default center).
+    float originX = 0.5f, originY = 0.5f;
+    // Screen-space AABB of the node's box under its full accumulated
+    // transform (own + ancestor matrices + scroll offsets).
+    float cullX = 0, cullY = 0, cullW = 0, cullH = 0;
+#endif
+
     // Display list (pre-recorded paint commands)
     int dlOffset;
     int dlCount;

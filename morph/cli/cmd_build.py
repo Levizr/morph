@@ -267,7 +267,33 @@ def _deser_style(s: dict) -> IRStyle:
         border_style=s.get("border_style", "none"),
         box_sizing=s.get("box_sizing", "content-box"),
         z_index=s.get("z_index"),
+        transform_ops=_deser_transform_ops(s.get("transform_ops")),
+        transform_matrix=tuple(s["transform_matrix"]) if s.get("transform_matrix") else None,
+        transform_origin=_deser_transform_origin(s.get("transform_origin_raw")),
+        transform_origin_resolved=tuple(s["transform_origin"]) if s.get("transform_origin") else None,
     )
+
+
+def _deser_transform_origin(raw):
+    """Rebuild a transform-origin tuple after the JSON round-trip."""
+    if not raw or not isinstance(raw, list) or len(raw) != 2:
+        return None
+    try:
+        return ((float(raw[0][0]), bool(raw[0][1])),
+                (float(raw[1][0]), bool(raw[1][1])))
+    except (TypeError, ValueError, IndexError):
+        return None
+
+
+def _deser_transform_ops(ops):
+    """Rebuild transform op tuples after the JSON round-trip (lists → tuples)."""
+    if not ops:
+        return None
+    def _tuplify(v):
+        if isinstance(v, list):
+            return tuple(_tuplify(x) for x in v)
+        return v
+    return [_tuplify(op) for op in ops]
 
 
 def _deser_node(d: dict) -> IRNode:

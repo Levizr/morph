@@ -181,6 +181,8 @@ _CSS_TO_IR: dict[str, str] = {
     "border-color":              "border_color",
     "border-style":              "border_style",
     "box-sizing":                "box_sizing",
+    "transform":                 "transform_ops",
+    "transform-origin":          "transform_origin",
 }
 
 
@@ -219,8 +221,50 @@ def _parse_margin_auto(val: str) -> tuple[bool, bool, bool, bool]:
     return (False, False, False, False)
 
 
+def _parse_transform_origin(raw: str) -> tuple | None:
+    """Parse a CSS `transform-origin` value into ((x, is_pct_x), (y, is_pct_y)).
+
+    One value sets both axes (second defaults to center).  Keywords
+    left/top/center/right/bottom map to 0 / 0.5 / 1.  Returns None when the
+    value is invalid (property ignored).
+    """
+    parts = raw.split()
+    if len(parts) == 0 or len(parts) > 2:
+        return None
+
+    def axis(tok: str) -> tuple[float, bool] | None:
+        k = tok.strip().lower()
+        if k in ("left", "top"):
+            return (0.0, False)
+        if k == "center":
+            return (0.5, False)
+        if k in ("right", "bottom"):
+            return (1.0, False)
+        if k.endswith("%"):
+            try:
+                return (float(k[:-1]), True)
+            except ValueError:
+                return None
+        if k.endswith("px"):
+            k = k[:-2]
+        try:
+            return (float(k), False)
+        except ValueError:
+            return None
+
+    x = axis(parts[0])
+    if x is None:
+        return None
+    if len(parts) == 2:
+        y = axis(parts[1])
+        if y is None:
+            return None
+    else:
+        y = (0.5, False)
+    return (x, y)
+
+
 class IRBuilder:
-    """Converts a walked AST + CSS rules + Tailwind into an IR tree."""
 
     def __init__(self, config=None):
         self.config = config
@@ -1099,5 +1143,14 @@ def _convert_value(field: str, raw: str | float | int) -> float | str | tuple | 
 
     if field == "border_style":
         return raw
+
+    if field == "transform_ops":
+        from morph.style.transforms import parse_transform
+        ops = parse_transform(raw)
+        # None = invalid (property ignored); [] = none/keyword (no transform)
+        return ops if ops else None
+
+    if field == "transform_origin":
+        return _parse_transform_origin(raw)
 
     return None

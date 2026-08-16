@@ -3,6 +3,16 @@
 #include <cstdio>
 
 // ── GLSL shader sources ──────────────────────────────────────
+// The transform feature adds a per-instance model matrix (mat4 attribute).
+// Raw string literals can't contain #ifdef, so splice with adjacent literals.
+
+#ifdef MORPH_FEATURE_TRANSFORM
+#define MORPH_GLSL_MODEL_DECL "layout(location = 7) in mat4 aModel;\n"
+#define MORPH_GLSL_MODEL_MUL "aModel * "
+#else
+#define MORPH_GLSL_MODEL_DECL ""
+#define MORPH_GLSL_MODEL_MUL ""
+#endif
 
 static const char* kQuadVertSrc = R"glsl(
 #version 330 core
@@ -13,6 +23,7 @@ layout(location = 3) in float aRadius;
 layout(location = 4) in float aBorderWidth;
 layout(location = 5) in vec4 aBorderColor;
 layout(location = 6) in float aBorderOnly;
+)glsl" MORPH_GLSL_MODEL_DECL R"glsl(
 uniform mat4 uProj;
 out vec4 vColor;
 out vec2 vUV;
@@ -23,7 +34,7 @@ out vec4 vBorderColor;
 out float vBorderOnly;
 void main() {
     vec2 pos = aInst0.xy + aPos * aInst0.zw;
-    gl_Position = uProj * vec4(pos, 0.0, 1.0);
+    gl_Position = uProj * )glsl" MORPH_GLSL_MODEL_MUL R"glsl(vec4(pos, 0.0, 1.0);
     vColor = aInst1;
     vUV = aPos;
     vSize = aInst0.zw;
@@ -119,13 +130,14 @@ layout(location = 1) in vec4 aInst0;
 layout(location = 2) in vec4 aInst1;
 layout(location = 3) in vec4 aInst2;
 layout(location = 4) in float aIsColor;
+)glsl" MORPH_GLSL_MODEL_DECL R"glsl(
 uniform mat4 uProj;
 out vec4 vColor;
 out vec2 vUV;
 flat out float vIsColor;
 void main() {
     vec2 pos = aInst0.xy + aPos * aInst0.zw;
-    gl_Position = uProj * vec4(pos, 0.0, 1.0);
+    gl_Position = uProj * )glsl" MORPH_GLSL_MODEL_MUL R"glsl(vec4(pos, 0.0, 1.0);
     vUV = mix(aInst1.xy, aInst1.zw, aPos);
     vColor = aInst2;
     vIsColor = aIsColor;
@@ -159,12 +171,13 @@ layout(location = 0) in vec2 aPos;
 layout(location = 1) in vec4 aInst0;
 layout(location = 2) in vec4 aInst1;
 layout(location = 3) in vec4 aInst2;
+)glsl" MORPH_GLSL_MODEL_DECL R"glsl(
 uniform mat4 uProj;
 out vec2 vUV;
 out vec4 vTint;
 void main() {
     vec2 pos = aInst0.xy + aPos * aInst0.zw;
-    gl_Position = uProj * vec4(pos, 0.0, 1.0);
+    gl_Position = uProj * )glsl" MORPH_GLSL_MODEL_MUL R"glsl(vec4(pos, 0.0, 1.0);
     vUV = mix(aInst1.xy, aInst1.zw, aPos);
     vTint = aInst2;
 }

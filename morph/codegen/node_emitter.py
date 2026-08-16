@@ -16,6 +16,35 @@ def fmt(v: float) -> str:
     return s.rstrip("0").rstrip(".") + ".0f" if "." not in s else s + "f"
 
 
+def transform_assignments(prefix: str, m: tuple[float, ...],
+                          ptr: bool = False) -> list[str]:
+    """C++ assignments writing a resolved transform matrix to a style.
+
+    ``ptr=True`` when ``prefix`` is a pointer (e.g. ``node->hoverStyle``).
+    """
+    op = "->" if ptr else "."
+    lines = [f"{prefix}{op}transformSet = true;"]
+    for i, v in enumerate(m):
+        lines.append(f"{prefix}{op}matrix[{i}] = {fmt(v)};")
+    return lines
+
+
+def transform_origin_assignments(prefix: str, origin: tuple[float, float],
+                                 ptr: bool = False) -> list[str]:
+    """C++ assignments writing a resolved transform-origin to a style.
+
+    Fractions (0..1) of the element's own border-box size; the runtime
+    default is the center (0.5, 0.5), so only non-default origins are
+    emitted by callers.
+    """
+    op = "->" if ptr else "."
+    return [
+        f"{prefix}{op}originSet = true;",
+        f"{prefix}{op}originX = {fmt(origin[0])};",
+        f"{prefix}{op}originY = {fmt(origin[1])};",
+    ]
+
+
 class NodeEmitter:
     """Generates C++ instantiation code for an IR node tree.
 
@@ -213,6 +242,12 @@ class NodeEmitter:
                     lines.append(f"{node_id}->m_associatedEffects.push_back(morph::create_effect([{node_id}]() {{")
                     lines.append(f"{indent}{node_id}->interruptStateTransitions();")
                     lines.append(f"{indent}morph::setColor({node_id}->style.{field_name}, morph::str({cpp_expr}));")
+                    lines.append(f"{indent}{node_id}->markDirty(PaintDirty);")
+                    lines.append(f"}}));")
+                elif val_type == "transform":
+                    lines.append(f"{node_id}->m_associatedEffects.push_back(morph::create_effect([{node_id}]() {{")
+                    lines.append(f"{indent}{node_id}->interruptStateTransitions();")
+                    lines.append(f"{indent}morph::setCssTransform({node_id}->style, morph::str({cpp_expr}), {node_id}->w, {node_id}->h);")
                     lines.append(f"{indent}{node_id}->markDirty(PaintDirty);")
                     lines.append(f"}}));")
 
@@ -428,6 +463,15 @@ class NodeEmitter:
             if s.scrollbar_border_radius != 4.0:
                 lines.append(f"{prefix}.scrollbarBorderRadius = {fmt(s.scrollbar_border_radius)};")
 
+        # ── Feature: TRANSFORM ──
+        if "transform" in self.features:
+            if s.transform_matrix is not None:
+                lines.extend(transform_assignments(prefix, s.transform_matrix))
+            if s.transform_origin_resolved is not None \
+                    and s.transform_origin_resolved != (0.5, 0.5):
+                lines.extend(transform_origin_assignments(
+                    prefix, s.transform_origin_resolved))
+
         return "\n".join(f"{indent}{l}" for l in lines)
 
     def _set_ancestor_hover_rules(self, node: IRNode, indent: str) -> str:
@@ -518,6 +562,13 @@ class NodeEmitter:
                     lines.append(f"{var}.style.flexGrow = {fmt(s.flex_grow)};")
                 if s.flex_shrink != 1.0:
                     lines.append(f"{var}.style.flexShrink = {fmt(s.flex_shrink)};")
+            if "transform" in self.features:
+                if s.transform_matrix is not None:
+                    lines.extend(transform_assignments(f"{var}.style", s.transform_matrix))
+                if s.transform_origin_resolved is not None \
+                        and s.transform_origin_resolved != (0.5, 0.5):
+                    lines.extend(transform_origin_assignments(
+                        f"{var}.style", s.transform_origin_resolved))
             lines.append(f"{node.node_id}->{member}.push_back({var});")
         return "\n" + "\n".join(f"{indent}{l}" for l in lines)
 
@@ -630,6 +681,15 @@ class NodeEmitter:
         if "cursor" in self.features:
             if s.cursor != "default" and s.cursor != base.cursor:
                 overrides.append(f"{hv}->cursor = \"{s.cursor}\";")
+
+        # ── Feature: TRANSFORM ──
+        if "transform" in self.features:
+            if s.transform_matrix is not None and s.transform_matrix != base.transform_matrix:
+                overrides.extend(transform_assignments(hv, s.transform_matrix, ptr=True))
+            if s.transform_origin_resolved is not None \
+                    and s.transform_origin_resolved != base.transform_origin_resolved:
+                overrides.extend(transform_origin_assignments(
+                    hv, s.transform_origin_resolved, ptr=True))
 
         if not overrides:
             return ""

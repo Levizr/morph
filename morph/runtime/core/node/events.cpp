@@ -2,16 +2,87 @@
 #include <cmath>
 
 MorphNode* MorphNode::hitTest(float ex, float ey) {
-    if (ex < x || ex > x + w || ey < y || ey > y + h) return nullptr;
+#ifdef MORPH_FEATURE_TRANSFORM
+    float inv[16];
+    morph::mat4Identity(inv);
+    return hitTestImpl(ex, ey, inv);
+#else
+    return hitTestImpl(ex, ey, nullptr);
+#endif
+}
+
+// accInv is the inverse of the accumulated model transform of this node
+// (identity matrix for the root). It maps screen coords into this node's
+// local space, where its box is (0, 0, w, h) — so transformed subtrees are
+// hit-tested against their actual (rotated/scaled) geometry.
+MorphNode* MorphNode::hitTestImpl(float ex, float ey, const float* accInv) {
+    float lx = ex, ly = ey;
+#ifdef MORPH_FEATURE_TRANSFORM
+    if (accInv)
+    {
+        float ox, oy, oz;
+        morph::mat4TransformPoint(accInv, ex, ey, 0.0f, ox, oy, oz);
+        lx = ox;
+        ly = oy;
+    }
+#endif
+    if (accInv)
+    {
+        if (lx < 0.0f || lx > w || ly < 0.0f || ly > h) return nullptr;
+    }
+    else
+    {
+        if (ex < x || ex > x + w || ey < y || ey > y + h) return nullptr;
+    }
     const auto& po = paintOrder();
     for (auto it = po.rbegin(); it != po.rend(); ++it) {
         auto* c = *it;
-        float cy = c->y - (scrollEnabled ? scrollY : 0);
-        if (ex >= c->x && ex <= c->x + c->w &&
-            ey >= cy && ey <= cy + c->h) {
-            auto* found = c->hitTest(ex, ey + (scrollEnabled ? scrollY : 0));
-            if (found) return found;
+        const float* childInvPtr;
+        float childInv[16];
+#ifdef MORPH_FEATURE_TRANSFORM
+        if (accInv)
+        {
+            // A(child) = A(this) × T(0,-scrollY) × T(rel) × T(o) × M(child) ×
+            // T(-o), so A(child)^-1 = T(o) × M^-1 × T(-o) × T(-rel) ×
+            // T(0,+scrollY) × A(this)^-1.  o is the child's transform-origin
+            // in its own box space (default center).
+            float invScroll[16], invRel[16], invM[16], invO[16], posO[16],
+                  t1[16], t2[16], t3[16];
+            float s = (scrollEnabled && contentH > h) ? scrollY : 0.0f;
+            morph::mat4Identity(invScroll);
+            invScroll[13] = s;
+            morph::mat4Identity(invRel);
+            invRel[12] = x - c->x;
+            invRel[13] = y - c->y;
+            float ox = 0.0f, oy = 0.0f;
+            if (c->style.transformSet)
+            {
+                morph::mat4Inverse(c->style.matrix, invM);
+                ox = c->style.originX * c->w;
+                oy = c->style.originY * c->h;
+            }
+            else
+            {
+                morph::mat4Identity(invM);
+            }
+            morph::mat4Identity(invO);
+            invO[12] = -ox; invO[13] = -oy;
+            morph::mat4Identity(posO);
+            posO[12] = ox; posO[13] = oy;
+            morph::mat4Multiply(t1, invScroll, accInv);
+            morph::mat4Multiply(t2, invRel, t1);
+            morph::mat4Multiply(t3, invO, t2);
+            morph::mat4Multiply(t2, invM, t3);
+            morph::mat4Multiply(childInv, posO, t2);
+            childInvPtr = childInv;
         }
+        else
+#endif
+        {
+            childInvPtr = nullptr;
+        }
+        auto* found = c->hitTestImpl(ex, ey, childInvPtr);
+        if (found) return found;
     }
     return this;
 }

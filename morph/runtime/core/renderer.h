@@ -43,10 +43,21 @@ public:
 
     virtual void setClearColor(float r, float g, float b, float a) {}
 
-    void pushScrollOffset(float dx, float dy) { m_scrollX += dx; m_scrollY += dy; }
-    void popScrollOffset(float dx, float dy) { m_scrollX -= dx; m_scrollY -= dy; }
+    virtual void pushScrollOffset(float dx, float dy) { m_scrollX += dx; m_scrollY += dy; }
+    virtual void popScrollOffset(float dx, float dy) { m_scrollX -= dx; m_scrollY -= dy; }
     float scrollX() const { return m_scrollX; }
     float scrollY() const { return m_scrollY; }
+
+#ifdef MORPH_FEATURE_TRANSFORM
+    // Model-path transform stack. pushTransform(m, ax, ay) composes the
+    // current accumulated model with m and remembers the node's layout
+    // anchor (ax, ay): while the stack is active every draw call computes
+    // model = acc * T(-anchor) so baked absolute instance coords cancel and
+    // shapes land in the node's local space under the transform.
+    virtual void pushTransform(const float m[16], float anchorX, float anchorY) {}
+    virtual void popTransform() {}
+    virtual bool transformStackActive() const { return false; }
+#endif
 
     int fbHeight() const { return m_fbHeight; }
     void setFBHeight(int h) { m_fbHeight = h; }
