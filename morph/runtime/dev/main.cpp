@@ -446,6 +446,7 @@ int main() {
         glfwTerminate();
         return 1;
     }
+    window.setConstraints(config.minWidth, config.minHeight, config.maxWidth, config.maxHeight);
     window.addChild(rootNode);
 
     // ── DevTools ─────────────────────────────────────────────
@@ -491,8 +492,10 @@ int main() {
             DevWindowConfig newConfig;
             MorphNode* newNode = nullptr;
             if (parseIR(newRoot, newNode, newConfig, newRegistry, newStateVars)) {
-                // Apply window config (title only; resizing disrupts dev flow)
+                // Apply window config (title + constraints; resizing disrupts dev flow)
                 window.setTitle(newConfig.title);
+                window.setConstraints(newConfig.minWidth, newConfig.minHeight,
+                                      newConfig.maxWidth, newConfig.maxHeight);
                 if (newConfig.renderer == "forge")
                     setRenderMode(RenderMode::Forge);
                 else
