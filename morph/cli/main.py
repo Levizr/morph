@@ -54,9 +54,21 @@ def main():
                          help="Pin a specific UPX release to use (e.g. 4.2.4); "
                               "overrides build.upx_version in config")
 
-    p_run = sub.add_parser("run", help="Run built production binary")
+    p_run = sub.add_parser("run", help="Build and run production binary")
     p_run.add_argument("binary", nargs="?", default=None,
                        help="Path to binary (default: <output>/app)")
+    p_run.add_argument("--entry", type=str, default=None,
+                       help="Override entry .mx file")
+    p_run.add_argument("--output", type=str, default=None,
+                       help="Output directory (default: .morph/)")
+    p_run.add_argument("--static", action="store_true",
+                       help="Statically link GLFW/FreeType/HarfBuzz into the binary")
+    p_run.add_argument("--upx", dest="upx", action="store_true", default=None,
+                       help="Compress the binary with UPX")
+    p_run.add_argument("--no-upx", dest="upx", action="store_false",
+                       help="Skip UPX compression")
+    p_run.add_argument("--upx-version", type=str, default=None,
+                       help="Pin a specific UPX release to use")
 
     p_pkg = sub.add_parser("pkg", help="Package manager")
     pkg_sub = p_pkg.add_subparsers(dest="pkg_command")
@@ -140,7 +152,7 @@ def _show_welcome(parser: argparse.ArgumentParser) -> None:
         ("init   [name]",  "Scaffold a new .mx project (interactive wizard)"),
         ("dev",            "Start dev mode with live hot reload"),
         ("build",          "Compile .mx → native OpenGL binary"),
-        ("run    [path]",  "Run built production binary"),
+        ("run    [path]",  "Build and run production binary"),
         ("pkg   <add|rm|install|list|search>",  "Package manager"),
         ("doctor",             "Verify system dependencies"),
         ("cache",              "Clear fetched CSS cache"),

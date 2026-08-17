@@ -101,24 +101,29 @@ def run(config, verbose: bool = True) -> dict | None:
 
         t = time.time()
         css_rules: dict = {}
+        keyframes: dict = {}
         for imp in walked.get("imports", []):
             if imp["type"] == "css_local":
                 path = Path(config.entry).parent / imp["path"]
                 if path.exists():
-                    rules = _css_parser.parse_file(str(path))
+                    rules, kfs = _css_parser.parse_sheet(path.read_text(encoding="utf-8"))
                     css_rules.update(rules)
+                    for name, kf_list in kfs.items():
+                        keyframes.setdefault(name, []).extend(kf_list)
                 else:
                     log_warn(f"CSS file not found: {path} (imported from {config.entry})")
             elif imp["type"] == "css_url":
                 css_text = _fetcher.fetch(imp["url"])
                 if css_text:
-                    rules = _css_parser.parse_string(css_text)
+                    rules, kfs = _css_parser.parse_sheet(css_text)
                     css_rules.update(rules)
+                    for name, kf_list in kfs.items():
+                        keyframes.setdefault(name, []).extend(kf_list)
         if verbose:
             log_dim(f"resolved  CSS  in {_fmt(time.time() - t)}")
 
         t = time.time()
-        ir = IRBuilder(config).build(walked, css_rules, _tw_resolver)
+        ir = IRBuilder(config).build(walked, css_rules, _tw_resolver, keyframes)
         if verbose:
             log_dim(f"built  IR  in {_fmt(time.time() - t)}")
 

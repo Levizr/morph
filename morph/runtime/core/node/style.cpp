@@ -316,15 +316,31 @@ static void _retargetState(MorphNode* node, bool hover, bool on) {
     }
 
     MorphStyle target = node->style;
+#ifdef MORPH_FEATURE_ANIMATION
+    bool animRestored = false;
+#endif
     if (on) {
         applyStyleDelta(target, *delta);
-        // Snapshot the pre-state at press and the press target (delta
-        // applied) so the release equality tests match the settled style.
+        // Snapshot the pre-state at press — must capture the BASE animation
+        // list (node->style is untouched so far) before the swap below.
         if (hover) {
             trans->preHoverStyle = node->style;
-            trans->pressStyle = target;
         } else {
             trans->preActiveStyle = node->style;
+        }
+#ifdef MORPH_FEATURE_ANIMATION
+        // CSS `animation` configs from :hover rules swap in/out with the
+        // state (browsers run hover animations only while hovered). The
+        // swap is instant — the style transition interpolates scalars only,
+        // so the animation must not wait for it to complete.
+        target.animations = delta->animations;
+        node->style.animations = delta->animations;
+#endif
+        // Press target must carry the swapped animation list so the hover-off
+        // matrix restore can tell the hover state owned an animation.
+        if (hover) {
+            trans->pressStyle = target;
+        } else {
             trans->pressActiveStyle = target;
         }
     } else {
@@ -336,6 +352,25 @@ static void _retargetState(MorphNode* node, bool hover, bool on) {
             buildReleaseStyle(target, target, trans->pressActiveStyle, trans->preActiveStyle);
         if (!node->m_hoverState)
             buildReleaseStyle(target, target, trans->pressStyle, trans->preHoverStyle);
+#ifdef MORPH_FEATURE_ANIMATION
+        // Restore the base `animation` configs when the hover state ends —
+        // instantly, while scalar fields still transition. The animation was
+        // writing the transform matrix every frame (so the equality check
+        // above can't revert it), so restore the pre-hover matrix too.
+        if (!node->m_hoverState) {
+            target.animations = trans->preHoverStyle.animations;
+            node->style.animations = trans->preHoverStyle.animations;
+#ifdef MORPH_FEATURE_TRANSFORM
+            if (!trans->preHoverStyle.animations.empty() ||
+                !trans->pressStyle.animations.empty()) {
+                memcpy(target.matrix, trans->preHoverStyle.matrix,
+                       sizeof(float) * 16);
+                target.transformSet = trans->preHoverStyle.transformSet;
+                animRestored = true;
+            }
+#endif
+        }
+#endif
     }
 
     if (node->m_transitionDuration > 0.0f) {
@@ -346,6 +381,21 @@ static void _retargetState(MorphNode* node, bool hover, bool on) {
     } else {
         node->style = target;
     }
+#ifdef MORPH_FEATURE_ANIMATION
+#ifdef MORPH_FEATURE_TRANSFORM
+    if (animRestored) {
+        // Browsers revert a removed animation's properties instantly — the
+        // transition only interpolates the non-animated scalar deltas, never
+        // the animation's transform. Snap the matrix now and freeze it in
+        // the transition's start snapshot so the unwind doesn't animate back.
+        memcpy(node->style.matrix, target.matrix, sizeof(float) * 16);
+        node->style.transformSet = target.transformSet;
+        if (trans->active)
+            memcpy(trans->startStyle.matrix, target.matrix,
+                   sizeof(float) * 16);
+    }
+#endif
+#endif
     node->markDirty(PaintDirty);
     if (hasLayoutDiff(layoutBefore, node->style))
         node->markDirty(LayoutDirty);
@@ -634,6 +684,9 @@ void MorphNode::update(float dt) {
     updateAncestorHoverTransition(dt);
     updateAncestorActiveTransition(dt);
     updateAnimations(dt);
+#ifdef MORPH_FEATURE_ANIMATION
+    updateCssAnimations(dt);
+#endif
 
     if (m_stateTransition && m_stateTransition->active) {
         m_isTransitioning = true;
@@ -650,6 +703,11 @@ void MorphNode::update(float dt) {
         if (hasLayoutDiff(m_ancestorActiveTransition->revertStyle, m_ancestorActiveTransition->targetStyle))
             m_hasLayoutTransition = true;
     }
+    if (m_ancestorActiveTransition && m_ancestorActiveTransition->active) {
+        m_isTransitioning = true;
+        if (hasLayoutDiff(m_ancestorActiveTransition->revertStyle, m_ancestorActiveTransition->targetStyle))
+            m_hasLayoutTransition = true;
+    }
     for (auto& a : m_animations) {
         if (a.running && !a.finished) {
             m_isTransitioning = true;
@@ -657,6 +715,17 @@ void MorphNode::update(float dt) {
                 m_hasLayoutTransition = true;
         }
     }
+#ifdef MORPH_FEATURE_ANIMATION
+    for (auto& st : m_cssAnimStates) {
+        if (st.active) {
+            m_isTransitioning = true;
+            // Keep the subtree in the render frame (culling guard); whether
+            // layout actually re-runs is decided by the dirty flags the
+            // driver set on individual properties.
+            m_hasLayoutTransition = true;
+        }
+    }
+#endif
 
     for (auto* c : children) c->update(dt);
 

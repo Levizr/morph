@@ -326,6 +326,17 @@ public:
     std::vector<MorphAnimation> m_animations;
     void updateAnimations(float dt);
 
+#ifdef MORPH_FEATURE_ANIMATION
+    // CSS `animation` runtime state (one entry per style.animations config).
+    // Behind the feature define so the struct layout is unchanged when the
+    // feature is compiled out (dead-code elimination in prod builds).
+    std::vector<CssAnimationState> m_cssAnimStates;
+    // Pre-animation style snapshots for the revert-on-finish path, indexed
+    // in parallel with m_cssAnimStates.
+    std::vector<MorphStyle> m_cssAnimBases;
+    void updateCssAnimations(float dt);
+#endif
+
     // Associated reactive effects (cleaned up on destruction)
     std::vector<morph::EffectNode*> m_associatedEffects;
 

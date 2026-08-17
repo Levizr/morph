@@ -63,6 +63,10 @@ int main() {
     auto& wm = WindowManager::get();
     auto lastFrameTime = std::chrono::steady_clock::now();
 
+{% if keyframe_code %}
+{{ keyframe_code }}
+
+{% endif %}
 {{ window_code }}
 
     // Enable vsync so present is capped at the refresh rate when we do render.

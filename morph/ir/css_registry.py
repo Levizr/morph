@@ -72,6 +72,17 @@ CSS_REGISTRY = {
 
     # ── Opacity ────────────────────────────────────────────
     "opacity":                {"feature": "opacity", "type": "float"},
+
+    # ── Animation ──────────────────────────────────────────
+    "animation":               {"feature": "animation", "type": "shorthand"},
+    "animation-name":          {"feature": "animation", "type": "keyword"},
+    "animation-duration":      {"feature": "animation", "type": "time"},
+    "animation-timing-function": {"feature": "animation", "type": "keyword"},
+    "animation-delay":         {"feature": "animation", "type": "time"},
+    "animation-iteration-count": {"feature": "animation", "type": "keyword"},
+    "animation-direction":     {"feature": "animation", "type": "keyword"},
+    "animation-fill-mode":     {"feature": "animation", "type": "keyword"},
+    "animation-play-state":    {"feature": "animation", "type": "keyword"},
 }
 
 

@@ -42,7 +42,75 @@ class IRSerializer:
             "extra_headers": w.extra_headers,
             "state_vars":   w.state_vars,
             "effect_decls": w.effect_decls,
+            "keyframes":    self._keyframes_dict(w.keyframes),
         }
+
+    @staticmethod
+    def _keyframes_dict(keyframes: dict[str, list]) -> dict:
+        """Serialize the global @keyframes registry.
+
+        Each entry is {"offset": float, "style": style_dict, "raw": {...}}
+        with a *partial* style (only the fields the keyframe declares).
+        C++ samples and interpolates these per frame.
+        """
+        return {
+            name: [
+                {
+                    "offset": kf.offset,
+                    "style": IRSerializer._keyframe_style_dict(kf),
+                    "raw": kf.raw,
+                }
+                for kf in kfs
+            ]
+            for name, kfs in keyframes.items()
+        }
+
+    @staticmethod
+    def _keyframe_style_dict(kf) -> dict:
+        """Partial style dict — only fields the keyframe explicitly declares.
+
+        Default-compare heuristics would drop legitimate declarations like
+        `opacity: 1` or `background-color: #000`; `declared` is set by the
+        IR builder, so presence in the JSON always means "declared".
+        """
+        full = IRSerializer._style_dict(kf.style)
+        declared = getattr(kf, "declared", None)
+        if declared:
+            return {k: v for k, v in full.items() if k in declared}
+        # Fallback for hand-built keyframes without `declared`: keep only
+        # fields that differ from the style defaults.
+        s = kf.style
+        keep = set()
+        if s.opacity != 1.0:
+            keep.add("opacity")
+        if s.bg_color != (0, 0, 0, 0):
+            keep.add("bg_color")
+        if s.color != (0, 0, 0, 1):
+            keep.add("color")
+        if s.border_radius != 0.0:
+            keep.add("border_radius")
+        if s.font_size != 16.0:
+            keep.add("font_size")
+        for f in ("width", "height", "left", "top"):
+            if getattr(s, f) is not None:
+                keep.add(f)
+        return {k: v for k, v in full.items() if k in keep}
+
+    @staticmethod
+    def _animations_dict(anims) -> list[dict]:
+        return [
+            {
+                "name": a.name,
+                "duration": a.duration,
+                "easing": a.easing,
+                "delay": a.delay,
+                "iterations": a.iterations,
+                "direction": a.direction,
+                "fill_mode": a.fill_mode,
+                "play_state": a.play_state,
+            }
+            for a in anims
+        ]
 
     @staticmethod
     def _style_dict(s: IRStyle) -> dict:
@@ -130,6 +198,10 @@ class IRSerializer:
         if n.transition_duration > 0:
             result["transition_duration"] = n.transition_duration
             result["transition_easing"] = n.transition_easing
+        if n.animations:
+            result["animations"] = self._animations_dict(n.animations)
+        if n.hover_animations:
+            result["hover_animations"] = self._animations_dict(n.hover_animations)
         if n.ancestor_hover_rules:
             result["ancestor_hover_rules"] = [
                 {"ancestor_tag": tag, "style": self._style_dict(s)}

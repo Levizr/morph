@@ -26,4 +26,5 @@ KNOWN_PROPERTIES: dict[str, str] = {
     "font-weight":      "normal",
     "text-align":       "left",
     "transform":        "none",
+    "animation":        "none",
 }

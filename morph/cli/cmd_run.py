@@ -6,6 +6,19 @@ from morph.utils.logger import log_banner, log_step, log_error, log_success, log
 
 
 def run(args=None) -> None:
+    from morph.cli.cmd_build import run as build_run
+    build_args = None
+    if args:
+        import argparse
+        build_args = argparse.Namespace(
+            entry=getattr(args, "entry", None),
+            output=getattr(args, "output", None),
+            static=getattr(args, "static", False),
+            upx=getattr(args, "upx", None),
+            upx_version=getattr(args, "upx_version", None),
+        )
+    build_run(build_args)
+
     config = load_config()
     out_dir = config.output
     from morph.build.platform import exe_suffix
@@ -16,7 +29,6 @@ def run(args=None) -> None:
 
     if not os.path.exists(binary):
         log_error(f"Binary not found at {binary}")
-        log_info("Run `morph build` first")
         sys.exit(1)
 
     log_banner("morph run")

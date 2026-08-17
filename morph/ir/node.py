@@ -2,6 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from morph.ir.style import IRStyle
 from morph.ir.event import IREvent
+from morph.ir.animation import IRAnimation, IRKeyframe
 
 
 @dataclass
@@ -38,6 +39,12 @@ class IRNode:
     then_nodes: list[IRNode] = field(default_factory=list)
     else_nodes: list[IRNode] = field(default_factory=list)
 
+    # ── CSS animations ────────────────────────────────────────
+    # Resolved `animation` configs (feature: "animation"). Empty = none.
+    animations: list[IRAnimation] = field(default_factory=list)
+    # Resolved `animation` configs from `:hover` rules (applied on hover).
+    hover_animations: list[IRAnimation] = field(default_factory=list)
+
     # ── Reactive className / style ────────────────────────────
     reactive_class: str = ""         # C++ expression for dynamic className (empty = static)
     reactive_style: dict[str, str] = field(default_factory=dict)
@@ -63,6 +70,8 @@ class IRWindow:
     extra_headers: list[str] = field(default_factory=list)
     state_vars: list[dict] = field(default_factory=list)  # morphState definitions
     effect_decls: list[dict] = field(default_factory=list)  # morphEffect declarations
+    # Global @keyframes: name → sorted keyframes. Shared by every window.
+    keyframes: dict[str, list[IRKeyframe]] = field(default_factory=dict)
 
 
 @dataclass

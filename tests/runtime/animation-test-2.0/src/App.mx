@@ -1,0 +1,36 @@
+import { CSS } from 'morph'
+
+CSS.load("style.css")
+
+export const windowConfig = {
+  title: "Animation Test 2.0",
+  width: 900,
+  height: 700,
+}
+
+export default function App() {
+  return (
+    <body>
+      <div className="title">css animations 2.0 — multi-stop, multi-animation, fractional iterations, hover swap, fill-modes, % units</div>
+
+      <div className="row">
+        <div className="card combo" id="combo">combo: 5 props multi-stop</div>
+        <div className="card triple" id="triple">triple: 3 animations at once</div>
+        <div className="card half" id="half">half: 2.5 iterations</div>
+        <div className="card pingpong" id="pingpong">pingpong: infinite alternate</div>
+      </div>
+
+      <div className="row">
+        <div className="card reverse" id="reverse">reverse: alternate-reverse</div>
+        <div className="card hover-swap" id="hover-swap">hover-swap: hover me</div>
+        <div className="card delayed-both" id="delayed-both">both: 3s delay hold end</div>
+        <div className="card delayed-backwards" id="delayed-backwards">backwards: 3s delay revert</div>
+      </div>
+
+      <div className="row">
+        <div className="card pct" id="pct">pct: left/width %</div>
+        <div className="card translate-pct" id="translate-pct">translate %</div>
+      </div>
+    </body>
+  )
+}

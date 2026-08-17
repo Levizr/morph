@@ -84,6 +84,12 @@ class FeatureSet:
         "box-sizing": ("border_box",),
         "margin": ("margin_collapse",),
         "transform": ("transform",),
+        # CSS animations need the runtime animation driver + keyframe engine.
+        "animation": ("animation",),
+        "animation-name": ("animation",), "animation-duration": ("animation",),
+        "animation-timing-function": ("animation",), "animation-delay": ("animation",),
+        "animation-iteration-count": ("animation",), "animation-direction": ("animation",),
+        "animation-fill-mode": ("animation",), "animation-play-state": ("animation",),
     }
 
     def _scan_reactive(self, reactive_style: dict[str, str]) -> None:
@@ -95,6 +101,18 @@ class FeatureSet:
         for win in windows:
             if getattr(win, "renderer", "flash") == "forge":
                 self.features.add("forge")
+            # Keyframes may animate features the base styles never touch
+            # (opacity, position offsets, transform) — enable them here so
+            # the generated code compiles against the feature-gated fields.
+            for kfs in getattr(win, "keyframes", {}).values():
+                for kf in kfs:
+                    self._scan_style(kf.style)
+                    if "opacity" in kf.raw:
+                        self.features.add("opacity")
+                    if "transform" in kf.raw:
+                        self.features.add("transform")
+                    if "left" in kf.raw or "top" in kf.raw:
+                        self.features.add("position")
             for node in self._walk(win.nodes):
                 if node.node_type == "__text__":
                     self.features.add("text")
@@ -114,6 +132,10 @@ class FeatureSet:
                     self._scan_style(node.active_style)
                 if node.events:
                     self.features.add("event")
+                if node.animations or node.hover_animations:
+                    # CSS `animation` + @keyframes driver (dead-code eliminated
+                    # from prod builds that never use animations).
+                    self.features.add("animation")
                 if isinstance(node, IRViewport):
                     self.features.add("viewport")
                 if node.reactive_style:
@@ -163,6 +185,8 @@ class FeatureSet:
             defines.append("MORPH_FEATURE_BORDER")
         if "transform" in self.features:
             defines.append("MORPH_FEATURE_TRANSFORM")
+        if "animation" in self.features:
+            defines.append("MORPH_FEATURE_ANIMATION")
         # ── Layout feature defines ──
         if "display_none" in self.features:
             defines.append("MORPH_FEATURE_DISPLAY_NONE")

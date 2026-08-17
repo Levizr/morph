@@ -7,6 +7,7 @@ from morph.config.loader import load_config
 from morph.dev import pipeline
 from morph.codegen.emitter import Emitter
 from morph.ir.node import IRWindow, IRNode
+from morph.ir.animation import IRKeyframe, IRAnimation
 from morph.ir.style import IRStyle
 from morph.ir.event import IREvent
 from morph.utils.logger import log_info, log_error, log_step, log_success, log_banner, log_dim, log_key, log_bullet
@@ -195,6 +196,18 @@ def run(args=None) -> None:
 def _deserialize(ir_dict: dict) -> list:
     windows = []
     for w in ir_dict.get("windows", []):
+        # Keyframes are needed by codegen (feature scan + registration code).
+        keyframes = {}
+        for name, kf_list in (w.get("keyframes") or {}).items():
+            keyframes[name] = [
+                IRKeyframe(
+                    offset=float(kf.get("offset", 0.0)),
+                    style=_deser_style(kf.get("style", {}) or {}),
+                    declared=set((kf.get("style") or {}).keys()),
+                    raw=dict(kf.get("raw") or {}),
+                )
+                for kf in kf_list or []
+            ]
         win = IRWindow(
             window_id=w.get("id", "win_0001"),
             title=w.get("title", "App"),
@@ -208,6 +221,7 @@ def _deserialize(ir_dict: dict) -> list:
             extra_headers=w.get("extra_headers", []),
             state_vars=w.get("state_vars", []),
             effect_decls=w.get("effect_decls", []),
+            keyframes=keyframes,
         )
         windows.append(win)
     return windows
@@ -357,6 +371,32 @@ def _deser_node(d: dict) -> IRNode:
         ],
         ancestor_hover_rules=ancestor_hover_rules,
         ancestor_active_rules=ancestor_active_rules,
+        animations=[
+            IRAnimation(
+                name=a.get("name", ""),
+                duration=float(a.get("duration", 0.0) or 0.0),
+                easing=a.get("easing", "linear"),
+                delay=float(a.get("delay", 0.0) or 0.0),
+                iterations=float(a.get("iterations", 1.0) or 1.0),
+                direction=a.get("direction", "normal"),
+                fill_mode=a.get("fill_mode", "none"),
+                play_state=a.get("play_state", "running"),
+            )
+            for a in d.get("animations", [])
+        ],
+        hover_animations=[
+            IRAnimation(
+                name=a.get("name", ""),
+                duration=float(a.get("duration", 0.0) or 0.0),
+                easing=a.get("easing", "linear"),
+                delay=float(a.get("delay", 0.0) or 0.0),
+                iterations=float(a.get("iterations", 1.0) or 1.0),
+                direction=a.get("direction", "normal"),
+                fill_mode=a.get("fill_mode", "none"),
+                play_state=a.get("play_state", "running"),
+            )
+            for a in d.get("hover_animations", [])
+        ],
     )
 
 

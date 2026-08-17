@@ -166,6 +166,7 @@ class Compiler:
             os.path.join(node_dir, "events.cpp"),
             os.path.join(node_dir, "flatten.cpp"),
             os.path.join(node_dir, "style.cpp"),
+            os.path.join(node_dir, "animation.cpp"),
             os.path.join(node_dir, "layout.cpp"),
             os.path.join(node_dir, "paint_order.cpp"),
             os.path.join(runtime_dir, "core", "window.cpp"),
@@ -366,6 +367,7 @@ class Compiler:
             "MORPH_FEATURE_BORDER_BOX", "MORPH_FEATURE_IMAGE",
             "MORPH_FEATURE_DIRTY_RENDERING",
             "MORPH_FEATURE_TRANSFORM",
+            "MORPH_FEATURE_ANIMATION",
             "MORPH_FEATURE_DEV",
         ]
         for d in _DEV_FEATURES:

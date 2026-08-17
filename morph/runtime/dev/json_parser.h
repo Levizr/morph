@@ -50,6 +50,14 @@ public:
         return false;
     }
 
+    // Object iteration: key at index i (requires size() > i).
+    const std::string& key(size_t i) const { return m_obj[i].first; }
+
+    // Object iteration: value at index i (requires size() > i).  Note:
+    // operator[](size_t) indexes the array storage, so objects MUST use
+    // key()/value() for iteration.
+    const JsonValue& value(size_t i) const { return m_obj[i].second; }
+
     // Iteration helpers for array
     using ArrayIter = std::vector<JsonValue>::const_iterator;
     ArrayIter begin() const { return m_arr.begin(); }

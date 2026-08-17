@@ -31,6 +31,7 @@ set(RUNTIME_SOURCES
     ${RUNTIME_DIR}/core/node/node.cpp
     ${RUNTIME_DIR}/core/node/layout.cpp
     ${RUNTIME_DIR}/core/node/style.cpp
+    ${RUNTIME_DIR}/core/node/animation.cpp
     ${RUNTIME_DIR}/core/node/flatten.cpp
     ${RUNTIME_DIR}/core/node/events.cpp
     ${RUNTIME_DIR}/core/node/paint_order.cpp
@@ -85,6 +86,7 @@ target_compile_definitions(morph_devrt PRIVATE
     MORPH_FEATURE_IMAGE
     MORPH_FEATURE_DIRTY_RENDERING
     MORPH_FEATURE_TRANSFORM
+    MORPH_FEATURE_ANIMATION
     MORPH_FEATURE_DEV
     MORPH_FEATURE_DEV_RENDERER_SWITCH
     MORPH_RENDERER_FORGE

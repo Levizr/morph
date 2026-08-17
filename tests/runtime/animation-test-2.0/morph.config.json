@@ -1,0 +1,18 @@
+{
+  "name": "animation-test-2.0",
+  "entry": "src/App.mx",
+  "output": "dist/",
+  "window": {
+    "width": 900,
+    "height": 700,
+    "title": "animation-test-2.0"
+  },
+  "dependencies": {},
+  "cpp_sources": [],
+  "build": {
+    "wayland": false,
+    "system_freetype": false,
+    "upx": true,
+    "upx_version": ""
+  }
+}

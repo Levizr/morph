@@ -66,6 +66,153 @@ static void setColorFromJson(float* dst, const JsonValue& arr) {
     }
 }
 
+#ifdef MORPH_FEATURE_ANIMATION
+// ── @keyframes / animation deserialization (feature: animation) ─
+
+static KeyframeProperty keyframePropFor(const std::string& cssProp) {
+    if (cssProp == "opacity") return KeyframeProperty::Opacity;
+    if (cssProp == "background-color") return KeyframeProperty::BgColor;
+    if (cssProp == "color") return KeyframeProperty::Color;
+    if (cssProp == "border-radius") return KeyframeProperty::BorderRadius;
+    if (cssProp == "font-size") return KeyframeProperty::FontSize;
+    if (cssProp == "width") return KeyframeProperty::Width;
+    if (cssProp == "height") return KeyframeProperty::Height;
+    if (cssProp == "left") return KeyframeProperty::Left;
+    if (cssProp == "top") return KeyframeProperty::Top;
+    if (cssProp == "transform") return KeyframeProperty::Transform;
+    return KeyframeProperty::None;
+}
+
+static void pushKeyframeValue(std::vector<KeyframeValue>& values,
+                              KeyframeProperty prop, float a = 0.0f,
+                              float b = 0.0f, float c = 0.0f, float d = 0.0f,
+                              const std::string& css = "") {
+    KeyframeValue v;
+    v.prop = prop;
+    v.v[0] = a; v.v[1] = b; v.v[2] = c; v.v[3] = d;
+    v.css = css;
+    values.push_back(std::move(v));
+}
+
+// Extract the animatable values from a serialized (partial) keyframe style
+// into KeyframeValues.  The IR serializer emits only the fields the keyframe
+// explicitly declares (presence == declared), so no default-value heuristics
+// here — `opacity: 1` and `background-color: #000` are legit declarations.
+// Raw (% / transform) values come from `raw`.
+static void keyframeValuesFromStyle(std::vector<KeyframeValue>& values,
+                                    const JsonValue& styleVal,
+                                    const JsonValue& rawVal) {
+    if (styleVal.type() == JsonType::Object) {
+        const JsonValue& o = styleVal["opacity"];
+        if (!o.isNull())
+            pushKeyframeValue(values, KeyframeProperty::Opacity, o.asFloat());
+        const JsonValue& bg = styleVal["bg_color"];
+        if (bg.type() == JsonType::Array && bg.size() >= 4)
+            pushKeyframeValue(values, KeyframeProperty::BgColor,
+                              bg[0].asFloat(), bg[1].asFloat(),
+                              bg[2].asFloat(), bg[3].asFloat());
+        const JsonValue& col = styleVal["color"];
+        if (col.type() == JsonType::Array && col.size() >= 4)
+            pushKeyframeValue(values, KeyframeProperty::Color,
+                              col[0].asFloat(), col[1].asFloat(),
+                              col[2].asFloat(), col[3].asFloat());
+        const JsonValue& br = styleVal["border_radius"];
+        if (!br.isNull())
+            pushKeyframeValue(values, KeyframeProperty::BorderRadius, br.asFloat());
+        const JsonValue& fs = styleVal["font_size"];
+        if (!fs.isNull())
+            pushKeyframeValue(values, KeyframeProperty::FontSize, fs.asFloat());
+        const JsonValue& w = styleVal["width"];
+        if (!w.isNull()) pushKeyframeValue(values, KeyframeProperty::Width, w.asFloat());
+        const JsonValue& h = styleVal["height"];
+        if (!h.isNull()) pushKeyframeValue(values, KeyframeProperty::Height, h.asFloat());
+        const JsonValue& l = styleVal["left"];
+        if (!l.isNull()) pushKeyframeValue(values, KeyframeProperty::Left, l.asFloat());
+        const JsonValue& t = styleVal["top"];
+        if (!t.isNull()) pushKeyframeValue(values, KeyframeProperty::Top, t.asFloat());
+    }
+    // Raw (unresolved) values: transforms always; % lengths.
+    if (rawVal.type() == JsonType::Object) {
+        for (size_t i = 0; i < rawVal.size(); i++) {
+            const std::string& prop = rawVal.key(i);
+            KeyframeProperty kp = keyframePropFor(prop);
+            if (kp == KeyframeProperty::None) continue;
+            pushKeyframeValue(values, kp, 0, 0, 0, 0, rawVal.value(i).asString());
+        }
+    }
+}
+
+static bool parseIRKeyframes(const JsonValue& root) {
+    // Reset the registry on every (re)load so hot-reloads never carry
+    // stale keyframes from a previous version of the stylesheet.
+    morphClearKeyframes();
+    if (root.type() != JsonType::Object || !root.has("windows"))
+        return false;
+    auto& win = root["windows"];
+    if (win.type() != JsonType::Array || win.size() == 0) return false;
+    if (!win[0].has("keyframes") || win[0]["keyframes"].type() != JsonType::Object)
+        return true;  // no keyframes — not an error
+    auto& kfs = win[0]["keyframes"];
+    for (size_t i = 0; i < kfs.size(); i++) {
+        const std::string& name = kfs.key(i);
+        auto& list = kfs.value(i);
+        if (list.type() != JsonType::Array) continue;
+        for (size_t j = 0; j < list.size(); j++) {
+            auto& kf = list[j];
+            float offset = kf.has("offset") && !kf["offset"].isNull()
+                ? kf["offset"].asFloat() : 0.0f;
+            std::vector<KeyframeValue> values;
+            if (kf.has("style"))
+                keyframeValuesFromStyle(values, kf["style"], kf["raw"]);
+            morphAddKeyframe(name, offset, std::move(values));
+        }
+    }
+    return true;
+}
+
+static void deserializeAnimations(MorphNode* node, const JsonValue& val,
+                                  bool hover = false) {
+    const char* key = hover ? "hover_animations" : "animations";
+    if (!val.has(key) || val[key].type() != JsonType::Array)
+        return;
+    std::vector<CssAnimation>& dst = hover
+        ? node->hoverStyle->animations : node->style.animations;
+    auto& arr = val[key];
+    for (size_t i = 0; i < arr.size(); i++) {
+        auto& a = arr[i];
+        CssAnimation ca;
+        if (a.has("name") && !a["name"].isNull()) ca.name = a["name"].asString();
+        if (a.has("duration") && !a["duration"].isNull()) ca.duration = a["duration"].asFloat();
+        if (a.has("delay") && !a["delay"].isNull()) ca.delay = a["delay"].asFloat();
+        if (a.has("iterations") && !a["iterations"].isNull())
+            ca.iterations = a["iterations"].asFloat();
+        if (a.has("running") && !a["running"].isNull()) ca.running = a["running"].asBool();
+        if (a.has("easing") && !a["easing"].isNull()) {
+            std::string e = a["easing"].asString();
+            if (e == "linear") ca.easing = Easing::Linear;
+            else if (e == "ease-in") ca.easing = Easing::EaseIn;
+            else if (e == "ease-out") ca.easing = Easing::EaseOut;
+            else if (e == "ease-in-out") ca.easing = Easing::EaseInOut;
+        }
+        if (a.has("direction") && !a["direction"].isNull()) {
+            std::string d = a["direction"].asString();
+            if (d == "reverse") ca.direction = AnimDirection::Reverse;
+            else if (d == "alternate") ca.direction = AnimDirection::Alternate;
+            else if (d == "alternate-reverse") ca.direction = AnimDirection::AlternateReverse;
+        }
+        if (a.has("fill_mode") && !a["fill_mode"].isNull()) {
+            std::string f = a["fill_mode"].asString();
+            if (f == "forwards") ca.fillMode = AnimFillMode::Forwards;
+            else if (f == "backwards") ca.fillMode = AnimFillMode::Backwards;
+            else if (f == "both") ca.fillMode = AnimFillMode::Both;
+        }
+        if (a.has("play_state") && !a["play_state"].isNull())
+            ca.running = a["play_state"].asString() == "running";
+        dst.push_back(std::move(ca));
+    }
+}
+#endif // MORPH_FEATURE_ANIMATION
+
 static void setFloatOpt(float& dst, const JsonValue& val, float sentinel = -1.0f) {
     if (!val.isNull()) dst = val.asFloat();
     else dst = sentinel;
@@ -258,6 +405,14 @@ static MorphNode* deserializeNode(const JsonValue& val,
         *node->hoverStyle = node->style;
         applyStyle(*node->hoverStyle, val["hover_style"]);
     }
+#ifdef MORPH_FEATURE_ANIMATION
+    // `:hover` animations — live on hoverStyle so the shared hover runtime
+    // swaps them into style on hover enter/leave.
+    if (val.has("hover_animations") && val["hover_animations"].type() == JsonType::Array) {
+        if (!node->hoverStyle) node->hoverStyle = new MorphStyle();
+        deserializeAnimations(node, val, /*hover=*/true);
+    }
+#endif
 
     // Apply active style if present
     if (val.has("active_style") && val["active_style"].type() == JsonType::Object) {
@@ -277,6 +432,11 @@ static MorphNode* deserializeNode(const JsonValue& val,
         else if (e == "ease-out")  node->m_transitionEasing = Easing::EaseOut;
         else if (e == "ease-in-out") node->m_transitionEasing = Easing::EaseInOut;
     }
+
+#ifdef MORPH_FEATURE_ANIMATION
+    // CSS `animation` configs
+    deserializeAnimations(node, val);
+#endif
 
     // Deserialize ancestor hover rules
     if (val.has("ancestor_hover_rules") && val["ancestor_hover_rules"].type() == JsonType::Array) {
@@ -358,6 +518,12 @@ static bool parseIR(const JsonValue& root, MorphNode*& outRoot,
 
     if (root.type() != JsonType::Object) return false;
     if (!root.has("windows")) return false;
+
+#ifdef MORPH_FEATURE_ANIMATION
+    // Register @keyframes (cleared first so hot reloads never leak stale
+    // keyframes from a previous stylesheet).
+    parseIRKeyframes(root);
+#endif
 
     auto& windows = root["windows"];
     if (windows.type() != JsonType::Array || windows.size() == 0)

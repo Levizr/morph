@@ -1,0 +1,38 @@
+import { CSS } from 'morph'
+
+CSS.load("style.css")
+
+export const windowConfig = {
+  title: "Animation Test",
+  width: 900,
+  height: 700,
+}
+
+export default function App() {
+  return (
+    <body>
+      <div className="title" id="title">css animations — keyframes, shorthand, longhand, fill-mode, direction, paused</div>
+
+      <div className="row">
+        <div className="card pulse" id="pulse">pulse infinite</div>
+        <div className="card multi" id="multi">pulse + color-cycle</div>
+        <div className="card dupe" id="dupe">duplicate offsets</div>
+        <div className="card imp" id="imp">!important dropped</div>
+      </div>
+
+      <div className="card slide" id="slide">3s ease 1s 2 alt both slide-in</div>
+
+      <div className="row">
+        <div className="card longhand" id="longhand">longhand bounce-x</div>
+        <div className="card paused" id="paused">paused</div>
+        <div className="card forward" id="forward">forwards dupe</div>
+        <div className="card both" id="both">both important1</div>
+      </div>
+
+      <div className="row">
+        <div className="card spin" id="spin">spin</div>
+        <div className="card grow" id="grow">grow (layout)</div>
+      </div>
+    </body>
+  )
+}

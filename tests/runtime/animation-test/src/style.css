@@ -1,0 +1,158 @@
+/* animation-test stylesheet.
+ * Exercises every animatable property and every keyframe parsing rule:
+ *   - from/to keywords          - duplicate offsets (merged, later wins)
+ *   - !important is ignored     - % lengths (left: 100%)
+ *   - transform keyframes       - multi-stop blocks
+ *   - comma-separated animations in the shorthand
+ */
+body {
+  background-color: #0d0f14;
+  overflow: scroll;
+}
+
+.title {
+  margin: 14px 0 0 40px;
+  font-size: 13px;
+  color: #9aa4bd;
+}
+
+.row {
+  display: flex;
+  flex-direction: row;
+  gap: 20px;
+  margin: 40px 0 0 40px;
+}
+
+.card {
+  width: 150px;
+  height: 110px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: #ffffff;
+  background-color: #2050d0;
+}
+
+/* ── keyframes ─────────────────────────────────────────────── */
+
+@keyframes pulse {
+  0%   { opacity: 0.35; }
+  100% { opacity: 1; }
+}
+
+@keyframes slide-in {
+  from { left: -120px; opacity: 0; transform: translateX(-40px); }
+  to   { left: 100%;  opacity: 1; transform: translateX(0); }
+}
+
+@keyframes color-cycle {
+  0%   { background-color: #2050d0; color: #ffffff; }
+  50%  { background-color: #e07020; color: #ffd9a0; }
+  100% { background-color: #2050d0; color: #ffffff; }
+}
+
+/* Duplicate offsets (50% listed twice) → merged, later block wins:
+ * 50% should end on green, never magenta.
+ */
+@keyframes dupe {
+  0%  { background-color: #2050d0; }
+  50% { background-color: #ff00ff; }
+  50% { background-color: #208040; }
+  100%{ background-color: #2050d0; }
+}
+
+/* Exercises the merged duplicate offsets live (50% must be green,
+ * never magenta). */
+.dupe {
+  animation: dupe 2s ease-in-out infinite;
+}
+
+/* The 50% frame is !important → must be dropped, animation interpolates
+ * 0% → 100% directly (never flashing white).
+ */
+@keyframes important1 {
+  0%   { background-color: #2050d0; }
+  50%  { background-color: #ffffff !important; }
+  100% { background-color: #e07020; }
+}
+
+@keyframes grow {
+  from { width: 120px; height: 80px; border-radius: 8px; font-size: 12px; }
+  to   { width: 260px; height: 140px; border-radius: 70px; font-size: 20px; }
+}
+
+/* Multi-stop with % lengths */
+@keyframes bounce-x {
+  0%, 100% { left: 0; }
+  25%      { left: 100%; }
+  50%      { left: 30%; }
+}
+
+/* ── usage ─────────────────────────────────────────────────── */
+
+.pulse {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+/* shorthand: duration 3s, easing ease, delay 1s, 2 iterations,
+ * direction alternate, fill-mode both, play-state running */
+.slide {
+  position: absolute;
+  top: 220px;
+  left: 0;
+  width: 140px;
+  height: 60px;
+  animation: 3s ease 1s 2 alternate both slide-in;
+}
+
+/* Longhand form + two comma-separated animations */
+.multi {
+  animation: pulse 2s linear infinite,
+             color-cycle 4s ease-in-out 1s 3 both;
+}
+
+/* Longhand properties only (no shorthand).
+ * `left` only applies to positioned elements (like browsers), so the card
+ * is `relative` for bounce-x to be visible. */
+.longhand {
+  position: relative;
+  animation-name: bounce-x;
+  animation-duration: 4s;
+  animation-delay: 500ms;
+  animation-iteration-count: infinite;
+  animation-timing-function: ease-out;
+  animation-direction: alternate;
+}
+
+/* paused: stays frozen at the first keyframe */
+.paused {
+  animation: 2s linear infinite paused color-cycle;
+}
+
+/* forwards: ends and holds the 100% frame */
+.forward {
+  animation: 1s ease-out forwards dupe;
+}
+
+/* both: fills backwards (100% frame shown during the 1s delay) */
+.both {
+  animation: 2s ease-out both important1;
+  animation-delay: 1s;
+}
+
+/* transform-driven rotation */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.spin {
+  animation: spin 4s linear infinite;
+}
+
+/* layout animation (width/height/font-size) */
+.grow {
+  animation: 3s ease-in-out infinite alternate grow;
+}

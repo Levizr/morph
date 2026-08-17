@@ -4,6 +4,7 @@ import math
 from morph.ir.node import IRNode, IRWindow
 from morph.ir.style import IRStyle
 from morph.ir.event import IREvent
+from morph.ir.animation import IRKeyframe, IRAnimation, parse_animations
 from morph.style.tailwind import TailwindResolver
 from morph.style.selector import matches_selector, calculate_specificity, parse_selector, selector_to_string
 from morph.utils.color import parse_color
@@ -277,8 +278,12 @@ class IRBuilder:
         walked: dict,
         css_rules: dict,
         tw_resolver: TailwindResolver,
+        keyframes: dict | None = None,
     ) -> list[IRWindow]:
         ir_windows = []
+        # Raw @keyframes: name → [(offset, declarations), ...] → partial
+        # IRStyle keyframes (validated against what the runtime can animate).
+        ir_keyframes = self._keyframes_to_ir(keyframes or {})
 
         # ── Transpile top-level function declarations ─────
         premain_functions = []
@@ -385,7 +390,8 @@ class IRBuilder:
                 children = jsx.get("children", []) if tag == "__fragment__" else [jsx]
                 for child in children:
                     node = self._build_node(child, css_rules, tw_resolver,
-                                            state_vars_map=state_vars_map)
+                                            state_vars_map=state_vars_map,
+                                            keyframes=ir_keyframes)
                     if node:
                         window_nodes.append(node)
 
@@ -401,6 +407,7 @@ class IRBuilder:
                     extra_headers=sorted(self._extra_headers),
                     state_vars=comp.get("state_vars", []),
                     effect_decls=effect_decls,
+                    keyframes=ir_keyframes,
                 ))
             elif tag == "morph-window":
                 props = jsx.get("props", {})
@@ -409,7 +416,8 @@ class IRBuilder:
                 window_nodes = []
                 for child in jsx.get("children", []):
                     node = self._build_node(child, css_rules, tw_resolver,
-                                            state_vars_map=state_vars_map)
+                                            state_vars_map=state_vars_map,
+                                            keyframes=ir_keyframes)
                     if node:
                         window_nodes.append(node)
 
@@ -425,6 +433,7 @@ class IRBuilder:
                     extra_headers=sorted(self._extra_headers),
                     state_vars=comp.get("state_vars", []),
                     effect_decls=effect_decls,
+                    keyframes=ir_keyframes,
                 ))
 
         return ir_windows
@@ -465,6 +474,7 @@ class IRBuilder:
         tw_resolver: TailwindResolver,
         ancestry: list[tuple[str, list[str]]] | None = None,
         state_vars_map: dict[str, str] | None = None,
+        keyframes: dict[str, list[IRKeyframe]] | None = None,
     ) -> IRNode | None:
         tag = jsx_node.get("tag")
         if not tag:
@@ -493,13 +503,15 @@ class IRBuilder:
                                                  state_vars_map)
             then_nodes = [
                 self._build_node(n, css_rules, tw_resolver, ancestry,
-                                 state_vars_map=state_vars_map)
+                                 state_vars_map=state_vars_map,
+                                 keyframes=keyframes)
                 for n in jsx_node.get("then_branch", [])
                 if n is not None
             ]
             else_nodes = [
                 self._build_node(n, css_rules, tw_resolver, ancestry,
-                                 state_vars_map=state_vars_map)
+                                 state_vars_map=state_vars_map,
+                                 keyframes=keyframes)
                 for n in jsx_node.get("else_branch", [])
                 if n is not None
             ]
@@ -710,7 +722,8 @@ class IRBuilder:
         for child in jsx_node.get("children", []):
             child_node = self._build_node(child, css_rules, tw_resolver,
                                           child_ancestry,
-                                          state_vars_map=state_vars_map)
+                                          state_vars_map=state_vars_map,
+                                          keyframes=keyframes)
             if child_node:
                 children_nodes.append(child_node)
 
@@ -792,6 +805,22 @@ class IRBuilder:
         if trans_easing == "ease":
             trans_easing = "ease-in-out"
 
+        # ── CSS animations ───────────────────────────────────
+        # Parse the `animation` shorthand + longhands, then drop any whose
+        # keyframe name is unknown (browsers ignore those entirely).
+        animations: list[IRAnimation] = []
+        if keyframes:
+            for anim in parse_animations(merged):
+                if anim.name in keyframes:
+                    animations.append(anim)
+
+        # Same for `:hover` rules — animations there only run while hovered.
+        hover_animations: list[IRAnimation] = []
+        if keyframes:
+            for anim in parse_animations(hover_merged):
+                if anim.name in keyframes:
+                    hover_animations.append(anim)
+
         return IRNode(
             node_id=node_id,
             node_type=tag,
@@ -809,6 +838,8 @@ class IRBuilder:
             reactive_class=reactive_class,
             reactive_style=reactive_style,
             class_conditional_effects=class_conditional_effects,
+            animations=animations,
+            hover_animations=hover_animations,
         )
 
     def _analyze_class_template(self, js_source: str, tw_resolver: TailwindResolver,
@@ -967,6 +998,46 @@ class IRBuilder:
     def _next_id(self) -> str:
         self._counter += 1
         return f"node_{self._counter:04d}"
+
+    # CSS properties the animation runtime can interpolate. Keyframe values
+    # for everything else are ignored (browsers ignore non-animatable too).
+    _ANIMATABLE_PROPS = {
+        "opacity", "background-color", "color", "border-radius", "font-size",
+        "width", "height", "left", "top", "transform",
+    }
+
+    def _keyframes_to_ir(self, keyframes: dict) -> dict[str, list[IRKeyframe]]:
+        """Convert raw @keyframes (name → [(offset, declarations)]) to
+        partial-styles keyframes the C++ runtime can sample.
+
+        Values needing layout-time resolution (% lengths) and transforms are
+        kept as raw CSS strings resolved against the element's box at
+        runtime; everything else is baked to pixels/colors here.
+        """
+        result: dict[str, list[IRKeyframe]] = {}
+        for name, kfs in keyframes.items():
+            converted = []
+            for offset, decls in kfs:
+                raw: dict[str, str] = {}
+                static: dict[str, str] = {}
+                for prop, val in decls.items():
+                    if prop not in self._ANIMATABLE_PROPS:
+                        continue
+                    if prop == "transform":
+                        raw[prop] = val
+                    elif needs_layout(val):
+                        raw[prop] = val
+                    else:
+                        static[prop] = val
+                ir_kw, _ = self._css_to_ir_kw(static, collect_raw=False)
+                converted.append(IRKeyframe(
+                    offset=offset,
+                    style=IRStyle(**ir_kw) if ir_kw else IRStyle(),
+                    declared=set(ir_kw),
+                    raw=raw,
+                ))
+            result[name] = converted
+        return result
 
     def _css_to_ir_kw(self, css_dict: dict, collect_raw: bool = True) -> tuple[dict, dict]:
         """Convert CSS property dict → (IRStyle kwargs, raw_styles)."""

@@ -24,6 +24,9 @@
 #ifdef MORPH_FEATURE_TRANSFORM
 #include "features/transform.h"
 #endif
+#ifdef MORPH_FEATURE_ANIMATION
+#include "features/animation.h"
+#endif
 
 struct MorphStyle : StyleBase
 #ifdef MORPH_FEATURE_FLEX
@@ -49,6 +52,9 @@ struct MorphStyle : StyleBase
 #endif
 #ifdef MORPH_FEATURE_TRANSFORM
     , TransformStyle
+#endif
+#ifdef MORPH_FEATURE_ANIMATION
+    , AnimationStyle
 #endif
 {};
 
@@ -83,6 +89,9 @@ inline bool setCssTransform(MorphStyle& s, const std::string& value,
         s.transformSet = false;
         return true;
     }
+    // Rewind so the function-list loop below parses the first function
+    // (the token above was only consumed for the keyword check).
+    i = start;
 
     // Parse the function list.
     float acc[16];
@@ -170,6 +179,24 @@ inline void interpolateTransform(MorphStyle& s, const float a[16],
                                  const float b[16], float t) {
     mat4Interpolate(a, b, t, s.matrix);
     s.transformSet = true;
+}
+
+// Interpolate two CSS `transform` values numerically (keyframe
+// interpolation).  Uses op-list semantics when both sides share the same
+// function structure — handles rotation wraparound that matrix
+// interpolation cannot — and falls back to matrix interpolation otherwise.
+// Returns false when either value is invalid.
+inline bool interpolateTransformCss(MorphStyle& s, const std::string& a,
+                                    const std::string& b, float t,
+                                    float own_w, float own_h) {
+    std::vector<detail::TransformOp> opsA, opsB;
+    if (!detail::tParseTransformOps(a, own_w, own_h, opsA) ||
+        !detail::tParseTransformOps(b, own_w, own_h, opsB))
+        return false;
+    if (!detail::tInterpolateTransformOps(opsA, opsB, t, s.matrix))
+        return false;
+    s.transformSet = true;
+    return true;
 }
 
 } // namespace morph

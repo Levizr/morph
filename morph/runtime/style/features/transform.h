@@ -310,6 +310,278 @@ inline bool tOpMatrix(const std::string& name,
     return false;  // unknown function
 }
 
+// ── Transform op-list parsing & interpolation ──────────────────
+// Keyframe interpolation needs the *function list*, not just the composed
+// matrix: rotate(0deg) → rotate(360deg) both decompose to the identity
+// matrix, so matrix interpolation never rotates.  Browsers interpolate the
+// op lists numerically (CSS Transforms §7); we do the same when the two
+// sides have the same function structure, falling back to matrix
+// interpolation otherwise.
+
+struct TransformOp {
+    std::string name;
+    std::vector<float> args;  // units resolved: lengths→px, angles→deg
+};
+
+// Parse a CSS transform value into numeric ops (mirrors tOpMatrix but keeps
+// the per-function scalars instead of composing).  Returns false when the
+// value is invalid; `none`/global keywords yield an empty op list.
+inline bool tParseTransformOps(const std::string& value, float own_w,
+                               float own_h, std::vector<TransformOp>& ops) {
+    ops.clear();
+    size_t i = 0, n = value.size();
+    while (i < n && (value[i] == ' ' || value[i] == '\t' ||
+                     value[i] == '\n' || value[i] == '\r'))
+        i++;
+    if (i >= n) return false;
+    size_t start = i;
+    while (i < n && (isalnum((unsigned char)value[i]) || value[i] == '-')) i++;
+    std::string first = value.substr(start, i - start);
+    for (char& c : first) c = (char)tolower((unsigned char)c);
+    if (first == "none" || first == "inherit" || first == "initial" ||
+        first == "revert" || first == "revert-layer" || first == "unset")
+        return true;
+    // Rewind so the op loop below parses the first function (the token
+    // above was only consumed for the keyword check).
+    i = start;
+
+    while (i < n) {
+        while (i < n && (value[i] == ' ' || value[i] == '\t' ||
+                         value[i] == '\n' || value[i] == '\r'))
+            i++;
+        if (i >= n) break;
+        start = i;
+        while (i < n && (isalnum((unsigned char)value[i]) || value[i] == '-')) i++;
+        std::string name = value.substr(start, i - start);
+        for (char& c : name) c = (char)tolower((unsigned char)c);
+        while (i < n && (value[i] == ' ' || value[i] == '\t' ||
+                         value[i] == '\n' || value[i] == '\r'))
+            i++;
+        if (i >= n || value[i] != '(') return false;
+        int depth = 1;
+        size_t j = i + 1;
+        while (j < n && depth > 0) {
+            if (value[j] == '(') depth++;
+            else if (value[j] == ')') depth--;
+            j++;
+        }
+        if (depth != 0) return false;
+        std::string inner = value.substr(i + 1, j - i - 2);
+        std::vector<std::string> args;
+        tSplitArgs(inner, args);
+
+        TransformOp op;
+        op.name = name;
+        auto need = [&](size_t k) { return args.size() == k; };
+        auto num = [&](size_t k) -> bool {
+            float v; if (!tNumber(args[k], v)) return false;
+            op.args.push_back(v); return true;
+        };
+        auto ang = [&](size_t k) -> bool {
+            float v; if (!tAngle(args[k], v)) return false;
+            op.args.push_back(v); return true;
+        };
+        auto len = [&](size_t k, float own) -> bool {
+            float v; bool pct;
+            if (!tLength(args[k], v, pct)) return false;
+            op.args.push_back(pct ? v / 100.0f * own : v);
+            return true;
+        };
+        auto lenNoPct = [&](size_t k) -> bool {
+            float v; bool pct;
+            if (!tLength(args[k], v, pct) || pct) return false;
+            op.args.push_back(v); return true;
+        };
+
+        if (name == "matrix") {
+            if (!need(6)) return false;
+            for (size_t k = 0; k < 6; k++) if (!num(k)) return false;
+        } else if (name == "matrix3d") {
+            if (!need(16)) return false;
+            for (size_t k = 0; k < 16; k++) if (!num(k)) return false;
+        } else if (name == "perspective") {
+            if (!need(1) || !lenNoPct(0)) return false;
+        } else if (name == "rotate" || name == "rotatex" ||
+                   name == "rotatey" || name == "rotatez") {
+            if (!need(1) || !ang(0)) return false;
+        } else if (name == "rotate3d") {
+            if (!need(4)) return false;
+            if (!num(0) || !num(1) || !num(2) || !ang(3)) return false;
+        } else if (name == "translate") {
+            if (args.size() < 1 || args.size() > 2) return false;
+            if (!len(0, own_w)) return false;
+            if (args.size() == 2) { if (!len(1, own_h)) return false; }
+            else op.args.push_back(0.0f);
+        } else if (name == "translate3d") {
+            if (!need(3)) return false;
+            if (!len(0, own_w) || !len(1, own_h) || !lenNoPct(2)) return false;
+        } else if (name == "scale") {
+            if (args.size() < 1 || args.size() > 2) return false;
+            if (!num(0)) return false;
+            if (args.size() == 2) { if (!num(1)) return false; }
+            else op.args.push_back(op.args[0]);
+        } else if (name == "scale3d") {
+            if (!need(3)) return false;
+            for (size_t k = 0; k < 3; k++) if (!num(k)) return false;
+        } else if (name == "skew") {
+            if (args.size() < 1 || args.size() > 2) return false;
+            if (!ang(0)) return false;
+            if (args.size() == 2) { if (!ang(1)) return false; }
+            else op.args.push_back(0.0f);
+        } else if (name == "translatex") {
+            if (!need(1) || !len(0, own_w)) return false;
+            op.name = "translate";
+            op.args.push_back(0.0f);
+        } else if (name == "translatey") {
+            if (!need(1)) return false;
+            float v; bool pct;
+            if (!tLength(args[0], v, pct)) return false;
+            op.name = "translate";
+            op.args.push_back(0.0f);
+            op.args.push_back(pct ? v / 100.0f * own_h : v);
+        } else if (name == "translatez") {
+            if (!need(1) || !lenNoPct(0)) return false;
+            op.name = "translate3d";
+            op.args.insert(op.args.begin(), 0.0f);
+            op.args.insert(op.args.begin(), 0.0f);
+        } else if (name == "scalex") {
+            if (!need(1) || !num(0)) return false;
+            op.name = "scale";
+            op.args.push_back(1.0f);
+        } else if (name == "scaley") {
+            if (!need(1)) return false;
+            float v; if (!tNumber(args[0], v)) return false;
+            op.name = "scale";
+            op.args.push_back(1.0f);
+            op.args.push_back(v);
+        } else if (name == "scalez") {
+            if (!need(1) || !num(0)) return false;
+            op.name = "scale3d";
+            op.args.insert(op.args.begin(), 1.0f);
+            op.args.insert(op.args.begin(), 1.0f);
+        } else if (name == "skewx") {
+            if (!need(1) || !ang(0)) return false;
+            op.name = "skew";
+            op.args.push_back(0.0f);
+        } else if (name == "skewy") {
+            if (!need(1)) return false;
+            float v; if (!tAngle(args[0], v)) return false;
+            op.name = "skew";
+            op.args.push_back(0.0f);
+            op.args.push_back(v);
+        } else {
+            return false;  // unknown function
+        }
+        ops.push_back(std::move(op));
+        i = j;
+    }
+    return true;
+}
+
+// Compose a numeric op list into a matrix (translate/scale normalized to
+// fixed arity by tParseTransformOps).
+inline bool tComposeTransformOps(const std::vector<TransformOp>& ops,
+                                 float out[16]) {
+    float acc[16];
+    mat4Identity(acc);
+    for (const auto& op : ops) {
+        float opm[16];
+        const float* v = op.args.data();
+        size_t n = op.args.size();
+        mat4Identity(opm);
+        if (op.name == "matrix") {
+            if (n != 6) return false;
+            opm[0] = v[0]; opm[1] = v[1];
+            opm[4] = v[2]; opm[5] = v[3];
+            opm[12] = v[4]; opm[13] = v[5];
+        } else if (op.name == "matrix3d") {
+            if (n != 16) return false;
+            for (size_t k = 0; k < 16; k++) opm[k] = v[k];
+        } else if (op.name == "perspective") {
+            if (n != 1) return false;
+            if (v[0] > 0.0f) opm[11] = -1.0f / v[0];
+        } else if (op.name == "rotate" || op.name == "rotatez") {
+            if (n != 1) return false;
+            float r = v[0] * 3.14159265358979323846f / 180.0f;
+            float c = std::cos(r), s = std::sin(r);
+            opm[0] = c; opm[1] = s; opm[4] = -s; opm[5] = c;
+        } else if (op.name == "rotatex") {
+            if (n != 1) return false;
+            float r = v[0] * 3.14159265358979323846f / 180.0f;
+            float c = std::cos(r), s = std::sin(r);
+            opm[5] = c; opm[6] = s; opm[9] = -s; opm[10] = c;
+        } else if (op.name == "rotatey") {
+            if (n != 1) return false;
+            float r = v[0] * 3.14159265358979323846f / 180.0f;
+            float c = std::cos(r), s = std::sin(r);
+            opm[0] = c; opm[2] = -s; opm[8] = s; opm[10] = c;
+        } else if (op.name == "rotate3d") {
+            if (n != 4) return false;
+            float len = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+            if (len > 1e-12f) {
+                float x = v[0] / len, y = v[1] / len, z = v[2] / len;
+                float r = v[3] * 3.14159265358979323846f / 180.0f;
+                float c = std::cos(r), s = std::sin(r), t = 1.0f - c;
+                opm[0] = t * x * x + c; opm[1] = t * x * y + s * z; opm[2] = t * x * z - s * y;
+                opm[4] = t * x * y - s * z; opm[5] = t * y * y + c; opm[6] = t * y * z + s * x;
+                opm[8] = t * x * z + s * y; opm[9] = t * y * z - s * x; opm[10] = t * z * z + c;
+            }
+        } else if (op.name == "translate") {
+            if (n != 2) return false;
+            opm[12] = v[0]; opm[13] = v[1];
+        } else if (op.name == "translate3d") {
+            if (n != 3) return false;
+            opm[12] = v[0]; opm[13] = v[1]; opm[14] = v[2];
+        } else if (op.name == "scale") {
+            if (n != 2) return false;
+            opm[0] = v[0]; opm[5] = v[1];
+        } else if (op.name == "scale3d") {
+            if (n != 3) return false;
+            opm[0] = v[0]; opm[5] = v[1]; opm[10] = v[2];
+        } else if (op.name == "skew") {
+            if (n != 2) return false;
+            opm[4] = std::tan(v[0] * 3.14159265358979323846f / 180.0f);
+            opm[1] = std::tan(v[1] * 3.14159265358979323846f / 180.0f);
+        } else {
+            return false;
+        }
+        float tmp[16];
+        mat4Multiply(tmp, acc, opm);
+        mat4Copy(acc, tmp);
+    }
+    mat4Copy(out, acc);
+    return true;
+}
+
+// Interpolate two transform values.  When both sides parse to structurally
+// identical function lists, interpolates the scalars numerically (correct
+// rotation wraparound); otherwise falls back to matrix interpolation.
+// Returns false only when either value is invalid.
+inline bool tInterpolateTransformOps(const std::vector<TransformOp>& a,
+                                     const std::vector<TransformOp>& b,
+                                     float t, float out[16]) {
+    bool match = a.size() == b.size();
+    if (match) {
+        for (size_t i = 0; i < a.size() && match; i++)
+            match = a[i].name == b[i].name &&
+                    a[i].args.size() == b[i].args.size();
+    }
+    if (match && !a.empty()) {
+        std::vector<TransformOp> r = a;
+        for (size_t i = 0; i < a.size(); i++)
+            for (size_t k = 0; k < a[i].args.size(); k++)
+                r[i].args[k] = a[i].args[k] +
+                               (b[i].args[k] - a[i].args[k]) * t;
+        return tComposeTransformOps(r, out);
+    }
+    // Structural mismatch → matrix interpolation fallback.
+    float ma[16], mb[16];
+    if (!tComposeTransformOps(a, ma) || !tComposeTransformOps(b, mb))
+        return false;
+    mat4Interpolate(ma, mb, t, out);
+    return true;
+}
+
 } // namespace detail
 
 } // namespace morph

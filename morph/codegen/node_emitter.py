@@ -45,6 +45,103 @@ def transform_origin_assignments(prefix: str, origin: tuple[float, float],
     ]
 
 
+_ANIM_EASING_TO_CPP = {
+    "linear": "Easing::Linear",
+    "ease-in": "Easing::EaseIn",
+    "ease-out": "Easing::EaseOut",
+    "ease-in-out": "Easing::EaseInOut",
+}
+
+_ANIM_DIRECTION_TO_CPP = {
+    "normal": "AnimDirection::Normal",
+    "reverse": "AnimDirection::Reverse",
+    "alternate": "AnimDirection::Alternate",
+    "alternate-reverse": "AnimDirection::AlternateReverse",
+}
+
+_ANIM_FILL_MODE_TO_CPP = {
+    "none": "AnimFillMode::None",
+    "forwards": "AnimFillMode::Forwards",
+    "backwards": "AnimFillMode::Backwards",
+    "both": "AnimFillMode::Both",
+}
+
+# Raw keyframe CSS property → KeyframeProperty enum member.
+_RAW_PROP_TO_ENUM = {
+    "opacity": "Opacity",
+    "background-color": "BgColor",
+    "color": "Color",
+    "border-radius": "BorderRadius",
+    "font-size": "FontSize",
+    "width": "Width",
+    "height": "Height",
+    "left": "Left",
+    "top": "Top",
+    "transform": "Transform",
+}
+
+
+def keyframe_registration_code(keyframes: dict[str, list],
+                               features: set[str]) -> str:
+    """C++ registering the global @keyframes registry (prod builds).
+
+    Emitted only when the animation feature is active; a no-op otherwise.
+    """
+    if "animation" not in features or not keyframes:
+        return ""
+
+    # IRStyle field → (KeyframeProperty name, value formatting)
+    def _style_values(kf) -> list[tuple[str, str]]:
+        s = kf.style
+        # `declared` (set by the IR builder) distinguishes explicit
+        # declarations like `opacity: 1` from unset fields — default-value
+        # comparisons would silently drop them.  Fall back to the legacy
+        # comparisons for hand-built keyframes without the field.
+        declared = getattr(kf, "declared", None)
+        def is_on(ir_field, default_cond):
+            return ir_field in declared if declared is not None else default_cond
+
+        out: list[tuple[str, str]] = []
+        if is_on("opacity", s.opacity != 1.0):
+            out.append(("Opacity", fmt(s.opacity)))
+        if is_on("bg_color", s.bg_color != (0, 0, 0, 0)):
+            out.append(("BgColor", f"{s.bg_color[0]:.4f}f, {s.bg_color[1]:.4f}f, "
+                                  f"{s.bg_color[2]:.4f}f, {s.bg_color[3]:.4f}f"))
+        if is_on("color", s.color != (0, 0, 0, 1)):
+            out.append(("Color", f"{s.color[0]:.4f}f, {s.color[1]:.4f}f, "
+                                 f"{s.color[2]:.4f}f, {s.color[3]:.4f}f"))
+        if is_on("border_radius", s.border_radius > 0):
+            out.append(("BorderRadius", fmt(s.border_radius)))
+        if is_on("font_size", s.font_size != 16.0):
+            out.append(("FontSize", fmt(s.font_size)))
+        if is_on("width", s.width is not None):
+            out.append(("Width", fmt(s.width)))
+        if is_on("height", s.height is not None):
+            out.append(("Height", fmt(s.height)))
+        if is_on("left", s.left is not None):
+            out.append(("Left", fmt(s.left)))
+        if is_on("top", s.top is not None):
+            out.append(("Top", fmt(s.top)))
+        return out
+
+    lines = ["// ── @keyframes registry (feature: animation) ──",
+             "morphClearKeyframes();"]
+    for name, kfs in sorted(keyframes.items()):
+        for kf in kfs:
+            lines.append(f"morphAddKeyframe(\"{name}\", {fmt(kf.offset)}, {{")
+            for prop, val in _style_values(kf):
+                lines.append(f"    {{KeyframeProperty::{prop}, {{{val}}}}},")
+            for prop, css in kf.raw.items():
+                enum_name = _RAW_PROP_TO_ENUM.get(prop)
+                if enum_name is None:
+                    continue  # unsupported raw property — skipped
+                escaped = css.replace("\\", "\\\\").replace("\"", "\\\"")
+                lines.append(
+                    f"    {{KeyframeProperty::{enum_name}, {{}}, \"{escaped}\"}},")
+            lines.append("});")
+    return "\n".join(lines)
+
+
 class NodeEmitter:
     """Generates C++ instantiation code for an IR node tree.
 
@@ -81,6 +178,8 @@ class NodeEmitter:
             lines.append(f"{indent}{node.node_id}->w = {fmt(node.w)};")
             lines.append(f"{indent}{node.node_id}->h = {fmt(node.h)};")
             lines.append(self._set_style(node, indent, parent_style))
+            lines.append(self._set_animations(node, indent))
+            lines.append(self._set_hover_animations(node, indent))
             lines.append(self._set_hover_style(node, indent))
             lines.append(self._set_active_style(node, indent))
             lines.append(self._set_ancestor_hover_rules(node, indent))
@@ -172,6 +271,8 @@ class NodeEmitter:
                          f"{fmt(node.x)}, {fmt(node.y)}, {fmt(node.w)}, {fmt(node.h)});")
 
         lines.append(self._set_style(node, indent, parent_style))
+        lines.append(self._set_animations(node, indent))
+        lines.append(self._set_hover_animations(node, indent))
         lines.append(self._set_hover_style(node, indent))
         lines.append(self._set_active_style(node, indent))
         lines.append(self._set_transition(node, indent))
@@ -580,12 +681,14 @@ class NodeEmitter:
         return "\n" + "\n".join(f"{indent}{l}" for l in lines)
 
     def _set_hover_style(self, node: IRNode, indent: str) -> str:
-        return self._set_state_style(node, "hover_style", "hoverStyle", indent)
+        return self._set_state_style(node, "hover_style", "hoverStyle", indent,
+                                     alloc=not node.hover_animations)
 
     def _set_active_style(self, node: IRNode, indent: str) -> str:
         return self._set_state_style(node, "active_style", "activeStyle", indent)
 
-    def _set_state_style(self, node: IRNode, attr: str, cpp_member: str, indent: str) -> str:
+    def _set_state_style(self, node: IRNode, attr: str, cpp_member: str,
+                         indent: str, alloc: bool = True) -> str:
         s = getattr(node, attr)
         if s is None:
             return ""
@@ -705,9 +808,59 @@ class NodeEmitter:
 
         if not overrides:
             return ""
-        lines = [f"{hv} = new MorphStyle(); // delta only"]
+        lines = []
+        if alloc:
+            lines.append(f"{hv} = new MorphStyle(); // delta only")
         lines += [f"{indent}{l}" for l in overrides]
         return "\n" + "\n".join(lines)
+
+    def _set_animations(self, node: IRNode, indent: str) -> str:
+        """Emit `animation` configs (feature: animation) onto a node.
+
+        Each animation is a CssAnimation aggregate:
+        {name, duration, easing, delay, iterations, direction, fillMode, running}
+        """
+        if "animation" not in self.features or not node.animations:
+            return ""
+        lines = []
+        prefix = f"{node.node_id}->style.animations"
+        for a in node.animations:
+            easing = _ANIM_EASING_TO_CPP.get(a.easing, "Easing::Linear")
+            direction = _ANIM_DIRECTION_TO_CPP.get(a.direction,
+                                                   "AnimDirection::Normal")
+            fill = _ANIM_FILL_MODE_TO_CPP.get(a.fill_mode,
+                                              "AnimFillMode::None")
+            running = "true" if a.play_state == "running" else "false"
+            iters = fmt(a.iterations) if a.iterations >= 0 else "-1.0f"
+            lines.append(
+                f"{prefix}.push_back(CssAnimation{{"
+                f"\"{a.name}\", {fmt(a.duration)}, {easing}, {fmt(a.delay)}, "
+                f"{iters}, {direction}, {fill}, {running}}});")
+        return "\n".join(f"{indent}{l}" for l in lines)
+
+    def _set_hover_animations(self, node: IRNode, indent: str) -> str:
+        """Emit `:hover` animation configs onto the node's hoverStyle delta.
+
+        The runtime swaps ``style.animations`` ↔ ``hoverStyle->animations`` on
+        hover enter/leave, so the animation only runs while hovered.
+        """
+        if "animation" not in self.features or not node.hover_animations:
+            return ""
+        lines = [f"{node.node_id}->hoverStyle = new MorphStyle(); // delta only"]
+        prefix = f"{node.node_id}->hoverStyle->animations"
+        for a in node.hover_animations:
+            easing = _ANIM_EASING_TO_CPP.get(a.easing, "Easing::Linear")
+            direction = _ANIM_DIRECTION_TO_CPP.get(a.direction,
+                                                   "AnimDirection::Normal")
+            fill = _ANIM_FILL_MODE_TO_CPP.get(a.fill_mode,
+                                              "AnimFillMode::None")
+            running = "true" if a.play_state == "running" else "false"
+            iters = fmt(a.iterations) if a.iterations >= 0 else "-1.0f"
+            lines.append(
+                f"{prefix}.push_back(CssAnimation{{"
+                f"\"{a.name}\", {fmt(a.duration)}, {easing}, {fmt(a.delay)}, "
+                f"{iters}, {direction}, {fill}, {running}}});")
+        return "\n".join(f"{indent}{l}" for l in lines)
 
     def _set_transition(self, node: IRNode, indent: str) -> str:
         if node.transition_duration <= 0:

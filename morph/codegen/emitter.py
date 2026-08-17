@@ -4,7 +4,7 @@ import os
 from jinja2 import Environment, FileSystemLoader
 from morph.ir.node import IRWindow
 from morph.codegen.feature_set import FeatureSet
-from morph.codegen.node_emitter import NodeEmitter
+from morph.codegen.node_emitter import NodeEmitter, keyframe_registration_code
 from morph.codegen.logic_emitter import emit_logic as _emit_logic
 
 _TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
@@ -81,6 +81,12 @@ class Emitter:
                 extra_headers.insert(0, h)
 
         # ── Generate node C++ code for each window ──────────
+        # @keyframes are app-global — register them once, before any window.
+        keyframe_code = "\n".join(
+            keyframe_registration_code(w.keyframes, features.features)
+            for w in windows
+        )
+
         window_code = []
         for win in windows:
             win_code = []
@@ -142,6 +148,7 @@ class Emitter:
         code = tmpl.render(
             windows=windows,
             window_code="\n".join(window_code),
+            keyframe_code=keyframe_code,
             headers=features.required_headers(),
             extra_headers=extra_headers,
             defines=features.required_defines(),
