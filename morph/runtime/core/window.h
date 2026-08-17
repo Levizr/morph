@@ -76,6 +76,7 @@ public:
     static void clearActiveState();
     void setTitle(const std::string &title);
     void setSize(int width, int height);
+    void setConstraints(int minWidth, int minHeight, int maxWidth, int maxHeight);
     int width() const { return m_width; }
     int height() const { return m_height; }
     GLFWwindow *handle() const { return m_handle; }

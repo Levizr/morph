@@ -1,0 +1,9 @@
+body { padding: 24px; font-family: sans-serif; }
+.title { font-size: 20px; font-weight: bold; margin-bottom: 20px; }
+.card {
+  border: 1px solid #ddd; border-radius: 10px; padding: 14px 18px;
+  margin-bottom: 14px; background: #fafafa;
+}
+.label { font-size: 13px; color: #666; margin-bottom: 8px; }
+button { margin-right: 10px; padding: 6px 14px; font-size: 14px; cursor: pointer; }
+.value { display: inline-block; font-size: 18px; font-weight: bold; }

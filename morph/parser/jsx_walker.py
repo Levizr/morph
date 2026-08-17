@@ -22,6 +22,8 @@ class JSXWalker:
 
     # ── Imports ───────────────────────────────────────────────
 
+    _CPP_EXTS = (".cpp", ".cc", ".cxx", ".c++", ".h", ".hpp", ".hxx")
+
     def _extract_imports(self, root: Node) -> list[dict]:
         imports = []
         for node in self._find_all(root, "import_statement"):
@@ -33,6 +35,18 @@ class JSXWalker:
                 imports.append({"type": "css_url",   "url":  source, "style": "import"})
             elif source.endswith(".css"):
                 imports.append({"type": "css_local", "path": source, "style": "import"})
+            elif source.lower().endswith(self._CPP_EXTS):
+                # import { foo, bar } from './native.cpp'  or  import './utils.cpp'
+                # The .cpp is #included into the generated TU (single-translation
+                # unit = maximum inlining / dead-code elimination). Named
+                # specifiers are validated at compile time by C++ itself.
+                specifiers = self._get_import_specifiers(node)
+                imports.append({
+                    "type":       "cpp_local",
+                    "path":       source,
+                    "specifiers": specifiers,
+                    "style":      "import",
+                })
             else:
                 specifiers = self._get_import_specifiers(node)
                 imports.append({

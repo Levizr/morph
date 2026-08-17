@@ -23,6 +23,20 @@ class BuildConfig:
 
 
 @dataclass
+class NativeConfig:
+    """Build options for user C++ files imported via `import {} from './x.cpp'`.
+
+    Everything here is forwarded to g++ verbatim so native code can use
+    external libraries (OpenCV, SQLite, ...).
+    """
+    include_dirs: list[str] = field(default_factory=list)  # -I paths for headers
+    library_dirs: list[str] = field(default_factory=list)  # -L paths for archives
+    libraries:   list[str] = field(default_factory=list)   # -l flags (name w/o -l)
+    cflags:      list[str] = field(default_factory=list)   # extra compile flags
+    ldflags:     list[str] = field(default_factory=list)   # extra link flags
+
+
+@dataclass
 class MorphConfig:
     name:         str          = "my-app"
     entry:        str          = "src/App.mx"      # .html → .mx
@@ -31,6 +45,7 @@ class MorphConfig:
     renderer:     str          = "flash"           # "flash" (default) | "forge"
     dependencies: dict         = field(default_factory=dict)
     cpp_sources:  list         = field(default_factory=list)
+    native:       NativeConfig = field(default_factory=NativeConfig)
     node_bridge:  bool         = False
     build:        BuildConfig  = field(default_factory=BuildConfig)
 
@@ -38,6 +53,7 @@ class MorphConfig:
     def from_dict(d: dict) -> "MorphConfig":
         win = d.get("window", {})
         bl = d.get("build", {})
+        nat = d.get("native", {})
         return MorphConfig(
             name=d.get("name", "my-app"),
             entry=d.get("entry", "src/App.mx"),
@@ -50,6 +66,13 @@ class MorphConfig:
             renderer=d.get("renderer", "flash"),
             dependencies=d.get("dependencies", {}),
             cpp_sources=d.get("cpp_sources", []),
+            native=NativeConfig(
+                include_dirs=nat.get("include_dirs", []),
+                library_dirs=nat.get("library_dirs", []),
+                libraries=nat.get("libraries", []),
+                cflags=nat.get("cflags", []),
+                ldflags=nat.get("ldflags", []),
+            ),
             node_bridge=d.get("node_bridge", False),
             build=BuildConfig(
                 wayland=bl.get("wayland", False),
@@ -72,6 +95,13 @@ class MorphConfig:
             "renderer":     self.renderer,
             "dependencies": self.dependencies,
             "cpp_sources":  self.cpp_sources,
+            "native":       {
+                "include_dirs": self.native.include_dirs,
+                "library_dirs": self.native.library_dirs,
+                "libraries":    self.native.libraries,
+                "cflags":       self.native.cflags,
+                "ldflags":      self.native.ldflags,
+            },
             "build":        {
                 "wayland":         self.build.wayland,
                 "system_freetype": self.build.system_freetype,

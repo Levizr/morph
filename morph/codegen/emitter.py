@@ -6,8 +6,16 @@ from morph.ir.node import IRWindow
 from morph.codegen.feature_set import FeatureSet
 from morph.codegen.node_emitter import NodeEmitter, keyframe_registration_code
 from morph.codegen.logic_emitter import emit_logic as _emit_logic
+from morph.codegen.native_header import (
+    collect_cpp_imports,
+    collect_state_vars,
+    generate_state_header,
+    strip_static_function,
+)
 
 _TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
+
+_STATE_HEADER_NAME = "_morph_state.h"
 
 
 class Emitter:
@@ -35,6 +43,13 @@ class Emitter:
                 if f not in seen:
                     seen.add(f)
                     premain_parts.append(f)
+
+        # ── User C++ imports (single-TU include for max performance) ──
+        cpp_imports = collect_cpp_imports(windows)
+        native_mode = bool(cpp_imports)
+        if native_mode:
+            # External linkage so the user's .cpp can call JSX functions.
+            premain_parts = [strip_static_function(p) for p in premain_parts]
         premain_code = "\n\n".join(premain_parts)
 
         # ── Collect state vars (morphState) ──────────────────
@@ -99,6 +114,19 @@ class Emitter:
             win_code.append(f'wm.registerWindow("{win.window_id}", {var});')
             win_code.append("")
 
+            _GLFW_DONT_CARE = -1
+            has_constraints = any(x is not None for x in (
+                win.min_width, win.max_width, win.min_height, win.max_height))
+            if has_constraints:
+                min_w = win.min_width if win.min_width is not None else _GLFW_DONT_CARE
+                min_h = win.min_height if win.min_height is not None else _GLFW_DONT_CARE
+                max_w = win.max_width if win.max_width is not None else _GLFW_DONT_CARE
+                max_h = win.max_height if win.max_height is not None else _GLFW_DONT_CARE
+                win_code.append(
+                    f"{var}->setConstraints({min_w}, {min_h}, {max_w}, {max_h});"
+                )
+                win_code.append("")
+
             if len(win.nodes) == 1:
                 for node in win.nodes:
                     code = self.node_emitter.emit_node(node, var)
@@ -155,14 +183,56 @@ class Emitter:
             dev_mode=(mode == "dev"),
             premain_code=premain_code,
             state_decls=state_decls,
+            native_mode=native_mode,
+            cpp_includes=cpp_imports,
         )
 
         os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
         with open(out_path, "w") as f:
             f.write(code)
 
+        # Write the generated state header next to the TU so
+        # `#include "_morph_state.h"` resolves relative to the source file.
+        if native_mode:
+            header = generate_state_header(windows, state_decls, premain_parts)
+            header_path = os.path.join(
+                os.path.dirname(out_path) or ".", _STATE_HEADER_NAME)
+            with open(header_path, "w") as f:
+                f.write(header)
+
     def emit_logic(self, windows: list[IRWindow], out_path: str) -> None:
-        code = _emit_logic(windows)
         os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+
+        # The dev logic TU also gets the generated interop header, so user
+        # .cpp files see state + JSX functions (single-TU, hot-reloadable).
+        if collect_cpp_imports(windows):
+            state_decls = []
+            for sv in collect_state_vars(windows):
+                name = sv.get("getter", "")
+                init = sv.get("init", "0")
+                sig = f"__st_{name}" if name else "__st_unknown"
+                raw = init.strip()
+                if raw.startswith("'") and raw.endswith("'"):
+                    init = '"' + raw[1:-1] + '"'
+                    raw = init
+                if raw in ("true", "false"):
+                    cpp_type = "bool"
+                elif raw.startswith('"') or raw.startswith("'"):
+                    cpp_type = "std::string"
+                elif "." in raw:
+                    cpp_type = "double"
+                elif raw.isdigit() or (raw.startswith("-") and raw[1:].isdigit()):
+                    cpp_type = "int"
+                else:
+                    cpp_type = "auto"
+                state_decls.append({"signal_name": sig, "type": cpp_type})
+            header = generate_state_header(
+                windows, state_decls, [f for w in windows for f in w.premain_functions])
+            header_path = os.path.join(
+                os.path.dirname(out_path) or ".", _STATE_HEADER_NAME)
+            with open(header_path, "w") as f:
+                f.write(header)
+
+        code = _emit_logic(windows)
         with open(out_path, "w") as f:
             f.write(code)

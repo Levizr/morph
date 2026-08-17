@@ -1,0 +1,46 @@
+import { CSS } from 'morph'
+import { doubleIt, area, callJsxFromCpp, runAsync } from './native.cpp'
+
+CSS.load("style.css")
+
+export const windowConfig = { title: "Native Interop Test", width: 640, height: 560 }
+
+// JSX function — called back from C++ via callJsxFromCpp().
+function jsxHelper(x: int): int {
+  return x * 10 + 1
+}
+
+export default function App() {
+  const [count, setCount] = morphState(0)
+  const [status, setStatus] = morphState("idle")
+  const [areaVal, setAreaVal] = morphState(0.0)
+
+  return (
+    <body>
+      <div className="title" id="title">native interop — JSX ⇄ C++</div>
+
+      <div className="card" id="card-double">
+        <div className="label">JSX → C++ : doubleIt(count)</div>
+        <button id="btn-double" onClick={() => setCount(doubleIt(count))}>double it</button>
+        <div className="value" id="count">{count}</div>
+      </div>
+
+      <div className="card" id="card-jsx-cb">
+        <div className="label">C++ → JSX : callJsxFromCpp(count) → jsxHelper(count)</div>
+        <button id="btn-jsx" onClick={() => setCount(callJsxFromCpp(count))}>jsx helper</button>
+      </div>
+
+      <div className="card" id="card-async">
+        <div className="label">C++ → setState from worker thread : runAsync(count)</div>
+        <button id="btn-async" onClick={() => runAsync(count)}>run async</button>
+        <div className="value" id="status">{status}</div>
+      </div>
+
+      <div className="card" id="card-area">
+        <div className="label">JSX → C++ : area(5, 7)</div>
+        <button id="btn-area" onClick={() => setAreaVal(area(5, 7))}>compute area</button>
+        <div className="value" id="area">{areaVal}</div>
+      </div>
+    </body>
+  )
+}

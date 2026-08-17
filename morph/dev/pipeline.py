@@ -175,7 +175,8 @@ def _runtime_headers_hash() -> str:
     return devrt._compute_source_hash()
 
 
-def compile_logic(windows: list[IRWindow], verbose: bool = True) -> bool:
+def compile_logic(windows: list[IRWindow], verbose: bool = True,
+                  config=None) -> bool:
     """Generate and compile the JS logic to a native shared library."""
     global _last_logic_hash, _last_logic_so_path, _last_error
     try:
@@ -187,11 +188,23 @@ def compile_logic(windows: list[IRWindow], verbose: bool = True) -> bool:
         if verbose:
             log_dim(f"generated logic  in {_fmt(time.time() - t)}")
 
-        # Skip compilation if source unchanged.  The hash covers both the
-        # generated logic source and the runtime headers it compiles
-        # against, so runtime layout changes force a rebuild.
+        # Skip compilation if source unchanged.  The hash covers the
+        # generated logic source, any imported user .cpp files, and the
+        # runtime headers it compiles against, so a change anywhere forces
+        # a rebuild (and a fresh .so for dlopen hot-reload).
         with open(LOGIC_SOURCE_PATH, "rb") as f:
             logic_hash = hashlib.sha256(f.read()).hexdigest()
+        from morph.codegen.native_header import collect_cpp_imports
+        for ci in collect_cpp_imports(windows):
+            path = ci.get("path", "")
+            if not path or not os.path.exists(path):
+                continue
+            try:
+                with open(path, "rb") as f:
+                    logic_hash = hashlib.sha256(
+                        (logic_hash + f.read().hex()).encode()).hexdigest()
+            except OSError:
+                pass
         cur_hash = hashlib.sha256(
             (logic_hash + _runtime_headers_hash()).encode()).hexdigest()
         if cur_hash == _last_logic_hash:
@@ -217,7 +230,9 @@ def compile_logic(windows: list[IRWindow], verbose: bool = True) -> bool:
         t = time.time()
         # Compile to a temp file, then atomically rename to the final name
         so_tmp = so_path + ".tmp." + str(os.getpid())
-        ok = compiler.compile_shared(LOGIC_SOURCE_PATH, so_tmp)
+        native_cfg = getattr(config, "native", None) if config else None
+        ok = compiler.compile_shared(LOGIC_SOURCE_PATH, so_tmp,
+                                     native=native_cfg)
         if ok:
             os.rename(so_tmp, so_path)
             # Clean up old logic libraries (keep last 3)

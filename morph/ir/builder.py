@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 from morph.ir.node import IRNode, IRWindow
 from morph.ir.style import IRStyle
 from morph.ir.event import IREvent
@@ -321,6 +322,7 @@ class IRBuilder:
                 pass
 
         win_cfg = walked.get("windowConfig")
+        cpp_imports = self._resolve_cpp_imports(walked)
 
         for comp in walked.get("components", []):
             if not comp.get("exported", False):
@@ -402,11 +404,16 @@ class IRBuilder:
                     title=win_cfg.get("title", str(getattr(self.config, "name", "Untitled"))),
                     width=win_cfg.get("width", 800),
                     height=win_cfg.get("height", 600),
+                    min_width=win_cfg.get("minWidth"),
+                    max_width=win_cfg.get("maxWidth"),
+                    min_height=win_cfg.get("minHeight"),
+                    max_height=win_cfg.get("maxHeight"),
                     renderer=getattr(self.config, "renderer", "flash"),
                     premain_functions=comp_premain,
                     extra_headers=sorted(self._extra_headers),
                     state_vars=comp.get("state_vars", []),
                     effect_decls=effect_decls,
+                    cpp_imports=cpp_imports,
                     keyframes=ir_keyframes,
                 ))
             elif tag == "morph-window":
@@ -428,11 +435,16 @@ class IRBuilder:
                     title=props.get("title", str(getattr(self.config, "name", "Untitled"))),
                     width=_int_prop(props, "width", tw_styles, 800),
                     height=_int_prop(props, "height", tw_styles, 600),
+                    min_width=_int_prop_optional(props, "minWidth", tw_styles),
+                    max_width=_int_prop_optional(props, "maxWidth", tw_styles),
+                    min_height=_int_prop_optional(props, "minHeight", tw_styles),
+                    max_height=_int_prop_optional(props, "maxHeight", tw_styles),
                     renderer=getattr(self.config, "renderer", "flash"),
                     premain_functions=comp_premain,
                     extra_headers=sorted(self._extra_headers),
                     state_vars=comp.get("state_vars", []),
                     effect_decls=effect_decls,
+                    cpp_imports=cpp_imports,
                     keyframes=ir_keyframes,
                 ))
 
@@ -995,6 +1007,33 @@ class IRBuilder:
             except ValueError:
                 pass
 
+    def _resolve_cpp_imports(self, walked: dict) -> list[dict]:
+        """Resolve C++ file imports relative to the entry .mx file.
+
+        Returns a deduplicated list of {"path": str, "specifiers": [...]} where
+        path is absolute (so #include works from any working directory).
+        """
+        imports: list[dict] = []
+        seen: set[str] = set()
+        base = Path(self.config.entry).parent if self.config else Path(".")
+        for imp in walked.get("imports", []):
+            if imp.get("type") != "cpp_local":
+                continue
+            raw = imp.get("path", "")
+            if not raw:
+                continue
+            path = base / raw
+            key = str(path.resolve())
+            if key in seen:
+                continue
+            seen.add(key)
+            imports.append({
+                "path": key,
+                "specifiers": imp.get("specifiers", []),
+                "import_path": raw,
+            })
+        return imports
+
     def _next_id(self) -> str:
         self._counter += 1
         return f"node_{self._counter:04d}"
@@ -1136,6 +1175,22 @@ def _int_prop(props: dict, key: str, tw_styles: dict, fallback: int) -> int:
         except (ValueError, TypeError):
             pass
     return fallback
+
+
+def _int_prop_optional(props: dict, key: str, tw_styles: dict) -> int | None:
+    raw = props.get(key)
+    if raw is not None:
+        try:
+            return int(raw)
+        except (ValueError, TypeError):
+            pass
+    tw = tw_styles.get(key)
+    if tw is not None:
+        try:
+            return int(tw)
+        except (ValueError, TypeError):
+            pass
+    return None
 
 
 def _parse_transition_duration(raw: str) -> float:

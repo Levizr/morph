@@ -19,6 +19,16 @@
 {% for header in extra_headers %}
 #include {{ header }}
 {% endfor %}
+{% if native_mode %}
+// ── Generated interop declarations (morphState + JSX functions) ──
+// Exposed so user C++ code can call setState()/getState() and JSX
+// functions; definitions live further down in this file.
+#include "_morph_state.h"
+{% for cpp in cpp_includes %}
+// User C++ import: {{ cpp.import_path }}
+#include "{{ cpp.path }}"
+{% endfor %}
+{% endif %}
 
 static void glfw_error_cb(int code, const char* msg) {
     fprintf(stderr, "[GLFW] error %d: %s\n", code, msg);
@@ -44,8 +54,9 @@ inline void setColor(float rgba[4], const std::string& c) {
 {% if state_decls %}
 // ── morphState signals ──
 {% for s in state_decls %}
-static morph::Signal<{{ s.type }}> {{ s.signal_name }}({{ s.init }});
-{% endfor %}
+{% if native_mode %}morph::Signal<{{ s.type }}> {{ s.signal_name }}({{ s.init }});
+{% else %}static morph::Signal<{{ s.type }}> {{ s.signal_name }}({{ s.init }});
+{% endif %}{% endfor %}
 
 {% endif %}
 

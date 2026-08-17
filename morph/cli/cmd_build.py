@@ -157,7 +157,8 @@ def run(args=None) -> None:
                           defines=features.required_defines(),
                           static=static,
                           wayland=config.build.wayland,
-                          system_freetype=config.build.system_freetype)
+                          system_freetype=config.build.system_freetype,
+                          native=config.native)
 
     if not ok:
         log_error("Compilation failed — run `morph doctor` to check dependencies")
@@ -214,6 +215,10 @@ def _deserialize(ir_dict: dict) -> list:
             width=w.get("width", 800),
             height=w.get("height", 600),
             visible=w.get("visible", True),
+            min_width=w.get("min_width"),
+            max_width=w.get("max_width"),
+            min_height=w.get("min_height"),
+            max_height=w.get("max_height"),
             renderer=w.get("renderer", "flash"),
             nodes=[_deser_node(n) for n in w.get("nodes", [])],
             startup_logs=w.get("startup_logs", []),
@@ -221,6 +226,7 @@ def _deserialize(ir_dict: dict) -> list:
             extra_headers=w.get("extra_headers", []),
             state_vars=w.get("state_vars", []),
             effect_decls=w.get("effect_decls", []),
+            cpp_imports=w.get("cpp_imports", []),
             keyframes=keyframes,
         )
         windows.append(win)

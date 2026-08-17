@@ -261,6 +261,12 @@ void MorphWindow::setSize(int width, int height)
         glfwSetWindowSize(m_handle, width, height);
 }
 
+void MorphWindow::setConstraints(int minWidth, int minHeight, int maxWidth, int maxHeight)
+{
+    if (m_handle)
+        glfwSetWindowSizeLimits(m_handle, minWidth, minHeight, maxWidth, maxHeight);
+}
+
 MorphWindow::~MorphWindow()
 {
     stopCompositor();

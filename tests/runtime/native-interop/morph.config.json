@@ -1,0 +1,25 @@
+{
+  "name": "native-interop-test",
+  "entry": "src/App.mx",
+  "output": "dist/",
+  "window": {
+    "width": 640,
+    "height": 560,
+    "title": "Native Interop Test"
+  },
+  "dependencies": {},
+  "cpp_sources": [],
+  "native": {
+    "include_dirs": [],
+    "library_dirs": [],
+    "libraries": [],
+    "cflags": ["-O3"],
+    "ldflags": []
+  },
+  "build": {
+    "wayland": false,
+    "system_freetype": false,
+    "upx": false,
+    "upx_version": ""
+  }
+}

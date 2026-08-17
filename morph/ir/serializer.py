@@ -29,7 +29,7 @@ class IRSerializer:
         return json.dumps(_clean_inf(raw), ensure_ascii=False)
 
     def _window(self, w: IRWindow) -> dict:
-        return {
+        result = {
             "id":           w.window_id,
             "title":        w.title,
             "width":        w.width,
@@ -42,8 +42,18 @@ class IRSerializer:
             "extra_headers": w.extra_headers,
             "state_vars":   w.state_vars,
             "effect_decls": w.effect_decls,
+            "cpp_imports":  w.cpp_imports,
             "keyframes":    self._keyframes_dict(w.keyframes),
         }
+        if w.min_width is not None:
+            result["min_width"] = w.min_width
+        if w.max_width is not None:
+            result["max_width"] = w.max_width
+        if w.min_height is not None:
+            result["min_height"] = w.min_height
+        if w.max_height is not None:
+            result["max_height"] = w.max_height
+        return result
 
     @staticmethod
     def _keyframes_dict(keyframes: dict[str, list]) -> dict:

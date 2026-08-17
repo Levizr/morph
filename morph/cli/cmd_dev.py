@@ -178,7 +178,8 @@ def run(args=None) -> None:
                 windows = pipeline.get_latest_windows()
                 logic_ok = True
                 if windows:
-                    logic_ok = pipeline.compile_logic(windows, verbose=changed_file == "")
+                    logic_ok = pipeline.compile_logic(windows, verbose=changed_file == "",
+                                                      config=config)
                     so_path = pipeline.get_logic_so_path()
                     if so_path:
                         ir["logic_so_path"] = so_path

@@ -136,13 +136,32 @@ class Compiler:
             flags.insert(0, "-flto")
         return "-Os", flags
 
+    def _native_flags(self, native: "object | None") -> list[str]:
+        """Convert NativeConfig into g++ flags (-I, -L, -l, cflags, ldflags)."""
+        if native is None:
+            return []
+        flags: list[str] = []
+        for d in getattr(native, "include_dirs", []):
+            if d:
+                flags += ["-I", d]
+        for d in getattr(native, "library_dirs", []):
+            if d:
+                flags += ["-L", d]
+        for lib in getattr(native, "libraries", []):
+            if lib:
+                flags.append(f"-l{lib}")
+        flags.extend(getattr(native, "cflags", []))
+        flags.extend(getattr(native, "ldflags", []))
+        return flags
+
     def compile(self, source_path: str, binary_path: str,
                 needs_freetype: bool = True,
                 needs_harfbuzz: bool = True,
                 defines: list[str] | None = None,
                 static: bool = False,
                 wayland: bool = False,
-                system_freetype: bool = False) -> bool:
+                system_freetype: bool = False,
+                native: "object | None" = None) -> bool:
         if not os.path.exists(source_path):
             log_error(f"Source not found: {source_path}")
             return False
@@ -273,6 +292,9 @@ class Compiler:
             for d in defines:
                 cmd.append(f"-D{d}")
 
+        # User native build options (external includes/libs/cflags)
+        cmd.extend(self._native_flags(native))
+
         if needs_freetype:
             ft_self_built = static and archives.get("freetype", {}).get("self_built")
             if ft_self_built:
@@ -329,7 +351,8 @@ class Compiler:
         return True
 
     def compile_shared(self, source_path: str, output_path: str,
-                       defines: list[str] | None = None) -> bool:
+                       defines: list[str] | None = None,
+                       native: "object | None" = None) -> bool:
         if not os.path.exists(source_path):
             log_error(f"Source not found: {source_path}")
             return False
@@ -355,12 +378,17 @@ class Compiler:
             "-I", vendor_dir,
         ]
 
-        # Feature defines (same as build for compat)
+        # Feature defines for the dev logic.so. MUST match the layout-affecting
+        # feature set of morph_devrt (runtime/dev/CMakeLists.txt): MorphNode /
+        # MorphStyle are header-only, so any divergence (e.g. a missing
+        # MORPH_FEATURE_OPACITY) changes the class layout between the devrt
+        # binary and the dynamically loaded logic.so and causes ODR mismatches
+        # (garbage std::function -> SIGSEGV on click handlers).
         _DEV_FEATURES = [
             "MORPH_FEATURE_SCROLL", "MORPH_FEATURE_RADIUS",
             "MORPH_FEATURE_TEXT", "MORPH_FEATURE_BOLD",
             "MORPH_FEATURE_POSITION", "MORPH_FEATURE_ZINDEX",
-            "MORPH_FEATURE_FLEX",
+            "MORPH_FEATURE_OPACITY", "MORPH_FEATURE_FLEX",
             "MORPH_FEATURE_CURSOR", "MORPH_FEATURE_BORDER",
             "MORPH_FEATURE_DISPLAY_NONE", "MORPH_FEATURE_INLINE",
             "MORPH_FEATURE_MARGIN_COLLAPSE", "MORPH_FEATURE_MIN_MAX",
@@ -375,6 +403,9 @@ class Compiler:
         if defines:
             for d in defines:
                 cmd.append(f"-D{d}")
+
+        # User native build options (external includes/libs/cflags)
+        cmd.extend(self._native_flags(native))
 
         # FreeType and HarfBuzz headers (needed by node.h → gl_renderer.h)
         cflags: list[str] = []

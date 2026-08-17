@@ -3,6 +3,12 @@ from __future__ import annotations
 import re
 
 from morph.ir.node import IRWindow, IRNode
+from morph.codegen.native_header import (
+    collect_cpp_imports,
+    collect_state_vars,
+    generate_state_header,
+    strip_static_function,
+)
 
 # CSS property → (C++ style field name, value type)
 _CSS_TO_STYLE_FIELD: dict[str, tuple[str, str]] = {
@@ -256,13 +262,12 @@ def _clean_init(init: str) -> str:
 def emit_logic(windows: list[IRWindow]) -> str:
     lines = [_LOGIC_PREHEADER]
 
+    # ── User C++ imports (single-TU include — max inlining, no FFI) ──
+    cpp_imports = collect_cpp_imports(windows)
+    native_mode = bool(cpp_imports)
+
     # Collect all state vars
-    all_state_vars: list[dict] = []
-    for w in windows:
-        for sv in w.state_vars:
-            name = sv.get("getter", "")
-            if name and sv not in all_state_vars:
-                all_state_vars.append(sv)
+    all_state_vars = collect_state_vars(windows)
     state_getters: set[str] = {sv.get("getter", "") for sv in all_state_vars}
 
     # Extra headers required by transpiled code (task.h for coroutines, etc.)
@@ -279,6 +284,14 @@ def emit_logic(windows: list[IRWindow]) -> str:
     for h in sorted(extra_headers):
         lines.append(f'#include {h}')
 
+    if native_mode:
+        lines.append("")
+        lines.append("// ── Generated interop declarations (morphState + JSX functions) ──")
+        lines.append('#include "_morph_state.h"')
+        for ci in cpp_imports:
+            lines.append(f'// User C++ import: {ci.get("import_path", ci.get("path", ""))}')
+            lines.append(f'#include "{ci["path"]}"')
+
     # ── File-scope signal statics (persist across morph_logic_init calls) ──
     if all_state_vars:
         lines.append("")
@@ -289,7 +302,10 @@ def emit_logic(windows: list[IRWindow]) -> str:
                 continue
             init = _clean_init(sv.get("init", "0"))
             cpp_type = _get_cpp_type(sv.get("init", "0"))
-            lines.append(f'static morph::Signal<{cpp_type}> __st_{name}({init});')
+            if native_mode:
+                lines.append(f'morph::Signal<{cpp_type}> __st_{name}({init});')
+            else:
+                lines.append(f'static morph::Signal<{cpp_type}> __st_{name}({init});')
 
     # ── File-scope premain functions (static inline, same as build mode) ──
     seen_fns = set()
@@ -298,7 +314,10 @@ def emit_logic(windows: list[IRWindow]) -> str:
             if f not in seen_fns:
                 seen_fns.add(f)
                 lines.append("")
-                lines.append(f)
+                if native_mode:
+                    lines.append(strip_static_function(f))
+                else:
+                    lines.append(f)
 
     # ── User morphEffect declarations ──
     all_effect_decls: list[dict] = []

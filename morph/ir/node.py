@@ -62,6 +62,10 @@ class IRWindow:
     width: int
     height: int
     visible: bool = True
+    min_width: int | None = None
+    max_width: int | None = None
+    min_height: int | None = None
+    max_height: int | None = None
     modal: bool = False
     renderer: str = "flash"  # "flash" (default) | "forge"
     nodes: list[IRNode] = field(default_factory=list)
@@ -70,6 +74,8 @@ class IRWindow:
     extra_headers: list[str] = field(default_factory=list)
     state_vars: list[dict] = field(default_factory=list)  # morphState definitions
     effect_decls: list[dict] = field(default_factory=list)  # morphEffect declarations
+    # C++ files imported from the .mx source: {"path": resolved, "specifiers": [...]}
+    cpp_imports: list[dict] = field(default_factory=list)
     # Global @keyframes: name → sorted keyframes. Shared by every window.
     keyframes: dict[str, list[IRKeyframe]] = field(default_factory=dict)
 
