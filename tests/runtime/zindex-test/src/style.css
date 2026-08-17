@@ -1,0 +1,70 @@
+body {
+  background-color: #0d0f14;
+  overflow: hidden;
+}
+
+.title {
+  margin: 14px 0 0 40px;
+  font-size: 13px;
+  color: #9aa4bd;
+}
+
+/* Static in-flow block — paints in the block-flow layer, above
+   negative z-index children but below positioned auto/0 ones. */
+.backdrop {
+  position: static;
+  margin: 30px 0 0 40px;
+  width: 480px;
+  height: 300px;
+  background-color: #222a3a;
+  border-radius: 12px;
+  color: #5f6b85;
+  font-size: 13px;
+  padding: 12px;
+}
+
+.card {
+  position: absolute;
+  width: 160px;
+  height: 110px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: #ffffff;
+}
+
+.neg {
+  top: 60px;
+  left: 80px;
+  z-index: -1;
+  background-color: #b8860b;
+}
+
+.base {
+  top: 100px;
+  left: 140px;
+  background-color: #d03030;
+}
+
+.zero {
+  top: 140px;
+  left: 200px;
+  z-index: 0;
+  background-color: #e07020;
+}
+
+.mid {
+  top: 180px;
+  left: 260px;
+  z-index: 5;
+  background-color: #208040;
+}
+
+.top {
+  top: 220px;
+  left: 320px;
+  z-index: 10;
+  background-color: #2050d0;
+}

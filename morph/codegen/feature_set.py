@@ -25,6 +25,8 @@ class FeatureSet:
             self.features.add("position")
         if s.z_index is not None:
             self.features.add("zindex")
+        if s.opacity != 1.0:
+            self.features.add("opacity")
         if s.display == "none":
             self.features.add("display_none")
         if s.display in ("inline", "inline-block"):
@@ -57,6 +59,7 @@ class FeatureSet:
     # reactive assignment must enable them or the generated C++ won't compile.
     _REACTIVE_CSS_TO_FEATURE: dict[str, tuple[str, ...]] = {
         "z-index": ("zindex",),
+        "opacity": ("opacity",),
         "position": ("position",),
         "left": ("position",), "right": ("position",),
         "top": ("position",), "bottom": ("position",),
@@ -150,6 +153,8 @@ class FeatureSet:
             defines.append("MORPH_FEATURE_POSITION")
         if "zindex" in self.features:
             defines.append("MORPH_FEATURE_ZINDEX")
+        if "opacity" in self.features:
+            defines.append("MORPH_FEATURE_OPACITY")
         if "flex" in self.features:
             defines.append("MORPH_FEATURE_FLEX")
         if "cursor" in self.features:

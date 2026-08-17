@@ -177,6 +177,10 @@ static void applyStyle(MorphStyle& s, const JsonValue& styleVal) {
         s.zIndexSet = true;
     }
 #endif
+#ifdef MORPH_FEATURE_OPACITY
+    if (!styleVal["opacity"].isNull())
+        s.opacity = styleVal["opacity"].asFloat();
+#endif
 
     if (!styleVal["scrollbar_width"].isNull())
         s.scrollbarWidth = styleVal["scrollbar_width"].asFloat();

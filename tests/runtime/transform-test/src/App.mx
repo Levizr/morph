@@ -1,0 +1,23 @@
+import { CSS, morphState } from "morph"
+CSS.load("./style.css")
+
+export const windowConfig = { title: "Transform Test", width: 900, height: 720 }
+
+export default function App() {
+  const [angle, setAngle] = morphState(0);
+  const [clicks, setClicks] = morphState(0);
+
+  function spin():int {
+    return angle + 15;
+  }
+
+  function clickHit():int {
+    return clicks + 1;
+  }
+
+  return (
+    <body>
+     <div className="box"></div>
+    </body>
+  )
+}

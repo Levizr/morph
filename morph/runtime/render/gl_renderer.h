@@ -423,12 +423,16 @@ public:
                   const std::string &fontWeight) override;
 #endif
 
-    void drawTexture(unsigned int tex, float x, float y, float w, float h) override
+    void drawTexture(unsigned int tex, float x, float y, float w, float h,
+                     const float tint[4] = nullptr) override
     {
 #ifdef MORPH_FEATURE_IMAGE
         m_imageBatches[tex].push_back({x + m_scrollX, y + m_scrollY, w, h,
                                        0.0f, 0.0f, 1.0f, 1.0f,
-                                       1.0f, 1.0f, 1.0f, 1.0f});
+                                       tint ? tint[0] : 1.0f,
+                                       tint ? tint[1] : 1.0f,
+                                       tint ? tint[2] : 1.0f,
+                                       tint ? tint[3] : 1.0f});
 #ifdef MORPH_FEATURE_TRANSFORM
         applyModel(m_imageBatches[tex].back());
 #endif
@@ -438,6 +442,7 @@ public:
         (void)y;
         (void)w;
         (void)h;
+        (void)tint;
 #endif
     }
 

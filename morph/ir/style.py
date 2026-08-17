@@ -43,6 +43,7 @@ class IRStyle:
     border_style:               str   = "none"
     box_sizing:                 str   = "content-box"
     z_index:                    int | None = None   # None = auto (no explicit z-index)
+    opacity:                    float = 1.0         # 1.0 = fully opaque
     # ── Transform (feature: "transform") ────────────────────────
     # Parsed CSS transform ops (see morph/style/transforms.py). None = not set.
     transform_ops:   list[tuple] | None = None

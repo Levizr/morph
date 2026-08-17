@@ -342,9 +342,9 @@ public:
                         float scrollOffset = 0.0f);
     // Recursive flatten with the accumulated parent transform matrix
     // (identity when MORPH_FEATURE_TRANSFORM is off or no ancestor
-    // carries a transform).
+    // carries a transform) and the accumulated parent opacity product.
     int flattenImpl(RenderFrame& frame, int parentId, float scrollOffset,
-                    const float* parentAcc);
+                    const float* parentAcc, float parentOpacity);
     virtual int flattenExtra(RenderFrame& frame, FlatRenderNode& fn);
 
 #ifdef MORPH_FEATURE_TRANSFORM

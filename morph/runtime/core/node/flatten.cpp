@@ -57,11 +57,11 @@ int MorphNode::flatten(RenderFrame& frame, int parentId, float scrollOffset) {
 #ifdef MORPH_FEATURE_TRANSFORM
     morph::mat4Identity(identity);
 #endif
-    return flattenImpl(frame, parentId, scrollOffset, identity);
+    return flattenImpl(frame, parentId, scrollOffset, identity, 1.0f);
 }
 
 int MorphNode::flattenImpl(RenderFrame& frame, int parentId, float scrollOffset,
-                           const float* parentAcc) {
+                           const float* parentAcc, float parentOpacity) {
 #ifdef MORPH_FEATURE_TRANSFORM
     // Accumulated model transform of this node, matching the renderer's push
     // order in renderNode():
@@ -202,6 +202,25 @@ int MorphNode::flattenImpl(RenderFrame& frame, int parentId, float scrollOffset,
     fn.borderStyle = borderStyleToEnum(style.borderStyle);
 #endif
 
+    // ── Opacity: multiply every paint color by the accumulated opacity ──
+    // (this node's opacity × each ancestor's). This is the lightweight
+    // approximation of CSS group opacity: colors are pre-multiplied per node
+    // instead of compositing the subtree into an offscreen surface.
+#ifdef MORPH_FEATURE_OPACITY
+    float opac = parentOpacity * style.opacity;
+    if (opac < 0.0f) opac = 0.0f;
+    if (opac > 1.0f) opac = 1.0f;
+#else
+    float opac = parentOpacity;
+#endif
+    fn.opacity = opac;
+    if (opac < 1.0f)
+    {
+        fn.bgColor[3] *= opac;
+        fn.color[3] *= opac;
+        fn.borderColor[3] *= opac;
+    }
+
     fn.overflow = overflowToEnum(style.overflow);
     fn.boxSizing = boxSizingToEnum(style.boxSizing);
     fn.display = displayToEnum(style.display);
@@ -224,6 +243,11 @@ int MorphNode::flattenImpl(RenderFrame& frame, int parentId, float scrollOffset,
     memcpy(fn.scrollbarThumbColor, style.scrollbarThumbColor, sizeof(float)*4);
     fn.scrollbarBorderRadius = style.scrollbarBorderRadius;
 #endif
+    if (opac < 1.0f)
+    {
+        fn.scrollbarTrackColor[3] *= opac;
+        fn.scrollbarThumbColor[3] *= opac;
+    }
 
 #ifdef MORPH_FEATURE_TRANSFORM
     fn.transformSet = hasOwnTransform;
@@ -244,6 +268,39 @@ int MorphNode::flattenImpl(RenderFrame& frame, int parentId, float scrollOffset,
     else
     {
         frame.drawOps.insert(frame.drawOps.end(), m_displayList.begin(), m_displayList.end());
+        // Pre-multiply the accumulated opacity into this node's own paint
+        // colors. Children append their ops AFTER these indices, so mutating
+        // by index is safe even if the vector reallocates during recursion.
+        if (opac < 1.0f)
+        {
+            for (int i = dlStart; i < dlStart + (int)m_displayList.size(); i++)
+            {
+                DrawOp& op = frame.drawOps[i];
+                switch (op.type)
+                {
+                case DrawOp::Rect:
+                case DrawOp::RoundedRect:
+                    op.a *= opac;
+                    break;
+                case DrawOp::BorderedRect:
+                case DrawOp::BorderedRoundedRect:
+                    op.a *= opac;   // fill
+                    op.ba *= opac;  // border
+                    break;
+                case DrawOp::BorderRing:
+                    op.ba *= opac;
+                    break;
+                case DrawOp::TextureQuad:
+                case DrawOp::TextureBordered:
+                    // Image tint alpha (recorded as 1,1,1,1; multiplied by the
+                    // shader as texel * tint).
+                    op.a *= opac;
+                    break;
+                default:
+                    break;
+                }
+            }
+        }
     }
     fn.dlOffset = dlStart;
     fn.dlCount = (int)frame.drawOps.size() - dlStart;
@@ -285,7 +342,7 @@ int MorphNode::flattenImpl(RenderFrame& frame, int parentId, float scrollOffset,
                         (scrollEnabled && contentH > h ? scrollY : 0.0f);
 
     for (auto* child : paintOrder()) {
-        int childIdx = child->flattenImpl(frame, idx, childScroll, passAcc);
+        int childIdx = child->flattenImpl(frame, idx, childScroll, passAcc, opac);
         if (childIdx >= 0)
             frame.nodes[idx].children.push_back(childIdx);
     }

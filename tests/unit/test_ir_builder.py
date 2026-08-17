@@ -1,4 +1,4 @@
-from morph.ir.builder import IRBuilder
+from morph.ir.builder import IRBuilder, _convert_value
 from morph.ir.style import IRStyle
 from morph.style.tailwind import TailwindResolver
 
@@ -314,6 +314,38 @@ def test_z_index_parsed_from_css():
     # `auto` resolves to None (no explicit z-index)
     auto_style = IRStyle()
     assert auto_style.z_index is None
+
+
+def test_opacity_parsed_from_css():
+    """opacity CSS values land on IRStyle.opacity, clamped to [0, 1]."""
+    walked = {
+        "components": [{
+            "exported": True,
+            "jsx": {
+                "tag": "morph-window",
+                "props": {"title": "Test", "width": 400, "height": 300},
+                "children": [{
+                    "tag": "div",
+                    "props": {"className": "faded"},
+                    "children": [],
+                }],
+            },
+        }],
+    }
+    css_rules = {
+        ".faded": {"opacity": "0.5"},
+        ".clamped": {"opacity": "3"},
+        ".default": {"background-color": "red"},
+    }
+    tw = TailwindResolver(project_root=".")
+    windows = IRBuilder().build(walked, css_rules, tw)
+    faded = windows[0].nodes[0]
+    assert faded.style.opacity == 0.5
+    # Default style stays fully opaque
+    assert IRStyle().opacity == 1.0
+    assert _convert_value("opacity", "3") == 1.0
+    assert _convert_value("opacity", "-1") == 0.0
+    assert _convert_value("opacity", "not-a-number") is None
 
 
 def test_z_index_serialization_roundtrip():

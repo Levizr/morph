@@ -183,6 +183,7 @@ _CSS_TO_IR: dict[str, str] = {
     "box-sizing":                "box_sizing",
     "transform":                 "transform_ops",
     "transform-origin":          "transform_origin",
+    "opacity":                   "opacity",
 }
 
 
@@ -1100,6 +1101,12 @@ def _convert_value(field: str, raw: str | float | int) -> float | str | tuple | 
                  "border_radius", "font_size", "flex_grow", "flex_shrink", "gap"):
         try:
             return to_px(raw)
+        except (ValueError, TypeError):
+            return None
+
+    if field == "opacity":
+        try:
+            return max(0.0, min(1.0, float(raw)))
         except (ValueError, TypeError):
             return None
 

@@ -426,6 +426,11 @@ class NodeEmitter:
                 lines.append(f"{prefix}.zIndex = {int(s.z_index)};")
                 lines.append(f"{prefix}.zIndexSet = true;")
 
+        # ── Feature: OPACITY ──
+        if "opacity" in self.features:
+            if s.opacity != 1.0:
+                lines.append(f"{prefix}.opacity = {fmt(s.opacity)};")
+
         # ── Feature: CURSOR ──
         if "cursor" in self.features:
             if s.cursor != "default":
@@ -549,6 +554,8 @@ class NodeEmitter:
             if "zindex" in self.features and s.z_index is not None:
                 lines.append(f"{var}.style.zIndex = {int(s.z_index)};")
                 lines.append(f"{var}.style.zIndexSet = true;")
+            if "opacity" in self.features and s.opacity != 1.0:
+                lines.append(f"{var}.style.opacity = {fmt(s.opacity)};")
             if "flex" in self.features:
                 if s.flex_dir != "row":
                     lines.append(f"{var}.style.flexDirection = \"{s.flex_dir}\";")
@@ -676,6 +683,11 @@ class NodeEmitter:
             if s.z_index is not None and s.z_index != base.z_index:
                 overrides.append(f"{hv}->zIndex = {int(s.z_index)};")
                 overrides.append(f"{hv}->zIndexSet = true;")
+
+        # ── Feature: OPACITY ──
+        if "opacity" in self.features:
+            if s.opacity != 1.0 and s.opacity != base.opacity:
+                overrides.append(f"{hv}->opacity = {fmt(s.opacity)};")
 
         # ── Feature: CURSOR ──
         if "cursor" in self.features:

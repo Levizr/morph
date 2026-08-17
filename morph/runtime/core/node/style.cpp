@@ -141,6 +141,9 @@ static void applyStyleDelta(MorphStyle& target, const MorphStyle& delta) {
         target.zIndexSet = true;
     }
 #endif
+#ifdef MORPH_FEATURE_OPACITY
+    if (delta.opacity != 1.0f) target.opacity = delta.opacity;
+#endif
 #ifdef MORPH_FEATURE_CURSOR
     if (delta.cursor != "default") target.cursor = delta.cursor;
 #endif
@@ -247,6 +250,9 @@ static void buildReleaseStyle(MorphStyle& target, const MorphStyle& current,
 #ifdef MORPH_FEATURE_ZINDEX
     SCALAR_REVERT(zIndex);
     SCALAR_REVERT(zIndexSet);
+#endif
+#ifdef MORPH_FEATURE_OPACITY
+    SCALAR_REVERT(opacity);
 #endif
 #ifdef MORPH_FEATURE_SCROLL
     SCALAR_REVERT(scrollbarWidth);
@@ -518,6 +524,10 @@ void MorphNode::interpolateStyles(MorphStyle& out, const MorphStyle& a,
 #ifdef MORPH_FEATURE_ZINDEX
     out.zIndex = b.zIndex;
     out.zIndexSet = b.zIndexSet;
+#endif
+
+#ifdef MORPH_FEATURE_OPACITY
+    out.opacity = a.opacity + (b.opacity - a.opacity) * t;
 #endif
 
 #ifdef MORPH_FEATURE_SCROLL

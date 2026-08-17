@@ -74,6 +74,12 @@ struct FlatRenderNode {
     // True when active transition changes layout-affecting properties
     bool hasLayoutTransition = false;
 
+    // Accumulated opacity: product of this node's opacity and every ancestor's
+    // (1.0 when the feature is off). Colors baked into the frame are already
+    // pre-multiplied by this value (see flatten.cpp); text flattenExtra reads
+    // it to fade glyph color.
+    float opacity = 1.0f;
+
     // Compositor-written fields (updated each vsync tick):
     float animOffsetX = 0;
     float animOffsetY = 0;

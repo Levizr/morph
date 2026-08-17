@@ -1,0 +1,35 @@
+import { CSS } from 'morph'
+
+CSS.load("style.css")
+
+export const windowConfig = {
+  title: "Opacity Test",
+  width: 800,
+  height: 600,
+}
+
+export default function App() {
+  return (
+    <body>
+      <div className="title" id="title">opacity — cards at 1.0 / 0.7 / 0.45 / 0.2, group container at 0.6, hover fades</div>
+
+      <div className="row" id="row1">
+        <div className="card o100" id="c100">opacity: 1</div>
+        <div className="card o70" id="c70">opacity: 0.7</div>
+        <div className="card o45" id="c45">opacity: 0.45</div>
+        <div className="card o20" id="c20">opacity: 0.2</div>
+      </div>
+
+      <div className="group" id="group">
+        <div className="inner" id="inner1">child A — group opacity: 0.6</div>
+        <div className="inner" id="inner2">child B — text fades too</div>
+      </div>
+
+      <div className="row" id="row2">
+        <div className="card tw" id="tw">tailwind opacity-50</div>
+        <img className="avatar" id="img1" src="src/avatar.png" />
+        <img className="avatar faded-img" id="img2" src="src/avatar.png" />
+      </div>
+    </body>
+  )
+}

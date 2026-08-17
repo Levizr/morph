@@ -191,6 +191,9 @@ public:
                 fto.color[0] = top.color[0]; fto.color[1] = top.color[1];
                 fto.color[2] = top.color[2]; fto.color[3] = top.color[3];
             }
+            // Group opacity: the flat node's `opacity` already holds the
+            // product of every ancestor's opacity (own opacity is 1 on text).
+            fto.color[3] *= fn.opacity;
             fto.align = (uint8_t)top.align;
             fto.fontSize = top.fontSize;
             fto.fontWeight = (top.fontWeight == "bold" || top.fontWeight == "700" || top.fontWeight == "800" || top.fontWeight == "900") ? (uint8_t)1 : (uint8_t)0;

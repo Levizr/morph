@@ -1,0 +1,180 @@
+body {
+  background-color: #0f172a;
+  overflow: auto;
+}
+
+/* ── Navigation ── */
+.nav {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 40px;
+  border-bottom: 1px solid #1e293b;
+}
+
+.nav-logo {
+  font-size: 24px;
+  font-weight: bold;
+  color: #f1f5f9;
+}
+
+.nav-links {
+  display: flex;
+  flex-direction: row;
+  gap: 24px;
+}
+
+.nav-link {
+  font-size: 14px;
+  color: #94a3b8;
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.nav-link:hover {
+  color: #6366f1;
+}
+
+/* ── Hero ── */
+.hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 80px 20px 60px;
+  text-align: center;
+}
+
+.hero-badge {
+  display: inline-block;
+  padding: 6px 16px;
+  border: 2px solid #334155;
+  border-radius: 9999px;
+  font-size: 12px;
+  color: #94a3b8;
+  margin-bottom: 24px;
+}
+
+.hero-title {
+  font-size: 48px;
+  font-weight: bold;
+  color: #f8fafc;
+  margin: 0;
+}
+
+.hero-subtitle {
+  font-size: 18px;
+  color: #94a3b8;
+  max-width: 540px;
+  margin: 16px 0 0;
+}
+
+.hero-actions {
+  display: flex;
+  flex-direction: row;
+  gap: 16px;
+  margin-top: 32px;
+}
+
+/* ── Buttons ── */
+.btn {
+  padding: 12px 28px;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.btn-primary {
+  background-color: #6366f1;
+  color: #ffffff;
+}
+
+.btn-primary:hover {
+  background-color: #4f46e5;
+}
+
+.btn-outline {
+  background-color: transparent;
+  color: #e2e8f0;
+  border: 2px solid #334155;
+}
+
+.btn-outline:hover {
+  border-color: #6366f1;
+  color: #6366f1;
+}
+
+/* ── Features Grid ── */
+.features {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 24px;
+  justify-content: center;
+  padding: 40px 20px 60px;
+}
+
+.card {
+  background-color: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 16px;
+  padding: 32px;
+  width: 280px;
+  transition: border-color 0.3s ease;
+  cursor: default;
+}
+
+.card:hover {
+  border-color: #6366f1;
+}
+
+.card-icon {
+  font-size: 24px;
+  font-weight: bold;
+  margin-bottom: 16px;
+}
+
+.card-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #f1f5f9;
+  margin-bottom: 8px;
+}
+
+.card-text {
+  font-size: 14px;
+  color: #94a3b8;
+}
+
+/* ── CTA Section ── */
+.cta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 60px 20px;
+}
+
+.cta-title {
+  font-size: 32px;
+  font-weight: bold;
+  color: #f8fafc;
+  margin: 0;
+}
+
+.cta-text {
+  font-size: 16px;
+  color: #94a3b8;
+  margin: 12px 0 28px;
+}
+
+/* ── Footer ── */
+.footer {
+  text-align: center;
+  padding: 32px;
+  color: #475569;
+  font-size: 14px;
+  border-top: 1px solid #1e293b;
+}

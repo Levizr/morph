@@ -355,10 +355,10 @@ void MorphWindow::drawOpsForNode(GLRenderer &r, const RenderFrame *frame, int no
         case DrawOp::Scrollbar:
             break; // handled in renderNode
         case DrawOp::TextureQuad:
-            r.drawTexture(op.texId, px, py, op.w, op.h);
+            r.drawTexture(op.texId, px, py, op.w, op.h, &op.r);
             break;
         case DrawOp::TextureBordered:
-            r.drawTexture(op.texId, px, py, op.w, op.h);
+            r.drawTexture(op.texId, px, py, op.w, op.h, &op.r);
             break;
         }
     }

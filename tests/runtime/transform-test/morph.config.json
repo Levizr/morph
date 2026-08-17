@@ -1,0 +1,18 @@
+{
+  "name": "trnasform-test",
+  "entry": "src/App.mx",
+  "output": "dist/",
+  "window": {
+    "width": 800,
+    "height": 600,
+    "title": "trnasform-test"
+  },
+  "dependencies": {},
+  "cpp_sources": [],
+  "build": {
+    "wayland": false,
+    "system_freetype": false,
+    "upx": true,
+    "upx_version": ""
+  }
+}

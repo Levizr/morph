@@ -1,0 +1,25 @@
+import { CSS } from 'morph'
+
+CSS.load("style.css")
+
+export const windowConfig = {
+  title: "Z-Index Test",
+  width: 800,
+  height: 600,
+}
+
+export default function App() {
+  return (
+    <body>
+      <div className="title" id="title">z-index paint order — bottom to top: z:-1 → static backdrop → auto → z:0 → z:5 → z:10</div>
+
+      <div className="backdrop" id="backdrop">static block flow (no z-index)</div>
+
+      <div className="card neg" id="neg">z-index: -1</div>
+      <div className="card base" id="base">auto</div>
+      <div className="card zero" id="zero">z-index: 0</div>
+      <div className="card mid" id="mid">z-index: 5</div>
+      <div className="card top" id="top">z-index: 10</div>
+    </body>
+  )
+}

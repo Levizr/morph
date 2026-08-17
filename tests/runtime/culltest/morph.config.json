@@ -1,0 +1,13 @@
+{
+  "name": "culltest",
+  "entry": "src/App.mx",
+  "output": "dist/",
+  "window": {
+    "width": 700,
+    "height": 520,
+    "title": "Cull Stress"
+  },
+  "dependencies": {},
+  "cpp_sources": [],
+  "renderer": "flash"
+}

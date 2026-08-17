@@ -31,7 +31,8 @@ public:
     virtual void endRoundedClip() {}
 
     virtual void drawTexture(unsigned int tex,
-                             float x, float y, float w, float h) = 0;
+                             float x, float y, float w, float h,
+                             const float tint[4] = nullptr) = 0;
     virtual void drawBorderRing(float x, float y, float w, float h,
                                 float radius, float borderWidth,
                                 float borderColor[4]) {}

@@ -1,0 +1,11 @@
+.box {
+  width: 100px;
+  height: 100px;
+  background-color: red;
+  transition: all 0.5s ease;
+  cursor: pointer;
+}
+
+.box:hover {
+  transform: translateY(20px)
+}

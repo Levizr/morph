@@ -69,6 +69,9 @@ CSS_REGISTRY = {
 
     # ── Transform ──────────────────────────────────────────
     "transform":              {"feature": "transform", "type": "transform"},
+
+    # ── Opacity ────────────────────────────────────────────
+    "opacity":                {"feature": "opacity", "type": "float"},
 }
 
 

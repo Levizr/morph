@@ -267,6 +267,7 @@ def _deser_style(s: dict) -> IRStyle:
         border_style=s.get("border_style", "none"),
         box_sizing=s.get("box_sizing", "content-box"),
         z_index=s.get("z_index"),
+        opacity=_clean_float(s.get("opacity"), 1.0),
         transform_ops=_deser_transform_ops(s.get("transform_ops")),
         transform_matrix=tuple(s["transform_matrix"]) if s.get("transform_matrix") else None,
         transform_origin=_deser_transform_origin(s.get("transform_origin_raw")),

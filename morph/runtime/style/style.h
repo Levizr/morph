@@ -18,6 +18,9 @@
 #ifdef MORPH_FEATURE_ZINDEX
 #include "features/zindex.h"
 #endif
+#ifdef MORPH_FEATURE_OPACITY
+#include "features/opacity.h"
+#endif
 #ifdef MORPH_FEATURE_TRANSFORM
 #include "features/transform.h"
 #endif
@@ -40,6 +43,9 @@ struct MorphStyle : StyleBase
 #endif
 #ifdef MORPH_FEATURE_ZINDEX
     , ZIndexStyle
+#endif
+#ifdef MORPH_FEATURE_OPACITY
+    , OpacityStyle
 #endif
 #ifdef MORPH_FEATURE_TRANSFORM
     , TransformStyle
