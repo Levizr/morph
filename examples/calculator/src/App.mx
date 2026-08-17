@@ -6,10 +6,10 @@ export const windowConfig = {
   title: "Calculator",
   width: 340,
   height: 500,
-  minWidth: 280,
-  minHeight: 400,
-  maxWidth: 500,
-  maxHeight: 700,
+  minWidth: 340,
+  minHeight: 500,
+  maxWidth: 340,
+  maxHeight: 500,
 }
 
 // opcodes: 0 none, 1 +, 2 -, 3 x, 4 /
