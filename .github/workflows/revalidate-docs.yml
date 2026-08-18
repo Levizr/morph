@@ -19,33 +19,86 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const commits = context.payload.commits || [];
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const before = context.payload.before;
+            const after = context.payload.after;
 
-            // Keep only commits that touched docs/
-            const relevant = commits.filter((c) =>
-              [...(c.added || []), ...(c.modified || []), ...(c.removed || [])].some(
-                (f) => f.startsWith("docs/")
-              )
-            );
+            let payloadCommits;
 
-            if (relevant.length === 0) {
+            if (before && after && before !== after) {
+              // Push event: diff the pushed range via the API.
+              // (context.payload.commits is sometimes empty for pushes, so
+              // we never rely on it.)
+              const { data } = await github.rest.repos.compareCommits({
+                owner,
+                repo,
+                base: before,
+                head: after,
+              });
+              const files = (data.files || []).filter((f) =>
+                f.filename.startsWith("docs/")
+              );
+              payloadCommits = [
+                {
+                  id: after,
+                  message: context.payload.head_commit?.message || "",
+                  added: files
+                    .filter((f) => f.status === "added")
+                    .map((f) => f.filename),
+                  modified: files
+                    .filter((f) =>
+                      ["modified", "changed", "renamed"].includes(f.status)
+                    )
+                    .map((f) => f.filename),
+                  removed: files
+                    .filter((f) => f.status === "removed")
+                    .map((f) => f.filename),
+                },
+              ];
+            } else {
+              // Manual dispatch: revalidate every doc file.
+              const { data } = await github.rest.git.getTree({
+                owner,
+                repo,
+                tree_sha: "main",
+                recursive: "true",
+              });
+              const files = (data.tree || [])
+                .filter(
+                  (t) => t.type === "blob" && t.path.startsWith("docs/")
+                )
+                .map((t) => t.path);
+              payloadCommits = [
+                {
+                  id: after || "main",
+                  message: "manual revalidation",
+                  added: [],
+                  modified: files,
+                  removed: [],
+                },
+              ];
+            }
+
+            const all = payloadCommits.flatMap((c) => [
+              ...(c.added || []),
+              ...(c.modified || []),
+              ...(c.removed || []),
+            ]);
+
+            if (all.length === 0) {
               core.setOutput("skip", "true");
               return;
             }
 
-            const payload = {
-              ref: context.payload.ref,
-              commits: relevant.map((c) => ({
-                id: c.id,
-                message: c.message,
-                added: c.added,
-                modified: c.modified,
-                removed: c.removed,
-              })),
-            };
-
             core.setOutput("skip", "false");
-            core.setOutput("payload", JSON.stringify(payload));
+            core.setOutput(
+              "payload",
+              JSON.stringify({
+                ref: context.payload.ref || "refs/heads/main",
+                commits: payloadCommits,
+              })
+            );
 
       - name: Call revalidation endpoint
         if: steps.payload.outputs.skip == 'false'
