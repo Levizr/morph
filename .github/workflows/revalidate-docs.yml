@@ -1,0 +1,63 @@
+name: Revalidate Docs Cache
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  revalidate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build webhook payload
+        id: payload
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const commits = context.payload.commits || [];
+
+            // Keep only commits that touched docs/
+            const relevant = commits.filter((c) =>
+              [...(c.added || []), ...(c.modified || []), ...(c.removed || [])].some(
+                (f) => f.startsWith("docs/")
+              )
+            );
+
+            if (relevant.length === 0) {
+              core.setOutput("skip", "true");
+              return;
+            }
+
+            const payload = {
+              ref: context.payload.ref,
+              commits: relevant.map((c) => ({
+                id: c.id,
+                message: c.message,
+                added: c.added,
+                modified: c.modified,
+                removed: c.removed,
+              })),
+            };
+
+            core.setOutput("skip", "false");
+            core.setOutput("payload", JSON.stringify(payload));
+
+      - name: Call revalidation endpoint
+        if: steps.payload.outputs.skip == 'false'
+        env:
+          REVALIDATE_URL: ${{ secrets.REVALIDATE_URL }}
+          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
+          PAYLOAD: ${{ steps.payload.outputs.payload }}
+        run: |
+          SIGNATURE=$(printf '%s' "$PAYLOAD" | openssl dgst -sha256 -hmac "$WEBHOOK_SECRET" -binary | xxd -p -c 256)
+          curl -fsS -X POST "$REVALIDATE_URL" \
+            -H "Content-Type: application/json" \
+            -H "x-github-event: push" \
+            -H "x-hub-signature-256: sha256=$SIGNATURE" \
+            -d "$PAYLOAD"
+          echo "Revalidation request sent successfully"
