@@ -1,4 +1,4 @@
-# Morph
+# Morpha
 
 Build native desktop applications with HTML, CSS, and JavaScript. No browser, no Electron, no WebView — just a lightweight native binary.
 
