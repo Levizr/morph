@@ -1,0 +1,69 @@
+[
+  {
+    "category": "Getting Started",
+    "items": [
+      { "title": "Introduction", "slug": "index" },
+      { "title": "Installation", "slug": "getting-started/installation" },
+      { "title": "Quick Start", "slug": "getting-started/quick-start" },
+      { "title": "Configuration", "slug": "getting-started/configuration" },
+      { "title": "Project Structure", "slug": "getting-started/project-structure" }
+    ]
+  },
+  {
+    "category": "Concepts",
+    "items": [
+      { "title": "How It Works", "slug": "concepts/how-it-works" },
+      { "title": "Dev Mode", "slug": "concepts/dev-mode" },
+      { "title": "Build Mode", "slug": "concepts/build-mode" }
+    ]
+  },
+  {
+    "category": "Elements",
+    "items": [
+      { "title": "HTML Elements", "slug": "elements/overview" },
+      { "title": "Conditional Rendering", "slug": "elements/conditional" },
+      { "title": "Events", "slug": "elements/events" }
+    ]
+  },
+  {
+    "category": "CSS",
+    "items": [
+      { "title": "CSS Properties", "slug": "css/properties" },
+      { "title": "Animations", "slug": "css/animations" },
+      { "title": "Transitions", "slug": "css/transitions" },
+      { "title": "Transforms", "slug": "css/transforms" },
+      { "title": "Flexbox", "slug": "css/flexbox" },
+      { "title": "Tailwind CSS", "slug": "css/tailwind" }
+    ]
+  },
+  {
+    "category": "JavaScript",
+    "items": [
+      { "title": "Overview", "slug": "javascript/overview" },
+      { "title": "State", "slug": "javascript/state" },
+      { "title": "Effects", "slug": "javascript/effects" },
+      { "title": "Async & Networking", "slug": "javascript/async" },
+      { "title": "Runtime Types", "slug": "javascript/types" }
+    ]
+  },
+  {
+    "category": "Guides",
+    "items": [
+      { "title": "C++ / JSX Interop", "slug": "guides/native-cpp" },
+      { "title": "Custom C++ Nodes", "slug": "guides/custom-cpp-nodes" },
+      { "title": "Dynamic Styles", "slug": "guides/dynamic-styles" }
+    ]
+  },
+  {
+    "category": "CLI",
+    "items": [{ "title": "CLI Commands", "slug": "cli/commands" }]
+  },
+  {
+    "category": "Examples",
+    "items": [
+      { "title": "Calculator", "slug": "examples/calculator" },
+      { "title": "Dynamic", "slug": "examples/dynamic" },
+      { "title": "IP Checker", "slug": "examples/ipchecker" }
+    ]
+  }
+]
