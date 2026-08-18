@@ -26,7 +26,12 @@ def apply_flex(parent: IRNode) -> None:
     for child in children:
         cs = child.style
         mt, mr, mb, ml = cs.margin
-        # Clamp DEFERRED (auto) margins — resolved by the runtime on resize
+        # Track auto margins on main axis before clamping
+        ml_auto = ml == DEFERRED
+        mr_auto = mr == DEFERRED
+        mt_auto = mt == DEFERRED
+        mb_auto = mb == DEFERRED
+        # Clamp DEFERRED (auto) margins
         ml = 0.0 if ml == DEFERRED else ml
         mr = 0.0 if mr == DEFERRED else mr
         mt = 0.0 if mt == DEFERRED else mt
@@ -34,14 +39,19 @@ def apply_flex(parent: IRNode) -> None:
         if is_row:
             main = child.w + ml + mr
             cross = child.h + mt + mb
+            auto_main = ml_auto or mr_auto
         else:
             main = child.h + mt + mb
             cross = child.w + ml + mr
+            auto_main = mt_auto or mb_auto
         items.append({
             "node": child,
             "main": max(main, 0.0),
             "cross": max(cross, 0.0),
             "mt": mt, "mr": mr, "mb": mb, "ml": ml,
+            "mt_auto": mt_auto, "mb_auto": mb_auto,
+            "ml_auto": ml_auto, "mr_auto": mr_auto,
+            "auto_main": auto_main,
         })
 
     # Wrap into flex lines
@@ -111,6 +121,27 @@ def apply_flex(parent: IRNode) -> None:
         extra_gap = gap * (len(line) - 1) if len(line) > 1 else 0
         used = total_main + extra_gap
         free = main_avail - used
+
+        # Distribute free space to auto margins on main axis
+        auto_main_items = [item for item in line if item["auto_main"]]
+        if auto_main_items and free > 0:
+            per_auto = free / len(auto_main_items)
+            for item in auto_main_items:
+                if is_row:
+                    if item["ml_auto"]:
+                        item["ml"] += per_auto
+                    elif item["mr_auto"]:
+                        item["mr"] += per_auto
+                else:
+                    if item["mt_auto"]:
+                        item["mt"] += per_auto
+                    elif item["mb_auto"]:
+                        item["mb"] += per_auto
+                item["main"] += per_auto
+            # Recompute used/free after auto margin absorption
+            total_main = sum(item["main"] for item in line)
+            used = total_main + extra_gap
+            free = main_avail - used
 
         # Compute main-axis offset
         justify = s.justify_content

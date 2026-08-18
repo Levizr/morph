@@ -193,6 +193,8 @@ class IRSerializer:
             result["reactive_class"] = n.reactive_class
         if n.reactive_style:
             result["reactive_style"] = n.reactive_style
+        if n.reactive_attrs:
+            result["reactive_attrs"] = n.reactive_attrs
         if n.class_conditional_effects:
             result["class_conditional_effects"] = [
                 [cond, on, off] for cond, on, off in n.class_conditional_effects

@@ -339,8 +339,26 @@ class IRBuilder:
                 if setter:
                     state_vars_map[setter] = f"{sig_name}.set"
 
-            # ── Translate inner functions ──
+            # ── Component-level const declarations ──
+            # `const x = <expr>` in the component body becomes a file-scope
+            # zero-arg lambda `auto x = []() { return <expr>; };` so every
+            # reference re-evaluates the expression reactively.
             comp_premain = list(premain_functions)
+            for cd in comp.get("consts", []):
+                name = cd.get("name", "")
+                rhs = cd.get("rhs", "")
+                if not name or not rhs:
+                    continue
+                try:
+                    cpp_rhs = self._transpile_js_expr(rhs, state_vars_map)
+                    if not cpp_rhs:
+                        continue
+                    comp_premain.append(f"auto {name} = []() {{ return {cpp_rhs}; }};")
+                    state_vars_map[name] = f"{name}()"
+                except Exception:
+                    pass
+
+            # ── Translate inner functions ──
             for fd in comp.get("inner_functions", []):
                 try:
                     source = fd["source"]
@@ -572,12 +590,12 @@ class IRBuilder:
             if "__template__" in raw_class:
                 js_source = raw_class["__template__"]
                 reactive_class = self._transpile_js_expr(js_source, state_vars_map)
-                class_conditional_effects = self._analyze_class_template(js_source, tw_resolver, state_vars_map)
+                class_conditional_effects = self._analyze_class_template(js_source, tw_resolver, state_vars_map, tag, css_rules)
                 raw_class = ""
             elif "__expr__" in raw_class:
                 js_source = raw_class["__expr__"]
                 reactive_class = self._transpile_js_expr(js_source, state_vars_map)
-                class_conditional_effects = self._analyze_class_expression(js_source, tw_resolver, state_vars_map)
+                class_conditional_effects = self._analyze_class_expression(js_source, tw_resolver, state_vars_map, tag, css_rules)
                 raw_class = ""
             elif "__ref__" in raw_class:
                 js_source = raw_class["__ref__"]
@@ -741,10 +759,20 @@ class IRBuilder:
 
         # ── Tag attributes (src, alt, etc.) ──────────────────
         attrs = {}
+        reactive_attrs = {}
         for attr_key in ("src", "alt", "href", "target"):
             val = props.get(attr_key)
-            if val is not None and isinstance(val, str):
+            if val is None:
+                continue
+            if isinstance(val, str):
                 attrs[attr_key] = val
+            elif isinstance(val, dict) and ("__ref__" in val or "__expr__" in val):
+                js_source = val.get("__ref__") or val.get("__expr__")
+                if js_source:
+                    try:
+                        reactive_attrs[attr_key] = self._transpile_js_expr(js_source, state_vars_map)
+                    except Exception:
+                        pass
 
         # ── Events ───────────────────────────────────────────
         events = []
@@ -842,6 +870,7 @@ class IRBuilder:
             children=children_nodes,
             events=events,
             attrs=attrs,
+            reactive_attrs=reactive_attrs,
             raw_styles=raw_styles,
             transition_duration=trans_dur,
             transition_easing=trans_easing,
@@ -855,7 +884,9 @@ class IRBuilder:
         )
 
     def _analyze_class_template(self, js_source: str, tw_resolver: TailwindResolver,
-                                 state_vars_map: dict[str, str] | None = None
+                                 state_vars_map: dict[str, str] | None = None,
+                                 tag: str = "div",
+                                 css_rules: dict | None = None
                                  ) -> list[tuple[str, dict[str, str], dict[str, str]]]:
         """Parse a template literal className expression.
 
@@ -883,12 +914,17 @@ class IRBuilder:
 
             def _resolve_to_css(class_str: str) -> dict[str, str]:
                 result: dict[str, str] = {}
-                for cls in class_str.split():
-                    cls = cls.strip()
-                    if cls:
-                        tw = tw_resolver.resolve(cls)
-                        if tw:
-                            result.update(tw)
+                tokens = [c.strip() for c in class_str.split() if c.strip()]
+                for cls in tokens:
+                    tw = tw_resolver.resolve(cls)
+                    if tw:
+                        result.update(tw)
+                if css_rules:
+                    for rule_key, rule_props in css_rules.items():
+                        if ":hover" in rule_key or ":active" in rule_key:
+                            continue
+                        if matches_selector(rule_key, tag, tokens, "", []):
+                            result.update(rule_props)
                 return result
 
             def _extract_class_string(node: TSNode) -> str:
@@ -915,7 +951,9 @@ class IRBuilder:
         return effects
 
     def _analyze_class_expression(self, js_source: str, tw_resolver: TailwindResolver,
-                                   state_vars_map: dict[str, str] | None = None
+                                   state_vars_map: dict[str, str] | None = None,
+                                   tag: str = "div",
+                                   css_rules: dict | None = None
                                    ) -> list[tuple[str, dict[str, str], dict[str, str]]]:
         """Analyze a non-template className expression (e.g., ternary).
 
@@ -935,12 +973,17 @@ class IRBuilder:
 
             def _resolve_to_css(class_str: str) -> dict[str, str]:
                 result: dict[str, str] = {}
-                for cls in class_str.split():
-                    cls = cls.strip()
-                    if cls:
-                        tw = tw_resolver.resolve(cls)
-                        if tw:
-                            result.update(tw)
+                tokens = [c.strip() for c in class_str.split() if c.strip()]
+                for cls in tokens:
+                    tw = tw_resolver.resolve(cls)
+                    if tw:
+                        result.update(tw)
+                if css_rules:
+                    for rule_key, rule_props in css_rules.items():
+                        if ":hover" in rule_key or ":active" in rule_key:
+                            continue
+                        if matches_selector(rule_key, tag, tokens, "", []):
+                            result.update(rule_props)
                 return result
 
             # Unwrap TSProgram → TSExpressionStatement → inner expression

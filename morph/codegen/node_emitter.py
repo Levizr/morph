@@ -223,6 +223,8 @@ class NodeEmitter:
                 for line in then_code.split("\n"):
                     lines.append(f"{bi}        {line}")
                 lines.append(f"{bi}        {node.node_id}->addChild({then_root_var});")
+                lines.append(f"{bi}        {node.node_id}->style.explicitWidth = {then_root_var}->style.explicitWidth;")
+                lines.append(f"{bi}        {node.node_id}->style.explicitHeight = {then_root_var}->style.explicitHeight;")
                 lines.append(f"{bi}        {child_var} = {then_root_var};")
                 lines.append(f"{bi}    }}")
             else:
@@ -233,6 +235,8 @@ class NodeEmitter:
                 for line in else_code.split("\n"):
                     lines.append(f"{bi}        {line}")
                 lines.append(f"{bi}        {node.node_id}->addChild({else_root_var});")
+                lines.append(f"{bi}        {node.node_id}->style.explicitWidth = {else_root_var}->style.explicitWidth;")
+                lines.append(f"{bi}        {node.node_id}->style.explicitHeight = {else_root_var}->style.explicitHeight;")
                 lines.append(f"{bi}        {child_var} = {else_root_var};")
                 lines.append(f"{bi}    }}")
             elif node.else_nodes:
@@ -368,6 +372,21 @@ class NodeEmitter:
                         lines.append(f"{indent}{child.node_id}->markDirty(LayoutDirty);")
                         lines.append(f"{indent}{child.node_id}->markDirty(PaintDirty);")
                         lines.append(f"}}));")
+
+        # ── Reactive attrs (src/alt on img nodes) ──
+        if node.reactive_attrs:
+            for attr_key, cpp_expr in node.reactive_attrs.items():
+                lines.append(f"{node_id}->m_associatedEffects.push_back(morph::create_effect([{node_id}]() {{")
+                if attr_key == "src" and node.node_type == "img":
+                    lines.append(f"{indent}std::string _src = morph::str({cpp_expr});")
+                    lines.append(f"{indent}if ({node_id}->src != _src) {{")
+                    lines.append(f"{indent}    {node_id}->src = _src;")
+                    lines.append(f"{indent}    {node_id}->loaded = false;")
+                    lines.append(f"{indent}}}{node_id}->markDirty(PaintDirty);")
+                else:
+                    lines.append(f"{indent}{node_id}->{attr_key} = morph::str({cpp_expr});")
+                    lines.append(f"{indent}{node_id}->markDirty(PaintDirty);")
+                lines.append(f"}}));")
 
         # ── Reactive className (stores string on node) ──
         if node.reactive_class:

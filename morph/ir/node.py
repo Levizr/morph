@@ -16,6 +16,8 @@ class IRNode:
     events: list[IREvent] = field(default_factory=list)
     text_content: str = ""
     attrs: dict[str, str] = field(default_factory=dict)
+    reactive_attrs: dict[str, str] = field(default_factory=dict)
+    # Attr name → C++ expression for dynamic attrs (e.g. src={qrPath})
     parent_id: str | None = None
     raw_styles: dict[str, str] = field(default_factory=dict)
     transition_duration: float = 0.0   # 0 = no transition

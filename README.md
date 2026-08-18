@@ -196,6 +196,11 @@ Since v0.0.6, rendering runs on a dedicated **compositor thread**: the main thre
 | **Dev-mode `logic.so`** — JS logic compiled to a content-hash-addressed shared library loaded via `dlopen`; hot reload re-wires signals/effects in place (`morph_logic_rewire`) without re-running effects; registry + signal store keep node/state references across reloads | Complete |
 | **DevTools Logs tab** — thread-safe ring buffer of info/ok/warn/error entries with timestamps; clear button | Complete |
 | **Docked DevTools panel** — panel occupies right side of the window and app layout is constrained to remaining content (browser-style docking); drag-resizable, never covers app elements | Complete |
+| **CSS animations** — `@keyframes` declarations, `animation-name`/`animation-duration`/`animation-timing-function`/`animation-delay`/`animation-iteration-count`/`animation-direction`/`animation-fill-mode` properties and `animation` shorthand; easing functions (linear, ease, ease-in, ease-out, ease-in-out, cubic-bezier); percentage-based keyframe stops; property interpolation (color, bg-color, margin, padding, border, border-radius, font-size, gap, width/height, opacity, transform); `MORPH_FEATURE_ANIMATION` compile-time gate | Complete |
+| **CSS transforms** — `transform` property with `translate`, `rotate`, `scale`, `skew`, `matrix`, `matrix3d` functions; 4x4 matrix composition (`mat4.h`); per-element transform applied in vertex shader; `transform-origin` support; Tailwind `rotate-*`, `scale-*`, `translate-*` utilities; `MORPH_FEATURE_TRANSFORM` gate | Complete |
+| **C++/JSX interop** — `import { fn } from './file.cpp'` in JSX; user C++ files `#included` into the generated translation unit; `_morph_state.h` generated exposing signals, setter wrappers, and JSX function declarations so C++ can update state and call JSX code; `native` config block (`include_dirs`, `library_dirs`, `libraries`, `cflags`, `ldflags`) forwarded to g++ | Complete |
+| **Window constraints** — `min-width`, `max-width`, `min-height`, `max-height` in `windowConfig` and `<morph-window>` JSX; enforced via `glfwSetWindowSizeLimits` in C++ runtime; serialized/deserialized for dev hot reload | Complete |
+| **Build config options** — Wayland backend toggle, FreeType static linking, UPX compression post-build; all configurable via `morph.config.json` `build` block; `--output` directory override for `morph build` | Complete |
 
 ### 🚧 In Progress
 
@@ -204,7 +209,7 @@ Since v0.0.6, rendering runs on a dedicated **compositor thread**: the main thre
 | **CSS style resolver** — full cascade, specificity, selector matching | Partial | `morph/style/selector.py` parses descendant/child/adjacent/sibling + specificity; runtime class-based hover/active rules work; full cascade still being built out |
 | **JS interpreter** — JS event handler → C++ lambdas | Partial | Replaced by compile-time TS→C++ translation via `logic.so` (works for the JS subset the translator supports); interactive scripting not yet available |
 | **`position: relative/fixed`** — offset positioning, sticky | Partial | `position`/`left`/`top`/`right`/`bottom` parse + feature-gated runtime fields exist; sticky in progress |
-| **Forge renderer** — retained-FBO + damage tracking | Beta / buggy | Damage tracking + retained FBO shipped and toggleable in dev, but it's still **in progress** — known bugs around damage-rect edges, scroll-shift, and some compositor animation paths. **Flash is the recommended/default production renderer for now.** Per-tile LRU pool and scroll-shift remap planned in `arch/renderer-flash-forge.md` Phases 4/6 |
+| **Forge renderer** — retained-FBO + damage tracking | Beta / buggy | Damage tracking + retained FBO shipped and toggleable in dev, but it's still **in progress** — known bugs around damage-rect edges, scroll-shift, and some compositor animation paths. **Flash is the recommended/default production renderer for now.** Per-tile LRU pool and scroll-shift remap planned in `help/renderer-flash-forge.md` Phases 4/6 |
 
 ---
 

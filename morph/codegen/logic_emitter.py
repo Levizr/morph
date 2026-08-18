@@ -173,6 +173,7 @@ _LOGIC_PREHEADER = """#include <cstdio>
 #include "reactivity/signal.h"
 #include "core/event.h"
 #include "types/js_value.h"
+#include "ui/image.h"
 
 // Node registry and signal store (included via -I<runtime>/dev)
 #include "signal_store.h"
@@ -498,11 +499,19 @@ def _emit_node_effects(lines: list[str], node: IRNode, indent: str = "    ") -> 
             lines.append(f'{indent}    if ({node.condition_expr}) {{')
             if then_id:
                 lines.append(f'{indent}        auto* child = nodes.get("{then_id}");')
-                lines.append(f'{indent}        if (child) container->addChild(child);')
+                lines.append(f'{indent}        if (child) {{')
+                lines.append(f'{indent}            container->addChild(child);')
+                lines.append(f'{indent}            container->style.explicitWidth = child->style.explicitWidth;')
+                lines.append(f'{indent}            container->style.explicitHeight = child->style.explicitHeight;')
+                lines.append(f'{indent}        }}')
             lines.append(f'{indent}    }} else {{')
             if else_id:
                 lines.append(f'{indent}        auto* child = nodes.get("{else_id}");')
-                lines.append(f'{indent}        if (child) container->addChild(child);')
+                lines.append(f'{indent}        if (child) {{')
+                lines.append(f'{indent}            container->addChild(child);')
+                lines.append(f'{indent}            container->style.explicitWidth = child->style.explicitWidth;')
+                lines.append(f'{indent}            container->style.explicitHeight = child->style.explicitHeight;')
+                lines.append(f'{indent}        }}')
             lines.append(f'{indent}    }}')
         lines.append(f'{indent}}});')
         for tn in node.then_nodes:
@@ -575,6 +584,24 @@ def _emit_node_effects(lines: list[str], node: IRNode, indent: str = "    ") -> 
                     lines.append(f'{indent}    n->markDirty(LayoutDirty);')
                     lines.append(f'{indent}    n->markDirty(PaintDirty);')
                     lines.append(f'{indent}}});')
+
+    # ── Reactive attrs (src/alt on img nodes) ──
+    if node.reactive_attrs:
+        for attr_key, cpp_expr in node.reactive_attrs.items():
+            lines.append(f'{indent}__effects[__effect_count++] = morph::create_effect([&]() {{')
+            lines.append(f'{indent}    auto* n = nodes.get("{node_id}");')
+            lines.append(f'{indent}    if (!n) return;')
+            if attr_key == "src" and node.node_type == "img":
+                lines.append(f'{indent}    auto* img = static_cast<ImageNode*>(n);')
+                lines.append(f'{indent}    std::string _src = morph::str({cpp_expr});')
+                lines.append(f'{indent}    if (img->src != _src) {{')
+                lines.append(f'{indent}        img->src = _src;')
+                lines.append(f'{indent}        img->loaded = false;')
+                lines.append(f'{indent}    }}')
+            else:
+                lines.append(f'{indent}    n->{attr_key} = morph::str({cpp_expr});')
+            lines.append(f'{indent}    n->markDirty(PaintDirty);')
+            lines.append(f'{indent}}});')
 
     # ── Reactive className (stores string on node) ──
     if node.reactive_class:

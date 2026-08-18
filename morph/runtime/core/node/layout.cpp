@@ -373,7 +373,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 
 #ifdef MORPH_FEATURE_FLEX
     if (style.display == "flex") {
-        struct FlexItem { MorphNode* node; float main, cross, mt, mr, mb, ml; };
+        struct FlexItem { MorphNode* node; float main, cross, mt, mr, mb, ml; bool mtAuto, mbAuto, mlAuto, mrAuto; };
         std::vector<FlexItem> items;
 
         for (auto* c : normal) {
@@ -387,9 +387,11 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 
             float cmt = c->style.margin[0], cmb = c->style.margin[2];
             float cml = c->style.margin[3], cmr = c->style.margin[1];
+            bool cmtA = c->style.marginAuto[0], cmbA = c->style.marginAuto[2];
+            bool cmlA = c->style.marginAuto[3], cmrA = c->style.marginAuto[1];
             float childMain = isCol ? (c->h + cmt + cmb) : (c->w + cml + cmr);
             float childCross = isCol ? (c->w + cml + cmr) : (c->h + cmt + cmb);
-            items.push_back({c, childMain, childCross, cmt, cmr, cmb, cml});
+            items.push_back({c, childMain, childCross, cmt, cmr, cmb, cml, cmtA, cmbA, cmlA, cmrA});
         }
 
         float mainAvail = isCol ? ch : cw;
@@ -458,6 +460,33 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
             float lineCross = line.crossSize;
             float extraGap = line.fItems.size() > 1 ? style.gap * (line.fItems.size() - 1) : 0.0f;
             float free = mainAvail - line.totalMain;
+
+            // Distribute free space to auto margins on main axis
+            std::vector<FlexItem*> autoMainItems;
+            for (auto* item : line.fItems) {
+                if (isCol) {
+                    if (item->mtAuto || item->mbAuto) autoMainItems.push_back(item);
+                } else {
+                    if (item->mlAuto || item->mrAuto) autoMainItems.push_back(item);
+                }
+            }
+            if (!autoMainItems.empty() && free > 0.0f) {
+                float perAuto = free / autoMainItems.size();
+                for (auto* item : autoMainItems) {
+                    if (isCol) {
+                        if (item->mtAuto) item->mt += perAuto;
+                        else if (item->mbAuto) item->mb += perAuto;
+                    } else {
+                        if (item->mlAuto) item->ml += perAuto;
+                        else if (item->mrAuto) item->mr += perAuto;
+                    }
+                    item->main += perAuto;
+                }
+                // Recompute free after auto margin absorption
+                float newTotal = 0.0f;
+                for (auto* item : line.fItems) newTotal += item->main;
+                free = mainAvail - newTotal;
+            }
 
             float offset = 0.0f;
             float itemGap = style.gap;

@@ -165,6 +165,7 @@ class JSXWalker:
         state_vars = self._extract_state_vars(block_node) if block_node else []
         inner_funcs = self._extract_inner_functions(block_node) if block_node else []
         effects = self._extract_morph_effects(block_node) if block_node else []
+        consts = self._extract_component_consts(block_node) if block_node else []
 
         return {
             "name":           name,
@@ -174,6 +175,7 @@ class JSXWalker:
             "state_vars":     state_vars,
             "inner_functions": inner_funcs,
             "morph_effects":  effects,
+            "consts":         consts,
             "exported":       False,
         }
 
@@ -696,6 +698,48 @@ class JSXWalker:
                                 "source": child.text.decode(),
                             })
         return funcs
+
+    def _extract_component_consts(self, block_node: Node) -> list[dict]:
+        """Extract simple component-level const declarations.
+
+        Handles `const showQrImage = qrPath !== "" && qrFailed === 0`
+        (non-morphState, non-arrow-function values). These are emitted as
+        file-scope lambdas so they stay reactive when state changes.
+        """
+        consts = []
+        for child in block_node.children:
+            if child.type != "lexical_declaration":
+                continue
+            for decl in child.children:
+                if decl.type != "variable_declarator":
+                    continue
+                var_name = ""
+                value_node = None
+                is_state = False
+                for c in decl.children:
+                    if c.type == "identifier":
+                        var_name = c.text.decode()
+                    elif c.type in ("arrow_function", "function_expression"):
+                        var_name = ""  # handled by inner_functions
+                    elif c.type == "array_pattern":
+                        var_name = ""  # morphState destructuring — handled separately
+                        is_state = True
+                    elif c.type == "call_expression":
+                        fn_parts, _ = self._parse_call_expr(c)
+                        if fn_parts == ["morphState"]:
+                            is_state = True
+                            var_name = ""
+                        elif value_node is None:
+                            value_node = c
+                    elif c.type not in ("=", "const", "let", "var"):
+                        if value_node is None:
+                            value_node = c
+                if var_name and value_node is not None and not is_state:
+                    consts.append({
+                        "name": var_name,
+                        "rhs": value_node.text.decode(),
+                    })
+        return consts
 
     # ── Generic helpers ───────────────────────────────────────
 

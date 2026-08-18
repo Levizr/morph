@@ -105,6 +105,10 @@ def extract_function_decl(cpp: str) -> str | None:
             header = text[:i].rstrip()
             if "(" not in header or ")" not in header:
                 return None
+            # Skip lambda assignments like `auto x = []() { ... };` —
+            # they're TU-internal consts, not functions callable from C++.
+            if "= [" in header or header.rstrip().endswith("= ["):
+                return None
             # Skip `main` — the app provides its own.
             m = re.search(r"\bmain\s*\(", header)
             if m:

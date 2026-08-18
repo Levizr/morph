@@ -355,6 +355,7 @@ def _deser_node(d: dict) -> IRNode:
         reactive_text=d.get("reactive_text", ""),
         reactive_class=d.get("reactive_class", ""),
         reactive_style=d.get("reactive_style", {}),
+        reactive_attrs=d.get("reactive_attrs", {}),
         class_conditional_effects=[
             (str(c), dict(o), dict(f))
             for c, o, f in d.get("class_conditional_effects", [])
