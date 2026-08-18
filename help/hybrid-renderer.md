@@ -1,6 +1,6 @@
 # Hybrid Retained Renderer — Tier 3 Architecture (forge deep-dive)
 
-> Status: Design reference for the **forge** renderer (see `arch/renderer-flash-forge.md` for the dual-renderer implementation plan)
+> Status: Design reference for the **forge** renderer (see `renderer-flash-forge.md` for the dual-renderer implementation plan)
 > Scope: Browser-grade damage rendering — paint only damaged regions, skip unchanged work entirely
 > Selection: User-configurable renderer (per-app) — **dev: runtime toggle; production: build-time only** (`constexpr` + `if constexpr`)
 
@@ -259,4 +259,4 @@ Floor: **one window's worth of retained pixels is mandatory** (old pixels must p
 
 ---
 
-*Related:* `arch/renderer-flash-forge.md` (dual-renderer plan — this design is the forge side) · `arch/compositing-thread.md` (existing compositor thread architecture — reused, extended).
+*Related:* `renderer-flash-forge.md` (dual-renderer plan — this design is the forge side) · `compositing-thread.md` (existing compositor thread architecture — reused, extended).

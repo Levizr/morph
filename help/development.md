@@ -135,8 +135,8 @@ runtime/                      # C++ runtime headers
 └── vendor/                   #   glad (GL loader), stb_image
 
 templates/default/            # morph init scaffolding (incl. node_modules/morph TS types)
-examples/                     # calculator, ipchecker example apps
-arch/                         # design docs (compositor thread, renderers)
+examples/                     # calculator, ipchecker, dynamic-styles example apps
+help/                         # design docs (compositor thread, renderers, pipeline, etc.)
 ```
 
 ## Key Design Decisions

@@ -2,7 +2,7 @@
 
 > Status: Approved plan (not yet implemented)
 > Scope: Two user-selectable renderers — `flash` (Lightweight Direct Renderer) and `forge` (Hybrid Retained Tile Compositor)
-> Related: `arch/hybrid-renderer.md` (tile-architecture deep-dive for the forge side), `arch/compositing-thread.md` (compositor thread model, reused)
+> Related: `hybrid-renderer.md` (tile-architecture deep-dive for the forge side), `compositing-thread.md` (compositor thread model, reused)
 
 ---
 
@@ -268,10 +268,10 @@ Floor: one window's worth of retained pixels is mandatory (old pixels must persi
 
 ### Phase 9 — Benchmarks & verification matrix
 - flash vs forge on 100 / 5,000 / 20,000-node scenes × {scrub, scroll, static, full-screen anim}; report frame time, present BW, RAM (RSS + VRAM), size.
-- **DoD:** documented in `arch/`; targets below.
+- **DoD:** documented in `help/`; targets below.
 
 ### Phase 10 — Docs & examples
-- Update `arch/` docs; add `examples/flash` + `examples/forge`; renderer selection guide.
+- Update `help/` docs; add `examples/flash` + `examples/forge`; renderer selection guide.
 
 ---
 
@@ -320,4 +320,4 @@ Floor: one window's worth of retained pixels is mandatory (old pixels must persi
 
 ---
 
-*Companion docs:* `arch/hybrid-renderer.md` (tile-architecture deep-dive, now the forge design reference) · `arch/compositing-thread.md` (compositor thread model, reused).
+*Companion docs:* `hybrid-renderer.md` (tile-architecture deep-dive, now the forge design reference) · `compositing-thread.md` (compositor thread model, reused).

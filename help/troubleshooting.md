@@ -95,5 +95,5 @@ Or delete `.morph/css-cache/` manually.
 ## Getting Help
 
 - Open a GitHub issue
-- Check the [development guide](docs/development.md) for codebase tour
-- Check the [pipeline deep-dive](docs/pipeline.md) for component details
+- Check the [development guide](development.md) for codebase tour
+- Check the [pipeline deep-dive](pipeline.md) for component details

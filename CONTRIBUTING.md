@@ -17,11 +17,11 @@ The most impactful areas right now:
 
 | Area | Difficulty | Impact | Guide |
 |---|---|---|---|
-| **CSS Style Resolver** (`morph/style/`) | Medium | Full cascade + selector matching at runtime | [Development Guide](docs/development.md) |
-| **TS→C++ translator coverage** (`morph/js/`) | Medium | Broaden supported JS surface (built-ins, arrays/objects in UI logic) | [Development Guide](docs/development.md) |
-| **Forge tile pool** (`runtime/renderers/forge/`) | Hard | Content-keyed tile caching, LRU budget, scroll-shift remap | `arch/renderer-flash-forge.md` |
-| **`position: relative/fixed` + sticky** | Medium | Offset and viewport-relative positioning | [Development Guide](docs/development.md) |
-| **Tests** | Easy | Increase coverage (esp. layout, JS→C++, C++ runtime) | [Testing Guide](docs/testing.md) |
+| **CSS Style Resolver** (`morph/style/`) | Medium | Full cascade + selector matching at runtime | [Development Guide](help/development.md) |
+| **TS→C++ translator coverage** (`morph/js/`) | Medium | Broaden supported JS surface (built-ins, arrays/objects in UI logic) | [Development Guide](help/development.md) |
+| **Forge tile pool** (`runtime/renderers/forge/`) | Hard | Content-keyed tile caching, LRU budget, scroll-shift remap | `help/renderer-flash-forge.md` |
+| **`position: relative/fixed` + sticky** | Medium | Offset and viewport-relative positioning | [Development Guide](help/development.md) |
+| **Tests** | Easy | Increase coverage (esp. layout, JS→C++, C++ runtime) | [Testing Guide](help/testing.md) |
 | **Bug fixes** | Varies | Any open issue | — |
 
 ## Code Conventions

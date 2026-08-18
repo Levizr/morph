@@ -99,10 +99,9 @@ A native window opens. Edit `src/App.mx` — the window updates instantly withou
 
 **4. Ship**
 ```bash
-morph build
-morph run       # run the built binary
+morph run         # builds and runs the production binary
 # or with --static to link GLFW/FreeType/HarfBuzz into a single self-contained file
-morph build --static
+morph run --static
 ```
 
 ---
@@ -229,6 +228,8 @@ Since v0.0.6, rendering runs on a dedicated **compositor thread**: the main thre
 - `font-size` (px, %, em, bare numbers), `font-weight`, `text-align`
 - `color`, `font-size`, `font-weight`, `text-align` cascade from parent to children
 - `<body>` default changed from `margin: 8px` → `padding: 8px` — body background fills window edge-to-edge; no white gaps. Override with any CSS rule.
+- `transform` — `translate`, `rotate`, `scale`, `skew`, `matrix`, `matrix3d`; 4x4 matrix composition; vertex-shader applied
+- `animation` — `@keyframes`, `animation-name`/`duration`/`timing-function`/`delay`/`iteration-count`/`direction`/`fill-mode`; easing functions; property interpolation
 
 **Pseudo-classes**
 - `:hover` — class-based rules from CSS files (e.g. `.btn:hover`); style struct snap-copy on mouse enter/leave with correct restoration; all CSS properties above supported (color, background, margin, padding, border, border-radius, font-size, gap, flex alignment, width, height)
@@ -255,6 +256,7 @@ Since v0.0.6, rendering runs on a dedicated **compositor thread**: the main thre
 - **Async / coroutines** — `async` functions compile to C++ coroutines (`morph::Task` + `morph::Result<T>`); `await fetch(url)` runs HTTP on a worker thread; `await next_frame` resumes next tick
 - **Timers** — `setTimeout`, `setInterval`, `clearTimeout`
 - **Networking** — `fetch(url)` → `Response` with `status`, `headers`, `ok()`, `text()`; errors surface as JS `Error` objects with `.message`
+- **C++/JSX interop** — `import { fn } from './file.cpp'` imports user C++ directly; generated `_morph_state.h` exposes signals and JSX functions to C++; `native` config block for include dirs, libraries, and flags
 
 **C++ Runtime**
 - OpenGL 3.3 core profile batch renderer (instanced VAO/VBO/IBO)
@@ -283,6 +285,8 @@ Since v0.0.6, rendering runs on a dedicated **compositor thread**: the main thre
 - **JS runtime types** — `JsValue` variant with `typeof_()`, `truthy()`, `==`, `toString()`, `operator std::string()`, `std::formatter`; `JsNumber` (int64/double/big-string variants + arithmetic), `JsString` (+ number/string concat operators), `JsArray` (shared-ptr vector), `JsObject` (shared-ptr map), `JsBoolean`, `JsUndefined`/`JsNull`
 - **Reactivity** — `Signal<T>` with thread-local `EffectContext` auto-subscription, `notify_all()`, mutex-protected subscriber list; `create_effect()`/`run_pending_effects()`/`destroy_all_effects()`; `fmt_double()` / `str()` helpers for UI formatting
 - **Coroutines & timers** — `morph::Task` (eager, `suspend_never` start, `suspend_always` final, scheduler-owned frame), `next_frame` awaiter, `process_tasks()`, `schedule_coroutine()`, `TimerEntry`/`set_timeout`/`set_interval`/`clear_timer`
+- **CSS transforms** — `Transform` struct with `mat4` composition; `translate`/`rotate`/`scale`/`skew`/`matrix` functions parsed and composed; vertex-shader application via `MorphStyle::transformMatrix`; `MORPH_FEATURE_TRANSFORM` gate
+- **CSS animations** — `Animation` struct with keyframe tracks, easing, fill-mode, iteration count; `KeyframesRegistry` global registry; per-element animation state in `MorphNode`; property interpolation at vsync; `MORPH_FEATURE_ANIMATION` gate
 
 **DevTools (`morph_devrt` only)**
 - `F12` — Toggle DevTools panel (morph-branded dark UI); docked on the right side of the window with a drag-resize handle — the app layout is constrained to the remaining content area so the panel never covers app elements
@@ -357,9 +361,8 @@ Run `morph doctor` after installing to verify your environment — it checks the
 ### Future
 - [ ] Multi-window & navigation system
 - [ ] `<morph-viewport>` embedded OpenGL canvas
-- [ ] Custom C++ node integration
 - [ ] morph-icons (first-party package)
-- [ ] morph-animate
+- [ ] morph-animate (animation library on top of CSS animations)
 - [ ] Windows support
 - [ ] VSCode extension (syntax highlighting for `.mx` files)
 
@@ -374,10 +377,11 @@ Morph ships ready-to-run example apps under `examples/`:
 | **calculator** | Full working calculator UI — `morphState` reactive state, conditional JSX rendering (`{op !== 0 && <span>…</span>}`), typed functions (`:double`, `:int`), flexbox keypad |
 | **ipchecker** | Async networking — `await fetch("http://api.ipify.org")`, `Response.ok()`/`status`/`text()`, try/catch error handling, loading/error states |
 | **dynamic** | Dynamic classes & styles — template-literal `className` (`className={\`header ${theme == "light" ? "" : "bg-gray-900"}\`}`) with conditional Tailwind effects, and direct state values in inline `style` (`style={{ width: bodyWidth }}`) |
+| **dynamic-styles** | Reactive class & inline styles — dynamic `className` and `style` bindings with `morphState`, demonstrating runtime style updates |
 
 ```bash
 cd examples/calculator
-morph dev        # or: morph build && morph run
+morph dev        # or: morph run
 ```
 
 ---
