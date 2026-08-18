@@ -103,7 +103,7 @@ jobs:
       - name: Call revalidation endpoint
         if: steps.payload.outputs.skip == 'false'
         env:
-          REVALIDATE_URL: ${{ secrets.REVALIDATE_URL }}
+          REVALIDATE_URL: ${{ vars.REVALIDATE_URL }}
           WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
           PAYLOAD: ${{ steps.payload.outputs.payload }}
         run: |
