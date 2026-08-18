@@ -2,7 +2,7 @@
   {
     "category": "Getting Started",
     "items": [
-      { "title": "Introduction", "slug": "index" },
+      { "title": "Introduction", "slug": "introduction", "file": "index" },
       { "title": "Installation", "slug": "getting-started/installation" },
       { "title": "Quick Start", "slug": "getting-started/quick-start" },
       { "title": "Configuration", "slug": "getting-started/configuration" },
