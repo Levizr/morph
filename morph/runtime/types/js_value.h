@@ -2,6 +2,7 @@
 #include <variant>
 #include <string>
 #include <cstdint>
+#include <algorithm>
 #include "js_number.h"
 #include "js_boolean.h"
 #include "js_string.h"
@@ -316,6 +317,21 @@ inline void JsArray::push(const JsValue& item) {
     elements->push_back(item);
 }
 
+// JS Array.prototype.slice — copies [start, end) into a new JsArray.
+// Negative indices count from the end; end may be omitted (to the end).
+inline JsArray JsArray::slice(int64_t start, int64_t end) const {
+    int64_t len = (int64_t)elements->size();
+    if (start < 0) start = std::max<int64_t>(len + start, 0);
+    if (end < 0) end = std::max<int64_t>(len + end, 0);
+    end = std::min<int64_t>(end, len);
+    if (start >= end) return JsArray{};
+    JsArray out;
+    out.elements->reserve((size_t)(end - start));
+    for (int64_t i = start; i < end; ++i)
+        out.elements->push_back((*elements)[(size_t)i]);
+    return out;
+}
+
 inline JsValue JsArray::pop() {
     if (elements->empty()) return JsValue(JsUndefined{});
     auto back = elements->back();
@@ -431,6 +447,14 @@ inline JsString operator+(const JsString& a, int b) {
     return a.value + std::to_string(b);
 }
 inline JsString operator+(int a, const JsString& b) {
+    return std::to_string(a) + b.value;
+}
+// int64_t overloads — codegen emits (int64_t)(x.length()) etc.; without these,
+// JsString + int64_t is ambiguous between the int and JsValue overloads
+inline JsString operator+(const JsString& a, int64_t b) {
+    return a.value + std::to_string(b);
+}
+inline JsString operator+(int64_t a, const JsString& b) {
     return std::to_string(a) + b.value;
 }
 

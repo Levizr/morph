@@ -159,15 +159,27 @@ class NodeEmitter:
         self.features = features or set()
 
     def emit_node(self, node: IRNode, parent_id: str | None = None,
-                  parent_style: IRStyle | None = None) -> str:
-        """Return C++ code for a single node and all its children (recursive)."""
+                  parent_style: IRStyle | None = None,
+                  list_mode: bool = False) -> str:
+        """Return C++ code for a single node and all its children (recursive).
+
+        ``list_mode`` — emitted inside a list item factory: reactive effects
+        capture the node pointer by value plus ``&__it``/``&__index`` (the
+        binding refs) instead of the enclosing scope, and conditionals keep
+        their state in a heap shared_ptr so nothing dangles after the factory
+        returns. Effects are always registered on the node so destruction
+        marks them dead."""
         if isinstance(node, IRViewport):
             return self._emit_viewport(node, parent_id)
 
         lines = []
         indent = "    "
 
+        if node.node_type == "__list__":
+            return "\n".join(self._emit_list(node, parent_id, indent, list_mode))
+
         if node.node_type == "__text__":
+            caps = "__LCAPS__" if list_mode else ""
             if node.reactive_text:
                 lines.append(f"TextNode* {node.node_id} = new TextNode(\"\");")
             else:
@@ -189,13 +201,15 @@ class NodeEmitter:
             if parent_id:
                 lines.append(f"{parent_id}->addChild({node.node_id});")
             if node.reactive_text:
-                lines.append(f"{node.node_id}->m_associatedEffects.push_back(morph::create_effect([{node.node_id}]() {{")
+                lines.append(f"{node.node_id}->m_associatedEffects.push_back(morph::create_effect([{node.node_id}{caps}]() {{")
                 lines.append(f"{indent}{node.node_id}->setText(morph::str({node.reactive_text}));")
                 lines.append(f"}}));")
             return "\n".join(lines)
 
         # ── Conditional node ─────────────────────────────────
         if node.node_type == "__conditional__":
+            if list_mode:
+                return "\n".join(self._emit_conditional_list_mode(node, parent_id, indent))
             child_var = f"__cond_{node.node_id}"
             lines.append(f"RectNode* {node.node_id} = new RectNode(0.0f, 0.0f, 0.0f, 0.0f);")
             lines.append(f"MorphNode* {child_var} = nullptr;")
@@ -306,13 +320,142 @@ class NodeEmitter:
         )
 
         for child in node.children:
-            lines.append(self.emit_node(child, node.node_id, resolved))
+            lines.append(self.emit_node(child, node.node_id, resolved, list_mode=list_mode))
 
-        lines.append(self._emit_reactive_effects(node, indent))
+        lines.append(self._emit_reactive_effects(node, indent, list_mode=list_mode))
 
         return "\n".join(lines)
 
-    def _emit_reactive_effects(self, node: IRNode, indent: str = "    ") -> str:
+    def _emit_list(self, node: IRNode, parent_id: str | None,
+                   indent: str, list_mode: bool) -> list[str]:
+        """Emit a keyed list container + its wiring.
+
+        arrayFn reads the array source (auto-subscribing); itemFactory is the
+        generated static factory; keyFn produces stable keys; the reconcile
+        effect re-runs on any signal read by arrayFn.
+        """
+        caps = "__LCAPS__" if list_mode else ""
+        lines = [f"morph::ListContainer* {node.node_id} = new morph::ListContainer("
+                 f"{fmt(node.x)}, {fmt(node.y)}, {fmt(node.w)}, {fmt(node.h)});"]
+        if parent_id:
+            lines.append(f"{parent_id}->addChild({node.node_id});")
+        lines.append(self._set_style(node, indent, None))
+        lines.append(self._set_animations(node, indent))
+        lines.append(self._set_hover_animations(node, indent))
+        lines.append(self._set_hover_style(node, indent))
+        lines.append(self._set_active_style(node, indent))
+        lines.append(self._set_transition(node, indent))
+        lines.append(f"{node.node_id}->arrayFn = [{caps}]() {{ return {node.list_expr}; }};")
+        lines.append(f"{node.node_id}->itemFactory = __list_factory_{node.node_id};")
+        if node.list_key_expr:
+            # keyFn uses its own params — explicit captures of __it/__index
+            # would conflict with the parameter names on nested lists
+            lines.append(f"{node.node_id}->keyFn = [](const JsValue& __it, int __index) -> std::string {{")
+            lines.append(f"    return morph::list_key({node.list_key_expr}, __index);")
+            lines.append(f"}};")
+        # Reconcile effect: create_effect's immediate run performs the initial
+        # fill; later runs resubscribe to whatever signals arrayFn reads.
+        lines.append(f"{node.node_id}->m_associatedEffects.push_back(morph::create_effect([{node.node_id}{caps}]() {{")
+        lines.append(f"    {node.node_id}->reconcile({node.node_id}->arrayFn());")
+        lines.append(f"}}));")
+        return lines
+
+    def _emit_conditional_list_mode(self, node: IRNode, parent_id: str | None,
+                                    indent: str) -> list[str]:
+        """Emit a conditional inside a list item factory.
+
+        Unlike the top-level version this cannot capture the enclosing scope
+        ([&] would dangle after the factory returns). The branch state lives
+        in a heap shared_ptr and the effect is registered on the container so
+        deletion marks it dead; the effect only touches the nodes it owns."""
+        lines = [f"RectNode* {node.node_id} = new RectNode(0.0f, 0.0f, 0.0f, 0.0f);"]
+        if parent_id:
+            lines.append(f"{parent_id}->addChild({node.node_id});")
+        st = f"__condst_{node.node_id}"
+        br = f"__condbr_{node.node_id}"
+        lines.append(f"auto {st} = std::make_shared<MorphNode*>(nullptr);")
+        lines.append(f"auto {br} = std::make_shared<int>(0); // 1=then, 2=else")
+        then_code = ""
+        then_root_var = ""
+        for tn in node.then_nodes:
+            then_code = self.emit_node(tn, None, None, list_mode=True)
+            then_root_var = tn.node_id
+            break
+        else_code = ""
+        else_root_var = ""
+        for en in node.else_nodes:
+            else_code = self.emit_node(en, None, None, list_mode=True)
+            else_root_var = en.node_id
+            break
+        bi = indent + "    "
+        lines.append(f"{node.node_id}->m_associatedEffects.push_back(morph::create_effect([{node.node_id}, {st}, {br}__LCAPS__]() {{")
+        lines.append(f"{bi}if ({node.condition_expr}) {{")
+        lines.append(f"{bi}    if (*{st} && *{br} != 1) {{")
+        lines.append(f"{bi}        {node.node_id}->removeChild(*{st});")
+        lines.append(f"{bi}        delete *{st};")
+        lines.append(f"{bi}        *{st} = nullptr;")
+        lines.append(f"{bi}    }}")
+        if then_code and then_root_var:
+            lines.append(f"{bi}    if (!*{st}) {{")
+            for line in then_code.split("\n"):
+                lines.append(f"{bi}        {line}")
+            lines.append(f"{bi}        {node.node_id}->addChild({then_root_var});")
+            lines.append(f"{bi}        {node.node_id}->style.explicitWidth = {then_root_var}->style.explicitWidth;")
+            lines.append(f"{bi}        {node.node_id}->style.explicitHeight = {then_root_var}->style.explicitHeight;")
+            lines.append(f"{bi}        *{st} = {then_root_var};")
+            lines.append(f"{bi}        *{br} = 1;")
+            lines.append(f"{bi}    }}")
+        lines.append(f"{bi}}} else {{")
+        lines.append(f"{bi}    if (*{st} && *{br} != 2) {{")
+        lines.append(f"{bi}        {node.node_id}->removeChild(*{st});")
+        lines.append(f"{bi}        delete *{st};")
+        lines.append(f"{bi}        *{st} = nullptr;")
+        lines.append(f"{bi}    }}")
+        if else_code and else_root_var:
+            lines.append(f"{bi}    if (!*{st}) {{")
+            for line in else_code.split("\n"):
+                lines.append(f"{bi}        {line}")
+            lines.append(f"{bi}        {node.node_id}->addChild({else_root_var});")
+            lines.append(f"{bi}        {node.node_id}->style.explicitWidth = {else_root_var}->style.explicitWidth;")
+            lines.append(f"{bi}        {node.node_id}->style.explicitHeight = {else_root_var}->style.explicitHeight;")
+            lines.append(f"{bi}        *{st} = {else_root_var};")
+            lines.append(f"{bi}        *{br} = 2;")
+            lines.append(f"{bi}    }}")
+        lines.append(f"{bi}}}")
+        lines.append(f"{bi}{node.node_id}->markDirty(LayoutDirty);")
+        lines.append(f"}}));")
+        return lines
+
+    def emit_item_factory(self, node: IRNode) -> str:
+        """Emit the file-scope item factory for a __list__ node.
+
+        ``static MorphNode* __list_factory_<id>(morph::ListItemBinding& __b)``
+        builds one item subtree per call; ``__b`` lives on the heap (the
+        container owns it) so effects may capture ``&__b.item``/``&__b.index``.
+        """
+        tmpl = node.item_template
+        if tmpl is None:
+            return ""
+        body = self.emit_node(tmpl, None, None, list_mode=True)
+        caps = ""
+        if "__it" in body:
+            caps += ", &__it"
+        if "__index" in body:
+            caps += ", &__index"
+        body = body.replace("__LCAPS__", caps)
+        lines = [f"static MorphNode* __list_factory_{node.node_id}(morph::ListItemBinding& __b) {{"]
+        if "__it" in caps:
+            lines.append("    JsValue& __it = __b.item;")
+        if "__index" in caps:
+            lines.append("    int& __index = __b.index;")
+        lines.append(body)
+        lines.append(f"    return {tmpl.node_id};")
+        lines.append("}")
+        return "\n".join(lines)
+
+    def _emit_reactive_effects(self, node: IRNode, indent: str = "    ",
+                               list_mode: bool = False) -> str:
+        caps = "__LCAPS__" if list_mode else ""
         """Emit reactive className / inline style / conditional class effects
         (prod mode). Mirrors logic_emitter._emit_node_effects but captures node
         pointers directly instead of going through the dev NodeRegistry."""
@@ -331,26 +474,26 @@ class NodeEmitter:
                     continue
                 field_name, val_type = field_info
                 if val_type == "float":
-                    lines.append(f"{node_id}->m_associatedEffects.push_back(morph::create_effect([{node_id}]() {{")
+                    lines.append(f"{node_id}->m_associatedEffects.push_back(morph::create_effect([{node_id}{caps}]() {{")
                     lines.append(f"{indent}{node_id}->interruptStateTransitions();")
                     lines.append(f"{indent}{node_id}->style.{field_name} = (float)({cpp_expr});")
                     lines.append(f"{indent}{node_id}->markDirty(LayoutDirty);")
                     lines.append(f"{indent}{node_id}->markDirty(PaintDirty);")
                     lines.append(f"}}));")
                 elif val_type == "string":
-                    lines.append(f"{node_id}->m_associatedEffects.push_back(morph::create_effect([{node_id}]() {{")
+                    lines.append(f"{node_id}->m_associatedEffects.push_back(morph::create_effect([{node_id}{caps}]() {{")
                     lines.append(f"{indent}{node_id}->interruptStateTransitions();")
                     lines.append(f"{indent}{node_id}->style.{field_name} = morph::str({cpp_expr});")
                     lines.append(f"{indent}{node_id}->markDirty(PaintDirty);")
                     lines.append(f"}}));")
                 elif val_type == "color":
-                    lines.append(f"{node_id}->m_associatedEffects.push_back(morph::create_effect([{node_id}]() {{")
+                    lines.append(f"{node_id}->m_associatedEffects.push_back(morph::create_effect([{node_id}{caps}]() {{")
                     lines.append(f"{indent}{node_id}->interruptStateTransitions();")
                     lines.append(f"{indent}morph::setColor({node_id}->style.{field_name}, morph::str({cpp_expr}));")
                     lines.append(f"{indent}{node_id}->markDirty(PaintDirty);")
                     lines.append(f"}}));")
                 elif val_type == "transform":
-                    lines.append(f"{node_id}->m_associatedEffects.push_back(morph::create_effect([{node_id}]() {{")
+                    lines.append(f"{node_id}->m_associatedEffects.push_back(morph::create_effect([{node_id}{caps}]() {{")
                     lines.append(f"{indent}{node_id}->interruptStateTransitions();")
                     lines.append(f"{indent}morph::setCssTransform({node_id}->style, morph::str({cpp_expr}), {node_id}->w, {node_id}->h);")
                     lines.append(f"{indent}{node_id}->markDirty(PaintDirty);")
@@ -366,7 +509,7 @@ class NodeEmitter:
                     continue
                 for child in node.children:
                     if child.node_type == "__text__":
-                        lines.append(f"{child.node_id}->m_associatedEffects.push_back(morph::create_effect([{child.node_id}]() {{")
+                        lines.append(f"{child.node_id}->m_associatedEffects.push_back(morph::create_effect([{child.node_id}{caps}]() {{")
                         lines.append(f"{indent}{child.node_id}->interruptStateTransitions();")
                         lines.append(f"{indent}{child.node_id}->style.fontSize = (float)({cpp_expr});")
                         lines.append(f"{indent}{child.node_id}->markDirty(LayoutDirty);")
@@ -376,7 +519,7 @@ class NodeEmitter:
         # ── Reactive attrs (src/alt on img nodes) ──
         if node.reactive_attrs:
             for attr_key, cpp_expr in node.reactive_attrs.items():
-                lines.append(f"{node_id}->m_associatedEffects.push_back(morph::create_effect([{node_id}]() {{")
+                lines.append(f"{node_id}->m_associatedEffects.push_back(morph::create_effect([{node_id}{caps}]() {{")
                 if attr_key == "src" and node.node_type == "img":
                     lines.append(f"{indent}std::string _src = morph::str({cpp_expr});")
                     lines.append(f"{indent}if ({node_id}->src != _src) {{")
@@ -390,7 +533,7 @@ class NodeEmitter:
 
         # ── Reactive className (stores string on node) ──
         if node.reactive_class:
-            lines.append(f"{node_id}->m_associatedEffects.push_back(morph::create_effect([{node_id}]() {{")
+            lines.append(f"{node_id}->m_associatedEffects.push_back(morph::create_effect([{node_id}{caps}]() {{")
             lines.append(f"{indent}{node_id}->setClassName(morph::str({node.reactive_class}));")
             lines.append(f"}}));")
 
@@ -415,7 +558,7 @@ class NodeEmitter:
                         out.append(a.replace("n->", f"{node_id}->"))
                 return out
 
-            lines.append(f"{node_id}->m_associatedEffects.push_back(morph::create_effect([{node_id}]() {{")
+            lines.append(f"{node_id}->m_associatedEffects.push_back(morph::create_effect([{node_id}{caps}]() {{")
             lines.append(f"{indent}{node_id}->interruptStateTransitions();")
             lines.append(f"{indent}if ({cond_cpp}) {{")
             for a in _assigns(on_styles):

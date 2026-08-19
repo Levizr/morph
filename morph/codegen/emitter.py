@@ -18,6 +18,20 @@ _TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
 _STATE_HEADER_NAME = "_morph_state.h"
 
 
+def collect_list_nodes(nodes: list) -> list:
+    """All __list__ IR nodes in a node forest (incl. nested/conditional)."""
+    out = []
+    for n in nodes:
+        if getattr(n, "node_type", "") == "__list__":
+            out.append(n)
+        if getattr(n, "item_template", None) is not None:
+            out.extend(collect_list_nodes([n.item_template]))
+        out.extend(collect_list_nodes(getattr(n, "children", [])))
+        out.extend(collect_list_nodes(getattr(n, "then_nodes", [])))
+        out.extend(collect_list_nodes(getattr(n, "else_nodes", [])))
+    return out
+
+
 class Emitter:
     """Renders IR into app.cpp using Jinja2 templates + NodeEmitter."""
 
@@ -53,30 +67,17 @@ class Emitter:
         premain_code = "\n\n".join(premain_parts)
 
         # ── Collect state vars (morphState) ──────────────────
+        from morph.codegen.logic_emitter import _get_cpp_type as _logic_cpp_type
+        from morph.codegen.logic_emitter import _clean_init as _logic_clean_init
         state_decls = []
         for w in windows:
             for sv in w.state_vars:
-                init = sv.get("init", "0")
+                init = _logic_clean_init(sv.get("init", "0"))
                 name = sv.get("getter", "")
                 sig_name = f"__st_{name}" if name else "__st_unknown"
-                # Determine C++ type from the init value
-                raw_init = init.strip()
-                if raw_init.startswith("'") and raw_init.endswith("'"):
-                    init = '"' + raw_init[1:-1] + '"'
-                    raw_init = init
-                if raw_init in ("true", "false"):
-                    cpp_type = "bool"
-                elif raw_init.startswith('"') or raw_init.startswith("'"):
-                    cpp_type = "std::string"
-                elif "." in raw_init:
-                    cpp_type = "double"
-                elif raw_init.isdigit() or (raw_init.startswith("-") and raw_init[1:].isdigit()):
-                    cpp_type = "int"
-                else:
-                    cpp_type = "auto"  # let CTAD deduce or fallback
                 state_decls.append({
                     "signal_name": sig_name,
-                    "type": cpp_type,
+                    "type": _logic_cpp_type(sv.get("init", "0")),
                     "init": init,
                 })
 
@@ -173,10 +174,15 @@ class Emitter:
             window_code.append("\n".join(win_code))
 
         tmpl = self.env.get_template("app_main.cpp.j2")
+        list_factory_code = "\n\n".join(
+            self.node_emitter.emit_item_factory(n)
+            for n in collect_list_nodes([nd for w in windows for nd in w.nodes])
+        )
         code = tmpl.render(
             windows=windows,
             window_code="\n".join(window_code),
             keyframe_code=keyframe_code,
+            list_factory_code=list_factory_code,
             headers=features.required_headers(),
             extra_headers=extra_headers,
             defines=features.required_defines(),

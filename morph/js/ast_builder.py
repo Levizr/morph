@@ -23,6 +23,7 @@ from morph.js.ast import (
     TSFunctionExpression,
     TSObjectLiteral,
     TSObjectProperty,
+    TSSpreadElement,
     TSForStatement,
     TSFunctionDeclaration,
     TSGenericType,
@@ -937,6 +938,16 @@ class TSAstBuilder:
         elements = []
         for child in node.children:
             if child.type in ("[", "]", ","):
+                continue
+            if child.type == "spread_element":
+                inner = None
+                for sub in child.children:
+                    if sub.type in ("[", "]", ",", "..."):
+                        continue
+                    inner = self._build_node(sub)
+                    break
+                if inner is not None:
+                    elements.append(TSSpreadElement(argument=inner))
                 continue
             elem = self._build_node(child)
             if elem is not None:

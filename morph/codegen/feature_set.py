@@ -123,6 +123,10 @@ class FeatureSet:
                     self.features.add("input")
                 if node.node_type == "img":
                     self.features.add("image")
+                if node.node_type == "__list__":
+                    self.features.add("list")
+                if node.item_template is not None:
+                    self.features.add("list")
                 self._scan_style(node.style)
                 if node.hover_style is not None:
                     self.features.add("hover")
@@ -159,6 +163,8 @@ class FeatureSet:
             headers.append("ui/viewport_node.h")
         if "image" in self.features:
             headers.append("ui/image.h")
+        if "list" in self.features:
+            headers.append("ui/morph_list.h")
         return headers
 
     def required_defines(self) -> list[str]:
@@ -217,3 +223,5 @@ class FeatureSet:
             yield from self._walk(node.children)
             yield from self._walk(node.then_nodes)
             yield from self._walk(node.else_nodes)
+            if node.item_template is not None:
+                yield from self._walk([node.item_template])

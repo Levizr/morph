@@ -481,6 +481,14 @@ class IRBuilder:
             expr = builder.build_expression(tree.root_node)
             translator = TSToCppTranslator(indent_level=0,
                                             state_vars=state_vars_map or {})
+            # List item aliases are JsValue/int — register so member access
+            # (item.id → __it["id"]) and calls (item.fn()) transpile correctly.
+            if state_vars_map:
+                for js_name, alias in state_vars_map.items():
+                    if alias == "__it":
+                        translator._var_types[js_name] = "JsValue"
+                    elif alias == "__index":
+                        translator._var_types[js_name] = "int"
             # expr is a TSProgram — extract the inner expression directly
             # to avoid _translate_program adding #include headers
             if (hasattr(expr, 'statements') and expr.statements
@@ -554,6 +562,48 @@ class IRBuilder:
                 condition_expr=cond_expr,
                 then_nodes=[n for n in then_nodes if n is not None],
                 else_nodes=[n for n in else_nodes if n is not None],
+            )
+
+        # ── Keyed list node ({arr.map(item => <JSX/>)}) ───────
+        if tag == "__list__":
+            # Item-scoped name mapping: the item/index callback params become
+            # __it / __index inside the runtime item factory.
+            item_map = dict(state_vars_map or {})
+            item_p = jsx_node.get("item_param", "")
+            index_p = jsx_node.get("index_param", "")
+            if item_p:
+                item_map[item_p] = "__it"
+            if index_p:
+                item_map[index_p] = "__index"
+
+            array_cpp = self._transpile_js_expr(jsx_node.get("array_expr", ""),
+                                                state_vars_map)
+            key_src = jsx_node.get("key_expr", "")
+            key_cpp = self._transpile_js_expr(key_src, item_map) if key_src else ""
+
+            tmpl = jsx_node.get("item_template")
+            tmpl_ir = None
+            if isinstance(tmpl, dict) and tmpl.get("tag"):
+                if tmpl.get("tag") == "__fragment__":
+                    # A fragment can't be one item root — wrap its children in
+                    # an invisible plain container (no styles of its own).
+                    tmpl = {"tag": "div", "props": {}, "children": tmpl.get("children", [])}
+                tmpl_ir = self._build_node(
+                    tmpl, css_rules, tw_resolver,
+                    (ancestry or []) + [("div", [])],
+                    state_vars_map=item_map,
+                    keyframes=keyframes,
+                )
+
+            return IRNode(
+                node_id=node_id,
+                node_type="__list__",
+                style=IRStyle(),
+                children=[],
+                events=[],
+                list_expr=array_cpp,
+                list_key_expr=key_cpp,
+                item_template=tmpl_ir,
             )
 
         # ── Text node ────────────────────────────────────────

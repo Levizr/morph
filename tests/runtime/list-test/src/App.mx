@@ -1,0 +1,22 @@
+import { morphState, morphEffect } from 'morph'
+export const windowConfig = { title: "List Test", width: 800, height: 600 }
+export default function App() {
+  const [items, setItems] = morphState([])
+  const [show, setShow] = morphState(true)
+  morphEffect(()=>{
+    console.log(show)
+  })
+  return (
+    <div>
+      <button onClick={() => setItems([...items, {id: items.length, name: "Item" + items.length}])}>Add</button>
+      <button onClick={() => setItems([...items].slice(0, -1))}>Remove</button>
+      <button onClick={() => setShow(!show)}>Toggle</button>
+      {items.map(item => (
+        <div key={item.id}>
+          {item.name}
+          {show ? <span> +</span> : null}
+        </div>
+      ))}
+    </div>
+  )
+}

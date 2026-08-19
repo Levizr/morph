@@ -9,6 +9,7 @@
 #include "../ui/text.h"
 #include "../ui/button.h"
 #include "../ui/image.h"
+#include "../ui/morph_list.h"
 
 static void deleteNodeTree(MorphNode* node) {
     delete node;
@@ -351,6 +352,8 @@ static MorphNode* deserializeNode(const JsonValue& val,
 
     if (type == "__conditional__") {
         node = new RectNode(0.0f, 0.0f, 0.0f, 0.0f);
+    } else if (type == "__list__") {
+        node = new morph::ListContainer(0.0f, 0.0f, 0.0f, 0.0f);
     } else if (type == "__text__") {
         std::string text;
         if (val.has("text") && !val["text"].isNull())

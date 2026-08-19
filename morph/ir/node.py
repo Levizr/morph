@@ -41,6 +41,11 @@ class IRNode:
     then_nodes: list[IRNode] = field(default_factory=list)
     else_nodes: list[IRNode] = field(default_factory=list)
 
+    # ── Keyed lists ({arr.map(item => <JSX/>)}) ────────────────
+    list_expr: str = ""              # C++ expression evaluating to a JsArray
+    list_key_expr: str = ""          # C++ expr for one item's key (params __it/__index)
+    item_template: IRNode | None = None   # single item template (cloned per item at runtime)
+
     # ── CSS animations ────────────────────────────────────────
     # Resolved `animation` configs (feature: "animation"). Empty = none.
     animations: list[IRAnimation] = field(default_factory=list)

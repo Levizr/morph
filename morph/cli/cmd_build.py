@@ -344,6 +344,7 @@ def _deser_node(d: dict) -> IRNode:
         v = d.get(key, default)
         return default if v is None else float(v)
 
+    item_template = d.get("item_template")
     return IRNode(
         node_id=d.get("id", ""),
         node_type=d.get("type", ""),
@@ -363,6 +364,9 @@ def _deser_node(d: dict) -> IRNode:
         condition_expr=d.get("condition_expr", ""),
         then_nodes=then_nodes,
         else_nodes=else_nodes,
+        list_expr=d.get("list_expr", ""),
+        list_key_expr=d.get("list_key_expr", ""),
+        item_template=_deser_node(item_template) if isinstance(item_template, dict) else None,
         style=_deser_style(d.get("style", {})),
         hover_style=hover_style,
         active_style=active_style,

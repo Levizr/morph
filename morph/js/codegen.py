@@ -37,6 +37,7 @@ from morph.js.ast import (
     TSPropertyDefinition,
     TSReturnStatement,
     TSSequenceExpression,
+    TSSpreadElement,
     TSSuperExpression,
     TSSwitchStatement,
     TSTernaryExpression,
@@ -981,11 +982,12 @@ class TSToCppTranslator:
                 return f"{self._class_name}::{prop}"
             return f"/* super */{prop}"
 
-        # .length → .size()
+        # .length → .size() (cast to a JS number; `int` keeps string-concat
+        # and JsValue conversions unambiguous — JsArray::length is size_t)
         if (isinstance(node.property, TSIdentifier)
                 and node.property.name == "length"
                 and not node.computed):
-            return f"{obj}.length()"
+            return f"(int)({obj}.length())"
 
         if node.computed:
             return f"{obj}[{prop}]"
@@ -1108,8 +1110,23 @@ class TSToCppTranslator:
     def _array_literal(self, node: TSArrayLiteral) -> str:
         if not node.elements:
             return "JsArray{}"
-        elems = [self._translate_node(e) for e in node.elements]
-        return "JsArray{" + ", ".join(elems) + "}"
+        if not any(isinstance(e, TSSpreadElement) for e in node.elements):
+            elems = [self._translate_node(e) for e in node.elements]
+            return "JsArray{" + ", ".join(elems) + "}"
+        # Array spread — materialize with an IIFE so element evaluation order
+        # matches JS and nested spreads compose.
+        lines = ["[&]() {", "    JsArray __a{};"]
+        for idx, e in enumerate(node.elements):
+            if isinstance(e, TSSpreadElement):
+                arg = self._translate_node(e.argument)
+                lines.append(f"    JsArray __sp_{idx} = {arg};")
+                lines.append(f"    for (int64_t __i_{idx} = 0; __i_{idx} < (int64_t)__sp_{idx}.length(); ++__i_{idx})")
+                lines.append(f"        __a.push(__sp_{idx}[__i_{idx}]);")
+            else:
+                lines.append(f"    __a.push({self._translate_node(e)});")
+        lines.append("    return __a;")
+        lines.append("}()")
+        return "\n".join(lines)
 
     # ── OOP: Object Literal ────────────────────────────────────
 

@@ -238,6 +238,64 @@ def _effect_dep_exprs(deps: str, state_getters: set[str]) -> list[str] | None:
     return exprs
 
 
+def _split_top_level(s: str) -> list[str]:
+    """Split a comma-separated string on top-level commas (respecting
+    quotes and nested brackets) so array literals can be converted to
+    JsArray initializer lists."""
+    parts: list[str] = []
+    depth = 0
+    quote: str | None = None
+    cur = []
+    for ch in s:
+        if quote:
+            cur.append(ch)
+            if ch == quote:
+                quote = None
+        elif ch in ("'", '"'):
+            quote = ch
+            cur.append(ch)
+        elif ch in "[{(":
+            depth += 1
+            cur.append(ch)
+        elif ch in "]})":
+            depth -= 1
+            cur.append(ch)
+        elif ch == "," and depth == 0:
+            parts.append("".join(cur).strip())
+            cur = []
+        else:
+            cur.append(ch)
+    tail = "".join(cur).strip()
+    if tail:
+        parts.append(tail)
+    return parts
+
+
+def _array_init_to_cpp(raw: str) -> str:
+    """Convert a JS array literal source (`[]`, `[1, 'a', true]`) to a C++
+    JsArray initializer expression (`JsArray{}`, `JsArray{1, "a", true}`)."""
+    stripped = raw.strip()
+    if not stripped.startswith("[") or not stripped.endswith("]"):
+        return stripped
+    inner = stripped[1:-1].strip()
+    if not inner:
+        return "JsArray{}"
+    items = []
+    for part in _split_top_level(inner):
+        p = part.strip()
+        if p.startswith("'") and p.endswith("'") and len(p) >= 2:
+            items.append('"' + p[1:-1].replace('"', '\\"') + '"')
+        elif p in ("true", "false"):
+            items.append(p)
+        elif p in ("null", "undefined"):
+            items.append("JsNull{}" if p == "null" else "JsUndefined{}")
+        elif p.startswith("[") and p.endswith("]"):
+            items.append(_array_init_to_cpp(p))
+        else:
+            items.append(p)
+    return "JsArray{" + ", ".join(items) + "}"
+
+
 def _get_cpp_type(init: str) -> str:
     raw_init = init.strip()
     if raw_init.startswith("'") and raw_init.endswith("'"):
@@ -246,6 +304,8 @@ def _get_cpp_type(init: str) -> str:
         return "bool"
     if raw_init.startswith('"'):
         return "std::string"
+    if raw_init.startswith("["):
+        return "JsArray"
     if "." in raw_init:
         return "double"
     if raw_init.isdigit() or (raw_init.startswith("-") and raw_init[1:].isdigit()):
@@ -257,6 +317,8 @@ def _clean_init(init: str) -> str:
     raw = init.strip()
     if raw.startswith("'") and raw.endswith("'"):
         return f'"{raw[1:-1]}"'
+    if raw.startswith("[") and raw.endswith("]"):
+        return _array_init_to_cpp(raw)
     return raw
 
 
@@ -266,6 +328,16 @@ def emit_logic(windows: list[IRWindow]) -> str:
     # ── User C++ imports (single-TU include — max inlining, no FFI) ──
     cpp_imports = collect_cpp_imports(windows)
     native_mode = bool(cpp_imports)
+
+    # Keyed lists: the factories + wiring need the runtime list widget and
+    # the node types the item templates construct.
+    from morph.codegen.emitter import collect_list_nodes
+    list_nodes = collect_list_nodes([n for w in windows for n in w.nodes])
+    if list_nodes:
+        lines.append('#include "ui/morph_list.h"')
+        lines.append('#include "ui/rect.h"')
+        lines.append('#include "ui/text.h"')
+        lines.append('#include "ui/button.h"')
 
     # Collect all state vars
     all_state_vars = collect_state_vars(windows)
@@ -319,6 +391,26 @@ def emit_logic(windows: list[IRWindow]) -> str:
                     lines.append(strip_static_function(f))
                 else:
                     lines.append(f)
+
+    # ── Keyed list item factories (file scope, shared with the wiring) ──
+    if list_nodes:
+        from morph.codegen.node_emitter import NodeEmitter
+        _dev_features = {
+            "scroll", "radius", "text", "bold", "position", "zindex",
+            "opacity", "flex", "cursor", "border", "transform", "animation",
+            "display_none", "inline", "margin_collapse", "min_max",
+            "border_box", "image", "button", "input", "event", "hover",
+            "active", "dirty_rendering",
+        }
+        factory_emitter = NodeEmitter()
+        factory_emitter.features = _dev_features
+        lines.append("")
+        lines.append("// ── Keyed list item factories ──")
+        for ln in list_nodes:
+            code = factory_emitter.emit_item_factory(ln)
+            if code:
+                lines.append(code)
+                lines.append("")
 
     # ── User morphEffect declarations ──
     all_effect_decls: list[dict] = []
@@ -518,6 +610,25 @@ def _emit_node_effects(lines: list[str], node: IRNode, indent: str = "    ") -> 
             _emit_node_effects(lines, tn, indent)
         for en in node.else_nodes:
             _emit_node_effects(lines, en, indent)
+        return
+
+    if node.node_type == "__list__":
+        # Wire the container: array source, item factory, key fn. The
+        # reconcile effect re-looks-up the container each run (hot reload can
+        # replace the node) and its immediate run performs the initial fill.
+        lines.append(f'{indent}if (auto* lc = dynamic_cast<morph::ListContainer*>(nodes.get("{node_id}"))) {{')
+        lines.append(f'{indent}    lc->arrayFn = [&]() {{ return {node.list_expr}; }};')
+        lines.append(f'{indent}    lc->itemFactory = __list_factory_{node_id};')
+        if node.list_key_expr:
+            lines.append(f'{indent}    lc->keyFn = [&](const JsValue& __it, int __index) -> std::string {{')
+            lines.append(f'{indent}        return morph::list_key({node.list_key_expr}, __index);')
+            lines.append(f'{indent}    }};')
+        lines.append(f'{indent}}}')
+        lines.append(f'{indent}__effects[__effect_count++] = morph::create_effect([&]() {{')
+        lines.append(f'{indent}    auto* lc = dynamic_cast<morph::ListContainer*>(nodes.get("{node_id}"));')
+        lines.append(f'{indent}    if (!lc) return;')
+        lines.append(f'{indent}    lc->reconcile(lc->arrayFn());')
+        lines.append(f'{indent}}});')
         return
 
     # ── Reactive style (inline style expressions) ──

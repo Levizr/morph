@@ -252,6 +252,8 @@ class JSXWalker:
                         return "false"
                     if arg.type == "identifier":
                         return arg.text.decode()
+                    if arg.type in ("array", "object"):
+                        return arg.text.decode()
         return None
 
     def _extract_morph_effects(self, block_node: Node) -> list[dict]:
@@ -370,10 +372,127 @@ class JSXWalker:
                 return self._extract_ternary_conditional(expr)
         return None
 
+    def _parse_map_expression(self, container: Node) -> dict | None:
+        """Parse a jsx_expression_container that is a `.map()` list rendering:
+        ``{items.map(item => <JSX key={item.id}/>)}``.
+
+        Returns a __list__ node:
+          array_expr     — JS source of the array expression (e.g. ``items``)
+          item_param     — callback first param name (``item``)
+          index_param    — callback second param name (``i``) or ""
+          key_expr       — JS source of the root element's `key` prop ("" = index fallback)
+          item_template  — parsed JSX of the callback body (key prop removed)
+
+        Returns None when the container is not a map-with-JSX expression
+        (caller falls back to a plain __expr__).
+        """
+        for expr in container.children:
+            if expr.type != "call_expression":
+                continue
+            array_src, prop_name, arrow = self._extract_map_call(expr)
+            if array_src is None or arrow is None:
+                continue
+
+            # ── Callback params (1 or 2) ──
+            params: list[str] = []
+            for child in arrow.children:
+                if child.type == "identifier" and len(params) < 2:
+                    # Single unparenthesized param: item => <JSX/>
+                    params.append(child.text.decode())
+                elif child.type == "formal_parameters":
+                    for sub in self._find_all(child, "required_parameter"):
+                        for ident in sub.children:
+                            if ident.type == "identifier":
+                                params.append(ident.text.decode())
+                                break
+                    for sub in self._find_all(child, "optional_parameter"):
+                        for ident in sub.children:
+                            if ident.type == "identifier":
+                                params.append(ident.text.decode())
+                                break
+
+            # ── Callback body must yield JSX ──
+            body = self._arrow_body_jsx(arrow)
+            if body is None:
+                continue
+
+            template = self._parse_jsx_element(body)
+            if not isinstance(template, dict) or not template.get("tag"):
+                continue
+
+            # ── `key` prop → key expression (removed from rendered props) ──
+            key_expr = ""
+            if isinstance(template.get("props"), dict) and template.get("tag") != "__fragment__":
+                key_val = template["props"].pop("key", None)
+                if key_val is not None:
+                    if isinstance(key_val, dict):
+                        key_expr = (key_val.get("__ref__") or key_val.get("__expr__")
+                                    or key_val.get("__template__") or "")
+                    else:
+                        key_expr = str(key_val)
+
+            return {
+                "tag": "__list__",
+                "array_expr": array_src,
+                "item_param": params[0] if params else "item",
+                "index_param": params[1] if len(params) > 1 else "",
+                "key_expr": key_expr,
+                "item_template": template,
+            }
+        return None
+
+    def _extract_map_call(self, node: Node) -> tuple[str | None, str | None, Node | None]:
+        """From a call_expression like ``items.map(item => <JSX/>)`` return
+        (array_source, method_name, arrow_function_node). None when the call
+        is not a member `.map(...)` with an arrow function argument."""
+        array_src: str | None = None
+        method: str | None = None
+        arrow: Node | None = None
+        for child in node.children:
+            if child.type == "member_expression":
+                parts = [c for c in child.children
+                         if c.type in ("identifier", "property_identifier")]
+                if len(parts) < 2 or parts[-1].text.decode() != "map":
+                    return None, None, None
+                obj_node = child.children[0]
+                if obj_node.type in ("identifier", "member_expression",
+                                     "call_expression", "parenthesized_expression"):
+                    array_src = obj_node.text.decode()
+                method = "map"
+            elif child.type == "arguments":
+                for arg in child.children:
+                    if arg.type == "arrow_function":
+                        arrow = arg
+                        break
+        if array_src is None or arrow is None:
+            return None, None, None
+        return array_src, method, arrow
+
+    def _arrow_body_jsx(self, arrow: Node) -> Node | None:
+        """Extract the JSX body of a map callback arrow function.
+
+        Supports expression bodies (``item => <div/>``), parenthesized bodies,
+        fragments, and block bodies with a single ``return <JSX/>``.
+        """
+        for child in arrow.children:
+            if child.type in ("jsx_element", "jsx_self_closing_element", "jsx_fragment"):
+                return child
+            if child.type == "parenthesized_expression":
+                jsx = self._unwrap_jsx(child)
+                if jsx is not None:
+                    return jsx
+            if child.type == "statement_block":
+                for stmt in self._find_all(child, "return_statement"):
+                    for sub in stmt.children:
+                        jsx = self._unwrap_jsx(sub)
+                        if jsx is not None:
+                            return jsx
+        return None
+
     @staticmethod
     def _unwrap_jsx(node: Node) -> Node | None:
-        """If node is or wraps a jsx_element/jsx_self_closing_element, return it."""
-        if node.type in ("jsx_element", "jsx_self_closing_element"):
+        """If node is or wraps a jsx_element/jsx_self_closing_element/jsx_fragment, return it."""
+        if node.type in ("jsx_element", "jsx_self_closing_element", "jsx_fragment"):
             return node
         if node.type == "parenthesized_expression":
             for child in node.children:
@@ -495,10 +614,15 @@ class JSXWalker:
                     if cond:
                         children.append(cond)
                     else:
-                        children.append({
-                            "tag": "__expr__",
-                            "text": inner,
-                        })
+                        # Check for list rendering: {items.map(item => <JSX/>)}
+                        lst = self._parse_map_expression(child)
+                        if lst:
+                            children.append(lst)
+                        else:
+                            children.append({
+                                "tag": "__expr__",
+                                "text": inner,
+                            })
                 elif child.type == "jsx_text":
                     text = _normalize_jsx_text(child.text.decode())
                     if text is not None:

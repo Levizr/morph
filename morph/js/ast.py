@@ -176,6 +176,11 @@ class TSArrayLiteral(TSNode):
 
 
 @dataclass
+class TSSpreadElement(TSNode):
+    argument: TSNode
+
+
+@dataclass
 class TSObjectProperty(TSNode):
     key: str
     value: TSNode

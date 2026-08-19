@@ -64,6 +64,11 @@ inline void setColor(float rgba[4], const std::string& c) {
 {{ premain_code }}
 
 {% endif %}
+{% if list_factory_code %}
+// ── Keyed list item factories ──
+{{ list_factory_code }}
+
+{% endif %}
 int main() {
     glfwSetErrorCallback(glfw_error_cb);
     if (!glfwInit()) {

@@ -22,6 +22,7 @@
     "items": [
       { "title": "HTML Elements", "slug": "elements/overview" },
       { "title": "Conditional Rendering", "slug": "elements/conditional" },
+      { "title": "List Rendering", "slug": "elements/lists" },
       { "title": "Events", "slug": "elements/events" }
     ]
   },
@@ -64,6 +65,13 @@
       { "title": "Calculator", "slug": "examples/calculator" },
       { "title": "Dynamic", "slug": "examples/dynamic" },
       { "title": "IP Checker", "slug": "examples/ipchecker" }
+    ]
+  },
+  {
+    "category": "Roadmap",
+    "items": [
+      { "title": "Under Construction", "slug": "roadmap/under-construction", "file": "roadmap/under-construction" },
+      { "title": "Future Plans", "slug": "roadmap/future", "file": "roadmap/future" }
     ]
   }
 ]

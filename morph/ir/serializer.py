@@ -203,6 +203,11 @@ class IRSerializer:
             result["condition_expr"] = n.condition_expr
             result["then_nodes"] = [self._node(tn) for tn in n.then_nodes]
             result["else_nodes"] = [self._node(en) for en in n.else_nodes]
+        if n.list_expr:
+            result["list_expr"] = n.list_expr
+            result["list_key_expr"] = n.list_key_expr
+        if n.item_template is not None:
+            result["item_template"] = self._node(n.item_template)
         if n.hover_style is not None:
             result["hover_style"] = self._style_dict(n.hover_style)
         if n.active_style is not None:

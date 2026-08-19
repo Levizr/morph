@@ -28,6 +28,8 @@ struct JsArray {
 
     void push(const JsValue& item);
     JsValue pop();
+    JsArray slice(int64_t start, int64_t end) const;
+    JsArray slice(int64_t start) const { return slice(start, (int64_t)elements->size()); }
 
     JsValue operator[](int64_t idx) const;
     JsValue& operator[](int64_t idx);

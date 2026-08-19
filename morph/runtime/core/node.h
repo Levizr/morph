@@ -340,6 +340,16 @@ public:
     // Associated reactive effects (cleaned up on destruction)
     std::vector<morph::EffectNode*> m_associatedEffects;
 
+    // Re-run every associated effect (used by keyed list reconciliation to
+    // refresh a reused item node after its binding's item value changed).
+    void runAssociatedEffects()
+    {
+        for (auto* ef : m_associatedEffects)
+        {
+            if (ef && !ef->dead) ef->run();
+        }
+    }
+
     // Dirty rendering
     std::vector<struct DrawOp> m_displayList;
     virtual void layoutIfNeeded(float px, float py, float parentW, float parentH,
