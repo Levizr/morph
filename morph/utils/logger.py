@@ -37,25 +37,18 @@ def log_success(msg: str)     -> None: print(f"{_GREEN}  ✓{_RESET}  {msg}")
 def log_warn(msg: str)        -> None: print(f"{_YELLOW}  ⚠{_RESET}  {msg}")
 def log_error(msg: str)       -> None: print(f"{_RED}  ✗{_RESET}  {msg}")
 
-def log_parse_error(error: MorphParseError) -> None:
-    """Display a parse error with file location, code context, and colors."""
-    file_path = error.file_path
-    source_lines = error.source_lines
-    line = error.line
-    col = error.col
-
+def _print_code_frame(file_path, line, col, source_lines, ctx=2) -> None:
+    """Print the ┌──┐ code box with the offending line and caret."""
     loc = str(file_path) if file_path else ""
     if line:
         loc += f":{line}"
         if col:
             loc += f":{col}"
 
-    print(f"\n  {_RED}{_BOLD}error{_RESET}{_DIM}:{_RESET} {_BOLD}{str(error)}{_RESET}")
     if loc:
         print(f"  {_DIM}──>{_RESET} {_CYAN}{loc}{_RESET}")
 
     if source_lines and line > 0:
-        ctx = 2
         start = max(0, line - 1 - ctx)
         end = min(len(source_lines), line + ctx)
 
@@ -74,6 +67,44 @@ def log_parse_error(error: MorphParseError) -> None:
                 pointer = " " * indent + _RED + "^" * width + _RESET
                 print(f"     {_DIM}   │{_RESET} {pointer}")
         print(f"   {_DIM}──┘{_RESET}")
+
+
+def log_parse_error(error: MorphParseError) -> None:
+    """Display a parse error with file location, code context, and colors."""
+    print(f"\n  {_RED}{_BOLD}error{_RESET}{_DIM}:{_RESET} {_BOLD}{str(error)}{_RESET}")
+    _print_code_frame(error.file_path, error.line, error.col,
+                      error.source_lines)
+
+
+def log_lint_errors(errors: list) -> None:
+    """Display lint findings with severity colors and code context.
+
+    ``errors`` items are morph.checker.errors.LintError (any object with
+    severity/code/message/suggestion/file_path/line/col/source_lines).
+    """
+    from morph.checker.errors import LintError
+
+    errors = [e for e in errors if isinstance(e, LintError)]
+    if not errors:
+        return
+    n_err = sum(1 for e in errors if e.severity == "error")
+    n_warn = len(errors) - n_err
+
+    summary = "lint"
+    if n_err:
+        summary += f" {_BOLD}{_RED}{n_err} error(s){_RESET}"
+    if n_warn:
+        summary += f" {_BOLD}{_YELLOW}{n_warn} warning(s){_RESET}"
+    print(f"\n  {_CYAN}◆{_RESET}  {_BOLD}{summary}{_RESET}")
+
+    for e in errors:
+        color = _RED if e.severity == "error" else _YELLOW
+        label = "error" if e.severity == "error" else "warning"
+        print(f"\n  {color}{_BOLD}{label}{_RESET}{_DIM}:{_RESET} "
+              f"{_BOLD}{e.code}{_RESET}{_DIM}:{_RESET} {e.message}")
+        if e.suggestion:
+            print(f"  {_DIM}  hint:{_RESET} {e.suggestion}")
+        _print_code_frame(e.file_path, e.line, e.col, e.source_lines)
 def log_dim(msg: str)         -> None: print(f"{_DIM}  · {msg}{_RESET}")
 def log_step(msg: str)        -> None: print(f"\n{_BOLD}{_BLUE}  →{_RESET} {_BOLD}{msg}{_RESET}")
 def log_header(msg: str)      -> None: print(f"\n{_BOLD}{_WHITE}{msg}{_RESET}")

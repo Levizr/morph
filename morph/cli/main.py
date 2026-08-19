@@ -54,6 +54,10 @@ def main():
                          help="Pin a specific UPX release to use (e.g. 4.2.4); "
                               "overrides build.upx_version in config")
 
+    p_check = sub.add_parser("check", help="Lint .mx files for framework rules")
+    p_check.add_argument("--entry", type=str, default=None,
+                         help="Override entry .mx file")
+
     p_run = sub.add_parser("run", help="Build and run production binary")
     p_run.add_argument("binary", nargs="?", default=None,
                        help="Path to binary (default: <output>/app)")
@@ -109,6 +113,9 @@ def main():
         case "build":
             from morph.cli.cmd_build import run
             run(args)
+        case "check":
+            from morph.cli.cmd_check import run
+            run(args)
         case "run":
             from morph.cli.cmd_run import run
             run(args)
@@ -152,6 +159,7 @@ def _show_welcome(parser: argparse.ArgumentParser) -> None:
         ("init   [name]",  "Scaffold a new .mx project (interactive wizard)"),
         ("dev",            "Start dev mode with live hot reload"),
         ("build",          "Compile .mx → native OpenGL binary"),
+        ("check",          "Lint .mx files for framework rules"),
         ("run    [path]",  "Build and run production binary"),
         ("pkg   <add|rm|install|list|search>",  "Package manager"),
         ("doctor",             "Verify system dependencies"),

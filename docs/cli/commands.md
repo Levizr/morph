@@ -51,6 +51,20 @@ morph build
 
 Feature detection is automatic: static linking, symbol stripping, and UPX compression are applied only when all required libraries exist on the system.
 
+## morph check
+
+Lint `.mx` files against the framework's supported surface without compiling. Exit code `0` = clean, `1` = lint errors (or parse failure) — CI-friendly.
+
+```
+morph check
+```
+
+| Option | Description |
+|---|---|
+| `--entry` | Override entry `.mx` file |
+
+Checks elements, props, events, inline styles, imported CSS files, imports, `morphState`/`morphEffect` usage, and JS→C++ compatibility. Errors block `morph dev`/`morph build`; warnings are reported only. Tune rules via the `lint` section of `morph.config.json` (see [Configuration](../getting-started/configuration.md)).
+
 ## morph run
 
 Build and run in one step.

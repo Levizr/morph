@@ -23,6 +23,18 @@ class BuildConfig:
 
 
 @dataclass
+class LintConfig:
+    """Per-project lint rule configuration.
+
+    disable:     rule codes to turn off entirely, e.g. ["mx-list-key"].
+    severities:  rule code → "error" | "warning" overrides,
+                 e.g. {"mx-tag": "warning"}.
+    """
+    disable:    list[str]       = field(default_factory=list)
+    severities: dict[str, str]  = field(default_factory=dict)
+
+
+@dataclass
 class NativeConfig:
     """Build options for user C++ files imported via `import {} from './x.cpp'`.
 
@@ -48,12 +60,14 @@ class MorphConfig:
     native:       NativeConfig = field(default_factory=NativeConfig)
     node_bridge:  bool         = False
     build:        BuildConfig  = field(default_factory=BuildConfig)
+    lint:         LintConfig   = field(default_factory=LintConfig)
 
     @staticmethod
     def from_dict(d: dict) -> "MorphConfig":
         win = d.get("window", {})
         bl = d.get("build", {})
         nat = d.get("native", {})
+        lt = d.get("lint", {})
         return MorphConfig(
             name=d.get("name", "my-app"),
             entry=d.get("entry", "src/App.mx"),
@@ -79,6 +93,10 @@ class MorphConfig:
                 system_freetype=bl.get("system_freetype", False),
                 upx=bl.get("upx", True),
                 upx_version=bl.get("upx_version", ""),
+            ),
+            lint=LintConfig(
+                disable=lt.get("disable", []),
+                severities=lt.get("severities", {}),
             ),
         )
 
@@ -107,5 +125,9 @@ class MorphConfig:
                 "system_freetype": self.build.system_freetype,
                 "upx":             self.build.upx,
                 "upx_version":     self.build.upx_version,
+            },
+            "lint":         {
+                "disable":    self.lint.disable,
+                "severities": self.lint.severities,
             },
         }

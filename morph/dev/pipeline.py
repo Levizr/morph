@@ -17,7 +17,7 @@ from morph.layout.engine import LayoutEngine
 from morph.codegen.emitter import Emitter
 from morph.build.compiler import Compiler
 from morph.build.platform import shared_lib_ext
-from morph.utils.logger import log_error, log_parse_error, log_dim, log_warn, log_success
+from morph.utils.logger import log_error, log_parse_error, log_dim, log_warn, log_success, log_lint_errors
 
 _tw_resolver: TailwindResolver | None = None
 _fetcher = CSSFetcher()
@@ -98,6 +98,32 @@ def run(config, verbose: bool = True) -> dict | None:
         walked = JSXWalker().walk(ast)
         if verbose:
             log_dim(f"walked  AST  in {_fmt(time.time() - t)}")
+
+        # ── Lint (semantic rules) ───────────────────────────
+        # Errors block the reload/build (Next.js-style: dev keeps watching,
+        # build fails); warnings are reported and ignored.
+        t = time.time()
+        from morph.checker.checker import Checker
+        lint_errors = Checker().run(source, ast, walked,
+                                    file_path=str(config.entry),
+                                    config=config)
+        lint_fails = [e for e in lint_errors if e.severity == "error"]
+        if lint_fails:
+            log_lint_errors(lint_errors)
+            e0 = lint_fails[0]
+            loc = ""
+            if e0.file_path:
+                loc = f"{e0.file_path}"
+                if e0.line:
+                    loc += f":{e0.line}:{e0.col}"
+                loc += ": "
+            _last_error = (f"{loc}{len(lint_fails)} lint error(s) — "
+                           "fix and save to hot reload")
+            return None
+        if lint_errors:
+            log_lint_errors(lint_errors)
+        if verbose:
+            log_dim(f"linted  in {_fmt(time.time() - t)}")
 
         t = time.time()
         css_rules: dict = {}
