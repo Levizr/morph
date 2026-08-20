@@ -19,6 +19,7 @@ Everything on Morph's roadmap, documented in detail. Each feature page covers wh
 | Package JS→C++ build bridge | [Packages](packages.md) | Medium | — |
 | Windows / macOS support | [Platforms](platform.md) | Medium | — |
 | OS accessibility reader (screen readers, focus, keyboard nav) | [Accessibility](accessibility.md) | Medium | Platforms |
+| WebView — embed HTML via the OS webview (Tauri-style hybrid apps) | [WebView](webview.md) | Medium | — |
 | Code signing, notarization, secure updates & store packaging | [Security & Commercial Release](security.md) | Medium | Platforms |
 | VSCode extension, `morph-icons`, `morph-animate` | [Tooling](tooling.md) | Low | — |
 | Hidden classes, compositor-safe properties | [Performance](performance.md) | Low | — |

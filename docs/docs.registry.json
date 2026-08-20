@@ -1,0 +1,1297 @@
+[
+  {
+    "category": "Getting Started",
+    "items": [
+      {
+        "title": "Introduction",
+        "slug": "introduction",
+        "file": "index",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Morph is a UI framework that compiles .mx files (JSX-like syntax with TypeScript and CSS) directly into native OpenGL binaries \u2014 no browser, no Electron, no WebView.",
+        "keywords": [
+          "morph",
+          "ui framework",
+          "native apps",
+          "opengl",
+          "compiler"
+        ],
+        "lastUpdated": "2026-08-19",
+        "publishedAt": "2026-08-18",
+        "priority": 0.9,
+        "changefreq": "weekly"
+      },
+      {
+        "title": "Installation",
+        "slug": "getting-started/installation",
+        "file": "getting-started/installation",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Install Morph on Linux \u2014 requirements, toolchain setup, and everything you need to build your first native app.",
+        "keywords": [
+          "morph install",
+          "requirements",
+          "toolchain",
+          "linux",
+          "g++"
+        ],
+        "lastUpdated": "2026-08-18",
+        "publishedAt": "2026-08-18",
+        "priority": 0.9,
+        "changefreq": "weekly"
+      },
+      {
+        "title": "Quick Start",
+        "slug": "getting-started/quick-start",
+        "file": "getting-started/quick-start",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Create your first Morph app in minutes: write an .mx file, run morph dev, and get a native OpenGL window on screen.",
+        "keywords": [
+          "morph quick start",
+          "hello world",
+          "morph dev",
+          "first app"
+        ],
+        "lastUpdated": "2026-08-18",
+        "publishedAt": "2026-08-18",
+        "priority": 0.9,
+        "changefreq": "weekly"
+      },
+      {
+        "title": "Configuration",
+        "slug": "getting-started/configuration",
+        "file": "getting-started/configuration",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Configure Morph projects \u2014 compiler flags, output settings, and build options in one place.",
+        "keywords": [
+          "morph config",
+          "compiler options",
+          "project setup"
+        ],
+        "lastUpdated": "2026-08-19",
+        "publishedAt": "2026-08-19",
+        "priority": 0.9,
+        "changefreq": "weekly"
+      },
+      {
+        "title": "Project Structure",
+        "slug": "getting-started/project-structure",
+        "file": "getting-started/project-structure",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "The standard Morph project layout \u2014 src folder, .mx files, CSS, and how the compiler sees your project.",
+        "keywords": [
+          "morph project structure",
+          "src folder",
+          "mx files"
+        ],
+        "lastUpdated": "2026-08-18",
+        "publishedAt": "2026-08-18",
+        "priority": 0.9,
+        "changefreq": "weekly"
+      }
+    ]
+  },
+  {
+    "category": "Concepts",
+    "items": [
+      {
+        "title": "How It Works",
+        "slug": "concepts/how-it-works",
+        "file": "concepts/how-it-works",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "How Morph works under the hood: parse .mx with tree-sitter, build an IR, and generate native C++ that compiles to a binary.",
+        "keywords": [
+          "morph internals",
+          "pipeline",
+          "tree-sitter",
+          "IR",
+          "codegen"
+        ],
+        "lastUpdated": "2026-08-18",
+        "publishedAt": "2026-08-18",
+        "priority": 0.8,
+        "changefreq": "weekly"
+      },
+      {
+        "title": "Dev Mode",
+        "slug": "concepts/dev-mode",
+        "file": "concepts/dev-mode",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Morph dev mode: hot reload, live node-tree updates, and instant iteration without restarting your app.",
+        "keywords": [
+          "morph dev mode",
+          "hot reload",
+          "live preview"
+        ],
+        "lastUpdated": "2026-08-18",
+        "publishedAt": "2026-08-18",
+        "priority": 0.8,
+        "changefreq": "weekly"
+      },
+      {
+        "title": "Build Mode",
+        "slug": "concepts/build-mode",
+        "file": "concepts/build-mode",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Morph build mode: compile your app to a standalone native binary for distribution.",
+        "keywords": [
+          "morph build",
+          "release binary",
+          "native build"
+        ],
+        "lastUpdated": "2026-08-18",
+        "publishedAt": "2026-08-18",
+        "priority": 0.8,
+        "changefreq": "weekly"
+      }
+    ]
+  },
+  {
+    "category": "Elements",
+    "items": [
+      {
+        "title": "HTML Elements",
+        "slug": "elements/overview",
+        "file": "elements/overview",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "The HTML-like elements Morph provides for building UI \u2014 div, span, button, input, and more, compiled to native nodes.",
+        "keywords": [
+          "morph elements",
+          "html elements",
+          "jsx",
+          "native nodes"
+        ],
+        "lastUpdated": "2026-08-18",
+        "publishedAt": "2026-08-18",
+        "priority": 0.8,
+        "changefreq": "weekly"
+      },
+      {
+        "title": "Conditional Rendering",
+        "slug": "elements/conditional",
+        "file": "elements/conditional",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Conditional rendering in Morph \u2014 show and hide parts of your UI with JavaScript conditions inside JSX.",
+        "keywords": [
+          "conditional rendering",
+          "if else",
+          "jsx conditions"
+        ],
+        "lastUpdated": "2026-08-18",
+        "publishedAt": "2026-08-18",
+        "priority": 0.8,
+        "changefreq": "weekly"
+      },
+      {
+        "title": "List Rendering",
+        "slug": "elements/lists",
+        "file": "elements/lists",
+        "status": "beta",
+        "author": "PIYUSH",
+        "description": "List rendering in Morph \u2014 map over arrays and render collections of native elements.",
+        "keywords": [
+          "list rendering",
+          "loops",
+          "map",
+          "arrays"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.8,
+        "changefreq": "weekly"
+      },
+      {
+        "title": "Events",
+        "slug": "elements/events",
+        "file": "elements/events",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Handle user events in Morph \u2014 clicks, input, and custom events wired to compiled native handlers.",
+        "keywords": [
+          "morph events",
+          "onClick",
+          "event handling"
+        ],
+        "lastUpdated": "2026-08-18",
+        "publishedAt": "2026-08-18",
+        "priority": 0.8,
+        "changefreq": "weekly"
+      }
+    ]
+  },
+  {
+    "category": "CSS",
+    "items": [
+      {
+        "title": "CSS Properties",
+        "slug": "css/properties",
+        "file": "css/properties",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "The CSS properties Morph supports \u2014 layout, colors, typography, and more, applied at compile time.",
+        "keywords": [
+          "morph css",
+          "properties",
+          "styling"
+        ],
+        "lastUpdated": "2026-08-18",
+        "publishedAt": "2026-08-18",
+        "priority": 0.8,
+        "changefreq": "weekly"
+      },
+      {
+        "title": "Animations",
+        "slug": "css/animations",
+        "file": "css/animations",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "CSS animations in Morph \u2014 keyframes and animated properties rendered on the GPU.",
+        "keywords": [
+          "morph animations",
+          "keyframes",
+          "gpu"
+        ],
+        "lastUpdated": "2026-08-18",
+        "publishedAt": "2026-08-18",
+        "priority": 0.8,
+        "changefreq": "weekly"
+      },
+      {
+        "title": "Transitions",
+        "slug": "css/transitions",
+        "file": "css/transitions",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "CSS transitions in Morph \u2014 smooth property changes between states.",
+        "keywords": [
+          "morph transitions",
+          "easing"
+        ],
+        "lastUpdated": "2026-08-18",
+        "publishedAt": "2026-08-18",
+        "priority": 0.8,
+        "changefreq": "weekly"
+      },
+      {
+        "title": "Transforms",
+        "slug": "css/transforms",
+        "file": "css/transforms",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "CSS transforms in Morph \u2014 translate, rotate, and scale on native elements.",
+        "keywords": [
+          "morph transforms",
+          "rotate",
+          "scale"
+        ],
+        "lastUpdated": "2026-08-18",
+        "publishedAt": "2026-08-18",
+        "priority": 0.8,
+        "changefreq": "weekly"
+      },
+      {
+        "title": "Flexbox",
+        "slug": "css/flexbox",
+        "file": "css/flexbox",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Flexbox layout in Morph \u2014 the same flex model you know from the web, compiled native.",
+        "keywords": [
+          "flexbox",
+          "layout",
+          "flex"
+        ],
+        "lastUpdated": "2026-08-18",
+        "publishedAt": "2026-08-18",
+        "priority": 0.8,
+        "changefreq": "weekly"
+      },
+      {
+        "title": "Tailwind CSS",
+        "slug": "css/tailwind",
+        "file": "css/tailwind",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Use Tailwind-style utility classes in Morph \u2014 atomic CSS compiled into your native layout.",
+        "keywords": [
+          "tailwind",
+          "utility classes",
+          "atomic css"
+        ],
+        "lastUpdated": "2026-08-18",
+        "publishedAt": "2026-08-18",
+        "priority": 0.8,
+        "changefreq": "weekly"
+      }
+    ]
+  },
+  {
+    "category": "JavaScript",
+    "items": [
+      {
+        "title": "Overview",
+        "slug": "javascript/overview",
+        "file": "javascript/overview",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Morph compiles your TypeScript/JavaScript logic to native C++ \u2014 how the translator works and what it covers.",
+        "keywords": [
+          "morph javascript",
+          "typescript",
+          "compiler",
+          "native"
+        ],
+        "lastUpdated": "2026-08-18",
+        "publishedAt": "2026-08-18",
+        "priority": 0.8,
+        "changefreq": "weekly"
+      },
+      {
+        "title": "State",
+        "slug": "javascript/state",
+        "file": "javascript/state",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "morphState \u2014 reactive state in Morph, used like useState, triggering native re-renders.",
+        "keywords": [
+          "morphState",
+          "state",
+          "reactivity"
+        ],
+        "lastUpdated": "2026-08-18",
+        "publishedAt": "2026-08-18",
+        "priority": 0.8,
+        "changefreq": "weekly"
+      },
+      {
+        "title": "Effects",
+        "slug": "javascript/effects",
+        "file": "javascript/effects",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "morphEffect \u2014 side effects in Morph components, run at the right time in the component lifecycle.",
+        "keywords": [
+          "morphEffect",
+          "effects",
+          "lifecycle"
+        ],
+        "lastUpdated": "2026-08-18",
+        "publishedAt": "2026-08-18",
+        "priority": 0.8,
+        "changefreq": "weekly"
+      },
+      {
+        "title": "Async & Networking",
+        "slug": "javascript/async",
+        "file": "javascript/async",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Async and networking in Morph \u2014 fetch, promises, and async code compiled to native.",
+        "keywords": [
+          "async",
+          "fetch",
+          "promises",
+          "networking"
+        ],
+        "lastUpdated": "2026-08-18",
+        "publishedAt": "2026-08-18",
+        "priority": 0.8,
+        "changefreq": "weekly"
+      },
+      {
+        "title": "Runtime Types",
+        "slug": "javascript/types",
+        "file": "javascript/types",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Morph runtime types \u2014 JsNumber, JsString, JsArray, JsObject, and how JS values behave natively.",
+        "keywords": [
+          "morph types",
+          "JsNumber",
+          "JsObject",
+          "runtime"
+        ],
+        "lastUpdated": "2026-08-18",
+        "publishedAt": "2026-08-18",
+        "priority": 0.8,
+        "changefreq": "weekly"
+      }
+    ]
+  },
+  {
+    "category": "Guides",
+    "items": [
+      {
+        "title": "C++ / JSX Interop",
+        "slug": "guides/native-cpp",
+        "file": "guides/native-cpp",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "C++/JSX interop in Morph \u2014 call native C++ from your component logic.",
+        "keywords": [
+          "cpp interop",
+          "native code",
+          "ffi"
+        ],
+        "lastUpdated": "2026-08-18",
+        "publishedAt": "2026-08-18",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Custom C++ Nodes",
+        "slug": "guides/custom-cpp-nodes",
+        "file": "guides/custom-cpp-nodes",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Build custom C++ nodes in Morph \u2014 new native elements with their own rendering and behavior.",
+        "keywords": [
+          "custom nodes",
+          "c++",
+          "native elements"
+        ],
+        "lastUpdated": "2026-08-18",
+        "publishedAt": "2026-08-18",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Dynamic Styles",
+        "slug": "guides/dynamic-styles",
+        "file": "guides/dynamic-styles",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Dynamic styles in Morph \u2014 change styles at runtime from your logic.",
+        "keywords": [
+          "dynamic styles",
+          "runtime styling"
+        ],
+        "lastUpdated": "2026-08-18",
+        "publishedAt": "2026-08-18",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      }
+    ]
+  },
+  {
+    "category": "CLI",
+    "items": [
+      {
+        "title": "CLI Commands",
+        "slug": "cli/commands",
+        "file": "cli/commands",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Every Morph CLI command \u2014 morph dev, morph build, morph check, and more.",
+        "keywords": [
+          "morph cli",
+          "commands",
+          "morph dev",
+          "morph build"
+        ],
+        "lastUpdated": "2026-08-19",
+        "publishedAt": "2026-08-19",
+        "priority": 0.8,
+        "changefreq": "weekly"
+      }
+    ]
+  },
+  {
+    "category": "Examples",
+    "items": [
+      {
+        "title": "Calculator",
+        "slug": "examples/calculator",
+        "file": "examples/calculator",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "A calculator built with Morph \u2014 buttons, state, and layout in a native binary.",
+        "keywords": [
+          "morph example",
+          "calculator"
+        ],
+        "lastUpdated": "2026-08-18",
+        "publishedAt": "2026-08-18",
+        "priority": 0.6,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Dynamic",
+        "slug": "examples/dynamic",
+        "file": "examples/dynamic",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "A dynamic example app built with Morph \u2014 reactive state and live updates.",
+        "keywords": [
+          "morph example",
+          "dynamic",
+          "reactive"
+        ],
+        "lastUpdated": "2026-08-18",
+        "publishedAt": "2026-08-18",
+        "priority": 0.6,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "IP Checker",
+        "slug": "examples/ipchecker",
+        "file": "examples/ipchecker",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "An IP checker app built with Morph \u2014 fetch and display data in a native window.",
+        "keywords": [
+          "morph example",
+          "fetch",
+          "ip checker"
+        ],
+        "lastUpdated": "2026-08-18",
+        "publishedAt": "2026-08-18",
+        "priority": 0.6,
+        "changefreq": "monthly"
+      }
+    ]
+  },
+  {
+    "category": "Roadmap",
+    "items": [
+      {
+        "title": "Under Construction",
+        "slug": "roadmap/under-construction",
+        "file": "roadmap/under-construction",
+        "status": "development",
+        "author": "PIYUSH",
+        "description": "What's under active construction in Morph right now \u2014 features being built, with progress.",
+        "keywords": [
+          "morph roadmap",
+          "in progress",
+          "development"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-18",
+        "priority": 0.7,
+        "changefreq": "weekly"
+      },
+      {
+        "title": "Future Overview",
+        "slug": "future/index",
+        "file": "future/index",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "Morph's future plans \u2014 every planned feature documented in detail, with priorities and dependencies.",
+        "keywords": [
+          "morph roadmap",
+          "future",
+          "planned features"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.7,
+        "changefreq": "weekly"
+      }
+    ]
+  },
+  {
+    "category": "Future",
+    "items": [
+      {
+        "title": "Viewport (Native OpenGL Canvas)",
+        "slug": "future/viewport",
+        "file": "future/viewport",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "The morph-viewport element \u2014 an embedded OpenGL canvas inside your Morph app for 2D/3D content.",
+        "keywords": [
+          "viewport",
+          "canvas",
+          "opengl"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Window / App API",
+        "slug": "future/window-api",
+        "file": "future/window-api",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "The planned Window and App API for Morph \u2014 imperative windows, Electron-style creation, and lifecycle safety.",
+        "keywords": [
+          "window api",
+          "app api",
+          "native windows"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "File-Based Windows & Pages",
+        "slug": "future/file-routing",
+        "file": "future/file-routing",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "File-based windows and pages in Morph \u2014 the route.mx convention, Next.js-style routing rules, and build-time typo safety.",
+        "keywords": [
+          "file routing",
+          "route.mx",
+          "windows",
+          "typo safety"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Menu / Tray / Dialog / Notification",
+        "slug": "future/native-modules",
+        "file": "future/native-modules",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "Menu, tray, dialog, and notification modules planned for Morph \u2014 native OS integration.",
+        "keywords": [
+          "menu",
+          "tray",
+          "dialog",
+          "notification"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Multi-Window Navigation",
+        "slug": "future/multi-window",
+        "file": "future/multi-window",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "Multi-window navigation in Morph \u2014 the useWindow hook and window lifecycle with safe handles.",
+        "keywords": [
+          "multi-window",
+          "useWindow",
+          "navigation"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Forge Renderer (Tile Pool)",
+        "slug": "future/forge-renderer",
+        "file": "future/forge-renderer",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "The Forge renderer future \u2014 tile pool, retained layers, and scroll-shift for faster GPU rendering.",
+        "keywords": [
+          "forge",
+          "renderer",
+          "tile pool",
+          "gpu"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Full CSS Cascade",
+        "slug": "future/css-cascade",
+        "file": "future/css-cascade",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "Full CSS cascade for Morph \u2014 specificity, inheritance, and the complete cascade model.",
+        "keywords": [
+          "css cascade",
+          "specificity",
+          "inheritance"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "TS\u2192C++ Translator Coverage",
+        "slug": "future/js-coverage",
+        "file": "future/js-coverage",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "Broader TS\u2192C++ translator coverage \u2014 every JavaScript feature you can use natively in Morph.",
+        "keywords": [
+          "typescript",
+          "javascript",
+          "translator",
+          "coverage"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Text Input (Caret, Focus)",
+        "slug": "future/text-input",
+        "file": "future/text-input",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "Text input in Morph \u2014 caret, focus, selection, and full keyboard input planned.",
+        "keywords": [
+          "text input",
+          "caret",
+          "focus",
+          "selection"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "box-shadow, outline, Margin Collapse",
+        "slug": "future/more-css",
+        "file": "future/more-css",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "More CSS for Morph \u2014 box-shadow, outline, and margin collapse.",
+        "keywords": [
+          "box-shadow",
+          "outline",
+          "margin collapse"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Package Build Bridge",
+        "slug": "future/packages",
+        "file": "future/packages",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "The package build bridge for Morph \u2014 resolving and compiling npm-style packages at build time.",
+        "keywords": [
+          "packages",
+          "npm",
+          "build bridge"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Windows & macOS Support",
+        "slug": "future/platform",
+        "file": "future/platform",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "Windows and macOS support for Morph \u2014 targets, builds, and cross-platform plans.",
+        "keywords": [
+          "windows",
+          "macos",
+          "cross-platform"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "OS Accessibility (Screen Reader & Keyboard)",
+        "slug": "future/accessibility",
+        "file": "future/accessibility",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "OS accessibility for Morph \u2014 screen readers, focus, and keyboard navigation via UIA, NSAccessibility, and AT-SPI.",
+        "keywords": [
+          "accessibility",
+          "screen reader",
+          "a11y",
+          "keyboard"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "WebView (Embed HTML via OS WebView)",
+        "slug": "future/webview",
+        "file": "future/webview",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "WebView support for Morph \u2014 embed HTML via the OS webview, Tauri-style hybrid apps.",
+        "keywords": [
+          "webview",
+          "html",
+          "tauri",
+          "hybrid"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Signing & Secure Distribution",
+        "slug": "future/security",
+        "file": "future/security",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "Signing and secure distribution for Morph \u2014 code signing, notarization, secure updates, and store packaging.",
+        "keywords": [
+          "code signing",
+          "security",
+          "notarization",
+          "updates"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "VSCode Extension & Ecosystem",
+        "slug": "future/tooling",
+        "file": "future/tooling",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "The Morph ecosystem \u2014 VSCode extension, morph-icons, morph-animate, and tooling plans.",
+        "keywords": [
+          "vscode",
+          "extension",
+          "tooling",
+          "ecosystem"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Performance (Hidden Classes)",
+        "slug": "future/performance",
+        "file": "future/performance",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "Performance plans for Morph \u2014 hidden classes, compositor-safe properties, and rendering speed.",
+        "keywords": [
+          "performance",
+          "hidden classes",
+          "rendering"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Rust Support",
+        "slug": "future/rust",
+        "file": "future/rust",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "Rust support for Morph \u2014 a second runtime target with cross-language interop.",
+        "keywords": [
+          "rust",
+          "runtime",
+          "interop"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Vulkan / Metal / DirectX",
+        "slug": "future/graphics-api",
+        "file": "future/graphics-api",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "Vulkan, Metal, and DirectX backends for Morph \u2014 pluggable graphics beyond OpenGL.",
+        "keywords": [
+          "vulkan",
+          "metal",
+          "directx",
+          "graphics"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Rust Compiler & Native CLI",
+        "slug": "future/compiler",
+        "file": "future/compiler",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "A Rust compiler (SWC/Oxc) and native CLI for Morph \u2014 removing Python from the build.",
+        "keywords": [
+          "rust compiler",
+          "swc",
+          "oxc",
+          "cli"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Suggestions",
+        "slug": "future/suggestions",
+        "file": "future/suggestions",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "Suggest a feature for Morph \u2014 email your ideas and shape the roadmap.",
+        "keywords": [
+          "suggestions",
+          "feedback",
+          "roadmap"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      }
+    ]
+  },
+  {
+    "category": "Story",
+    "items": [
+      {
+        "title": "The Story of Morph",
+        "slug": "story/index",
+        "file": "story/index",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "The story of Morph \u2014 why it exists, written by the author: a 17-year-old building a native UI framework alone.",
+        "keywords": [
+          "morph story",
+          "origin",
+          "author"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.7,
+        "changefreq": "yearly"
+      },
+      {
+        "title": "Why Morph Is Named Morph",
+        "slug": "story/why-morph",
+        "file": "story/why-morph",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Why Morph is named Morph \u2014 a real word that explains what it does, from a Minecraft mod.",
+        "keywords": [
+          "name",
+          "minecraft",
+          "morph meaning"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.7,
+        "changefreq": "yearly"
+      },
+      {
+        "title": "Why Morph Lives Under Levizr",
+        "slug": "story/why-levizr",
+        "file": "story/why-levizr",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "What Levizr is \u2014 the author's own company label, registered 1 January 2025, and why the name.",
+        "keywords": [
+          "levizr",
+          "company"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.7,
+        "changefreq": "yearly"
+      },
+      {
+        "title": "Why Python First",
+        "slug": "story/why-python",
+        "file": "story/why-python",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Why Morph's toolchain is Python first \u2014 concept validation, iteration speed, and why it never ships.",
+        "keywords": [
+          "python",
+          "toolchain",
+          "compiler"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.7,
+        "changefreq": "yearly"
+      },
+      {
+        "title": "Why C++ First",
+        "slug": "story/why-cpp",
+        "file": "story/why-cpp",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Why Morph's runtime is C++ first instead of Rust \u2014 JS-like syntax, binary size, and the SonicPro story.",
+        "keywords": [
+          "c++",
+          "rust",
+          "binary size"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.7,
+        "changefreq": "yearly"
+      },
+      {
+        "title": "Why OpenGL",
+        "slug": "story/why-opengl",
+        "file": "story/why-opengl",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Why Morph renders with OpenGL 3.3 \u2014 easy, cross-platform, and tested on a 2011 i5 with no GPU.",
+        "keywords": [
+          "opengl",
+          "rendering",
+          "cross-platform"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.7,
+        "changefreq": "yearly"
+      },
+      {
+        "title": "Why .mx (Not .tsx / .jsx / .js / .ts)",
+        "slug": "story/why-mx",
+        "file": "story/why-mx",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Why Morph uses .mx instead of .tsx, .jsx, .js, or .ts \u2014 the extension that signals 'this is Morph'.",
+        "keywords": [
+          "mx file",
+          "jsx",
+          "typescript",
+          "extension"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.7,
+        "changefreq": "yearly"
+      },
+      {
+        "title": "Why JSX",
+        "slug": "story/why-jsx",
+        "file": "story/why-jsx",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Why Morph uses JSX \u2014 the best developer experience, with state values dropped anywhere in markup.",
+        "keywords": [
+          "jsx",
+          "developer experience",
+          "dx"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.7,
+        "changefreq": "yearly"
+      }
+    ]
+  },
+  {
+    "category": "FAQ",
+    "items": [
+      {
+        "title": "Questions & Answers",
+        "slug": "faq/index",
+        "file": "faq/index",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Questions and answers about Morph \u2014 Electron, C++, React, npm, hot reload, and production readiness, answered in detail.",
+        "keywords": [
+          "faq",
+          "questions",
+          "answers"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.7,
+        "changefreq": "yearly"
+      },
+      {
+        "title": "Is Morph Just Electron with Extra Steps?",
+        "slug": "faq/q-electron",
+        "file": "faq/q-electron",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Is Morph just Electron with extra steps? No \u2014 it's the opposite: no browser, no Chromium; your code compiles to native machine code.",
+        "keywords": [
+          "electron",
+          "comparison",
+          "native",
+          "browser"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.7,
+        "changefreq": "yearly"
+      },
+      {
+        "title": "Do I Need to Know C++ to Use Morph?",
+        "slug": "faq/q-cpp",
+        "file": "faq/q-cpp",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Do you need to know C++ to use Morph? No \u2014 you write .mx files; C++ is an implementation detail, optional if you want to go deeper.",
+        "keywords": [
+          "c++",
+          "requirements",
+          "learning curve"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.7,
+        "changefreq": "yearly"
+      },
+      {
+        "title": "Is Morph React? Can I Use React?",
+        "slug": "faq/q-react",
+        "file": "faq/q-react",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Is Morph React? It's React-inspired \u2014 JSX, state, effects \u2014 but there's no virtual DOM; state changes re-render native nodes directly.",
+        "keywords": [
+          "react",
+          "jsx",
+          "state",
+          "virtual dom"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.7,
+        "changefreq": "yearly"
+      },
+      {
+        "title": "Is Morph for Games or Apps?",
+        "slug": "faq/q-games",
+        "file": "faq/q-games",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Is Morph for games or apps? Apps \u2014 a UI framework for native desktop applications, with an embedded OpenGL canvas for 2D/3D content.",
+        "keywords": [
+          "games",
+          "apps",
+          "ui framework",
+          "desktop"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.7,
+        "changefreq": "yearly"
+      },
+      {
+        "title": "Can I Build Websites with Morph?",
+        "slug": "faq/q-web",
+        "file": "faq/q-web",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Can you build websites with Morph? No \u2014 Morph builds native desktop binaries; the web already has the best web tooling in existence.",
+        "keywords": [
+          "web",
+          "websites",
+          "desktop",
+          "native"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.7,
+        "changefreq": "yearly"
+      },
+      {
+        "title": "What Happens to My JavaScript at Runtime?",
+        "slug": "faq/q-js-runtime",
+        "file": "faq/q-js-runtime",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "What happens to your JavaScript at runtime? It's compiled to C++ \u2014 no interpreter, no JIT, no VM; your logic runs as native machine code.",
+        "keywords": [
+          "javascript",
+          "runtime",
+          "compiled",
+          "native"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.7,
+        "changefreq": "yearly"
+      },
+      {
+        "title": "Can I Use npm Packages in Morph?",
+        "slug": "faq/q-npm",
+        "file": "faq/q-npm",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Can you use npm packages in Morph? Not yet \u2014 but a Morph registry for UI and native C++ modules is planned, with a security-first approach.",
+        "keywords": [
+          "npm",
+          "packages",
+          "registry",
+          "security"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.7,
+        "changefreq": "yearly"
+      },
+      {
+        "title": "How Does Hot Reload Work with a Compiler?",
+        "slug": "faq/q-hot-reload",
+        "file": "faq/q-hot-reload",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "How does hot reload work if everything is compiled? Dev mode keeps the app running and hot-swaps the compiled logic module without restarting.",
+        "keywords": [
+          "hot reload",
+          "dev mode",
+          "compiled"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.7,
+        "changefreq": "yearly"
+      },
+      {
+        "title": "Is Morph Production-Ready?",
+        "slug": "faq/q-production",
+        "file": "faq/q-production",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Is Morph production-ready? Not yet \u2014 the roadmap is honest about what's missing: platform support, accessibility, signing, and more.",
+        "keywords": [
+          "production",
+          "roadmap",
+          "commercial",
+          "release"
+        ],
+        "lastUpdated": "2026-08-20",
+        "publishedAt": "2026-08-20",
+        "priority": 0.7,
+        "changefreq": "yearly"
+      }
+    ]
+  }
+]
