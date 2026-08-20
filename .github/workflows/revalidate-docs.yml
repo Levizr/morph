@@ -14,8 +14,8 @@ jobs:
   revalidate:
     runs-on: ubuntu-latest
     steps:
-      - name: Build webhook payload
-        id: payload
+      - name: Build cache tags
+        id: tags
         uses: actions/github-script@v7
         with:
           script: |
@@ -92,25 +92,62 @@ jobs:
             }
 
             core.setOutput("skip", "false");
-            core.setOutput(
-              "payload",
-              JSON.stringify({
-                ref: context.payload.ref || "refs/heads/main",
-                commits: payloadCommits,
-              })
+
+            // One cache tag per changed/removed/added docs page, matching the
+            // tags assigned at render time in lib/github-docs.ts.
+            const tags = new Set();
+            for (const file of all) {
+              const match = file.match(/^docs\/(.+)\.md$/);
+              if (match) tags.add(`doc-${match[1]}`);
+            }
+
+            const jsonChanged = all.some((f) =>
+              /^docs\/.*\.(json|jsonc)$/.test(f)
+            );
+            const navChanged = payloadCommits.some(
+              (c) =>
+                (c.added || []).some((f) => f.startsWith("docs/")) ||
+                (c.removed || []).some((f) => f.startsWith("docs/"))
             );
 
-      - name: Call revalidation endpoint
-        if: steps.payload.outputs.skip == 'false'
+            if (jsonChanged || navChanged || tags.size > 0) {
+              tags.add("morph-docs-tree");
+              tags.add("navigation-menu");
+            }
+
+            core.setOutput("tags", JSON.stringify([...tags]));
+
+      - name: Purge Vercel cache by tag
+        if: steps.tags.outputs.skip == 'false'
         env:
-          REVALIDATE_URL: ${{ vars.REVALIDATE_URL }}
-          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
-          PAYLOAD: ${{ steps.payload.outputs.payload }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+          VERCEL_TEAM_ID: ${{ vars.VERCEL_TEAM_ID }}
+          TAGS: ${{ steps.tags.outputs.tags }}
         run: |
-          SIGNATURE=$(printf '%s' "$PAYLOAD" | openssl dgst -sha256 -hmac "$WEBHOOK_SECRET" -binary | xxd -p -c 256)
-          curl -fsS -X POST "$REVALIDATE_URL" \
-            -H "Content-Type: application/json" \
-            -H "x-github-event: push" \
-            -H "x-hub-signature-256: sha256=$SIGNATURE" \
-            -d "$PAYLOAD"
-          echo "Revalidation request sent successfully"
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "::error::Missing VERCEL_TOKEN secret"
+            exit 1
+          fi
+          if [ -z "$VERCEL_PROJECT_ID" ]; then
+            echo "::error::Missing VERCEL_PROJECT_ID variable"
+            exit 1
+          fi
+
+          PURGE_URL="https://api.vercel.com/v1/edge-cache/invalidate-by-tags?projectIdOrName=${VERCEL_PROJECT_ID}"
+          if [ -n "$VERCEL_TEAM_ID" ]; then
+            PURGE_URL="${PURGE_URL}&teamId=${VERCEL_TEAM_ID}"
+          fi
+
+          COUNT=$(echo "$TAGS" | jq length)
+          echo "Purging $COUNT tag(s) via $PURGE_URL"
+          for ((i = 0; i < COUNT; i += 16)); do
+            BATCH=$(echo "$TAGS" | jq -c ".[$i:$((i + 16))]")
+            echo "Batch $i: $BATCH"
+            curl -fsS -X POST "$PURGE_URL" \
+              -H "Authorization: Bearer $VERCEL_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "{\"tags\": $BATCH, \"target\": \"production\"}"
+            echo
+          done
+          echo "Vercel cache purged successfully"
