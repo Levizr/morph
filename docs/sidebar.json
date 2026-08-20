@@ -84,17 +84,19 @@
       { "title": "Multi-Window Navigation", "slug": "future/multi-window", "file": "future/multi-window", "status": "future", "lastUpdated": "2026-08-20" },
       { "title": "Forge Renderer (Tile Pool)", "slug": "future/forge-renderer", "file": "future/forge-renderer", "status": "future", "lastUpdated": "2026-08-20" },
       { "title": "Full CSS Cascade", "slug": "future/css-cascade", "file": "future/css-cascade", "status": "future", "lastUpdated": "2026-08-20" },
-      { "title": "JS Interpreter", "slug": "future/js-interpreter", "file": "future/js-interpreter", "status": "future", "lastUpdated": "2026-08-20" },
       { "title": "TS→C++ Translator Coverage", "slug": "future/js-coverage", "file": "future/js-coverage", "status": "future", "lastUpdated": "2026-08-20" },
       { "title": "Text Input (Caret, Focus)", "slug": "future/text-input", "file": "future/text-input", "status": "future", "lastUpdated": "2026-08-20" },
       { "title": "box-shadow, outline, Margin Collapse", "slug": "future/more-css", "file": "future/more-css", "status": "future", "lastUpdated": "2026-08-20" },
       { "title": "Package Build Bridge", "slug": "future/packages", "file": "future/packages", "status": "future", "lastUpdated": "2026-08-20" },
       { "title": "Windows & macOS Support", "slug": "future/platform", "file": "future/platform", "status": "future", "lastUpdated": "2026-08-20" },
+      { "title": "OS Accessibility (Screen Reader & Keyboard)", "slug": "future/accessibility", "file": "future/accessibility", "status": "future", "lastUpdated": "2026-08-20" },
+      { "title": "Signing & Secure Distribution", "slug": "future/security", "file": "future/security", "status": "future", "lastUpdated": "2026-08-20" },
       { "title": "VSCode Extension & Ecosystem", "slug": "future/tooling", "file": "future/tooling", "status": "future", "lastUpdated": "2026-08-20" },
       { "title": "Performance (Hidden Classes)", "slug": "future/performance", "file": "future/performance", "status": "future", "lastUpdated": "2026-08-20" },
       { "title": "Rust Support", "slug": "future/rust", "file": "future/rust", "status": "future", "lastUpdated": "2026-08-20" },
       { "title": "Vulkan / Metal / DirectX", "slug": "future/graphics-api", "file": "future/graphics-api", "status": "future", "lastUpdated": "2026-08-20" },
-      { "title": "Rust Compiler & Native CLI", "slug": "future/compiler", "file": "future/compiler", "status": "future", "lastUpdated": "2026-08-20" }
+      { "title": "Rust Compiler & Native CLI", "slug": "future/compiler", "file": "future/compiler", "status": "future", "lastUpdated": "2026-08-20" },
+      { "title": "Suggestions", "slug": "future/suggestions", "file": "future/suggestions", "status": "future", "lastUpdated": "2026-08-20" }
     ]
   }
 ]

@@ -13,12 +13,13 @@ Everything on Morph's roadmap, documented in detail. Each feature page covers wh
 | Multi-window navigation (`useWindow`) | [Multi-Window](multi-window.md) | High | File Routing |
 | Forge tile pool, retained layers, scroll-shift | [Forge Renderer](forge-renderer.md) | Medium | Forge (beta) |
 | Full CSS cascade | [CSS Cascade](css-cascade.md) | High | — |
-| Interactive JS interpreter | [JS Interpreter](js-interpreter.md) | Low | — |
 | Broader TS→C++ translator coverage | [JS Coverage](js-coverage.md) | High | — |
 | Text input (caret, focus, selection) | [Text Input](text-input.md) | High | — |
 | `box-shadow`, `outline`, margin collapse | [More CSS](more-css.md) | Low | CSS Cascade |
 | Package JS→C++ build bridge | [Packages](packages.md) | Medium | — |
 | Windows / macOS support | [Platforms](platform.md) | Medium | — |
+| OS accessibility reader (screen readers, focus, keyboard nav) | [Accessibility](accessibility.md) | Medium | Platforms |
+| Code signing, notarization, secure updates & store packaging | [Security & Commercial Release](security.md) | Medium | Platforms |
 | VSCode extension, `morph-icons`, `morph-animate` | [Tooling](tooling.md) | Low | — |
 | Hidden classes, compositor-safe properties | [Performance](performance.md) | Low | — |
 | Full Rust runtime (`--lang rust`, cross-language interop) | [Rust Support](rust.md) | High | — |
@@ -30,3 +31,5 @@ Everything on Morph's roadmap, documented in detail. Each feature page covers wh
 ## How to influence the roadmap
 
 Open an issue or PR — see [Contributing](../../CONTRIBUTING.md). The most impactful areas right now are the **CSS cascade**, **TS→C++ translator coverage**, and the **Forge tile pool**.
+
+**Have an idea or a feature you need?** See [Suggestions](suggestions.md) — or email us directly at [suggestions.morph@levizr.com](mailto:suggestions.morph@levizr.com).

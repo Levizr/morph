@@ -17,16 +17,20 @@ A programmatic API for creating and managing windows from JavaScript — `new Wi
 
 ```ts
 class Window {
-  constructor(routeId: string, config?: WindowConfig)   // e.g. new Window("/auth/login", {...})
+  constructor(routeId: string, config?: WindowConfig)   // handle is valid immediately (Electron-style)
   title: string
   width: number
   height: number
   id: string | null              // explicit id, if given at creation
-  show(): void
+  closed: boolean                // true once closed — by you OR by the user (X button, task manager)
+  ready: boolean                 // true once content is mounted and the first frame is drawn
+  show(): void                   // shows immediately (blank until ready)
   hide(): void
-  close(): void
-  navigate(routeId: string, props?: object): void       // swap this window's page
-  on(event: 'close' | 'resize' | 'focus', handler: Function): void
+  close(): boolean               // safe no-op if already closed; returns whether it closed
+  load(routeId: string, props?: object): Promise<void>  // async content (Electron's loadFile)
+  navigate(routeId: string, props?: object): boolean    // swap this window's page; false if closed
+  on(event: 'close' | 'resize' | 'focus' | 'ready', handler: Function): void
+  ready(): Promise<this>         // resolves when content is mounted (Electron's 'ready-to-show')
 }
 
 interface WindowConfig {
@@ -40,8 +44,8 @@ interface WindowConfig {
 // Access the window that rendered the current component — no argument needed,
 // the compiler resolves it from the component's compiled window tree:
 function useWindow(): Window
-// Or reach any window by the id given at creation:
-function useWindow(id: string): Window
+// Or resolve any window by id/route — sync, null if it doesn't exist:
+function useWindow(id: string): Window | null
 
 class App {
   static quit(): void
@@ -53,11 +57,16 @@ class CSS {
 }
 ```
 
-### The `Window` constructor
+### Window creation is synchronous — like Electron
 
-`new Window(routeId)` opens any `route.mx` file as a separate window — the same file that can be navigated to as a page. Route ids are folder paths (like Next.js URLs): `src/auth/login/route.mx` → `/auth/login`. See [File-Based Windows & Pages](file-routing.md) for the full design.
+`new Window(routeId, config)` returns a **valid handle immediately**, exactly like Electron's `new BrowserWindow()`:
 
 ```ts
+// Electron
+const win = new BrowserWindow({ width: 800, height: 600 })
+win.loadFile('index.html')
+
+// Morph
 const a = new Window("/auth/login", {
   width: 400,
   height: 320,          // overrides the route's windowConfig
@@ -66,12 +75,48 @@ const a = new Window("/auth/login", {
 a.show()
 ```
 
+Native window creation is fast — the handle exists before any heavy work. What's **asynchronous is content**: mounting the route's component, layout, and the first frame. If your code depends on content, wait for it:
+
+```ts
+await a.ready()                 // wait for first frame (or: a.on('ready', ...))
+a.navigate("/settings")         // safe anytime after
+```
+
+The constructor itself loads the route (like `loadFile`); `win.load(routeId, props)` re-loads a different route into an existing window.
+
+### Window lifecycle & availability
+
+The **registry is the single source of truth** — `WindowManager` owns the window; handles are views. Every operation on a handle re-resolves the window id through the registry at call time, so handles never dangle:
+
+```ts
+const loginWin = useWindow("login-window")   // null if it doesn't exist — sync
+if (!loginWin) return                         // handle the missing case
+
+await loginWin.ready()                        // wait until content is mounted
+loginWin.close()                              // close it ourselves
+
+// …but the user might close it via the X button or the task manager —
+// the handle stays safe and reports the truth:
+loginWin.closed          // true — updated via registry close events
+loginWin.on('close', () => { /* fires for ANY close: user X, task manager, App.quit */ })
+loginWin.close()         // safe no-op — returns false, doesn't crash
+loginWin.navigate("/settings")  // fails gracefully (returns false)
+```
+
+Key rules:
+
+- **User-initiated close** (X button / task manager) routes through the GLFW close callback → `WindowManager` marks the window closed, erases it from the registry, and fires `close` events on every live handle
+- **Operations on closed windows never crash** — they return `false` / no-op, because the registry lookup fails instead of dereferencing a dead window
+- **Re-opening** — `new Window("/auth/login")` again gives a fresh handle; old handles stay marked `closed`
+- **C++ safety** — `WindowManager` holds `shared_ptr<MorphWindow>`; JS handles hold weak references resolved by id. A raw pointer to a deleted window is the segfault this design prevents
+- **Typos and bad names never ship** — route ids and window ids are cross-referenced against the manifest at build time, and route segments must follow Next.js naming conventions (`mx-route-*` / `mx-window-*` lint rules + generated typed routes); runtime `null`/`false` behavior is only the last line of defense. See [Typo safety — validated at build time](file-routing.md#typo-safety--validated-at-build-time)
+
 ### Module convention (the rule for all future modules)
 
-- Instantiable → `class` + `new` (e.g. `new Window(...)`)
+- Instantiable → `class` + `new` (e.g. `new Window(...)`) — the handle is synchronous, like Electron; async only where content is involved (`load`, `ready`)
 - Singleton / utility → static class, no `new` (e.g. `App.quit()`)
 
-Constructors take a config object; `Window` additionally takes a file path for the page it renders.
+Constructors take a config object; `Window` additionally takes a route id for the page it renders.
 
 ## How it will work
 

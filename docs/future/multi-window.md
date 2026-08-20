@@ -15,9 +15,9 @@ Runtime control for showing, closing, and navigating between windows. The `Windo
 Navigation and window control go through the `useWindow` hook, not static `App` calls. Inside any component:
 
 ```ts
-const win = useWindow()              // the window rendering this component
-const win = useWindow("settings-win")  // any window, by id given at creation
-const win = useWindow("/auth/login")   // or by route id (opens if not running)
+const win = useWindow()                    // the window rendering this component
+const win = useWindow("settings-win")      // any window, by id — null if not running
+const win = useWindow("/auth/login")       // or by route id
 
 win.navigate("/settings", { theme: "dark" })  // swap this window's page
 win.close()
@@ -26,11 +26,33 @@ win.title = "New Title"
 win.on('close', () => { ... })
 ```
 
-New windows are created by opening a route as a window:
+New windows are created **synchronously like Electron** — `new Window(routeId, config)` returns a valid handle immediately; only content is async:
 
 ```ts
 const settings = new Window("/settings", { width: 500, height: 400 })
+settings.show()
+await settings.ready()   // only when you need the first frame
 ```
+
+## Window lifecycle & availability
+
+Windows are owned by the **registry, not by your handle**. That's what keeps handles safe when the user closes a window by the X button or the task manager:
+
+```ts
+const loginWin = useWindow("login-window")   // null if it doesn't exist — sync
+if (!loginWin) return                         // handle the missing case
+
+await loginWin.ready()                        // wait until content is mounted
+loginWin.close()
+
+// user closes it via the X button — the stale handle reports the truth:
+loginWin.closed           // true — registry notified via the GLFW close callback
+loginWin.close()          // safe no-op, returns false — never crashes
+loginWin.navigate("/x")   // fails gracefully, returns false
+loginWin.on('close', ...) // fired for ANY close: user X, task manager, App.quit
+```
+
+The user can always defeat your bookkeeping — the X button, the task manager, the OS. The design assumption is: **every window can die at any moment, and every operation must survive that.** Re-open with `new Window(...)` again; old handles stay `closed`.
 
 ## Underlying runtime (`WindowManager`)
 
@@ -53,7 +75,7 @@ The event emitter (`morph/codegen/event_emitter.py`) already generates these cal
 
 - **`open()`** — windows created from files are registered but can start hidden; `open` triggers show + layout + first paint. Requires `MorphWindow` to support "created but hidden" state (GLFW `glfwShowWindow`/`glfwHideWindow`)
 - **`navigate()`** — per-window page mounting. Each window owns one root layout tree; navigating swaps the root content (reusing the node-tree swap machinery that hot reload already uses) and delivers `props` to the new page component
-- **`close()`** — exists and works: deletes the window and erases it from the manager
+- **`close()`** — exists and works: deletes the window and erases it from the manager. **Safety rule:** the manager holds `shared_ptr<MorphWindow>`; JS handles resolve through the registry by id (weak references) — never raw pointers to deleted windows
 
 ## Current state
 
