@@ -53,7 +53,7 @@ public:
 };
 ```
 
-At build time the compiler reads the annotations, includes `runtime_headers` into the generated translation unit, and wires JSX usage of `<MyWidget/>` to `MyWidgetNode` — exactly like the existing user-side [C++ interop](../../docs/guides/native-cpp.md), but packaged and versioned.
+At build time the compiler reads the annotations, includes `runtime_headers` into the generated translation unit, and wires JSX usage of `<MyWidget/>` to `MyWidgetNode` — exactly like the existing user-side [C++ interop](../guides/native-cpp.md), but packaged and versioned.
 
 ### Dependency resolution
 

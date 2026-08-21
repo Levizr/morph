@@ -581,7 +581,7 @@
       },
       {
         "title": "Future Overview",
-        "slug": "future/index",
+        "slug": "future/future-overview",
         "file": "future/index",
         "status": "future",
         "author": "PIYUSH",
@@ -976,7 +976,7 @@
     "items": [
       {
         "title": "The Story of Morph",
-        "slug": "story/index",
+        "slug": "story/the-story-of-morph",
         "file": "story/index",
         "status": "production",
         "author": "PIYUSH",
@@ -1117,7 +1117,7 @@
     "items": [
       {
         "title": "Questions & Answers",
-        "slug": "faq/index",
+        "slug": "faq/question-answers",
         "file": "faq/index",
         "status": "production",
         "author": "PIYUSH",

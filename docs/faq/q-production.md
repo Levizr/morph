@@ -6,7 +6,7 @@ Not yet — and I'd rather be honest than oversell it.
 
 Morph is a young, genuinely original project: a compiler that turns web syntax into native binaries. The core works — you can build real apps, run them, hot-reload them, and ship a native binary. The architecture is sound and the foundation is solid.
 
-But a commercial app needs more than a working renderer. The [Under Construction](../roadmap/under-construction.md) and [Future](future/index.md) pages are honest about what's missing:
+But a commercial app needs more than a working renderer. The [Under Construction](../roadmap/under-construction.md) and [Future](../future/index.md) pages are honest about what's missing:
 
 - **Depth** — text input is at caret/focus basics; the full [CSS cascade](../future/css-cascade.md) isn't done
 - **Platform** — Linux is the current focus; [Windows and macOS](../future/platform.md) support is planned
