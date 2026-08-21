@@ -39,9 +39,23 @@ Use MSVC (Visual Studio) or MinGW with C++23 support. GLFW, FreeType, and HarfBu
 
 ## Install Morph
 
+### Stable Release
+
 ```bash
 pip install levizr-morph
 ```
+
+### Latest Features (From Source)
+
+Want features that haven't shipped to PyPI yet? Install straight from the repo:
+
+```bash
+git clone https://github.com/Levizr/morph.git
+cd morph
+pip install ".[dev]"
+```
+
+The `[dev]` extra pulls in the development dependencies (test tooling, linters) alongside Morph itself.
 
 ## Verify Your System
 
