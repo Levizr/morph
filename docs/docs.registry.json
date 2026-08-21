@@ -423,6 +423,25 @@
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
+      },
+      {
+        "title": "Native C++ Types",
+        "slug": "javascript/native-types",
+        "file": "javascript/native-types",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Native C++ types in Morph \u2014 use int, float, and double directly in .mx logic for zero overhead, and the pitfalls of losing JS methods.",
+        "keywords": [
+          "native types",
+          "int",
+          "double",
+          "c++ types",
+          "primitives"
+        ],
+        "lastUpdated": "2026-08-21",
+        "publishedAt": "2026-08-21",
+        "priority": 0.8,
+        "changefreq": "weekly"
       }
     ]
   },
@@ -581,7 +600,7 @@
       },
       {
         "title": "Future Overview",
-        "slug": "future/future-overview",
+        "slug": "future/overview",
         "file": "future/index",
         "status": "future",
         "author": "PIYUSH",
