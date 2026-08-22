@@ -1,0 +1,77 @@
+import { CSS, morphState } from 'morph'
+
+CSS.load("style.css")
+
+export const windowConfig = {
+  title: "Morph Login",
+  width: 490,
+  height: 600,
+  maxWidth: 490,
+  maxHeight: 600,
+  minWidth:490,
+  minHeight:600
+}
+
+export default function App() {
+  const [user, setUser] = morphState("");
+  const [pass, setPass] = morphState("");
+  const [error, setError] = morphState("");
+  // 0 = login form visible, 1 = logged in (form unmounted)
+  const [loggedIn, setLoggedIn] = morphState(0);
+
+  function doLogin():int {
+    if (user == "") { setError("Username required"); return 0; }
+    if (pass.length < 4) { setError("Password must be at least 4 characters"); return 0; }
+    setError("");
+    setLoggedIn(1);
+    return 1;
+  }
+
+  function logout():int {
+    setUser(""); setPass(""); setError(""); setLoggedIn(0);
+    return 0;
+  }
+
+  return (
+    <body>
+      {/* ambient background glows */}
+      <div className="glow glow-a" id="g1"/>
+      <div className="glow glow-b" id="g2"/>
+
+      {loggedIn == 0 ? (
+        <div className="card" id="login-card">
+          <h1 className="title" id="t-login">Welcome back</h1>
+          <p className="subtitle" id="sub-login">Sign in to continue to Morph</p>
+
+          <p className="label" id="l-user">Username</p>
+          <input className="field" id="in-user" placeholder="you@example.com"
+                 value={user} onInput={(e) => { setUser(e.value) }} />
+
+          <p className="label" id="l-pass">Password</p>
+          <input className="field" id="in-pass" type="password" placeholder="••••••••"
+                 value={pass} onInput={(e) => { setPass(e.value) }} />
+
+          {error == "" ? (<div className="err-space" id="err-space"/>) : (
+            <div className="err" id="err">{error}</div>
+          )}
+          <div className="footer-button" id="footer">
+            <button className="btn" id="btn-login" onClick={() => { console.log("Logged in"); doLogin() }}>Sign in</button>
+          </div>
+
+          <div className="footer-row" id="footer">
+            <span className="muted">Don't have an account?</span>
+            <span className="link">Sign up</span>
+          </div>
+        </div>
+      ) : (
+        <div className="card welcome" id="welcome-card">
+          <h1 className="title" id="t-welcome">Hi, {user}!</h1>
+          <p className="subtitle" id="sub-welcome">
+            You're signed in. The login form was unmounted and its memory freed.
+          </p>
+          <button className="btn ghost" id="btn-out" onClick={() => { logout() }}>Sign out</button>
+        </div>
+      )}
+    </body>
+  )
+}

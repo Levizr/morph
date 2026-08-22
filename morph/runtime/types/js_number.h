@@ -178,22 +178,8 @@ inline bool operator>=(size_t a, const JsNumber& b) { return (int64_t)a >= b.as_
 
 // ── std::formatter for std::format ──
 // Guarded so older libc++ (macOS Xcode <= 16) still compiles.
-
-#if __has_include(<format>)
-#include <format>
-
-template <>
-struct std::formatter<JsNumber> {
-    constexpr auto parse(auto& ctx) { return ctx.begin(); }
-    auto format(const JsNumber& v, auto& ctx) const {
-        if (v.is_int())
-            return std::format_to(ctx.out(), "{}", std::get<int64_t>(v.value));
-        if (v.is_big())
-            return std::format_to(ctx.out(), "{}", std::get<std::string>(v.value));
-        return std::format_to(ctx.out(), "{}", std::get<double>(v.value));
-    }
-};
-#endif
+// std::formatter<JsNumber> moved to the opt-in types/js_value_format.h
+// (<format> costs ~1.5s parse per TU — bad for dev hot-reload).
 
 inline std::string JsNumber::as_string() const {
     if (is_int()) return std::to_string(std::get<int64_t>(value));

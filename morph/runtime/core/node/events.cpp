@@ -5,6 +5,11 @@ MorphNode* MorphNode::hitTest(float ex, float ey) {
 #ifdef MORPH_FEATURE_TRANSFORM
     float inv[16];
     morph::mat4Identity(inv);
+    // Node x/y hold window-ABSOLUTE positions post-layout. Translate the
+    // point into this node's local frame up front, so subtree-level calls
+    // (dispatch routing, not just root queries) resolve correctly.
+    inv[12] = -x;
+    inv[13] = -y;
     return hitTestImpl(ex, ey, inv);
 #else
     return hitTestImpl(ex, ey, nullptr);
@@ -15,6 +20,11 @@ MorphNode* MorphNode::hitTest(float ex, float ey) {
 // (identity matrix for the root). It maps screen coords into this node's
 // local space, where its box is (0, 0, w, h) — so transformed subtrees are
 // hit-tested against their actual (rotated/scaled) geometry.
+//
+// NOTE: a node's own box does NOT gate its subtree — absolutely-positioned
+// descendants and zero-size conditional wrappers legitimately render (and
+// receive hits) outside their parent's box. Children are checked first;
+// the node itself is a candidate only for points inside its own box.
 MorphNode* MorphNode::hitTestImpl(float ex, float ey, const float* accInv) {
     float lx = ex, ly = ey;
 #ifdef MORPH_FEATURE_TRANSFORM
@@ -26,14 +36,6 @@ MorphNode* MorphNode::hitTestImpl(float ex, float ey, const float* accInv) {
         ly = oy;
     }
 #endif
-    if (accInv)
-    {
-        if (lx < 0.0f || lx > w || ly < 0.0f || ly > h) return nullptr;
-    }
-    else
-    {
-        if (ex < x || ex > x + w || ey < y || ey > y + h) return nullptr;
-    }
     const auto& po = paintOrder();
     for (auto it = po.rbegin(); it != po.rend(); ++it) {
         auto* c = *it;
@@ -84,7 +86,15 @@ MorphNode* MorphNode::hitTestImpl(float ex, float ey, const float* accInv) {
         auto* found = c->hitTestImpl(ex, ey, childInvPtr);
         if (found) return found;
     }
-    return this;
+    // Self hit: only for points inside THIS node's own box.
+    bool inside;
+#ifdef MORPH_FEATURE_TRANSFORM
+    inside = accInv ? (lx >= 0.0f && lx <= w && ly >= 0.0f && ly <= h)
+                    : (ex >= x && ex <= x + w && ey >= y && ey <= y + h);
+#else
+    inside = (ex >= x && ex <= x + w && ey >= y && ey <= y + h);
+#endif
+    return inside ? this : nullptr;
 }
 
 bool MorphNode::dispatchEvent(MorphEvent& e, float ex, float ey) {
@@ -165,16 +175,19 @@ bool MorphNode::dispatchEvent(MorphEvent& e, float ex, float ey) {
     const auto& po = paintOrder();
     for (auto it = po.rbegin(); it != po.rend(); ++it) {
         auto* c = *it;
-        float cy = c->y - (scrollEnabled ? scrollY : 0);
-        if (ex >= c->x && ex <= c->x + c->w &&
-            ey >= cy && ey <= cy + c->h) {
+        float eyAdj = ey + (scrollEnabled ? scrollY : 0.0f);
+        // Route by subtree hit, not own-box bounds: absolutely-positioned
+        // content and zero-size conditional wrappers can render (and must
+        // receive events) outside this child's box.
+        if (!c->hitTest(ex, eyAdj))
+            continue;
 #ifdef MORPH_FEATURE_SCROLL
-            if (scrollEnabled && (cy + c->h <= y || cy >= y + h))
-                continue;
+        float cy = c->y - (scrollEnabled ? scrollY : 0.0f);
+        if (scrollEnabled && (cy + c->h <= y || cy >= y + h))
+            continue;   // fully scrolled out of view
 #endif
-            if (c->dispatchEvent(e, ex, ey + (scrollEnabled ? scrollY : 0)))
-                return true;
-        }
+        if (c->dispatchEvent(e, ex, eyAdj))
+            return true;
     }
     return onEvent(e);
 }

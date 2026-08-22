@@ -2,7 +2,6 @@
 #include <string>
 #include <algorithm>
 #include <cctype>
-#include <sstream>
 #include <vector>
 struct JsNumber;
 
@@ -113,15 +112,5 @@ inline bool operator!=(const JsString& a, const std::string& b) { return a.value
 
 // ── std::formatter for std::format ──
 // Guarded so older libc++ (macOS Xcode <= 16) still compiles.
-
-#if __has_include(<format>)
-#include <format>
-
-template <>
-struct std::formatter<JsString> {
-    constexpr auto parse(auto& ctx) { return ctx.begin(); }
-    auto format(const JsString& v, auto& ctx) const {
-        return std::format_to(ctx.out(), "{}", v.value);
-    }
-};
-#endif
+// std::formatter<JsString> moved to the opt-in types/js_value_format.h
+// (<format> costs ~1.5s parse per TU — bad for dev hot-reload).

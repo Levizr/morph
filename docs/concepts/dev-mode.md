@@ -70,7 +70,7 @@ Press **F12** to toggle the DevTools panel. It includes:
 - **Network** — `fetch()` request log
 - **Logs** — application log entries
 
-See the [Development Guide](../../help/development.md#devtools-morph_devrt) for details.
+See the [DevTools](../devtools/index.md) section for details on each tab.
 
 ## Tips
 

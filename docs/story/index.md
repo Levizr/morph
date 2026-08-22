@@ -69,6 +69,7 @@ The story is really a series of choices. Each has its own page:
 | Rendering | OpenGL 3.3 is easy, cross-platform, and runs on the oldest hardware | [Why OpenGL](why-opengl.md) |
 | File format | `.mx` signals "this is Morph, not React" — and TS compiles cleanly to C++ | [Why .mx](why-mx.md) |
 | UI syntax | JSX is the best DX I've used — and you already know web syntax | [Why JSX](why-jsx.md) |
+| The bugs | Yes, Morph is buggy — here's why, and how you can help | [Why Morph Is Buggy](why-buggy.md) |
 
 ## Questions people ask
 

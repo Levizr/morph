@@ -769,6 +769,11 @@ void GLRenderer::clear()
 
 void GLRenderer::beginClip(float x, float y, float w, float h)
 {
+    // Draws are batched until flush(); anything queued before this clip must
+    // hit the framebuffer unclipped, and anything queued after it must be
+    // drawn while the scissor is still active — so flush on both edges,
+    // mirroring the stencil-clip pattern in beginRoundedClip/endRoundedClip.
+    flush(m_proj);
     float cx = x + m_scrollX;
     float cy = y + m_scrollY;
     glEnable(GL_SCISSOR_TEST);
@@ -778,6 +783,7 @@ void GLRenderer::beginClip(float x, float y, float w, float h)
 
 void GLRenderer::endClip()
 {
+    flush(m_proj);
     m_scissorClipDepth--;
     if (m_scissorClipDepth <= 0)
     {

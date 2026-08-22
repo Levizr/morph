@@ -59,9 +59,11 @@ public:
     // after intercepting its own DevTools input.
     static void mouseButtonCb(GLFWwindow *win, int btn, int act, int mods);
     static void KeyCb(GLFWwindow* win, int key, int scancode, int action, int mods);
+    static void CharCb(GLFWwindow* win, unsigned int codepoint);
     static void cursorPosCb(GLFWwindow *win, double mx, double my);
     static void windowSizeCb(GLFWwindow *win, int width, int height);
     static void scrollCb(GLFWwindow *win, double dx, double dy);
+    static void windowFocusCb(GLFWwindow *win, int focused);
 
 public:
     MorphWindow(const std::string &title, int width, int height, bool visible = true);
@@ -166,3 +168,7 @@ void recordPaintTree(MorphNode *n, Renderer &r, DirtyStats &stats);
 #ifdef MORPH_FEATURE_DEV
 void syncPaintDirtyTree(MorphNode *n);
 #endif
+
+// ── Clipboard (GLFW-backed, cross-platform) ─────────────────────
+// Declared in clipboard.h, implemented in window.cpp.
+#include "clipboard.h"

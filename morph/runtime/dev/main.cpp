@@ -585,6 +585,11 @@ int main() {
                     devtools.render(r, (float)window.width(), (float)window.height(),
                                     window.dirtyStats());
                 });
+            } else {
+                // Visible but nothing to draw — nap briefly instead of
+                // busy-spinning a whole core (which starves g++ during hot
+                // reloads). Events / socket data wake us within ~4ms.
+                glfwWaitEventsTimeout(0.004);
             }
         } else {
             // Hidden window — no point spinning, wait for events

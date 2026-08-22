@@ -18,15 +18,5 @@ struct JsBoolean {
 
 // ── std::formatter for std::format ──
 // Guarded so older libc++ (macOS Xcode <= 16) still compiles.
-
-#if __has_include(<format>)
-#include <format>
-
-template <>
-struct std::formatter<JsBoolean> {
-    constexpr auto parse(auto& ctx) { return ctx.begin(); }
-    auto format(const JsBoolean& v, auto& ctx) const {
-        return std::format_to(ctx.out(), "{}", v.value ? "true" : "false");
-    }
-};
-#endif
+// std::formatter<JsBoolean> moved to the opt-in types/js_value_format.h
+// (<format> costs ~1.5s parse per TU — bad for dev hot-reload).

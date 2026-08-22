@@ -11,7 +11,6 @@ Making `<input>` a real text field. Today `InputNode` renders a styled rounded b
 The `<input>` element is registered and styled, so users naturally expect to type into it. Right now:
 
 - `morph check` flags it: `<input> is registered but not fully implemented in the runtime yet` (`mx-tag-stub`)
-- The widget scaffold literally says `// TODO: text input handling` (`runtime/widgets/morph_input.h:5`)
 - Keyboard events dispatch to the node **under the mouse cursor**, not to a focused node — there is no focus concept at all
 
 ## Current state

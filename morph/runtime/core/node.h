@@ -6,7 +6,8 @@
 #include "../style/style.h"
 #include "event.h"
 #include "../types/js_value.h"
-#include "../render/gl_renderer.h"
+#include "renderer.h"
+#include "draw_op.h"
 #include "render_frame.h"
 #include "../reactivity/signal.h"
 
@@ -84,6 +85,13 @@ struct AncestorHoverTransition {
 class MorphNode {
 public:
     static MorphNode* s_lastHoveredNode;
+    // Keyboard focus owner (browser-style). Set via requestFocus(), cleared
+    // via blur(); KeyCb routes keys here instead of the hovered node.
+    static MorphNode* s_focusedNode;
+    // Mouse-drag capture (browser-style): while set, MouseMove/MouseUp go to
+    // this node even when the cursor leaves its box or the window — lets
+    // <input> drag-selection continue past its edges and end on release.
+    static MorphNode* s_mouseCapture;
 
     float x = 0, y = 0, w = 0, h = 0;
     MorphStyle style;
@@ -204,6 +212,56 @@ public:
     std::function<void(JsObject)> onMouseLeave;
     std::function<void(JsObject)> onKeyDown;
     std::function<void(JsObject)> onKeyUp;
+    std::function<void(JsObject)> onChange;
+    std::function<void(JsObject)> onInput;
+    std::function<void(JsObject)> onFocus;
+    std::function<void(JsObject)> onBlur;
+
+    // ── Keyboard focus model (browser-style) ────────────────────
+    // Gives this node keyboard focus. The previously focused node gets
+    // blurred first; Focus/Blur handlers fire around the swap.
+    void requestFocus() {
+        if (s_focusedNode == this && focused) return;
+        MorphNode* old = s_focusedNode;
+        s_focusedNode = this;
+        focused = true;
+        markDirty(PaintDirty);
+        if (old && old != this) {
+            old->focused = false;
+            old->markDirty(PaintDirty);
+            if (old->onBlur) {
+                JsObject evt;
+                evt.set("type", JsString("blur"));
+                old->onBlur(evt);
+            }
+        }
+        if (onFocus) {
+            JsObject evt;
+            evt.set("type", JsString("focus"));
+            onFocus(evt);
+        }
+    }
+    // Releases keyboard focus if this node currently holds it.
+    void blur() {
+        if (s_mouseCapture == this)
+            s_mouseCapture = nullptr;
+        if (s_focusedNode != this) { focused = false; return; }
+        s_focusedNode = nullptr;
+        focused = false;
+        markDirty(PaintDirty);
+        if (onBlur) {
+            JsObject evt;
+            evt.set("type", JsString("blur"));
+            onBlur(evt);
+        }
+    }
+
+    // Key-routing hook for focused nodes. Called from KeyCb BEFORE the
+    // normal hovered-node dispatch; returning true consumes the event.
+    virtual bool onKeyEvent(const MorphEvent& e) { (void)e; return false; }
+    // Text-input hook (GLFW char callback): receives Unicode codepoints
+    // with shift/dead-key handling already applied.
+    virtual void onTextChar(unsigned int codepoint) { (void)codepoint; }
 
     virtual bool onEvent(MorphEvent& e) {
         JsObject evt;

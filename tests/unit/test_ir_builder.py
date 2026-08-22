@@ -406,3 +406,81 @@ def test_universal_selector_applies_to_all_nodes():
         assert n.style.color == (1.0, 0.0, 0.0, 1.0), (
             f"{n.node_type} should get red from * selector, got {n.style.color}"
         )
+
+
+def test_named_event_handler_passes_event_object():
+    """onChange={handleChange} forwards the JsObject when the handler declares
+    a parameter; zero-param handlers are called bare."""
+    walked = {
+        "components": [{
+            "exported": True,
+            "jsx": {
+                "tag": "morph-window",
+                "props": {"title": "Test", "width": 400, "height": 300},
+                "children": [
+                    {"tag": "input",
+                     "props": {"onChange": {"__ref__": "handleChange"}},
+                     "children": []},
+                    {"tag": "input",
+                     "props": {"onBlur": {"__ref__": "handleBlur"}},
+                     "children": []},
+                ],
+            },
+            "inner_functions": [
+                {"id": 1, "name": "handleChange",
+                 "source": "function handleChange(e):void { log(e.value); }"},
+                {"id": 2, "name": "handleBlur",
+                 "source": "function handleBlur():void { log('blur'); }"},
+            ],
+        }],
+    }
+    tw = TailwindResolver(project_root=".")
+    windows = IRBuilder().build(walked, {}, tw)
+    inputs = [n for n in windows[0].nodes if n.node_type == "input"]
+    assert len(inputs) == 2
+    change_ev = [e for e in inputs[0].events if e.trigger == "change"][0]
+    assert "handleChange(__ev)" in change_ev.target
+    blur_ev = [e for e in inputs[1].events if e.trigger == "blur"][0]
+    assert "handleBlur()" in blur_ev.target
+    assert "__ev" not in blur_ev.target
+
+
+def test_input_attrs_and_events_captured():
+    """<input> captures value/maxLength/minLength/placeholder/disabled/type
+    and the change/input/focus/blur event props."""
+    walked = {
+        "components": [{
+            "exported": True,
+            "jsx": {
+                "tag": "morph-window",
+                "props": {"title": "Test", "width": 400, "height": 300},
+                "children": [{
+                    "tag": "input",
+                    "props": {
+                        "value": "hi",
+                        "maxLength": 12,
+                        "minLength": 3,
+                        "placeholder": "Type here",
+                        "disabled": "true",
+                        "type": "password",
+                        "onChange": {"__fn__": "(e) => { log(e.value); }"},
+                        "onFocus": {"__fn__": "() => { log('f'); }"},
+                        "onBlur": {"__fn__": "() => { log('b'); }"},
+                        "onInput": {"__fn__": "(e) => { log(e.value); }"},
+                    },
+                    "children": [],
+                }],
+            },
+        }],
+    }
+    tw = TailwindResolver(project_root=".")
+    windows = IRBuilder().build(walked, {}, tw)
+    inp = [n for n in windows[0].nodes if n.node_type == "input"][0]
+    assert inp.attrs["value"] == "hi"
+    assert inp.attrs["maxLength"] == "12"  # int coerced to str
+    assert inp.attrs["minLength"] == "3"
+    assert inp.attrs["placeholder"] == "Type here"
+    assert inp.attrs["disabled"] == "true"
+    assert inp.attrs["type"] == "password"
+    triggers = sorted(e.trigger for e in inp.events)
+    assert triggers == ["blur", "change", "focus", "input"]

@@ -2,6 +2,9 @@
 #include "renderers/flash/flash.h"
 #include "renderers/forge/forge.h"
 #include "renderers/forge/damage.h"
+#ifdef MORPH_FEATURE_INPUT
+#include "../ui/input.h"
+#endif
 #include <GLFW/glfw3.h>
 #include <algorithm>
 // <print> is C++23 but not in libc++ until LLVM 17 (macOS Xcode 16 and
@@ -17,6 +20,21 @@ static double s_lastClickTime = 0.0;
 static const double DBL_CLICK_THRESHOLD = 0.3;
 // Node currently :active (pressed) — cleared on release / tree rebuild
 static MorphNode* s_activeNode = nullptr;
+// Any live GLFWwindow, kept so widgets can reach the OS clipboard without
+// depending on GLFW themselves.
+static GLFWwindow* s_clipboardWindow = nullptr;
+
+namespace morph {
+void setClipboard(const std::string &text) {
+    if (s_clipboardWindow)
+        glfwSetClipboardString(s_clipboardWindow, text.c_str());
+}
+std::string getClipboard() {
+    if (!s_clipboardWindow) return "";
+    const char *c = glfwGetClipboardString(s_clipboardWindow);
+    return c ? std::string(c) : std::string();
+}
+} // namespace morph
 
 // :hover / :active match a *set*: the pointer node plus every ancestor. These
 // helpers only fire onHover/onActive on nodes whose membership in the set
@@ -65,6 +83,19 @@ void MorphWindow::mouseButtonCb(GLFWwindow *win, int btn, int act, int mods)
         e.button = btn;
         e.x = (float)mx;
         e.y = (float)my;
+
+        // End a mouse drag started inside a captured node (e.g. <input>
+        // selection) even when the button is released outside its box.
+#ifdef MORPH_FEATURE_INPUT
+        if (act == GLFW_RELEASE && MorphNode::s_mouseCapture)
+        {
+            e.type = EventType::MouseUp;
+            MorphNode::s_mouseCapture->onEvent(e);
+            MorphNode::s_mouseCapture = nullptr;
+            e.type = EventType::MouseUp;   // normal dispatch still runs below
+        }
+#endif
+
         self->m_root->dispatchEvent(e, (float)mx, (float)my);
 
         // :active pseudo-class — apply on press, release on button up
@@ -75,6 +106,17 @@ void MorphWindow::mouseButtonCb(GLFWwindow *win, int btn, int act, int mods)
             s_activeNode = self->m_root->hitTest((float)mx, (float)my);
             if (s_activeNode)
                 _applyActiveChain(s_activeNode, true);
+
+            // ── Keyboard focus model ────────────────────────────
+            // Clicking an enabled <input> focuses it (caret placement and
+            // drag-selection are handled by the input itself via onEvent);
+            // clicking anywhere else releases focus, browser-style.
+#ifdef MORPH_FEATURE_INPUT
+            if (s_activeNode && s_activeNode->type == "input" && !static_cast<InputNode *>(s_activeNode)->disabled)
+                s_activeNode->requestFocus();
+            else if (MorphNode::s_focusedNode)
+                MorphNode::s_focusedNode->blur();
+#endif
         }
         else
         {
@@ -98,24 +140,68 @@ void MorphWindow::mouseButtonCb(GLFWwindow *win, int btn, int act, int mods)
     }
 }
 
+// glfwGetKeyName only names printable keys; control keys (arrows, Home,
+// End, Delete...) come back NULL, so map the common ones by GLFW code.
+static std::string keyEventName(int key, int scancode)
+{
+    switch (key) {
+        case GLFW_KEY_ESCAPE:     return "escape";
+        case GLFW_KEY_ENTER:      return "enter";
+        case GLFW_KEY_KP_ENTER:   return "kp_enter";
+        case GLFW_KEY_TAB:        return "tab";
+        case GLFW_KEY_BACKSPACE:  return "backspace";
+        case GLFW_KEY_INSERT:     return "insert";
+        case GLFW_KEY_DELETE:     return "delete";
+        case GLFW_KEY_RIGHT:      return "right";
+        case GLFW_KEY_LEFT:       return "left";
+        case GLFW_KEY_DOWN:       return "down";
+        case GLFW_KEY_UP:         return "up";
+        case GLFW_KEY_PAGE_UP:    return "page_up";
+        case GLFW_KEY_PAGE_DOWN:  return "page_down";
+        case GLFW_KEY_HOME:       return "home";
+        case GLFW_KEY_END:        return "end";
+        default: break;
+    }
+    if (key >= GLFW_KEY_F1 && key <= GLFW_KEY_F12)
+        return "f" + std::to_string(key - GLFW_KEY_F1 + 1);
+    if (const char *n = glfwGetKeyName(key, scancode))
+        return n;
+    if (key == GLFW_KEY_SPACE) return "space";
+    return "";
+}
+
 void MorphWindow::KeyCb(GLFWwindow *win, int key, int scancode, int act, int mods)
 {
-    (void)mods;
     auto *self = (MorphWindow *)glfwGetWindowUserPointer(win);
     if (!self || !self->m_root)
         return;
     double mx, my;
     glfwGetCursorPos(win, &mx, &my);
     MorphEvent e;
-    e.type = (act == GLFW_PRESS) ? EventType::KeyDown : EventType::KeyUp;
-    const char *keyName = glfwGetKeyName(key, scancode);
-
-    e.key = keyName ? std::string(keyName) : key == 259 ? "Backspace"
-                                         : key == 32    ? "Space"
-                                                        : "";
+    e.type = (act == GLFW_PRESS || act == GLFW_REPEAT) ? EventType::KeyDown : EventType::KeyUp;
+    e.key = keyEventName(key, scancode);
     e.x = (float)mx;
     e.y = (float)my;
+    e.mods = mods;
+
+    // ── Focus routing ───────────────────────────────────────
+    // A focused node (e.g. an <input>) gets keys first; consuming the
+    // event stops it from also reaching whatever is under the cursor.
+    if ((act == GLFW_PRESS || act == GLFW_REPEAT) && MorphNode::s_focusedNode) {
+        if (MorphNode::s_focusedNode->onKeyEvent(e))
+            return;
+    }
     self->m_root->dispatchEvent(e, (float)mx, (float)my);
+}
+
+void MorphWindow::CharCb(GLFWwindow *win, unsigned int codepoint)
+{
+    auto *self = (MorphWindow *)glfwGetWindowUserPointer(win);
+    if (!self || !self->m_root)
+        return;
+    // Text input goes to the focused node only (browser semantics).
+    if (MorphNode::s_focusedNode)
+        MorphNode::s_focusedNode->onTextChar(codepoint);
 }
 
 void MorphWindow::clearHoverState() { MorphNode::s_lastHoveredNode = nullptr; }
@@ -162,6 +248,17 @@ void MorphWindow::cursorPosCb(GLFWwindow *win, double mx, double my)
     e.type = EventType::MouseMove;
     e.x = (float)mx;
     e.y = (float)my;
+
+    // Mouse-drag capture: a node that started a drag (e.g. <input> drag
+    // selection) keeps receiving moves even when the cursor leaves its box.
+#ifdef MORPH_FEATURE_INPUT
+    if (MorphNode::s_mouseCapture)
+    {
+        e.type = EventType::MouseMove;
+        MorphNode::s_mouseCapture->onEvent(e);
+    }
+#endif
+
     self->m_root->dispatchEvent(e, (float)mx, (float)my);
 
 #ifdef MORPH_FEATURE_CURSOR
@@ -214,6 +311,19 @@ void MorphWindow::scrollCb(GLFWwindow *win, double dx, double dy)
     self->m_root->dispatchEvent(e, (float)mx, (float)my);
 }
 
+// Browser-style: losing window focus ends any in-progress mouse drag and
+// drops keyboard focus from <input> fields (selection highlight clears too).
+void MorphWindow::windowFocusCb(GLFWwindow *win, int focused)
+{
+    if (focused == GLFW_TRUE)
+        return;
+#ifdef MORPH_FEATURE_INPUT
+    MorphNode::s_mouseCapture = nullptr;
+    if (MorphNode::s_focusedNode)
+        MorphNode::s_focusedNode->blur();
+#endif
+}
+
 MorphWindow::MorphWindow(const std::string &title, int width, int height, bool visible)
     : m_title(title), m_width(width), m_height(height), m_visible(visible)
 {
@@ -232,9 +342,12 @@ MorphWindow::MorphWindow(const std::string &title, int width, int height, bool v
         glfwSetWindowUserPointer(m_handle, this);
         glfwSetMouseButtonCallback(m_handle, mouseButtonCb);
         glfwSetKeyCallback(m_handle, KeyCb);
+        glfwSetCharCallback(m_handle, CharCb);
         glfwSetCursorPosCallback(m_handle, cursorPosCb);
         glfwSetScrollCallback(m_handle, scrollCb);
         glfwSetWindowSizeCallback(m_handle, windowSizeCb);
+        glfwSetWindowFocusCallback(m_handle, windowFocusCb);
+        s_clipboardWindow = m_handle;
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 #ifdef MORPH_FEATURE_CURSOR
         m_handCursor = glfwCreateStandardCursor(GLFW_HAND_CURSOR);
@@ -540,6 +653,32 @@ void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx,
     // 1. Draw self (background from display list)
     drawOpsForNode(m_renderer, frame, nodeIdx, node.animOffsetX, node.animOffsetY);
 
+    // 1b. Input edit overlay: selection highlight + caret, then the field's
+    // text — all clipped to the content box so nothing paints outside the
+    // field (browser behavior). Text ops ride the same clip.
+    bool inputClip = node.clipText;
+    if (inputClip)
+        m_renderer.beginClip(sx + node.textClipPadX, sy,
+                             sw - 2.0f * node.textClipPadX, sh);
+    if (!std::isnan(node.selX0) && node.selX1 != node.selX0)
+    {
+        float left = std::min(node.selX0, node.selX1);
+        float right = std::max(node.selX0, node.selX1);
+        float sc[4] = {node.selColor[0], node.selColor[1],
+                       node.selColor[2], node.selColor[3]};
+        m_renderer.drawRect(left + node.animOffsetX,
+                            node.caretY + node.animOffsetY,
+                            right - left, node.caretH, sc);
+    }
+    if (!std::isnan(node.caretX))
+    {
+        float cc[4] = {node.caretColor[0], node.caretColor[1],
+                       node.caretColor[2], node.caretColor[3]};
+        m_renderer.drawRect(node.caretX + node.animOffsetX,
+                            node.caretY + node.animOffsetY,
+                            2.0f, node.caretH, cc);
+    }
+
     // Text rendering
     for (int i = node.textOpOffset; i < node.textOpOffset + node.textOpCount; i++)
     {
@@ -552,6 +691,8 @@ void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx,
                             (TextAlign)to.align, to.fontSize,
                             to.fontWeight ? "bold" : "normal");
     }
+    if (inputClip)
+        m_renderer.endClip();
 
     // 2. Clip setup
     if (overflowClipped || radiusClip)

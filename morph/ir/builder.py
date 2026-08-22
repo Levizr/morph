@@ -97,7 +97,22 @@ _UA_DEFAULTS: dict[str, dict[str, str]] = {
         "font-size": "13.33px",
         "text-align": "center",
     },
-    "input":    {"display": "inline-block"},
+    # Text field mirrors the browser UA look (white field face, 1px
+    # buttonborder-gray outline) so bare <input> is visible without user CSS.
+    # `color` uses the same near-black sentinel as button — explicit value,
+    # never inherited from the parent. `cursor: text` shows the I-beam.
+    "input": {
+        "display": "inline-block",
+        "background-color": "#ffffff",
+        "color": "#010101",
+        "border-width": "1px",
+        "border-style": "solid",
+        "border-color": "#767676",
+        "border-radius": "4px",
+        "padding": "1px 6px",
+        "font-size": "13.33px",
+        "cursor": "text",
+    },
     "select":   {"display": "inline-block"},
     "textarea": {"display": "inline-block"},
     "label":    {"display": "inline"},
@@ -273,6 +288,8 @@ class IRBuilder:
         self.config = config
         self._counter = 0
         self._extra_headers: set[str] = set()
+        self._walked: dict = {}
+        self._handler_names: set[str] = set()
 
     def build(
         self,
@@ -281,10 +298,17 @@ class IRBuilder:
         tw_resolver: TailwindResolver,
         keyframes: dict | None = None,
     ) -> list[IRWindow]:
+        self._walked = walked
         ir_windows = []
         # Raw @keyframes: name → [(offset, declarations), ...] → partial
         # IRStyle keyframes (validated against what the runtime can animate).
         ir_keyframes = self._keyframes_to_ir(keyframes or {})
+
+        # Names referenced as JSX event handlers (onChange={handleChange}).
+        # Their untyped params receive JsObject events, browser-style.
+        self._handler_names: set[str] = set()
+        for comp in walked.get("components", []):
+            self._collect_handler_refs(comp.get("jsx"), self._handler_names)
 
         # ── Transpile top-level function declarations ─────
         premain_functions = []
@@ -297,6 +321,7 @@ class IRBuilder:
                 builder = TSAstBuilder()
                 func_node = builder.build_statement(tree.root_node.children[0])
                 translator = TSToCppTranslator(indent_level=0)
+                self._mark_handler_params(translator, func_node)
                 cpp = translator.translate(func_node)
                 if cpp:
                     premain_functions.append(cpp)
@@ -369,6 +394,7 @@ class IRBuilder:
                     func_node = builder.build_statement(tree.root_node.children[0])
                     translator = TSToCppTranslator(indent_level=0,
                                                     state_vars=state_vars_map)
+                    self._mark_handler_params(translator, func_node)
                     cpp = translator.translate(func_node)
                     if cpp:
                         comp_premain.append(cpp)
@@ -810,12 +836,21 @@ class IRBuilder:
         # ── Tag attributes (src, alt, etc.) ──────────────────
         attrs = {}
         reactive_attrs = {}
-        for attr_key in ("src", "alt", "href", "target"):
+        attr_names = ["src", "alt", "href", "target"]
+        if tag == "input":
+            # Browser-parity input attributes. maxLength/minLength are
+            # UTF-16 code-unit counts per HTML spec; when maxLength is
+            # absent the runtime caps at 524288 (browser hard limit).
+            attr_names += ["value", "maxLength", "minLength", "placeholder",
+                           "disabled", "type"]
+        for attr_key in attr_names:
             val = props.get(attr_key)
             if val is None:
                 continue
             if isinstance(val, str):
                 attrs[attr_key] = val
+            elif isinstance(val, (int, float)) and not isinstance(val, bool):
+                attrs[attr_key] = str(val)
             elif isinstance(val, dict) and ("__ref__" in val or "__expr__" in val):
                 js_source = val.get("__ref__") or val.get("__expr__")
                 if js_source:
@@ -837,6 +872,10 @@ class IRBuilder:
             "onMouseUp":    "mouseup",
             "onMouseEnter": "mouseenter",
             "onMouseLeave": "mouseleave",
+            "onChange": "change",
+            "onInput": "input",
+            "onFocus": "focus",
+            "onBlur": "blur",
         }
 
         # morph-* prefixed attributes
@@ -869,8 +908,12 @@ class IRBuilder:
                         pass  # transpilation failed — skip this event
                 elif "__ref__" in val:
                     ref_name = val["__ref__"]
-                    events.append(IREvent(trigger=trigger, action="call",
-                                          target=f"[&](JsObject) -> void {{ {ref_name}(); }}"))
+                    if self._handler_takes_event(ref_name):
+                        events.append(IREvent(trigger=trigger, action="call",
+                                              target=f"[&](JsObject __ev) -> void {{ {ref_name}(__ev); }}"))
+                    else:
+                        events.append(IREvent(trigger=trigger, action="call",
+                                              target=f"[&](JsObject) -> void {{ {ref_name}(); }}"))
 
         # Extract transition config from merged CSS
         trans_dur = 0.0
@@ -1130,6 +1173,51 @@ class IRBuilder:
     def _next_id(self) -> str:
         self._counter += 1
         return f"node_{self._counter:04d}"
+
+    def _handler_takes_event(self, name: str) -> bool:
+        """True if a named .mx handler declares parameters, so event wiring
+        must forward the JsObject (e.g. function handleChange(e) { ... })."""
+        sources: list[str] = []
+        for comp in self._walked.get("components", []):
+            for fn in comp.get("inner_functions", []):
+                if isinstance(fn, dict) and fn.get("name") == name:
+                    sources.append(fn.get("source") or "")
+        for fd in self._walked.get("function_declarations", []):
+            if isinstance(fd, dict) and fd.get("name") == name:
+                sources.append(fd.get("source") or "")
+        for src in sources:
+            sig = src.split(")", 1)[0]
+            if "(" in sig and sig.split("(", 1)[1].strip():
+                return True
+        return False
+
+    def _mark_handler_params(self, translator, func_node) -> None:
+        """Type untyped params of event-handler declarations as JsObject so
+        property access like e.value compiles to bracket access."""
+        name = getattr(func_node, "name", None)
+        if not name or name not in self._handler_names:
+            return
+        untyped = set()
+        for p in getattr(func_node, "params", None) or []:
+            pname = getattr(p, "name", None)
+            if getattr(p, "type_annotation", None) is None and pname is not None:
+                untyped.add(pname.name)
+        translator._js_object_params = untyped
+
+    def _collect_handler_refs(self, node, names: set) -> None:
+        """Walk a walked-JSX tree collecting __ref__ values of onXxx props."""
+        if not isinstance(node, dict):
+            return
+        for key, val in (node.get("props") or {}).items():
+            if (key.startswith("on") and len(key) > 2 and key[2].isupper()
+                    and isinstance(val, dict) and "__ref__" in val):
+                names.add(val["__ref__"])
+        for child in node.get("children") or []:
+            self._collect_handler_refs(child, names)
+        for branch in ("then_nodes", "else_nodes"):
+            for sub in node.get(branch) or []:
+                self._collect_handler_refs(sub, names)
+
 
     # CSS properties the animation runtime can interpolate. Keyframe values
     # for everything else are ignored (browsers ignore non-animatable too).

@@ -350,29 +350,41 @@ class Compiler:
 
         return True
 
-    def compile_shared(self, source_path: str, output_path: str,
-                       defines: list[str] | None = None,
-                       native: "object | None" = None) -> bool:
-        if not os.path.exists(source_path):
-            log_error(f"Source not found: {source_path}")
-            return False
+    def _pkg_config_cflags(self, cache: dict, pkgs: list[tuple[str, str]]) -> list[str]:
+        """pkg-config cflags for the given packages, memoized per instance."""
+        out: list[str] = []
+        for pkg, sub in pkgs:
+            key = f"cflags:{pkg}"
+            if key not in cache:
+                try:
+                    cache[key] = subprocess.check_output(
+                        ["pkg-config", "--cflags", pkg], text=True
+                    ).strip().split()
+                except Exception:
+                    dirs = " ".join(f"-I{d}/{sub}" for d in self._system_include_dirs())
+                    cache[key] = dirs.split()
+            out.extend(cache[key])
+        return out
 
+    def _dev_shared_flags(self, defines: list[str] | None,
+                          native: "object | None") -> list[str]:
+        """Flag set shared by dev logic .so and dev PCH compiles.
+
+        The PCH is only valid when these flags match exactly what the logic
+        compile uses (GCC validates and silently falls back to a full parse
+        on mismatch), so both paths must build their cmd from this one list.
+        """
         runtime_dir = os.path.join(os.path.dirname(__file__), "../runtime")
         runtime_dir = os.path.abspath(runtime_dir)
         dev_dir = os.path.join(runtime_dir, "dev")
         vendor_dir = os.path.join(runtime_dir, "vendor")
 
-        if not shutil.which(self.gpp):
-            log_error(f"Compiler not found: {self.gpp}")
-            return False
-
         cmd = [
-            self.gpp,
-            "-std=c++23",
-            "-O0", "-g",  # fast compilation, debug symbols for dev
+            # c++20: the runtime header chain uses no C++23 features, and
+            # GCC parses its C++23 library bits ~1s slower per TU.
+            "-std=c++20",
+            "-O0",  # fast compilation for dev hot-reload
             shared_lib_flag(), "-fPIC",
-            source_path,
-            "-o", output_path,
             "-I", runtime_dir,
             "-I", dev_dir,
             "-I", vendor_dir,
@@ -394,6 +406,7 @@ class Compiler:
             "MORPH_FEATURE_MARGIN_COLLAPSE", "MORPH_FEATURE_MIN_MAX",
             "MORPH_FEATURE_BORDER_BOX", "MORPH_FEATURE_IMAGE",
             "MORPH_FEATURE_DIRTY_RENDERING",
+            "MORPH_FEATURE_INPUT",
             "MORPH_FEATURE_TRANSFORM",
             "MORPH_FEATURE_ANIMATION",
             "MORPH_FEATURE_DEV",
@@ -408,15 +421,74 @@ class Compiler:
         cmd.extend(self._native_flags(native))
 
         # FreeType and HarfBuzz headers (needed by node.h → gl_renderer.h)
-        cflags: list[str] = []
-        for pkg, sub in (("freetype2", "freetype2"), ("harfbuzz", "harfbuzz")):
-            try:
-                cflags.extend(subprocess.check_output(
-                    ["pkg-config", "--cflags", pkg], text=True
-                ).strip().split())
-            except Exception:
-                cflags.extend(f"-I{d}/{sub}" for d in self._system_include_dirs())
-        cmd.extend(cflags)
+        pkg_cache: dict = getattr(self, "_pkg_cache", None)
+        if pkg_cache is None:
+            pkg_cache = self._pkg_cache = {}
+        cmd.extend(self._pkg_config_cflags(
+            pkg_cache, [("freetype2", "freetype2"), ("harfbuzz", "harfbuzz")]))
+        return cmd
+
+    def compile_pch(self, header_path: str, output_path: str,
+                    defines: list[str] | None = None,
+                    native: "object | None" = None) -> bool:
+        """Precompile `header_path` for reuse across dev logic compiles.
+
+        GCC output keeps the `<header>.gch` convention (auto-picked up by
+        `-include <header>`); clang gets an explicit `.pch` file used via
+        `-include-pch`. Both must be built with the exact same flags as
+        `compile_shared` uses — handled by `_dev_shared_flags`.
+        """
+        if not os.path.exists(header_path):
+            log_error(f"PCH header not found: {header_path}")
+            return False
+        if not shutil.which(self.gpp):
+            log_error(f"Compiler not found: {self.gpp}")
+            return False
+
+        cmd = [self.gpp]
+        cmd.extend(self._dev_shared_flags(defines, native))
+        if "clang" in os.path.basename(self.gpp):
+            cmd.extend(["-x", "c++-header", "-emit-pch",
+                        header_path, "-o", output_path])
+        else:
+            cmd.extend(["-x", "c++-header", header_path, "-o", output_path])
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        if result.returncode != 0:
+            log_error("PCH compilation failed:")
+            for line in result.stderr.split("\n"):
+                if line.strip():
+                    print(f"  {line.strip()}")
+            return False
+        return True
+
+    def compile_shared(self, source_path: str, output_path: str,
+                       defines: list[str] | None = None,
+                       native: "object | None" = None,
+                       pch_header: str | None = None) -> bool:
+        if not os.path.exists(source_path):
+            log_error(f"Source not found: {source_path}")
+            return False
+
+        if not shutil.which(self.gpp):
+            log_error(f"Compiler not found: {self.gpp}")
+            return False
+
+        cmd = [self.gpp]
+        cmd.extend(self._dev_shared_flags(defines, native))
+        if pch_header:
+            base, _ = os.path.splitext(pch_header)
+            if "clang" in os.path.basename(self.gpp):
+                pch_file = base + ".pch"
+                if os.path.exists(pch_file):
+                    cmd.append(f"-include-pch")
+                    cmd.append(pch_file)
+            elif os.path.exists(base + ".gch"):
+                # -include <header> auto-loads <header>.gch when flag-compatible
+                cmd.append("-include")
+                cmd.append(pch_header)
+        cmd.append(source_path)
+        cmd.extend(["-o", output_path])
 
         if not self.silent:
             log_info(f"Compiling shared library: {' '.join(cmd)}")

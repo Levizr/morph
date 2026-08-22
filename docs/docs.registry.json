@@ -501,6 +501,161 @@
     ]
   },
   {
+    "category": "DevTools",
+    "items": [
+      {
+        "title": "Overview",
+        "slug": "devtools/overview",
+        "file": "devtools/index",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Morph's built-in DevTools panel \u2014 F12 element inspection, rendering profiler, network monitor, and logs inside the native dev window.",
+        "keywords": [
+          "devtools",
+          "f12",
+          "inspector",
+          "debugging",
+          "profiler"
+        ],
+        "lastUpdated": "2026-08-22",
+        "publishedAt": "2026-08-22",
+        "priority": 0.8,
+        "changefreq": "weekly"
+      },
+      {
+        "title": "Elements",
+        "slug": "devtools/elements",
+        "file": "devtools/elements",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "The Elements tab \u2014 inspect mode, box-model overlay, and full layout/display/style info for any element on screen.",
+        "keywords": [
+          "devtools elements",
+          "inspect element",
+          "box model",
+          "overlay"
+        ],
+        "lastUpdated": "2026-08-22",
+        "publishedAt": "2026-08-22",
+        "priority": 0.8,
+        "changefreq": "weekly"
+      },
+      {
+        "title": "Rendering",
+        "slug": "devtools/rendering",
+        "file": "devtools/rendering",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "The Rendering tab \u2014 frame stats, layout/paint diagnostics, repaint highlighting, and the live Flash/Forge renderer switch.",
+        "keywords": [
+          "devtools rendering",
+          "profiler",
+          "flash",
+          "forge",
+          "renderer switch"
+        ],
+        "lastUpdated": "2026-08-22",
+        "publishedAt": "2026-08-22",
+        "priority": 0.8,
+        "changefreq": "weekly"
+      },
+      {
+        "title": "Network",
+        "slug": "devtools/network",
+        "file": "devtools/network",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "The Network tab \u2014 every fetch() request logged with status, timing, headers, and body previews.",
+        "keywords": [
+          "devtools network",
+          "fetch",
+          "requests",
+          "headers"
+        ],
+        "lastUpdated": "2026-08-22",
+        "publishedAt": "2026-08-22",
+        "priority": 0.8,
+        "changefreq": "weekly"
+      },
+      {
+        "title": "Logs",
+        "slug": "devtools/logs",
+        "file": "devtools/logs",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "The Logs tab \u2014 console output from your app with info/ok/warn/error levels and timestamps.",
+        "keywords": [
+          "devtools logs",
+          "console.log",
+          "logging"
+        ],
+        "lastUpdated": "2026-08-22",
+        "publishedAt": "2026-08-22",
+        "priority": 0.8,
+        "changefreq": "weekly"
+      }
+    ]
+  },
+  {
+    "category": "Rendering",
+    "items": [
+      {
+        "title": "Overview",
+        "slug": "rendering/overview",
+        "file": "rendering/index",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Morph's dual-renderer architecture \u2014 flash (lightweight direct) and forge (hybrid retained compositor), how selection works, and which to pick.",
+        "keywords": [
+          "renderer",
+          "flash",
+          "forge",
+          "opengl",
+          "rendering"
+        ],
+        "lastUpdated": "2026-08-22",
+        "publishedAt": "2026-08-22",
+        "priority": 0.8,
+        "changefreq": "weekly"
+      },
+      {
+        "title": "Flash Renderer",
+        "slug": "rendering/flash",
+        "file": "rendering/flash",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "The flash renderer \u2014 Morph's lightweight direct renderer: full clear each frame, zero retained state, the production default.",
+        "keywords": [
+          "flash renderer",
+          "direct rendering",
+          "full clear"
+        ],
+        "lastUpdated": "2026-08-22",
+        "publishedAt": "2026-08-22",
+        "priority": 0.8,
+        "changefreq": "weekly"
+      },
+      {
+        "title": "Forge Renderer",
+        "slug": "rendering/forge",
+        "file": "rendering/forge",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "The forge renderer \u2014 hybrid retained compositor with damage tracking and a persistent FBO surface, beta today.",
+        "keywords": [
+          "forge renderer",
+          "damage tracking",
+          "retained fbo",
+          "compositor"
+        ],
+        "lastUpdated": "2026-08-22",
+        "publishedAt": "2026-08-22",
+        "priority": 0.8,
+        "changefreq": "weekly"
+      }
+    ]
+  },
+  {
     "category": "CLI",
     "items": [
       {
@@ -1128,6 +1283,25 @@
         "publishedAt": "2026-08-20",
         "priority": 0.7,
         "changefreq": "yearly"
+      },
+      {
+        "title": "Why Morph Is Buggy",
+        "slug": "story/why-buggy",
+        "file": "story/why-buggy",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Why Morph feels buggy \u2014 an honest admission from the author: layout complexity, solo development, and a request for bug hunters.",
+        "keywords": [
+          "bugs",
+          "layout problems",
+          "flexbox",
+          "solo dev",
+          "contribute"
+        ],
+        "lastUpdated": "2026-08-22",
+        "publishedAt": "2026-08-22",
+        "priority": 0.7,
+        "changefreq": "monthly"
       }
     ]
   },

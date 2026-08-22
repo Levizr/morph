@@ -69,8 +69,7 @@ function greet(name: string): void {
     code = _translate(source)
     assert "void greet(" in code
     assert "const JsString& name" in code
-    assert 'std::println("{}", name)' in code
-    assert "#include <print>" in code
+    assert 'morph::dev_log(morph::str(name))' in code
 
 
 def test_arrow_function():
@@ -105,7 +104,7 @@ if (x > 5) {
 """)
     assert "if (" in code
     assert "else" in code
-    assert "std::println" in code
+    assert "morph::dev_log" in code
 
 
 def test_while():
@@ -170,20 +169,17 @@ def test_template_literal():
 
 def test_console_log():
     code = _translate('console.log("hello world");')
-    assert 'std::println("{}", "hello world")' in code
+    assert 'morph::dev_log("hello world")' in code
 
 
 def test_console_log_variable():
     code = _translate("console.log(count);")
-    assert 'std::println("{}", count)' in code
+    assert 'morph::dev_log(morph::str(count))' in code
 
 
 def test_console_log_template():
     code = _translate('console.log(`Hello, ${name}!`);')
-    assert 'std::println("Hello, {}!", name)' in code
-    assert "#include <print>" in code
-    assert "std::ios_base::sync_with_stdio(false)" in code
-    assert "std::cin.tie(NULL)" in code
+    assert 'morph::dev_log("Hello, " + morph::str(name) + "!")' in code
 
 
 # ── Type Resolution ───────────────────────────────────────
@@ -439,18 +435,18 @@ for (let m = 0; m < 5; ) {
 
 def test_template_expression():
     code = _translate('console.log(`Hello, ${name}!`);')
-    assert 'std::println("Hello, {}!", name)' in code
+    assert 'morph::dev_log("Hello, " + morph::str(name) + "!")' in code
 
 
 def test_template_with_method():
     code = _translate('console.log(`Upper: ${name.toUpperCase()}`);')
-    assert "std::println" in code
+    assert "morph::dev_log" in code
     assert "toUpperCase" in code
 
 
 def test_template_with_ternary():
     code = _translate('console.log(`Val is ${x > 10 ? "big" : "small"}`);')
-    assert "std::println" in code
+    assert "morph::dev_log" in code
 
 
 # ── Try / Catch / Throw ──────────────────────────────────

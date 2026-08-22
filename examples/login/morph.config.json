@@ -1,0 +1,14 @@
+{
+  "name": "login",
+  "entry": "src/App.mx",
+  "output": "dist/",
+
+  "window": {
+    "width": 420,
+    "height": 500,
+    "title": "Morph Login"
+  },
+  "dependencies": {},
+  "cpp_sources": [],
+  "renderer": "flash"
+}

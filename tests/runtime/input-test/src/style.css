@@ -1,0 +1,47 @@
+body {
+    background-color: #10141c;
+}
+
+.wrap {
+    width: 480px;
+    padding: 24px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.h1 {
+    color: #e8ecf4;
+    font-size: 22px;
+    font-weight: bold;
+    margin-bottom: 6px;
+}
+
+.field {
+    width: 440px;
+    height: 44px;
+    background-color: #1a2130;
+    border: 1px solid #1c201e;
+    border-radius: 8px;
+    color: #eef2f9;
+    font-size: 16px;
+    cursor: text;
+}
+
+.status {
+    display: flex;
+    flex-direction: row;
+    gap: 6px;
+    margin-top: 2px;
+}
+
+.label {
+    color: #7d8aa3;
+    font-size: 14px;
+    width: 130px;
+}
+
+.val {
+    color: #5ee6a8;
+    font-size: 14px;
+}

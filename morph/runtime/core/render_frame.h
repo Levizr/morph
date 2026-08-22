@@ -4,6 +4,7 @@
 #include <string>
 #include <atomic>
 #include <mutex>
+#include <cmath>
 #include "draw_op.h"
 #include "event.h"
 
@@ -99,6 +100,20 @@ struct FlatRenderNode {
     // Display list (pre-recorded paint commands)
     int dlOffset;
     int dlCount;
+
+    // ── Input edit overlay (set by InputNode::flattenExtra) ──
+    // Selection highlight + caret are drawn by renderNode between the node's
+    // display-list ops and its text ops, clipped to the content box so text
+    // never paints outside the field (browser behavior).
+    bool clipText = false;          // clip this node's text to its content box
+    float textClipPadX = 0.0f;      // horizontal padding of the content box
+    // NaN = hidden sentinel: selection/caret x can legitimately be negative
+    // when the text is scrolled left, so a sign-based sentinel would collide.
+    float selX0 = NAN, selX1 = NAN;       // selection highlight span (NaN = none)
+    float caretX = NAN;                   // caret bar x (NaN = hidden)
+    float caretY = 0.0f, caretH = 0.0f;
+    float selColor[4] = {0.20f, 0.56f, 1.0f, 0.35f};
+    float caretColor[4] = {0.0f, 0.0f, 0.0f, 1.0f};
 
     // Text rendering (separate from drawOps because DrawOp is POD)
     int textOpOffset = 0;

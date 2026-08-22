@@ -120,7 +120,15 @@ class FeatureSet:
                     self.features.add("button")
                     self.features.add("radius")
                 if node.node_type == "input":
+                    # <input> pulls its runtime dependencies in: text
+                    # rendering (value/placeholder glyphs), the I-beam
+                    # cursor, rounded-box painting, and the keyboard-focus
+                    # editing runtime (MORPH_FEATURE_INPUT).
                     self.features.add("input")
+                    self.features.add("text")
+                    self.features.add("cursor")
+                    self.features.add("radius")
+                    self.features.add("event")
                 if node.node_type == "img":
                     self.features.add("image")
                 if node.node_type == "__list__":
@@ -206,6 +214,10 @@ class FeatureSet:
             defines.append("MORPH_FEATURE_BORDER_BOX")
         if "image" in self.features:
             defines.append("MORPH_FEATURE_IMAGE")
+        if "input" in self.features:
+            # Keyboard-focus text editing runtime for <input> (caret,
+            # selection, clipboard, maxlength enforcement).
+            defines.append("MORPH_FEATURE_INPUT")
         if "dirty_rendering" in self.features or "scroll" in self.features:
             defines.append("MORPH_FEATURE_DIRTY_RENDERING")
         # ── Renderer selection defines ──

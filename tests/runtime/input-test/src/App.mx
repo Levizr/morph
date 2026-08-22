@@ -1,0 +1,65 @@
+import { CSS, morphState } from "morph"
+CSS.load("./style.css")
+
+export const windowConfig = { title: "Input Test", width: 520, height: 640 }
+
+export default function App() {
+  const [name, setName] = morphState("");
+  const [focused, setFocused] = morphState(0);
+  const [edits, setEdits] = morphState(0);
+
+  function handleChange(e):void {
+    setName(e.value);
+    setEdits(edits + 1);
+  }
+
+  function handleFocus():void {
+    setFocused(1);
+  }
+
+  function handleBlur():void {
+    setFocused(0);
+  }
+
+  return (
+    <body>
+      <div className="wrap">
+        <p className="h1">{"<input> runtime test"}</p>
+
+        {/* Controlled input: value + onChange (fires per keystroke) */}
+        <input
+          className="field"
+          value={name}
+          placeholder="Type your name…"
+          onChange={handleChange}
+          onFocus={handleFocus}
+          onBlur={handleBlur}
+        />
+
+        {/* Static attrs: initial value, minLength, disabled */}
+        <input className="field" value="prefilled" minLength={3} />
+        <input className="field" placeholder="Disabled — not focusable" disabled="true" />
+
+        {/* Password masking */}
+        <input className="field" type="password" placeholder="Password" maxLength={8} />
+
+        <div className="status">
+          <span className="label">value: </span>
+          <span className="val">{name === "" ? "(empty)" : name}</span>
+        </div>
+        <div className="status">
+          <span className="label">len: </span>
+          <span className="val">{name.length} / 12</span>
+        </div>
+        <div className="status">
+          <span className="label">change events: </span>
+          <span className="val">{edits}</span>
+        </div>
+        <div className="status">
+          <span className="label">focus: </span>
+          <span className="val">{focused === 1 ? "yes" : "no"}</span>
+        </div>
+      </div>
+    </body>
+  )
+}

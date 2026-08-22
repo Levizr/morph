@@ -166,9 +166,9 @@ def _css_field_reset_assignments(field_name: str) -> list[str]:
 
 _LOGIC_PREHEADER = """#include <cstdio>
 #include <string>
-#if __has_include(<print>)
-#include <print>
-#endif
+// Dev fast-reload prelude: extern template decls for Signal<T> /
+// get_or_create<T> + console.log sinks, all resolved from the devrt host.
+#include "logic_prelude.h"
 #include "core/node.h"
 #include "reactivity/signal.h"
 #include "core/event.h"
@@ -200,7 +200,8 @@ inline void setColor(float rgba[4], const std::string& c) {
 
 # Built-in headers already provided by _LOGIC_PREHEADER or the compiler include paths.
 _BUILTIN_HEADERS = frozenset({
-    "<cstdio>", "<print>", "<string>",
+    "<cstdio>", "<string>",
+    '"logic_prelude.h"',
     '"core/node.h"', '"reactivity/signal.h"', '"core/event.h"', '"types/js_value.h"',
     '"signal_store.h"', '"node_registry.h"',
 })
@@ -338,6 +339,19 @@ def emit_logic(windows: list[IRWindow]) -> str:
         lines.append('#include "ui/rect.h"')
         lines.append('#include "ui/text.h"')
         lines.append('#include "ui/button.h"')
+
+    # Reactive value bindings cast to InputNode — bring in the declaration.
+    def _has_input(nodes) -> bool:
+        for n in nodes:
+            if n.node_type == "input":
+                return True
+            if _has_input(n.children):
+                return True
+            if _has_input(n.then_nodes) or _has_input(n.else_nodes):
+                return True
+        return False
+    if any(_has_input(w.nodes) for w in windows):
+        lines.append('#include "ui/input.h"')
 
     # Collect all state vars
     all_state_vars = collect_state_vars(windows)
@@ -537,6 +551,10 @@ def _emit_node_events(lines: list[str], node: IRNode, wired_events: set[tuple[st
         "mouseup": "onMouseUp",
         "mouseenter": "onMouseEnter",
         "mouseleave": "onMouseLeave",
+        "change": "onChange",
+        "input": "onInput",
+        "focus": "onFocus",
+        "blur": "onBlur",
     }
 
     for event in node.events:
@@ -696,7 +714,7 @@ def _emit_node_effects(lines: list[str], node: IRNode, indent: str = "    ") -> 
                     lines.append(f'{indent}    n->markDirty(PaintDirty);')
                     lines.append(f'{indent}}});')
 
-    # ── Reactive attrs (src/alt on img nodes) ──
+    # ── Reactive attrs (src/alt on img, value on input) ──
     if node.reactive_attrs:
         for attr_key, cpp_expr in node.reactive_attrs.items():
             lines.append(f'{indent}__effects[__effect_count++] = morph::create_effect([&]() {{')
@@ -709,6 +727,8 @@ def _emit_node_effects(lines: list[str], node: IRNode, indent: str = "    ") -> 
                 lines.append(f'{indent}        img->src = _src;')
                 lines.append(f'{indent}        img->loaded = false;')
                 lines.append(f'{indent}    }}')
+            elif attr_key == "value" and node.node_type == "input":
+                lines.append(f'{indent}    static_cast<InputNode*>(n)->setValue(morph::str({cpp_expr}));')
             else:
                 lines.append(f'{indent}    n->{attr_key} = morph::str({cpp_expr});')
             lines.append(f'{indent}    n->markDirty(PaintDirty);')

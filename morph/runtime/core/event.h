@@ -12,4 +12,5 @@ struct MorphEvent {
     std::string key;
     int   button = 0;
     float scroll = 0;
+    int   mods = 0;     // GLFW key modifier bitmask (Shift/Ctrl/Alt/Super)
 };

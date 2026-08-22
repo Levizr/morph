@@ -201,10 +201,16 @@ def test_morph_window_prop_type():
 
 
 def test_stub_tags_warn():
+    # <input> is fully implemented now — select/textarea remain stubs
     src = CLEAN.replace('<img src="a.png" alt="x" width={100} height={50} />',
-                        "<input />")
+                        "<select><option>1</option></select>")
     errs = lint(src)
     assert "mx-tag-stub" in codes(errs)
+
+    src2 = CLEAN.replace('<img src="a.png" alt="x" width={100} height={50} />',
+                         '<input value="hi" maxLength={10} placeholder="Type" />')
+    errs2 = lint(src2)
+    assert "mx-tag-stub" not in codes(errs2)
 
 
 def test_component_imports_warn():

@@ -13,7 +13,7 @@ from morph.style.properties import KNOWN_PROPERTIES
 SUPPORTED_TAGS: frozenset[str] = frozenset(_UA_DEFAULTS) | {"morph-window"}
 
 # Tags the runtime registers but does not fully implement yet.
-STUB_TAGS: frozenset[str] = frozenset({"input", "select", "textarea"})
+STUB_TAGS: frozenset[str] = frozenset({"select", "textarea"})
 
 # ── Props ────────────────────────────────────────────────────────────
 GLOBAL_PROPS: frozenset[str] = frozenset({"className", "class", "id", "style", "key"})
@@ -22,6 +22,7 @@ EVENT_PROPS: frozenset[str] = frozenset({
     "onClick", "onDoubleClick",
     "onMouseDown", "onMouseUp", "onMouseEnter", "onMouseLeave",
     "onKeyUp", "onKeyDown",
+    "onChange", "onInput", "onFocus", "onBlur",
 })
 
 MORPH_ACTIONS: frozenset[str] = frozenset({
@@ -41,6 +42,10 @@ WINDOW_SIZE_PROPS: frozenset[str] = frozenset({
 TAG_PROPS: dict[str, frozenset[str]] = {
     "img":          frozenset({"src", "alt", "width", "height"}),
     "a":            frozenset({"href", "target"}),
+    # Browser-parity input attributes. maxLength/minLength are UTF-16
+    # code-unit counts; unset maxLength → runtime cap of 524288.
+    "input":        frozenset({"value", "maxLength", "minLength",
+                                "placeholder", "disabled", "type"}),
     "morph-window": WINDOW_PROPS,
 }
 

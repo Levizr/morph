@@ -105,7 +105,6 @@ _TYPE_TO_HEADER: dict[str, str] = {
     "std::optional":    "<optional>",
     "std::variant":     "<variant>",
     "std::format":      "<format>",
-    "std::println":     "<print>",
     "std::shared_ptr":  "<memory>",
     "std::make_shared": "<memory>",
     "JsNumber":         "\"../../morph/runtime/types/js_types.h\"",
@@ -222,6 +221,10 @@ class TSToCppTranslator:
         # Map of JS identifier → C++ expression for state variables
         # e.g. {"count": "__st_count.get()", "setCount": "__st_count.set"}
         self._state_vars: dict[str, str] = state_vars or {}
+        # Params of event-handler declarations that were written without a
+        # type annotation; they receive JsObject events (browser semantics).
+        # Not propagated to sub-translators — scoped to one declaration.
+        self._js_object_params: set[str] = set()
         # Set to True when a while(true) loop is encountered within a function
         self._has_infinite_loop: bool = False
         # Depth of enclosing `async` functions; >0 makes `return` → `co_return`
@@ -881,23 +884,39 @@ class TSToCppTranslator:
                 and isinstance(node.callee.property, TSIdentifier)
                 and not node.callee.computed
                 and node.callee.property.name in ("log", "warn", "error", "info")):
-            self._need("std::println")
-            fmt_chars: list[str] = []
-            val_args: list[str] = []
+            # Dev-mode sink: morph::dev_log lives in the devrt host binary
+            # (logic_prelude.h), so hot reloads skip the <format>/<print>
+            # template machinery entirely.
+            sink = {"warn": "dev_log_warn", "error": "dev_log_error"}.get(
+                node.callee.property.name, "dev_log")
+            pieces: list[tuple[str, str]] = []
             for a in node.arguments:
                 if isinstance(a, TSTemplateLiteral):
                     fstr, targs = self._extract_template_parts(a)
-                    fmt_chars.append(fstr)
-                    val_args.extend(targs)
+                    lits = fstr.split("{}")
+                    for i, t in enumerate(targs):
+                        if lits[i]:
+                            pieces.append(("lit", lits[i]))
+                        pieces.append(("val", t))
+                    if lits[-1]:
+                        pieces.append(("lit", lits[-1]))
                 elif isinstance(a, TSLiteral) and isinstance(a.value, str):
-                    fmt_chars.append(a.value.replace("{", "{{").replace("}", "}}"))
+                    pieces.append(("lit", a.value))
                 else:
-                    fmt_chars.append("{}")
-                    val_args.append(self._translate_node(a))
-            fmt_str = " ".join(fmt_chars)
-            if not val_args:
-                return f'std::println("{{}}", "{fmt_str}")'
-            return f'std::println("{fmt_str}", {", ".join(val_args)})'
+                    pieces.append(("val", self._translate_node(a)))
+            def _esc(s: str) -> str:
+                return s.replace("\\", "\\\\").replace('"', '\\"')
+            if not any(k == "val" for k, _ in pieces):
+                text = "".join(v for _, v in pieces)
+                return f'morph::{sink}("{_esc(text)}")'
+            expr_parts: list[str] = []
+            for kind, v in pieces:
+                if kind == "lit":
+                    if v:
+                        expr_parts.append(f'"{_esc(v)}"')
+                else:
+                    expr_parts.append(f"morph::str({v})")
+            return f"morph::{sink}({(' + '.join(expr_parts)) or '\"\"'})"
 
         # Detect .push(item) → .push(item)
         if (isinstance(node.callee, TSMemberExpression)
@@ -1439,8 +1458,13 @@ class TSToCppTranslator:
             cpp_type = _resolve_type(p.type_annotation, "auto",
                                      template_params=self._template_params,
                                      wrap_shared=wrap_shared)
+            if cpp_type == "auto" and p.name.name in self._js_object_params:
+                cpp_type = "JsObject"
             cpp_type = self._wrap_type(cpp_type)
             self._need(cpp_type)
+            # Register so member access on typed params (e.g. e.value when
+            # e:object) resolves to bracket access on JsObject/JsValue.
+            self._var_types[p.name.name] = cpp_type
             param_type = _param_type(cpp_type)
             if param_type == "std::string_view":
                 self._need("std::string_view")

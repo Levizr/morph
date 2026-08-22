@@ -274,6 +274,25 @@ class NodeEmitter:
             lines.append(f"{indent}{node.node_id}->y = {fmt(node.y)};")
             lines.append(f"{indent}{node.node_id}->w = {fmt(node.w)};")
             lines.append(f"{indent}{node.node_id}->h = {fmt(node.h)};")
+        elif node.node_type == "input":
+            def _esc(s: str) -> str:
+                return s.replace("\\", "\\\\").replace("\"", "\\\"")
+            lines.append(f"InputNode* {node.node_id} = new InputNode();")
+            lines.append(f"{indent}{node.node_id}->setValue(\"{_esc(node.attrs.get('value', ''))}\");")
+            if "placeholder" in node.attrs:
+                lines.append(f"{indent}{node.node_id}->placeholder = \"{_esc(node.attrs['placeholder'])}\";")
+            if "maxLength" in node.attrs:
+                lines.append(f"{indent}{node.node_id}->maxLength = {node.attrs['maxLength']};")
+            if "minLength" in node.attrs:
+                lines.append(f"{indent}{node.node_id}->minLength = {node.attrs['minLength']};")
+            if node.attrs.get("disabled", "").lower() in ("true", "1"):
+                lines.append(f"{indent}{node.node_id}->disabled = true;")
+            if "type" in node.attrs:
+                lines.append(f"{indent}{node.node_id}->inputType = \"{_esc(node.attrs['type'])}\";")
+            lines.append(f"{indent}{node.node_id}->x = {fmt(node.x)};")
+            lines.append(f"{indent}{node.node_id}->y = {fmt(node.y)};")
+            lines.append(f"{indent}{node.node_id}->w = {fmt(node.w)};")
+            lines.append(f"{indent}{node.node_id}->h = {fmt(node.h)};")
         elif node.node_type == "img":
             src = node.attrs.get("src", "")
             alt = node.attrs.get("alt", "")
@@ -516,7 +535,7 @@ class NodeEmitter:
                         lines.append(f"{indent}{child.node_id}->markDirty(PaintDirty);")
                         lines.append(f"}}));")
 
-        # ── Reactive attrs (src/alt on img nodes) ──
+        # ── Reactive attrs (src/alt on img, value on input) ──
         if node.reactive_attrs:
             for attr_key, cpp_expr in node.reactive_attrs.items():
                 lines.append(f"{node_id}->m_associatedEffects.push_back(morph::create_effect([{node_id}{caps}]() {{")
@@ -526,6 +545,9 @@ class NodeEmitter:
                     lines.append(f"{indent}    {node_id}->src = _src;")
                     lines.append(f"{indent}    {node_id}->loaded = false;")
                     lines.append(f"{indent}}}{node_id}->markDirty(PaintDirty);")
+                elif attr_key == "value" and node.node_type == "input":
+                    lines.append(f"{indent}{node_id}->setValue(morph::str({cpp_expr}));")
+                    lines.append(f"{indent}{node_id}->markDirty(PaintDirty);")
                 else:
                     lines.append(f"{indent}{node_id}->{attr_key} = morph::str({cpp_expr});")
                     lines.append(f"{indent}{node_id}->markDirty(PaintDirty);")
@@ -1047,6 +1069,10 @@ class NodeEmitter:
         "mouseup":    "onMouseUp",
         "mouseenter": "onMouseEnter",
         "mouseleave": "onMouseLeave",
+        "change":     "onChange",
+        "input":      "onInput",
+        "focus":      "onFocus",
+        "blur":       "onBlur",
     }
 
     def _emit_event(self, event, node_id: str, indent: str) -> str:

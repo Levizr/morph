@@ -9,6 +9,7 @@
 #include "../ui/text.h"
 #include "../ui/button.h"
 #include "../ui/image.h"
+#include "../ui/input.h"
 #include "../ui/morph_list.h"
 
 static void deleteNodeTree(MorphNode* node) {
@@ -361,6 +362,26 @@ static MorphNode* deserializeNode(const JsonValue& val,
         node = new TextNode(text);
     } else if (type == "button") {
         node = new RectNode(0, 0, 0, 0);
+    } else if (type == "input") {
+        auto* input = new InputNode();
+        if (val.has("attrs") && val["attrs"].type() == JsonType::Object) {
+            auto& a = val["attrs"];
+            if (a.has("value") && !a["value"].isNull())
+                input->setValue(a["value"].asString());
+            if (a.has("placeholder") && !a["placeholder"].isNull())
+                input->placeholder = a["placeholder"].asString();
+            if (a.has("maxLength") && !a["maxLength"].isNull())
+                input->maxLength = atoi(a["maxLength"].asString().c_str());
+            if (a.has("minLength") && !a["minLength"].isNull())
+                input->minLength = atoi(a["minLength"].asString().c_str());
+            if (a.has("disabled") && !a["disabled"].isNull()) {
+                std::string d = a["disabled"].asString();
+                input->disabled = (d == "true" || d == "1");
+            }
+            if (a.has("type") && !a["type"].isNull())
+                input->inputType = a["type"].asString();
+        }
+        node = input;
     } else if (type == "img") {
         std::string src, alt;
         if (val.has("attrs") && val["attrs"].type() == JsonType::Object) {

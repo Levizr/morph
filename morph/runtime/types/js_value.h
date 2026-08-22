@@ -509,38 +509,7 @@ inline JsValue operator%(const JsValue& a, int64_t b) { return a % JsValue(b); }
 inline JsValue operator+(int64_t a, const JsValue& b) { return JsValue(a) + b; }
 inline JsValue operator%(int64_t a, const JsValue& b) { return JsValue(a) % b; }
 
-// ── std::formatter for JsValue (JsValue is the top-level wrapper) ──
-
-#include <format>
-
-template <>
-struct std::formatter<JsValue> {
-    constexpr auto parse(auto& ctx) { return ctx.begin(); }
-    auto format(const JsValue& v, auto& ctx) const {
-        if (v.is_undefined()) return std::format_to(ctx.out(), "undefined");
-        if (v.is_null()) return std::format_to(ctx.out(), "null");
-        if (v.is_boolean()) return std::format_to(ctx.out(), "{}", std::get<JsBoolean>(v.inner));
-        if (v.is_number()) return std::format_to(ctx.out(), "{}", std::get<JsNumber>(v.inner));
-        if (v.is_string()) return std::format_to(ctx.out(), "{}", std::get<JsString>(v.inner));
-        if (v.is_array()) return std::format_to(ctx.out(), "[object Array]");
-        if (v.is_object()) return std::format_to(ctx.out(), "[object Object]");
-        if (v.is_function()) return std::format_to(ctx.out(), "function");
-        return std::format_to(ctx.out(), "undefined");
-    }
-};
-
-template <>
-struct std::formatter<JsObject> {
-    constexpr auto parse(auto& ctx) { return ctx.begin(); }
-    auto format(const JsObject& v, auto& ctx) const {
-        return std::formatter<JsValue>{}.format(JsValue(v), ctx);
-    }
-};
-
-template <>
-struct std::formatter<JsArray> {
-    constexpr auto parse(auto& ctx) { return ctx.begin(); }
-    auto format(const JsArray& v, auto& ctx) const {
-        return std::formatter<JsValue>{}.format(JsValue(v), ctx);
-    }
-};
+// std::formatter specializations for Js* types moved to the opt-in
+// "types/js_value_format.h" — <format> costs ~1.5s of parse time per TU,
+// which is unacceptable for dev hot-reload. Include that header explicitly
+// where std::format/println formatting of Js values is needed.
