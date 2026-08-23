@@ -12,11 +12,7 @@ All project settings live in `morph.config.json` at the project root.
   "window": {
     "width": 800,
     "height": 600,
-    "title": "My App",
-    "minWidth": 400,
-    "minHeight": 300,
-    "maxWidth": 1920,
-    "maxHeight": 1080
+    "title": "Morph App"
   },
   "renderer": "flash",
   "dependencies": {},
@@ -32,7 +28,10 @@ All project settings live in `morph.config.json` at the project root.
     "wayland": false,
     "system_freetype": false,
     "upx": true,
-    "upx_version": ""
+    "upx_version": "",
+    "cxx": "",
+    "dev_cxx": "",
+    "cmake": ""
   },
   "lint": {
     "disable": [],
@@ -47,7 +46,7 @@ All project settings live in `morph.config.json` at the project root.
 |---|---|---|---|
 | `name` | string | `"my-app"` | Project name. Used in window title and build output. |
 | `entry` | string | `"src/App.mx"` | Root `.mx` file to compile. |
-| `output` | string | `"dist/"` | Directory for build artifacts. |
+| `output` | string | `"dist/"` | Directory for build artifacts (`morph init` scaffolds `dist/`; omitting the key falls back to `.morph/`). |
 | `window` | object | (see below) | Native window settings. |
 | `renderer` | string | `"flash"` | Renderer backend: `"flash"` (default, lightweight) or `"forge"` (retained surfaces). |
 | `dependencies` | object | `{}` | Package dependencies (key-value pairs). |
@@ -62,11 +61,9 @@ All project settings live in `morph.config.json` at the project root.
 |---|---|---|---|
 | `width` | int | `800` | Window width in CSS pixels. |
 | `height` | int | `600` | Window height in CSS pixels. |
-| `title` | string | `"My App"` | Window title bar text. |
-| `minWidth` | int | — | Minimum window width (enforced by OS). |
-| `minHeight` | int | — | Minimum window height (enforced by OS). |
-| `maxWidth` | int | — | Maximum window width (enforced by OS). |
-| `maxHeight` | int | — | Maximum window height (enforced by OS). |
+| `title` | string | `"Morph App"` | Window title bar text. |
+
+Window size limits (`minWidth`, `minHeight`, `maxWidth`, `maxHeight`) are not read from `morph.config.json` — set them via the `windowConfig` export or `<morph-window>` props instead (below).
 
 Window settings can also be overridden per-file by exporting `windowConfig` from your entry `.mx`:
 
@@ -114,6 +111,46 @@ Example:
 | `system_freetype` | bool | `false` | Use system `libfreetype.a` instead of the trimmed self-built copy. |
 | `upx` | bool | `true` | Compress the final binary with UPX. |
 | `upx_version` | string | `""` | Pin a specific UPX release (e.g. `"4.2.4"`). Empty uses system/default. |
+| `cxx` | string | `""` | Compiler for production binaries (`morph build`). Empty = auto (`g++`). |
+| `dev_cxx` | string | `""` | Compiler for dev-mode hot-reload logic. Empty = auto (newest `clang++`, else `g++`). |
+| `cmake` | string | `""` | CMake binary used to build the dev runtime. Empty = `"cmake"` on PATH. |
+
+### Compilers
+
+Morph uses two independently configurable toolchains:
+
+- **Production (`morph build`, `morph run`)** — uses `build.cxx` if set, otherwise the platform default `g++`. Release binaries have one predictable toolchain.
+- **Dev hot reload (`morph dev`)** — every logic edit recompiles a small `.so`. The default is also `g++`: on our benchmarks (GCC 14 / libstdc++) it parses morph's template-heavy runtime headers measurably faster than clang (~3.5s vs ~4.4s for a small app). If your toolchain differs you can opt into clang with one line:
+
+```json
+{
+  "build": {
+    "cxx": "/usr/bin/g++-13",
+    "dev_cxx": "/usr/bin/clang++-19",
+    "cmake": "/snap/bin/cmake"
+  }
+}
+```
+
+The same values can be set per-session with environment variables (config wins over env, env wins over defaults):
+
+```sh
+export MORPH_CXX=/usr/bin/g++-13
+export MORPH_DEV_CXX=clang++-17
+export MORPH_CMAKE=/usr/local/bin/cmake
+```
+
+A configured path that doesn't exist falls back to the platform default with a warning rather than failing the build.
+
+**Faster dev linker (optional):** the hot-reload link step is small (~0.2s), but if you want it anyway, add a faster linker through the existing native flags:
+
+```json
+{
+  "native": {
+    "ldflags": ["-fuse-ld=mold"]
+  }
+}
+```
 
 ## `lint`
 

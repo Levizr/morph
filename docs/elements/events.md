@@ -14,6 +14,10 @@ Morph supports mouse and keyboard events on elements via JSX attributes.
 | `onMouseLeave` | Mouse leaves element bounds. |
 | `onKeyUp` | Key released while element is focused. |
 | `onKeyDown` | Key pressed while element is focused. |
+| `onChange` | `<input>` value changed. Fires together with `onInput` on every edit (React-style normalization); handler receives `{ value, type }`. |
+| `onInput` | `<input>` value changed — fires on every edit with the current value in `event.value`. |
+| `onFocus` | `<input>` gains keyboard focus. |
+| `onBlur` | `<input>` loses keyboard focus. |
 
 ## Usage
 

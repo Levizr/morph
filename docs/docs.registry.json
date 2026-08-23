@@ -730,6 +730,25 @@
         "publishedAt": "2026-08-18",
         "priority": 0.6,
         "changefreq": "monthly"
+      },
+      {
+        "title": "Login",
+        "slug": "examples/login",
+        "file": "examples/login",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "A login app built with Morph \u2014 controlled text inputs, password masking, validation errors, and screen swapping by unmount.",
+        "keywords": [
+          "morph example",
+          "login",
+          "form",
+          "input",
+          "validation"
+        ],
+        "lastUpdated": "2026-08-23",
+        "publishedAt": "2026-08-23",
+        "priority": 0.6,
+        "changefreq": "monthly"
       }
     ]
   },

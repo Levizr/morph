@@ -195,7 +195,7 @@ Since v0.0.6, rendering runs on a dedicated **compositor thread**: the main thre
 | **Dev-mode `logic.so`** — JS logic compiled to a content-hash-addressed shared library loaded via `dlopen`; hot reload re-wires signals/effects in place (`morph_logic_rewire`) without re-running effects; registry + signal store keep node/state references across reloads | Complete |
 | **DevTools Logs tab** — thread-safe ring buffer of info/ok/warn/error entries with timestamps; clear button | Complete |
 | **Docked DevTools panel** — panel occupies right side of the window and app layout is constrained to remaining content (browser-style docking); drag-resizable, never covers app elements | Complete |
-| **CSS animations** — `@keyframes` declarations, `animation-name`/`animation-duration`/`animation-timing-function`/`animation-delay`/`animation-iteration-count`/`animation-direction`/`animation-fill-mode` properties and `animation` shorthand; easing functions (linear, ease, ease-in, ease-out, ease-in-out, cubic-bezier); percentage-based keyframe stops; property interpolation (color, bg-color, margin, padding, border, border-radius, font-size, gap, width/height, opacity, transform); `MORPH_FEATURE_ANIMATION` compile-time gate | Complete |
+| **CSS animations** — `@keyframes` declarations, `animation-name`/`animation-duration`/`animation-timing-function`/`animation-delay`/`animation-iteration-count`/`animation-direction`/`animation-fill-mode` properties and `animation` shorthand; easing functions (linear, ease, ease-in, ease-out, ease-in-out); percentage-based keyframe stops; property interpolation (color, bg-color, margin, padding, border, border-radius, font-size, gap, width/height, opacity, transform); `MORPH_FEATURE_ANIMATION` compile-time gate | Complete |
 | **CSS transforms** — `transform` property with `translate`, `rotate`, `scale`, `skew`, `matrix`, `matrix3d` functions; 4x4 matrix composition (`mat4.h`); per-element transform applied in vertex shader; `transform-origin` support; Tailwind `rotate-*`, `scale-*`, `translate-*` utilities; `MORPH_FEATURE_TRANSFORM` gate | Complete |
 | **C++/JSX interop** — `import { fn } from './file.cpp'` in JSX; user C++ files `#included` into the generated translation unit; `_morph_state.h` generated exposing signals, setter wrappers, and JSX function declarations so C++ can update state and call JSX code; `native` config block (`include_dirs`, `library_dirs`, `libraries`, `cflags`, `ldflags`) forwarded to g++ | Complete |
 | **Window constraints** — `min-width`, `max-width`, `min-height`, `max-height` in `windowConfig` and `<morph-window>` JSX; enforced via `glfwSetWindowSizeLimits` in C++ runtime; serialized/deserialized for dev hot reload | Complete |
@@ -307,7 +307,7 @@ Since v0.0.6, rendering runs on a dedicated **compositor thread**: the main thre
 my-app/
 ├── src/
 │   ├── App.mx            ← entry point (JSX + CSS + JS)
-│   └── components/       ← reusable .mx components
+│   └── components/       ← per-component CSS (shared .mx components planned)
 ├── cpp/                  ← optional custom C++ nodes
 │   └── my_widget.h
 ├── assets/               ← fonts, textures, etc.
@@ -376,6 +376,7 @@ Morph ships ready-to-run example apps under `examples/`:
 |---|---|
 | **calculator** | Full working calculator UI — `morphState` reactive state, conditional JSX rendering (`{op !== 0 && <span>…</span>}`), typed functions (`:double`, `:int`), flexbox keypad |
 | **ipchecker** | Async networking — `await fetch("http://api.ipify.org")`, `Response.ok()`/`status`/`text()`, try/catch error handling, loading/error states |
+| **login** | Forms & validation — controlled `<input>` with `onInput`, `type="password"` masking, inline error rendering, screen swap by unmounting the login card |
 | **dynamic** | Dynamic classes & styles — template-literal `className` (`className={\`header ${theme == "light" ? "" : "bg-gray-900"}\`}`) with conditional Tailwind effects, and direct state values in inline `style` (`style={{ width: bodyWidth }}`) |
 | **dynamic-styles** | Reactive class & inline styles — dynamic `className` and `style` bindings with `morphState`, demonstrating runtime style updates |
 

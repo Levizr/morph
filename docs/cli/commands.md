@@ -1,5 +1,7 @@
 # CLI Commands
 
+Global flags: `morph --version` prints the CLI version; `morph -h` / `morph --help` lists all commands.
+
 ## morph init
 
 Scaffold a new `.mx` project.
@@ -16,7 +18,13 @@ morph init [name]
 | `--entry` | Entry `.mx` file (default: `src/App.mx`) |
 | `-y`, `--yes` | Skip interactive wizard, use defaults |
 
-Without arguments, launches an interactive wizard that asks for project name, window dimensions, title, and Tailwind mode.
+Without arguments, launches an interactive wizard that asks for project name, window dimensions, title, and entry file.
+
+Use `.` as the name to scaffold into the current directory instead of creating a new folder:
+
+```bash
+morph init .
+```
 
 ## morph dev
 
@@ -43,7 +51,7 @@ morph build
 | Option | Description |
 |---|---|
 | `--entry` | Override entry `.mx` file |
-| `--output` | Output directory (default: `.morph/`) |
+| `--output` | Output directory (default: `output` from config, `dist/`) |
 | `--static` | Statically link GLFW/FreeType/HarfBuzz (single self-contained file; needs `.a` dev archives) |
 | `--upx` | Compress the binary with UPX |
 | `--no-upx` | Skip UPX compression |
@@ -77,7 +85,7 @@ morph run [binary]
 |---|---|
 | `binary` | Path to binary (default: `<output>/app`) |
 | `--entry` | Override entry `.mx` file |
-| `--output` | Output directory (default: `.morph/`) |
+| `--output` | Output directory (default: `output` from config, `dist/`) |
 | `--static` | Statically link GLFW/FreeType/HarfBuzz |
 | `--upx` | Compress the binary with UPX |
 | `--no-upx` | Skip UPX compression |

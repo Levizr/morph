@@ -122,7 +122,12 @@ def run(args=None) -> None:
     log_step("Compiling binary")
     from morph.build.compiler import Compiler
     from morph.build.platform import exe_suffix
-    compiler = Compiler()
+    # Production builds use the configured C++ compiler (build.cxx) or the
+    # platform default g++; dev-mode hot reloads can pick a different
+    # compiler via build.dev_cxx without affecting release binaries.
+    prod_cxx = (getattr(config.build, "cxx", "") or ""
+                or os.environ.get("MORPH_CXX", "")) or None
+    compiler = Compiler(cxx=prod_cxx)
     binary_path = os.path.join(out_dir, "app" + exe_suffix())
 
     t1 = time.time()

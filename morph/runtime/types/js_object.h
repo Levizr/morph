@@ -11,7 +11,8 @@ struct JsObject {
     // shared_ptr for JS-like reference semantics
     std::shared_ptr<std::map<std::string, JsValue>> properties;
 
-    JsObject() : properties(std::make_shared<std::map<std::string, JsValue>>()) {}
+    // Defined in js_value.h AFTER JsValue is complete (clang requires it).
+    JsObject();
 
     JsObject(std::initializer_list<std::pair<const char*, JsValue>> init);
 

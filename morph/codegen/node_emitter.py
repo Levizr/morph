@@ -210,9 +210,18 @@ class NodeEmitter:
         if node.node_type == "__conditional__":
             if list_mode:
                 return "\n".join(self._emit_conditional_list_mode(node, parent_id, indent))
-            child_var = f"__cond_{node.node_id}"
+            child_then = f"__cond_then_{node.node_id}"
+            child_else = f"__cond_else_{node.node_id}"
             lines.append(f"RectNode* {node.node_id} = new RectNode(0.0f, 0.0f, 0.0f, 0.0f);")
-            lines.append(f"MorphNode* {child_var} = nullptr;")
+            # Per-build heap slots for the branch caches. The effect lambda
+            # owns them via shared_ptr value-captures, so:
+            #  - they outlive this build block (effects fire later, when the
+            #    block's stack frame is long gone — capturing these locals by
+            #    reference segfaulted prod builds),
+            #  - a rebuilt branch (logout → login) gets FRESH slots instead
+            #    of stale pointers into freed subtrees.
+            lines.append(f"auto {child_then} = std::make_shared<MorphNode*>(nullptr);")
+            lines.append(f"auto {child_else} = std::make_shared<MorphNode*>(nullptr);")
             if parent_id:
                 lines.append(f"{parent_id}->addChild({node.node_id});")
             # Build then/else branch code once (without parent wiring)
@@ -228,43 +237,43 @@ class NodeEmitter:
                 else_code = self.emit_node(en, None, None)
                 else_root_var = en.node_id
                 break
-            # Emit the effect
+
+            def _emit_branch(cache_slot: str, other_slot: str,
+                             branch_code: str, root_var: str) -> None:
+                """Teardown the opposite branch, lazily build this one."""
+                bi2 = indent + "    "
+                cache_deref = f"*{cache_slot}"
+                other_deref = f"*{other_slot}"
+                lines.append(f"{bi2}if ({other_deref}) {{")
+                lines.append(f"{bi2}    {node.node_id}->removeChild({other_deref});")
+                lines.append(f"{bi2}    delete {other_deref};")
+                lines.append(f"{bi2}    {other_deref} = nullptr;")
+                lines.append(f"{bi2}}}")
+                if branch_code and root_var:
+                    lines.append(f"{bi2}if (!{cache_deref}) {{")
+                    for line in branch_code.split("\n"):
+                        lines.append(f"{bi2}    {line}")
+                    lines.append(f"{bi2}    {node.node_id}->addChild({root_var});")
+                    lines.append(f"{bi2}    {node.node_id}->style.explicitWidth = {root_var}->style.explicitWidth;")
+                    lines.append(f"{bi2}    {node.node_id}->style.explicitHeight = {root_var}->style.explicitHeight;")
+                    lines.append(f"{bi2}    {cache_deref} = {root_var};")
+                    lines.append(f"{bi2}}}")
+
+            # Emit the effect. The container is captured BY VALUE: raw
+            # pointer, valid exactly as long as the node itself — and the
+            # effect is registered on the node so deleting the node kills
+            # the effect before that pointer can go stale.
             bi = indent + "    "
-            lines.append(f"morph::create_effect([&]() {{")
+            lines.append(
+                f"{node.node_id}->m_associatedEffects.push_back("
+                f"morph::create_effect([{node.node_id}, {child_then}, {child_else}]() {{")
             lines.append(f"{bi}if ({node.condition_expr}) {{")
-            if then_code and then_root_var:
-                lines.append(f"{bi}    if (!{child_var}) {{")
-                for line in then_code.split("\n"):
-                    lines.append(f"{bi}        {line}")
-                lines.append(f"{bi}        {node.node_id}->addChild({then_root_var});")
-                lines.append(f"{bi}        {node.node_id}->style.explicitWidth = {then_root_var}->style.explicitWidth;")
-                lines.append(f"{bi}        {node.node_id}->style.explicitHeight = {then_root_var}->style.explicitHeight;")
-                lines.append(f"{bi}        {child_var} = {then_root_var};")
-                lines.append(f"{bi}    }}")
-            else:
-                lines.append(f"{bi}    /* empty then */")
+            _emit_branch(child_then, child_else, then_code, then_root_var)
             lines.append(f"{bi}}} else {{")
-            if else_code and else_root_var:
-                lines.append(f"{bi}    if (!{child_var}) {{")
-                for line in else_code.split("\n"):
-                    lines.append(f"{bi}        {line}")
-                lines.append(f"{bi}        {node.node_id}->addChild({else_root_var});")
-                lines.append(f"{bi}        {node.node_id}->style.explicitWidth = {else_root_var}->style.explicitWidth;")
-                lines.append(f"{bi}        {node.node_id}->style.explicitHeight = {else_root_var}->style.explicitHeight;")
-                lines.append(f"{bi}        {child_var} = {else_root_var};")
-                lines.append(f"{bi}    }}")
-            elif node.else_nodes:
-                lines.append(f"{bi}    /* non-JSX else */")
-            if then_root_var and (not else_code or node.else_nodes):
-                # Cleanup then branch when condition becomes false
-                lines.append(f"{bi}    if ({child_var}) {{")
-                lines.append(f"{bi}        {node.node_id}->removeChild({child_var});")
-                lines.append(f"{bi}        delete {child_var};")
-                lines.append(f"{bi}        {child_var} = nullptr;")
-                lines.append(f"{bi}    }}")
+            _emit_branch(child_else, child_then, else_code, else_root_var)
             lines.append(f"{bi}}}")
             lines.append(f"{bi}{node.node_id}->markDirty(LayoutDirty);")
-            lines.append(f"}});")
+            lines.append(f"}}));")
             return "\n".join(lines)
 
         if node.node_type == "button":

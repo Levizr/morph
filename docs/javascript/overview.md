@@ -60,13 +60,13 @@ Binary (`+`, `-`, `*`, `/`, `===`, `!==`, `==`, `!=`, `<`, `>`, etc.), unary (`!
 
 ### JS Runtime Semantics
 
-- `typeof` operator
 - Truthiness (same rules as JS)
 - `==` / `!=` with JS coercion rules
 - String concatenation (`"" + x`)
 - Array `push`/`pop`/index access
 - Object `has`/`keys`/index access
-- String methods: `split`, `trim`, `toUpperCase`, `toLowerCase`, `indexOf`, `substring`, `slice`, `replace`, `charAt`
+- String methods: `trim`, `toUpperCase`, `toLowerCase`, `indexOf`, `substring`, `slice`, `replace`, `charAt`
+- Console output: `console.log` / `console.warn` / `console.error` / `console.info` print natively (visible in the DevTools **Logs** tab)
 
 ## What's NOT Supported Yet
 
@@ -76,3 +76,7 @@ Binary (`+`, `-`, `*`, `/`, `===`, `!==`, `==`, `!=`, `<`, `>`, etc.), unary (`!
 - `class` extends across files
 - Generics beyond basic usage
 - `async`/`await` in non-event-handler contexts
+- The `typeof` operator (compare against `undefined`/`null` instead)
+- JS-only string/array methods the native types don't implement — `.split()`, `.includes()`, `.startsWith()`, `.map()`, `.filter()`, `.join()`, etc.
+
+The linter (`morph check`) rejects unsupported operators and methods with a clear error before you build.

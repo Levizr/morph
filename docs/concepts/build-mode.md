@@ -62,7 +62,7 @@ Configure in `morph.config.json`:
 
 ## Output
 
-The build outputs to the `output` directory (default: `dist/`):
+The build outputs to the `output` directory (`morph init` scaffolds `dist/`):
 
 ```
 dist/

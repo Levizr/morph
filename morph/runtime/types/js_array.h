@@ -11,7 +11,9 @@ struct JsArray {
     // shared_ptr for JS-like reference semantics (no deep copy on assignment)
     std::shared_ptr<std::vector<JsValue>> elements;
 
-    JsArray() : elements(std::make_shared<std::vector<JsValue>>()) {}
+    // Defined in js_value.h AFTER JsValue is complete: the make_shared
+    // instantiation requires a complete element type (clang enforces this).
+    JsArray();
 
     JsArray(std::initializer_list<JsValue> init);
 
@@ -20,16 +22,18 @@ struct JsArray {
     JsArray& operator=(const JsArray&) = default;
 
     // ── Accessors ──
-
-    size_t length() const { return elements->size(); }
-    bool empty() const { return elements->empty(); }
+    // Defined in js_value.h after JsValue is complete: the inline bodies
+    // instantiate vector<JsValue> members, which need a complete element
+    // type (clang rejects them from this point).
+    size_t length() const;
+    bool empty() const;
 
     // ── JS Array methods ──
 
     void push(const JsValue& item);
     JsValue pop();
     JsArray slice(int64_t start, int64_t end) const;
-    JsArray slice(int64_t start) const { return slice(start, (int64_t)elements->size()); }
+    JsArray slice(int64_t start) const;
 
     JsValue operator[](int64_t idx) const;
     JsValue& operator[](int64_t idx);

@@ -356,6 +356,20 @@ inline JsValue& JsArray::operator[](const JsNumber& idx) {
     return (*this)[idx.as_int()];
 }
 
+// Default constructors live here (not in js_array.h / js_object.h) because
+// make_shared<vector<JsValue>> / make_shared<map<string, JsValue>> need a
+// complete JsValue — clang rejects the instantiation from the earlier point.
+inline JsArray::JsArray()
+    : elements(std::make_shared<std::vector<JsValue>>()) {}
+
+inline size_t JsArray::length() const { return elements->size(); }
+
+inline bool JsArray::empty() const { return elements->empty(); }
+
+inline JsArray JsArray::slice(int64_t start) const {
+    return slice(start, (int64_t)elements->size());
+}
+
 inline JsArray::JsArray(std::initializer_list<JsValue> init)
     : JsArray() {
     for (const auto& val : init) {
@@ -374,6 +388,9 @@ inline JsValue JsObject::get(const std::string& key) const {
 inline void JsObject::set(const std::string& key, const JsValue& val) {
     (*properties)[key] = val;
 }
+
+inline JsObject::JsObject()
+    : properties(std::make_shared<std::map<std::string, JsValue>>()) {}
 
 inline JsObject::JsObject(std::initializer_list<std::pair<const char*, JsValue>> init)
     : JsObject() {

@@ -5,15 +5,62 @@ import shlex
 import subprocess
 import shutil
 from morph.build.platform import current, is_macos, is_windows, shared_lib_flag
-from morph.utils.logger import log_info, log_error
+from morph.utils.logger import log_info, log_error, log_warn
+
+# Memoized result of the clang++ probe: False = not probed yet,
+# None = no usable clang++, str = path of a working driver.
+_clang_cache: "str | None | False" = False
+
+
+def find_clang() -> "str | None":
+    """Locate the newest usable clang++ for dev hot-reload compiles.
+
+    Scans versioned names (clang++-21 … clang++-14) plus the unversioned
+    `clang++`, newest first, and probes the first hit with a trivial
+    -std=c++20 syntax check (some distro pairings of older clang + newer
+    libstdc++ can't parse C++20 headers — those are skipped). The probe
+    runs once per process and is memoized.
+    """
+    global _clang_cache
+    if _clang_cache is not False:
+        return _clang_cache or None
+
+    candidates = ["clang++"] + [f"clang++-{v}" for v in range(21, 13, -1)]
+    for cand in candidates:
+        path = shutil.which(cand)
+        if not path:
+            continue
+        try:
+            r = subprocess.run(
+                [path, "-std=c++20", "-x", "c++", "-fsyntax-only", os.devnull],
+                capture_output=True, timeout=30)
+            if r.returncode == 0:
+                _clang_cache = path
+                return path
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+    _clang_cache = None
+    return None
 
 
 class Compiler:
     """Invokes g++ to compile generated C++ into a native binary."""
 
-    def __init__(self):
+    def __init__(self, cxx: "str | None" = None):
+        """`cxx` overrides the compiler executable (morph.config.json
+        build.cxx / build.dev_cxx or MORPH_CXX / MORPH_DEV_CXX). A missing
+        override falls back to the platform default with a warning."""
         from morph.build.platform import pick_cpp
-        self.gpp = pick_cpp()
+        default = pick_cpp()
+        if cxx:
+            if shutil.which(cxx):
+                self.gpp = cxx
+            else:
+                log_warn(f"configured compiler '{cxx}' not found on PATH — "
+                         f"falling back to '{default}'")
+                self.gpp = default
+        else:
+            self.gpp = default
         self.silent = False
 
     # Static link support: GLFW / FreeType / HarfBuzz are bundled into the
@@ -208,7 +255,8 @@ class Compiler:
             timeout = 300
         else:
             opt, size_flags = "-O2", []
-            timeout = 120
+            timeout = 600  # -O2 whole-runtime in one invocation; slow/loaded
+                           # machines (and CI) routinely exceed 120s
 
         cmd = [
             self.gpp,

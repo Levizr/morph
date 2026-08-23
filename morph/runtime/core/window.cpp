@@ -19,7 +19,6 @@ RepaintHookFn g_repaintHook = nullptr;
 static double s_lastClickTime = 0.0;
 static const double DBL_CLICK_THRESHOLD = 0.3;
 // Node currently :active (pressed) — cleared on release / tree rebuild
-static MorphNode* s_activeNode = nullptr;
 // Any live GLFWwindow, kept so widgets can reach the OS clipboard without
 // depending on GLFW themselves.
 static GLFWwindow* s_clipboardWindow = nullptr;
@@ -101,28 +100,28 @@ void MorphWindow::mouseButtonCb(GLFWwindow *win, int btn, int act, int mods)
         // :active pseudo-class — apply on press, release on button up
         if (act == GLFW_PRESS)
         {
-            if (s_activeNode)
-                _applyActiveChain(s_activeNode, false);
-            s_activeNode = self->m_root->hitTest((float)mx, (float)my);
-            if (s_activeNode)
-                _applyActiveChain(s_activeNode, true);
+            if (MorphNode::s_activePressNode)
+                _applyActiveChain(MorphNode::s_activePressNode, false);
+            MorphNode::s_activePressNode = self->m_root->hitTest((float)mx, (float)my);
+            if (MorphNode::s_activePressNode)
+                _applyActiveChain(MorphNode::s_activePressNode, true);
 
             // ── Keyboard focus model ────────────────────────────
             // Clicking an enabled <input> focuses it (caret placement and
             // drag-selection are handled by the input itself via onEvent);
             // clicking anywhere else releases focus, browser-style.
 #ifdef MORPH_FEATURE_INPUT
-            if (s_activeNode && s_activeNode->type == "input" && !static_cast<InputNode *>(s_activeNode)->disabled)
-                s_activeNode->requestFocus();
+            if (MorphNode::s_activePressNode && MorphNode::s_activePressNode->type == "input" && !static_cast<InputNode *>(MorphNode::s_activePressNode)->disabled)
+                MorphNode::s_activePressNode->requestFocus();
             else if (MorphNode::s_focusedNode)
                 MorphNode::s_focusedNode->blur();
 #endif
         }
         else
         {
-            if (s_activeNode)
-                _applyActiveChain(s_activeNode, false);
-            s_activeNode = nullptr;
+            if (MorphNode::s_activePressNode)
+                _applyActiveChain(MorphNode::s_activePressNode, false);
+            MorphNode::s_activePressNode = nullptr;
         }
 
         if (act == GLFW_PRESS)
@@ -206,7 +205,7 @@ void MorphWindow::CharCb(GLFWwindow *win, unsigned int codepoint)
 
 void MorphWindow::clearHoverState() { MorphNode::s_lastHoveredNode = nullptr; }
 
-void MorphWindow::clearActiveState() { s_activeNode = nullptr; }
+void MorphWindow::clearActiveState() { MorphNode::s_activePressNode = nullptr; }
 
 void MorphWindow::cursorPosCb(GLFWwindow *win, double mx, double my)
 {

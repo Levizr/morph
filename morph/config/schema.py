@@ -21,6 +21,15 @@ class BuildConfig:
     upx_version:     str    = ""     # pin a specific UPX release to download,
                                      # e.g. "4.2.4"; empty = system upx or default
 
+    # Toolchain overrides. Empty string = automatic selection:
+    #   cxx     → production binary compiler   (auto: best g++)
+    #   dev_cxx → hot-reload logic.so compiler (auto: newest clang++, else g++)
+    #   cmake   → CMake binary for morph_devrt (auto: "cmake" on PATH)
+    # Env equivalents: MORPH_CXX / MORPH_DEV_CXX / MORPH_CMAKE.
+    cxx:      str = ""
+    dev_cxx:  str = ""
+    cmake:    str = ""
+
 
 @dataclass
 class LintConfig:
@@ -93,6 +102,9 @@ class MorphConfig:
                 system_freetype=bl.get("system_freetype", False),
                 upx=bl.get("upx", True),
                 upx_version=bl.get("upx_version", ""),
+                cxx=bl.get("cxx", ""),
+                dev_cxx=bl.get("dev_cxx", ""),
+                cmake=bl.get("cmake", ""),
             ),
             lint=LintConfig(
                 disable=lt.get("disable", []),
@@ -125,6 +137,9 @@ class MorphConfig:
                 "system_freetype": self.build.system_freetype,
                 "upx":             self.build.upx,
                 "upx_version":     self.build.upx_version,
+                "cxx":             self.build.cxx,
+                "dev_cxx":         self.build.dev_cxx,
+                "cmake":           self.build.cmake,
             },
             "lint":         {
                 "disable":    self.lint.disable,

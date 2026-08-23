@@ -25,6 +25,14 @@ Use the `prefix-[value]` syntax for any value not in the static map:
 </div>
 ```
 
+Supported prefixes: `bg-`, `text-`, `w-`, `h-`, `p-`, `px-`, `py-`, `m-`, `mt-`, `mb-`, `ml-`, `mr-`, `gap-`, `rounded-`, `opacity-`, `top-`, `bottom-`, `left-`, `right-`, `min-w-`, `min-h-`, `max-w-`, `max-h-`, `z-`, and `font-` (maps to `font-weight`).
+
+Negative values work too:
+
+```tsx
+<div className="-translate-x-[50%]">Shifted left half its width</div>
+```
+
 ## Supported Categories
 
 ### Background Colors
@@ -100,7 +108,7 @@ Use the `prefix-[value]` syntax for any value not in the static map:
 
 ### Z-Index
 
-`z-0`, `z-10` through `z-50`, `z-auto`
+`z-0`, `z-10` through `z-50`, `z-auto`, and negative values `-z-10` through `-z-50` (arbitrary too: `z-[100]`).
 
 ### Cursor
 

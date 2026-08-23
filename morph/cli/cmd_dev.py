@@ -128,7 +128,8 @@ def run(args=None) -> None:
     log_banner("DEV")
 
     t1 = time.time()
-    process = devrt.launch()
+    process = devrt.launch(
+        cmake_bin=getattr(config.build, "cmake", "") or None)
     log_success(f"morph_devrt built in {_fmt_duration(time.time() - t1)}")
 
     # Read devrt stdout (user app logs) and stderr (internal) in real time

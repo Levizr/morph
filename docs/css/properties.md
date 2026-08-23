@@ -2,6 +2,10 @@
 
 Morph supports a subset of CSS properties that map to native OpenGL rendering. Properties can be set via inline styles, CSS rules, or Tailwind utilities.
 
+## Units
+
+Lengths accept: `px`, bare numbers (treated as px), `%`, `em`, `rem` (1rem = 16px), `vh`, `vw`, and absolute units `pt`, `pc`, `cm`, `mm`, `in` (converted at 96 dpi). `%`, `vh`, and `vw` resolve at layout time against the parent/viewport.
+
 ## Sizing
 
 | Property | Values | Default | Notes |
@@ -47,15 +51,15 @@ Morph supports a subset of CSS properties that map to native OpenGL rendering. P
 | `border` | shorthand | — | `border: 2px solid #fff` expands to width/style/color. |
 | `border-width` | px | `0` | |
 | `border-color` | hex, rgb | `#000000` | |
-| `border-style` | `none`, `solid` | `none` | Only `solid` is supported. |
+| `border-style` | `none`, `solid`, `dashed`, `dotted`, `double`, `groove`, `ridge`, `inset`, `outset`, `hidden` | `none` | Only `solid` renders a border — other values are accepted by the linter but draw nothing. |
 
 ## Typography
 
 | Property | Values | Default | Notes |
 |---|---|---|---|
-| `font-size` | px, %, em, bare number | `16px` | Inherits from parent. |
-| `font-weight` | `normal`, `bold`, 100–900 | `normal` | Bold uses `DejaVuSans-Bold.ttf`. |
-| `text-align` | `left`, `center`, `right` | `left` | Inherits from parent. |
+| `font-size` | px, %, em, rem, bare number | `16px` | Inherits from parent. |
+| `font-weight` | `normal`, `bold`, `lighter`, `bolder`, 100–900 | `normal` | Bold uses `DejaVuSans-Bold.ttf`. |
+| `text-align` | `left`, `center`, `right`, `justify` | `left` | Inherits from parent. `justify` behaves like `left`. |
 
 Style inheritance: `color`, `font-size`, `font-weight`, and `text-align` cascade from parent to children.
 
@@ -63,7 +67,7 @@ Style inheritance: `color`, `font-size`, `font-weight`, and `text-align` cascade
 
 | Property | Values | Default | Notes |
 |---|---|---|---|
-| `display` | `block`, `inline`, `flex`, `hidden` | `block` | |
+| `display` | `block`, `inline`, `inline-block`, `flex`, `hidden`, `none` | `block` | `none` removes the element from layout and rendering. |
 | `overflow` | `visible`, `hidden`, `scroll`, `auto` | `visible` | `auto`/`scroll` enable scroll containers. |
 | `position` | `static`, `absolute`, `relative`, `fixed` | `static` | `relative`/`fixed` in progress. |
 | `left` | px | — | |
@@ -81,7 +85,7 @@ Style inheritance: `color`, `font-size`, `font-weight`, and `text-align` cascade
 | `flex-grow` | number | `0` | |
 | `flex-shrink` | number | `1` | |
 | `flex-basis` | `auto`, px | `auto` | |
-| `flex-wrap` | `nowrap`, `wrap` | `nowrap` | |
+| `flex-wrap` | `nowrap`, `wrap`, `wrap-reverse` | `nowrap` | |
 | `justify-content` | `flex-start`, `center`, `flex-end`, `space-between`, `space-around` | `flex-start` | |
 | `align-items` | `flex-start`, `center`, `flex-end`, `stretch` | `stretch` | |
 | `gap` | px | `0` | |
@@ -109,7 +113,7 @@ See [Flexbox](flexbox.md) for a deep-dive.
 |---|---|---|---|
 | `transition` | shorthand | — | `all 0.3s ease-in-out` |
 | `transition-duration` | seconds | `0` | |
-| `transition-timing-function` | `linear`, `ease`, `ease-in`, `ease-out`, `ease-in-out` | `ease-in-out` | |
+| `transition-timing-function` | `linear`, `ease`, `ease-in`, `ease-out`, `ease-in-out` | `ease-in-out` | `ease` is an alias for `ease-in-out`. |
 
 See [Transitions](transitions.md) for details.
 
@@ -117,7 +121,7 @@ See [Transitions](transitions.md) for details.
 
 | Property | Values | Default | Notes |
 |---|---|---|---|
-| `transform` | functions | `none` | `translate()`, `rotate()`, `scale()`, `skew()`, `matrix()` |
+| `transform` | functions | `none` | `translate()`, `rotate()`, `scale()`, `skew()`, `matrix()` + 3D variants (see [Transforms](transforms.md)) |
 | `transform-origin` | px/% | `50% 50%` | |
 
 See [Transforms](transforms.md) for details.
@@ -129,7 +133,7 @@ See [Transforms](transforms.md) for details.
 | `animation` | shorthand | — | `name duration timing-function delay iteration-count direction fill-mode` |
 | `animation-name` | keyframe name | — | |
 | `animation-duration` | seconds | `0` | |
-| `animation-timing-function` | easing | `ease` | |
+| `animation-timing-function` | easing | `ease-in-out` | `linear`, `ease`, `ease-in`, `ease-out`, `ease-in-out` (`ease` = alias). `cubic-bezier()`/`steps()` fall back to the default. |
 | `animation-delay` | seconds | `0` | |
 | `animation-iteration-count` | number, `infinite` | `1` | Fractional values supported (e.g. `2.5`). |
 | `animation-direction` | `normal`, `reverse`, `alternate`, `alternate-reverse` | `normal` | |

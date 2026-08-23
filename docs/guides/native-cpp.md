@@ -55,6 +55,20 @@ void loadData() {
 
 The `setStatus()` and `setData()` functions are generated wrappers that update the corresponding morphState signals. They are mutex-protected and safe to call from worker threads.
 
+## Clipboard
+
+Native code (and `<input>` copy/paste) uses the GLFW-backed clipboard API from `morph/runtime/core/clipboard.h`:
+
+```cpp
+#include "clipboard.h"
+
+void copyGreeting() {
+    morph::setClipboard("Hello from Morph");
+}
+
+std::string paste = morph::getClipboard();
+```
+
 ## C++ → JSX Function Calls
 
 C++ can call functions defined in your JSX:

@@ -55,7 +55,7 @@ export default function App() {
             <div className="err" id="err">{error}</div>
           )}
           <div className="footer-button" id="footer">
-            <button className="btn" id="btn-login" onClick={() => { console.log("Logged in"); doLogin() }}>Sign in</button>
+            <button className="btn" id="btn-login" onClick={() => { doLogin() }}>Sign in</button>
           </div>
 
           <div className="footer-row" id="footer">

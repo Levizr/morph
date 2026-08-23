@@ -12,7 +12,7 @@ File save  →  File watcher  →  Pipeline  →  IR dict  →  Unix socket  →
 
 1. **File watcher** detects a change in your `.mx`, `.css`, or `.ts` files
 2. **Pipeline** re-runs: parse, walk, build IR, layout, serialize
-3. **JS logic** is translated to C++, compiled to `logic.<hash>.so`, and loaded via `dlopen`
+3. **JS logic** is translated to C++, compiled to `logic.<hash>.so`, and loaded via `dlopen`. The hot-reload compiler defaults to g++ and can be switched (e.g. to clang++) via `build.dev_cxx` in `morph.config.json` — see [Configuration](../getting-started/configuration.md#compilers).
 4. **IR dict** is sent over a Unix socket to `morph_devrt`
 5. **Window** swaps the node tree and re-wires signals — no restart needed
 

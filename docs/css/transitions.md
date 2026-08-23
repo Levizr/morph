@@ -39,10 +39,12 @@ transition: color 0.3s ease, background-color 0.5s ease-in-out;
 | Value | Behavior |
 |---|---|
 | `linear` | Constant speed |
-| `ease` | Slow start, fast middle, slow end (default) |
+| `ease` | Alias for `ease-in-out` |
 | `ease-in` | Slow start |
 | `ease-out` | Slow end |
-| `ease-in-out` | Slow start and end |
+| `ease-in-out` | Slow start and end (default) |
+
+`cubic-bezier()` and `steps()` are not supported yet — they fall back to the default easing.
 
 ## What Animates
 

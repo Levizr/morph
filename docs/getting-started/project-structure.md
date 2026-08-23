@@ -67,21 +67,23 @@ Shipped with every project. Contains `index.d.ts` with type definitions for the 
 
 ### Components
 
-Create `.mx` files in `src/` and import them:
+> **Not supported yet.** Importing other `.mx` files (`import Card from './Card.mx'`) is on the roadmap — the linter currently warns with `mx-import-type`. Keep your app in one entry file, or share logic via C++ imports (below).
+
+You can still organize CSS per component:
 
 ```
 src/
 ├── App.mx
 ├── components/
-│   ├── Header.mx
-│   └── Card.mx
+│   ├── Header.css
+│   └── Card.css
 └── style.css
 ```
 
 ```tsx
 // src/App.mx
-import Header from './components/Header.mx'
-import Card from './components/Card.mx'
+CSS.load("./components/Header.css")
+CSS.load("./components/Card.css")
 ```
 
 ### CSS
@@ -93,6 +95,16 @@ import { CSS } from 'morph'
 CSS.load("./style.css")
 CSS.load("./components/Header.css")
 ```
+
+Remote stylesheets work too — pass a URL and Morph fetches it, MD5-caches it in `.morph/css-cache/`, and downloads any `@font-face` font files it references:
+
+```tsx
+CSS.load("https://cdn.example.com/theme.css")
+```
+
+Clear the cache with `morph cache`.
+
+> **Note:** importing other `.mx` files (`import Card from './Card.mx'`) is not supported yet — keep your app in one entry file, or share logic via C++ imports.
 
 ### Custom C++ Code
 

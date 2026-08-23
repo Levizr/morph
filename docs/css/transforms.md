@@ -1,6 +1,6 @@
 # Transforms
 
-CSS transforms apply 2D transformations to elements — translation, rotation, scaling, and skewing.
+CSS transforms apply transformations to elements — translation, rotation, scaling, and skewing, in both 2D and 3D. Angle values accept `deg`, `rad`, `grad`, and `turn`.
 
 ## Basic Usage
 
@@ -57,6 +57,25 @@ Tilt an element:
 .box { transform: skewY(-5deg); }
 .box { transform: skew(10deg, -5deg); }
 ```
+
+## 3D Transforms
+
+3D functions compose into the same 4×4 matrix applied in the vertex shader:
+
+```css
+.box { transform: perspective(500px) rotateX(30deg); }
+.box { transform: rotateY(45deg); }
+.box { transform: rotateZ(90deg); }        /* same as rotate(90deg) */
+.box { transform: rotate3d(1, 1, 0, 30deg); }
+.box { transform: translate3d(10px, 20px, -30px); }
+.box { transform: translateZ(-50px); }
+.box { transform: scale3d(1.2, 1.2, 1); }
+.box { transform: matrix3d(...16 values...); }
+```
+
+`perspective(d)` sets the view distance for subsequent 3D functions in the chain.
+
+Global keywords are also accepted and resolve to no-op transforms: `inherit`, `initial`, `revert`, `revert-layer`, `unset`.
 
 ## Chaining Transforms
 

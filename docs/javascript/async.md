@@ -81,8 +81,9 @@ const id = setInterval(() => {
   console.log("tick")
 }, 500)
 
-// Stop the interval
-clearTimeout(id)
+// Stop timers
+clearTimeout(id)   // cancels a timeout
+clearInterval(id)  // cancels an interval
 ```
 
 ## Coroutines

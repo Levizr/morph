@@ -92,6 +92,11 @@ public:
     // this node even when the cursor leaves its box or the window — lets
     // <input> drag-selection continue past its edges and end on release.
     static MorphNode* s_mouseCapture;
+    // Node whose :active chain is currently applied (left button held down).
+    // Cleared by the dtor so a release arriving after the pressed subtree was
+    // deleted (e.g. a click handler swapped a conditional branch) never walks
+    // freed memory.
+    static MorphNode* s_activePressNode;
 
     float x = 0, y = 0, w = 0, h = 0;
     MorphStyle style;
@@ -456,6 +461,8 @@ public:
 
     virtual ~MorphNode() {
         if (this == s_lastHoveredNode) s_lastHoveredNode = nullptr;
+        if (this == s_activePressNode) s_activePressNode = nullptr;
+        if (this == s_mouseCapture) s_mouseCapture = nullptr;
         for (auto* ef : m_associatedEffects) ef->dead = true;
         m_associatedEffects.clear();
         delete hoverStyle; delete activeStyle;

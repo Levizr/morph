@@ -101,7 +101,15 @@ def _binary_valid(path: str) -> bool:
         return False
 
 
-def ensure_built() -> bool:
+def _resolve_cmake(configured: "str | None" = None) -> str:
+    """cmake binary: explicit arg / morph.config.json build.cmake →
+    MORPH_CMAKE env → plain "cmake" (PATH lookup at spawn time)."""
+    return (configured
+            or os.environ.get("MORPH_CMAKE", "")
+            or "cmake")
+
+
+def ensure_built(cmake_bin: "str | None" = None) -> bool:
     path = get_devrt_path()
     binary_exists = _binary_valid(path)
     changed = _source_changed()
@@ -117,22 +125,29 @@ def ensure_built() -> bool:
 
     dev_dir = _get_dev_src_dir()
     build_dir = os.path.join(dev_dir, "build")
+    cmake_bin = _resolve_cmake(cmake_bin)
 
     log_info("Configuring CMake...")
     cxx = pick_cpp()
-    r = subprocess.run(["cmake", "-S", dev_dir, "-B", build_dir,
+    r = subprocess.run([cmake_bin, "-S", dev_dir, "-B", build_dir,
                         f"-DCMAKE_CXX_COMPILER={cxx}"],
                        capture_output=True, text=True)
     if r.returncode != 0:
         sys.stdout.write(r.stdout)
         sys.stderr.write(r.stderr)
-        log_error("CMake configuration failed")
-        log_info("Ensure cmake and a C++23 compiler are installed (run `morph doctor`)")
+        if r.returncode < 0 or "No such file" in (r.stderr or ""):
+            log_error(f"CMake binary not found or failed to run: '{cmake_bin}'")
+            log_info("Set build.cmake in morph.config.json (or MORPH_CMAKE env) "
+                     "if CMake lives outside your PATH.")
+        else:
+            log_error("CMake configuration failed")
+            log_info("Ensure cmake and a C++23 compiler are installed "
+                     "(run `morph doctor` for per-OS instructions)")
         return False
 
     import multiprocessing
     log_info("Compiling morph_devrt (this may take a minute)...")
-    r = subprocess.run(["cmake", "--build", build_dir, "--parallel"],
+    r = subprocess.run([cmake_bin, "--build", build_dir, "--parallel"],
                        capture_output=True, text=True)
     if r.returncode != 0:
         sys.stdout.write(r.stdout)
@@ -149,10 +164,10 @@ def ensure_built() -> bool:
     return False
 
 
-def launch() -> subprocess.Popen:
+def launch(cmake_bin: "str | None" = None) -> subprocess.Popen:
     path = get_devrt_path()
 
-    if not ensure_built():
+    if not ensure_built(cmake_bin=cmake_bin):
         log_error("Failed to build morph_devrt. Make sure cmake and a C++23 compiler are installed.")
         log_info("Run `morph doctor` for install diagnostics.")
         raise FileNotFoundError(
