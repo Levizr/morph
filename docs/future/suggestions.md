@@ -31,3 +31,7 @@ Tracked suggestions live in the repo's issue tracker under the `suggestion` labe
 - **Graphics backends** — see [Vulkan / Metal / DirectX](graphics-api.md)
 
 If one of those is *your* use case, email us and say so — real demand is what moves something up the priority list.
+
+## Before you suggest
+
+Read the [Story](../story/index.md) and [Future](index.md) pages first — most suggestions are already planned or decided. The best suggestions are things we haven't thought of yet.

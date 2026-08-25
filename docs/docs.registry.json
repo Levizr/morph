@@ -1309,7 +1309,7 @@
         "file": "story/why-buggy",
         "status": "production",
         "author": "PIYUSH",
-        "description": "Why Morph feels buggy \u2014 an honest admission from the author: layout complexity, solo development, and a request for bug hunters.",
+        "description": "Why Morph feels buggy — an honest admission from the author: layout complexity, solo development, and a request for bug hunters.",
         "keywords": [
           "bugs",
           "layout problems",
@@ -1321,6 +1321,25 @@
         "publishedAt": "2026-08-22",
         "priority": 0.7,
         "changefreq": "monthly"
+      },
+      {
+        "title": "Working on morphc — The Rust Rewrite",
+        "slug": "story/working-on-morphc",
+        "file": "story/working-on-morphc",
+        "status": "development",
+        "author": "PIYUSH",
+        "description": "Currently building morphc — the Rust rewrite of Morph's Python toolchain. Architecture, decisions, version system, and implementation progress.",
+        "keywords": [
+          "morphc",
+          "rust rewrite",
+          "oxc",
+          "compiler",
+          "in progress"
+        ],
+        "lastUpdated": "2026-08-25",
+        "publishedAt": "2026-08-25",
+        "priority": 0.9,
+        "changefreq": "weekly"
       }
     ]
   },

@@ -71,6 +71,14 @@ The story is really a series of choices. Each has its own page:
 | UI syntax | JSX is the best DX I've used — and you already know web syntax | [Why JSX](why-jsx.md) |
 | The bugs | Yes, Morph is buggy — here's why, and how you can help | [Why Morph Is Buggy](why-buggy.md) |
 
+## Currently building
+
+| What | Status | Full plan |
+|------|--------|-----------|
+| morphc — the Rust rewrite | In progress | [Working on morphc](working-on-morphc.md) |
+
+The Rust rewrite replaces the Python toolchain with a single native binary. Updated as work progresses.
+
 ## Questions people ask
 
 The most common questions live in the [FAQ](../faq/index.md) — each answered in detail on its own page:
