@@ -144,6 +144,60 @@ morphc v0.3.0 + runtime v0.4.0 → ✗ Incompatible (update morphc)
 }
 ```
 
+## Version file security
+
+The version files live in a public repo. Here's how we prevent bad releases:
+
+### 1. Branch protection
+- `main` branch requires PR review before merge
+- Status checks must pass before merge
+- Only repo owner can merge
+
+### 2. CODEOWNERS
+```
+# .github/CODEOWNERS
+versions/**    @Piyushthelagend
+```
+Any PR touching `versions/` requires explicit approval from the maintainer.
+
+### 3. Version format validation in CI
+```yaml
+- name: Validate version format
+  run: |
+    VERSION=$(jq -r .version versions/runtime/cpp.json)
+    if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      echo "Invalid semver: $VERSION"
+      exit 1
+    fi
+```
+Invalid version = build fails, no release published.
+
+### 4. Only `main` triggers builds
+```yaml
+on:
+  push:
+    branches: [main]
+    paths: ['versions/**']
+```
+PRs never trigger releases. Only merged code on `main`.
+
+### 5. What if a bad PR merges?
+```
+Bad PR merges → versions/runtime/cpp.json has "version": "999.99.99"
+              → GitHub Actions validates → FAILS (invalid or mismatched tag)
+              → No release published
+              → Fix it, push correct version
+```
+
+### 6. Optional: signed releases
+Sign artifacts with GPG key for production releases. Users verify before installing.
+
+### Worst case
+Invalid version gets a GitHub Release with broken artifacts. But users are protected because:
+- `morph install` checks sha256 hash
+- morphc verifies runtime compatibility
+- Bad releases can be deleted manually
+
 ## What stays the same for users
 
 - `.mx` files, CSS, Tailwind — unchanged
