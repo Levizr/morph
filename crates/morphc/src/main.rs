@@ -87,6 +87,9 @@ enum Commands {
     },
     /// Lint .mx files for framework rules
     Check {
+        /// File or directory to check (overrides morph.config.json)
+        #[arg(value_name = "PATH")]
+        path: Option<PathBuf>,
         #[arg(long)]
         entry: Option<String>,
         #[arg(long)]
@@ -104,7 +107,32 @@ enum Commands {
 }
 
 fn main() {
-    let cli = Cli::parse();
+    let cli = match Cli::try_parse() {
+        Ok(c) => c,
+        Err(e) => {
+            // Let clap handle --help / --version display
+            use clap::error::ErrorKind;
+            match e.kind() {
+                ErrorKind::DisplayHelp | ErrorKind::DisplayVersion => e.exit(),
+                _ => {}
+            }
+            // Check for typo in subcommand (e.g. `cheack` -> `check`)
+            let args: Vec<String> = std::env::args().collect();
+            if args.len() > 1 {
+                let input = &args[1];
+                if !input.starts_with('-') {
+                    if let Some(suggestion) = crate::logger::suggest_command(input) {
+                        // Only suggest if it's actually a typo (not exact match)
+                        if suggestion != *input {
+                            crate::logger::did_you_mean(input);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+            }
+            e.exit();
+        }
+    };
 
     // ── Version flag ──
     if cli.version {
@@ -180,7 +208,7 @@ fn main() {
         Some(Commands::Run { binary, entry, output, static_ }) => {
             commands::run::run(binary, entry, output, static_)
         }
-        Some(Commands::Check { entry, migrate }) => commands::check::run(entry, migrate),
+        Some(Commands::Check { path, entry, migrate }) => commands::check::run(path, entry, migrate),
         Some(Commands::Doctor { verbose, yes }) => commands::doctor::run(verbose, yes),
         Some(Commands::Cache) => commands::cache::run(),
         None => {
