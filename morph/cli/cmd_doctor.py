@@ -197,7 +197,7 @@ def run(args) -> None:
 
     # ── Bundled Runtime ────────────────────────────────────
     log_step("Bundled Runtime")
-    rt_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "runtime")
+    rt_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "runtime/cpp")
     vendor_dir = os.path.join(rt_dir, "vendor")
 
     glad_c = os.path.join(vendor_dir, "glad", "glad.c")

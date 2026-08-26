@@ -3,7 +3,7 @@
 #include <chrono>
 // console.log sinks (+ dev-mode extern templates): resolves to host symbols
 // under morph dev (-DMORPH_FEATURE_DEV), inline helpers in release builds.
-#include "../../morph/runtime/dev/logic_prelude.h"
+#include "../../runtime/cpp/dev/logic_prelude.h"
 {% if dev_mode %}
 #define MORPH_DEV
 {% endif %}
