@@ -232,6 +232,10 @@ The Python version was never meant to ship to end users. It was the prototype th
 - [ ] Phase 6: Dev mode
 - [ ] Phase 7: Polish (check, doctor, CI/CD, distribution)
 
+## Full implementation plan
+
+For the complete technical plan — crate structure, all CLI commands, config files, GitHub Actions workflows, binary distribution, and implementation phases — see the [full rewrite plan](../../help/morphc-rust-rewrite-plan.md) in the help section.
+
 ## Follow the progress
 
 This page will be updated as work progresses. The best way to follow along is watching the repo and checking back here.
