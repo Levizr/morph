@@ -24,7 +24,7 @@ def get_devrt_path() -> str:
 
 
 def _get_dev_src_dir() -> str:
-    return os.path.abspath(os.path.join(os.path.dirname(__file__), "../runtime/dev"))
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "../../runtime/dev"))
 
 
 def _hash_file(path: str) -> str:

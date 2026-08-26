@@ -1,0 +1,12 @@
+[package]
+name = "morph-codegen"
+version = "0.1.0"
+edition = "2021"
+description = "Morph C++ / Rust code generation"
+
+[dependencies]
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tera = { workspace = true }
+morph-ir = { path = "../morph-ir" }

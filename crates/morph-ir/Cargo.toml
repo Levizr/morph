@@ -1,0 +1,10 @@
+[package]
+name = "morph-ir"
+version = "0.1.0"
+edition = "2021"
+description = "Morph Intermediate Representation"
+
+[dependencies]
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

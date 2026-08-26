@@ -1,0 +1,37 @@
+[package]
+name = "morphc"
+version = "0.1.0"
+edition = "2021"
+description = "Morph Compiler — Rust rewrite of Morph toolchain"
+authors = ["Piyush"]
+license = "Apache-2.0"
+repository = "https://github.com/Levizr/morph"
+
+[[bin]]
+name = "morph"
+path = "src/main.rs"
+
+[dependencies]
+morph-config = { path = "../morph-config" }
+morph-cache = { path = "../morph-cache" }
+morph-parser = { path = "../morph-parser" }
+morph-ir = { path = "../morph-ir" }
+morph-codegen = { path = "../morph-codegen" }
+morph-build = { path = "../morph-build" }
+clap = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+colored = { workspace = true }
+dialoguer = { workspace = true }
+dirs = { workspace = true }
+walkdir = { workspace = true }
+glob = { workspace = true }
+semver = { workspace = true }
+reqwest = { workspace = true }
+flate2 = { workspace = true }
+tar = { workspace = true }
+notify = { workspace = true }
+indicatif = { workspace = true }
+console = { workspace = true }
+strsim = { workspace = true }

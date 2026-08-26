@@ -14,6 +14,8 @@ dist/
 *.dylib
 venv/
 .venv/
+target/
+runtime/cpp/dev/build/
 
 my-app
 test.py

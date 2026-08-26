@@ -1,0 +1,11 @@
+[package]
+name = "morph-config"
+version = "0.1.0"
+edition = "2021"
+description = "Morph project configuration parsing"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+semver = { workspace = true }

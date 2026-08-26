@@ -1,0 +1,10 @@
+[package]
+name = "morph-parser"
+version = "0.1.0"
+edition = "2021"
+description = "Morph parser via Oxc + lightningcss"
+
+[dependencies]
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

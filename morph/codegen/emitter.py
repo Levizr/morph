@@ -89,8 +89,8 @@ class Emitter:
         )
         # Prepend runtime headers (deduplicated)
         _rt_headers = [
-            "\"../../morph/runtime/reactivity/signal.h\"",
-            "\"../../morph/runtime/reactivity/task.h\"",
+            "\"../../runtime/reactivity/signal.h\"",
+            "\"../../runtime/reactivity/task.h\"",
         ]
         for h in reversed(_rt_headers):
             if h not in extra_headers:

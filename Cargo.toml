@@ -1,0 +1,48 @@
+[workspace]
+members = [
+    "crates/morph-config",
+    "crates/morph-cache",
+    "crates/morph-parser",
+    "crates/morph-ir",
+    "crates/morph-codegen",
+    "crates/morph-build",
+    "crates/morphc",
+]
+resolver = "2"
+
+[workspace.dependencies]
+clap = { version = "4.6", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+thiserror = "2.0"
+semver = "1.0"
+dirs = "6.0"
+colored = "3.1"
+dialoguer = "0.12"
+indicatif = "0.17"
+console = "0.15"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+tar = "0.4"
+flate2 = "1.1"
+sha2 = "0.10"
+hex = "0.4"
+tokio = { version = "1", features = ["full"] }
+notify = "6.1"
+tera = "1.19"
+walkdir = "2.5"
+glob = "0.3"
+oxc_parser = "0.147"
+oxc_allocator = "0.147"
+oxc_ast = "0.147"
+oxc_span = "0.147"
+oxc_diagnostics = "0.147"
+lightningcss = "1.0.0-alpha.72"
+strsim = "0.11"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

@@ -1,0 +1,5 @@
+{
+  "version": "0.1.0",
+  "changelog": "Initial morphc release — Rust rewrite of Python toolchain",
+  "breaking": false
+}
