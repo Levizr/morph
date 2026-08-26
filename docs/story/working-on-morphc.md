@@ -224,7 +224,7 @@ The Python version was never meant to ship to end users. It was the prototype th
 
 ## Implementation phases
 
-- [ ] Phase 1: Foundation (CLI, config, parser, init/install)
+- [x] Phase 1: Foundation (CLI, config, parser, init/install)
 - [ ] Phase 2: Parser (Oxc + lightningcss)
 - [ ] Phase 3: AST + IR
 - [ ] Phase 4: Codegen (Tera templates)
