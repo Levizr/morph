@@ -126,14 +126,7 @@ pub fn run(path: Option<PathBuf>, entry: Option<String>, migrate: bool) -> Resul
                 if source.components.is_empty() {
                     file_warnings.push("No component found (expected `export default function App()`)");
                 }
-                if source.window_config.is_none() {
-                    // Only warn if this is likely an entry file or project root check
-                    // Don't spam for every component file
-                }
-                if content.contains("morphState") {
-                    warnings += 1;
-                    file_warnings.push("Uses `morphState` (deprecated, use `morph.state`)");
-                }
+                // morphState and morphEffect are current API — do not warn
                 if file_warnings.is_empty() {
                     crate::logger::log_success(&format!(
                         "{} — OK ({} component(s), {} import(s))",
@@ -154,10 +147,8 @@ pub fn run(path: Option<PathBuf>, entry: Option<String>, migrate: bool) -> Resul
             }
         }
 
-        if migrate && content.contains("morphState") {
-            let new = content.replace("morphState", "morph.state");
-            std::fs::write(f, new)?;
-            crate::logger::log_success(&format!("Migrated {}", f.display()));
+        if migrate {
+            // No migrations currently — morphState/morphEffect are not deprecated
         }
     }
 
