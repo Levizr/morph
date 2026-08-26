@@ -14,3 +14,4 @@ oxc_ast_visit = { workspace = true }
 oxc_parser = { workspace = true }
 oxc_span = { workspace = true }
 lightningcss = { workspace = true }
+strsim = { workspace = true }

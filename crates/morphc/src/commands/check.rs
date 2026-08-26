@@ -1,56 +1,71 @@
 use anyhow::Result;
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
-pub fn run(path: Option<PathBuf>, entry: Option<String>, migrate: bool) -> Result<()> {
+use morph_parser::LintError;
+
+fn cache_path(cwd: &Path) -> PathBuf {
+    let proj_cache = cwd.join(".morph").join("lint_cache.json");
+    if cwd.join(".morph").exists() {
+        proj_cache
+    } else {
+        // fallback to global cache
+        morph_cache::global_cache_root()
+            .map(|p| p.join("cache").join("lint_cache.json"))
+            .unwrap_or_else(|_| std::env::temp_dir().join("morph_lint_cache.json"))
+    }
+}
+
+fn load_cache(path: &Path) -> HashMap<String, (String, Vec<LintError>)> {
+    if let Ok(data) = std::fs::read_to_string(path) {
+        if let Ok(map) = serde_json::from_str(&data) {
+            return map;
+        }
+    }
+    HashMap::new()
+}
+
+fn save_cache(path: &Path, cache: &HashMap<String, (String, Vec<LintError>)>) {
+    if let Some(parent) = path.parent() { let _ = std::fs::create_dir_all(parent); }
+    if let Ok(data) = serde_json::to_string_pretty(cache) {
+        let _ = std::fs::write(path, data);
+    }
+}
+
+pub fn run(path: Option<PathBuf>, entry: Option<String>, _migrate: bool) -> Result<()> {
     let cwd = std::env::current_dir()?;
     let mut mx_files: Vec<PathBuf> = Vec::new();
     let mut project_root: Option<PathBuf> = None;
 
-    // ── If explicit PATH provided, resolve it ──
     if let Some(p) = path {
         let resolved = if p.is_absolute() { p.clone() } else { cwd.join(&p) };
         if !resolved.exists() {
             anyhow::bail!("Path not found: {}", p.display());
         }
         if resolved.is_file() {
-            // Single file — check it regardless of extension (should be .mx)
             mx_files.push(resolved);
         } else if resolved.is_dir() {
             project_root = Some(resolved.clone());
-            // If it's a project dir with src/, check src; else check dir itself
             let src_dir = resolved.join("src");
             let search_root = if src_dir.exists() { src_dir } else { resolved };
-            for e in walkdir::WalkDir::new(&search_root)
-                .into_iter()
-                .filter_map(|e| e.ok())
-            {
+            for e in walkdir::WalkDir::new(&search_root).into_iter().filter_map(|e| e.ok()) {
                 if e.path().extension().map(|e| e == "mx").unwrap_or(false) {
                     mx_files.push(e.path().to_path_buf());
                 }
             }
         }
     } else {
-        // ── No explicit path — use project config in cwd ──
         let config_path = cwd.join("morph.config.json");
         if !config_path.exists() {
-            // Fallback: if no config, just scan cwd/src
             let src_dir = cwd.join("src");
             if src_dir.exists() {
-                for e in walkdir::WalkDir::new(&src_dir)
-                    .into_iter()
-                    .filter_map(|e| e.ok())
-                {
+                for e in walkdir::WalkDir::new(&src_dir).into_iter().filter_map(|e| e.ok()) {
                     if e.path().extension().map(|e| e == "mx").unwrap_or(false) {
                         mx_files.push(e.path().to_path_buf());
                     }
                 }
             } else {
-                // No config and no src — also check cwd for .mx files
-                for e in walkdir::WalkDir::new(&cwd)
-                    .max_depth(2)
-                    .into_iter()
-                    .filter_map(|e| e.ok())
-                {
+                for e in walkdir::WalkDir::new(&cwd).max_depth(2).into_iter().filter_map(|e| e.ok()) {
                     if e.path().extension().map(|e| e == "mx").unwrap_or(false) {
                         mx_files.push(e.path().to_path_buf());
                     }
@@ -59,44 +74,28 @@ pub fn run(path: Option<PathBuf>, entry: Option<String>, migrate: bool) -> Resul
         } else {
             let config = morph_config::MorphConfig::from_file(&config_path)?;
             let entry_val = entry.unwrap_or(config.entry);
-            // Still scan src for all .mx, but also ensure entry is covered
             let src_dir = cwd.join("src");
             if src_dir.exists() {
-                for e in walkdir::WalkDir::new(&src_dir)
-                    .into_iter()
-                    .filter_map(|e| e.ok())
-                {
+                for e in walkdir::WalkDir::new(&src_dir).into_iter().filter_map(|e| e.ok()) {
                     if e.path().extension().map(|e| e == "mx").unwrap_or(false) {
                         mx_files.push(e.path().to_path_buf());
                     }
                 }
             }
-            // Ensure entry file is included if not already
             let entry_path = cwd.join(&entry_val);
-            if entry_path.exists()
-                && entry_path.extension().map(|e| e == "mx").unwrap_or(false)
-                && !mx_files.contains(&entry_path)
-            {
+            if entry_path.exists() && entry_path.extension().map(|e| e == "mx").unwrap_or(false) && !mx_files.contains(&entry_path) {
                 mx_files.push(entry_path);
             }
             project_root = Some(cwd.clone());
         }
     }
 
-    // Banner
-    let display_root = project_root
-        .as_ref()
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|| cwd.display().to_string());
+    let display_root = project_root.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| cwd.display().to_string());
     crate::logger::log_banner("Morph Check — Lint .mx Files");
     if mx_files.len() == 1 {
         crate::logger::log_step(&format!("Checking {}", mx_files[0].display()));
     } else {
-        crate::logger::log_step(&format!(
-            "Checking {} file(s) in {}",
-            mx_files.len(),
-            display_root
-        ));
+        crate::logger::log_step(&format!("Checking {} file(s) in {}", mx_files.len(), display_root));
     }
 
     if mx_files.is_empty() {
@@ -110,59 +109,79 @@ pub fn run(path: Option<PathBuf>, entry: Option<String>, migrate: bool) -> Resul
         return Ok(());
     }
 
-    let mut errors = 0;
-    let mut warnings = 0;
+    // ── Lint cache (JSX errors) ──
+    let cpath = cache_path(&cwd);
+    let mut cache = load_cache(&cpath);
+    let mut cache_dirty = false;
+    let mut all_errors: Vec<LintError> = Vec::new();
+    let mut contents: HashMap<String, String> = HashMap::new();
+    let mut ok_files = Vec::new();
 
     for f in &mx_files {
         let content = std::fs::read_to_string(f)?;
-        let filename = f
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_default();
+        let hash = morph_cache::sha256_bytes(content.as_bytes());
+        let key = f.display().to_string();
+        contents.insert(key.clone(), content.clone());
 
-        match morph_parser::parse_mx_str(&content, &filename) {
-            Ok(source) => {
-                let mut file_warnings = Vec::new();
-                if source.components.is_empty() {
-                    file_warnings.push("No component found (expected `export default function App()`)");
-                }
-                // morphState and morphEffect are current API — do not warn
-                if file_warnings.is_empty() {
-                    crate::logger::log_success(&format!(
-                        "{} — OK ({} component(s), {} import(s))",
-                        f.display(),
-                        source.components.len(),
-                        source.imports.len(),
-                    ));
-                } else {
-                    for w in &file_warnings {
-                        warnings += 1;
-                        crate::logger::log_warn(&format!("{}: {}", f.display(), w));
-                    }
-                }
+        let errors = if let Some((cached_hash, cached_errors)) = cache.get(&key) {
+            if cached_hash == &hash {
+                // cache hit — reuse
+                cached_errors.clone()
+            } else {
+                let errs = morph_parser::linter::check(&content, &key);
+                cache.insert(key.clone(), (hash.clone(), errs.clone()));
+                cache_dirty = true;
+                errs
             }
-            Err(e) => {
-                errors += 1;
-                crate::logger::log_error(&format!("{}: {}", f.display(), e));
-            }
-        }
+        } else {
+            let errs = morph_parser::linter::check(&content, &key);
+            cache.insert(key.clone(), (hash.clone(), errs.clone()));
+            cache_dirty = true;
+            errs
+        };
 
-        if migrate {
-            // No migrations currently — morphState/morphEffect are not deprecated
+        if errors.is_empty() {
+            ok_files.push(f.clone());
+        } else {
+            all_errors.extend(errors);
         }
     }
 
-    println!();
-    if errors > 0 {
-        crate::logger::log_error(&format!("{errors} file(s) with parse errors."));
-    } else if warnings > 0 {
-        crate::logger::log_warn(&format!(
-            "{warnings} warning(s). Run `morph check --migrate` to auto-fix."
-        ));
-    } else {
-        crate::logger::log_success(&format!("All {} file(s) passed.", mx_files.len()));
+    if cache_dirty {
+        save_cache(&cpath, &cache);
     }
-    println!();
 
+    // ── Per-file success for clean files ──
+    for f in &ok_files {
+        // Get component/import counts for nice message
+        let content = contents.get(&f.display().to_string()).unwrap();
+        let filename = f.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        if let Ok(src) = morph_parser::parse_mx_str(content, &filename) {
+            crate::logger::log_success(&format!("{} — OK ({} component(s), {} import(s))", f.display(), src.components.len(), src.imports.len()));
+        } else {
+            crate::logger::log_success(&format!("{} — OK", f.display()));
+        }
+    }
+
+    // ── Display aggregated lint errors with Python-style code frames ──
+    if !all_errors.is_empty() {
+        crate::logger::log_lint_errors(&all_errors, &contents);
+        let n_err = all_errors.iter().filter(|e| e.severity == "error").count();
+        let n_warn = all_errors.len() - n_err;
+        println!();
+        if n_err > 0 {
+            crate::logger::log_error(&format!("{n_err} error(s), {n_warn} warning(s) — fix and save to hot reload"));
+            // Return error to block build pipeline (like Python)
+            // But for `morph check` we don't fail, just report
+        } else {
+            crate::logger::log_warn(&format!("{n_warn} warning(s)."));
+        }
+        println!();
+        return Ok(());
+    }
+
+    println!();
+    crate::logger::log_success(&format!("All {} file(s) passed.", mx_files.len()));
+    println!();
     Ok(())
 }

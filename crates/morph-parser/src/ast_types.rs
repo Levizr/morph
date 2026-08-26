@@ -95,10 +95,14 @@ pub enum JsxNode {
         props: HashMap<String, JsxPropValue>,
         children: Vec<JsxNode>,
         self_closing: bool,
+        line: usize,
+        col: usize,
     },
     Fragment {
         props: HashMap<String, JsxPropValue>,
         children: Vec<JsxNode>,
+        line: usize,
+        col: usize,
     },
     Text(String),
     Expression(String),
@@ -106,6 +110,8 @@ pub enum JsxNode {
         condition: String,
         then_branch: Vec<JsxNode>,
         else_branch: Vec<JsxNode>,
+        line: usize,
+        col: usize,
     },
     List {
         array_expr: String,
@@ -113,7 +119,21 @@ pub enum JsxNode {
         index_param: String,
         key_expr: String,
         item_template: Box<JsxNode>,
+        line: usize,
+        col: usize,
     },
+}
+
+/// Lint diagnostic — mirrors Python's LintError
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct LintError {
+    pub severity: String, // "error" | "warning"
+    pub code: String,
+    pub message: String,
+    pub suggestion: Option<String>,
+    pub file_path: String,
+    pub line: usize,
+    pub col: usize,
 }
 
 #[derive(Debug, Clone)]

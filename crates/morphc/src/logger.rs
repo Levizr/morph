@@ -156,6 +156,67 @@ pub fn progress_bar(len: u64, msg: &str) -> indicatif::ProgressBar {
     pb
 }
 
+// ── Code frame (matches Python's _print_code_frame) ──
+
+pub fn print_code_frame(file_path: &str, line: usize, col: usize, source_lines: &[String]) {
+    let ctx = 2usize;
+    let loc = if line > 0 {
+        if col > 0 { format!("{file_path}:{line}:{col}") } else { format!("{file_path}:{line}") }
+    } else { file_path.to_string() };
+    if !loc.is_empty() {
+        println!("  {} {}", "──>".dimmed(), loc.cyan());
+    }
+    if source_lines.is_empty() || line == 0 { return; }
+    let start = line.saturating_sub(1).saturating_sub(ctx);
+    let end = (line + ctx).min(source_lines.len());
+    println!("   {}","──┐".dimmed());
+    for i in start..end {
+        let line_num = i + 1;
+        let is_target = line_num == line;
+        let prefix = if is_target { ">".red().bold().to_string() } else { " ".dimmed().to_string() };
+        let gutter = format!("{line_num:4}").dimmed().to_string();
+        let code = source_lines[i].trim_end();
+        println!("   {prefix} {gutter} {} {code}", "│".dimmed());
+        if is_target && col > 0 {
+            let indent = col.saturating_sub(1);
+            let width = 1usize;
+            let pointer = format!("{}{}", " ".repeat(indent), "^".repeat(width).red());
+            println!("     {}   {} {pointer}", " ".dimmed(), "│".dimmed());
+        }
+    }
+    println!("   {}","──┘".dimmed());
+}
+
+pub fn log_lint_errors(errors: &[morph_parser::LintError], contents: &std::collections::HashMap<String, String>) {
+    if errors.is_empty() { return; }
+    let n_err = errors.iter().filter(|e| e.severity == "error").count();
+    let n_warn = errors.len() - n_err;
+    let mut summary = "lint".to_string();
+    if n_err > 0 { summary += &format!(" {}", format!("{n_err} error(s)").red().bold()); }
+    if n_warn > 0 { summary += &format!(" {}", format!("{n_warn} warning(s)").yellow().bold()); }
+    println!("\n  {}  {}", "◆".cyan().bold(), summary.bold());
+    for e in errors {
+        let color = if e.severity == "error" { "red" } else { "yellow" };
+        let label = e.severity.clone();
+        let label_colored = if e.severity == "error" { label.red().bold() } else { label.yellow().bold() };
+        println!("\n  {} {} {} {}", label_colored, ":".dimmed(), e.code.bold(), format!(": {}", e.message).dimmed());
+        if let Some(s) = &e.suggestion {
+            println!("  {}  {} {}", "hint:".dimmed(), s.dimmed(), "");
+        }
+        let source_lines: Vec<String> = contents.get(&e.file_path).map(|c| c.lines().map(|s| s.to_string()).collect()).unwrap_or_default();
+        // Try to read file if not in contents (for cached errors)
+        let source_lines = if source_lines.is_empty() {
+            std::fs::read_to_string(&e.file_path).ok().map(|c| c.lines().map(|s| s.to_string()).collect::<Vec<_>>()).unwrap_or_default()
+        } else { source_lines };
+        print_code_frame(&e.file_path, e.line, e.col, &source_lines);
+    }
+}
+
+pub fn log_parse_error(file_path: &str, line: usize, col: usize, message: &str, source_lines: &[String]) {
+    println!("\n  {} {} {}", "error".red().bold(), ":".dimmed(), message.bold());
+    print_code_frame(file_path, line, col, source_lines);
+}
+
 // ── Suggestion helper ──
 
 pub fn suggest_command(input: &str) -> Option<String> {

@@ -193,7 +193,7 @@ fn jsx_to_ir_node(jsx: &morph_parser::JsxNode, node_id: &str) -> morph_ir::IRNod
     use std::collections::HashMap;
 
     match jsx {
-        morph_parser::JsxNode::Element { tag, props, children, self_closing: _ } => {
+        morph_parser::JsxNode::Element { tag, props, children, self_closing: _, .. } => {
             let mut node = IRNode::default();
             node.node_id = node_id.to_string();
             node.node_type = tag.clone();
@@ -275,7 +275,7 @@ fn jsx_to_ir_node(jsx: &morph_parser::JsxNode, node_id: &str) -> morph_ir::IRNod
             node.reactive_text = expr.clone();
             node
         }
-        morph_parser::JsxNode::Conditional { condition, then_branch, else_branch } => {
+        morph_parser::JsxNode::Conditional { condition, then_branch, else_branch, .. } => {
             let mut node = IRNode::default();
             node.node_id = node_id.to_string();
             node.node_type = "__conditional__".to_string();
@@ -290,7 +290,7 @@ fn jsx_to_ir_node(jsx: &morph_parser::JsxNode, node_id: &str) -> morph_ir::IRNod
             }
             node
         }
-        morph_parser::JsxNode::List { array_expr, item_param, index_param, key_expr, item_template } => {
+        morph_parser::JsxNode::List { array_expr, key_expr, item_template, .. } => {
             let mut node = IRNode::default();
             node.node_id = node_id.to_string();
             node.node_type = "__list__".to_string();

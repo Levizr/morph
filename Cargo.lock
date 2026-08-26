@@ -1445,6 +1445,7 @@ dependencies = [
  "oxc_span",
  "serde",
  "serde_json",
+ "strsim",
 ]
 
 [[package]]

@@ -1,11 +1,13 @@
 use anyhow::{bail, Result};
 use std::path::Path;
 
-mod ast_types;
-mod js_walker;
+pub(crate) mod ast_types;
+pub(crate) mod js_walker;
 mod css_parser;
+pub mod linter;
 
 pub use ast_types::*;
+pub use linter::{check as lint_check, lint};
 
 /// Parse an .mx file (which is TSX) and return a structured representation.
 pub fn parse_mx_file(path: &Path) -> Result<MxSource> {

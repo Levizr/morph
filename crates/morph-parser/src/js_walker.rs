@@ -116,6 +116,18 @@ fn binding_array_elements(bp: &BindingPattern) -> Option<Vec<Option<String>>> {
     }
 }
 
+fn offset_to_line_col(source: &str, offset: u32) -> (usize, usize) {
+    let offset = offset as usize;
+    let mut line = 1usize;
+    let mut last = 0usize;
+    for (i, ch) in source.char_indices() {
+        if i >= offset { break; }
+        if ch == '\n' { line += 1; last = i + 1; }
+    }
+    let col = offset.saturating_sub(last) + 1;
+    (line, col)
+}
+
 // ── Walker ─────────────────────────────────────────────────────────────────
 
 pub struct MxWalker<'src> {
@@ -266,7 +278,8 @@ impl<'src> MxWalker<'src> {
         let props = self.jsx_props(&elem.opening_element);
         let children = self.parse_jsx_children(&elem.children);
         let self_closing = elem.closing_element.is_none();
-        JsxNode::Element { tag, props, children, self_closing }
+        let (line, col) = offset_to_line_col(self.source, elem.span.start);
+        JsxNode::Element { tag, props, children, self_closing, line, col }
     }
 
     fn parse_jsx_children(&self, children: &[JSXChild]) -> Vec<JsxNode> {
@@ -281,7 +294,8 @@ impl<'src> MxWalker<'src> {
                 JSXChild::Element(e) => result.push(self.parse_jsx_element(e)),
                 JSXChild::Fragment(f) => {
                     let children = self.parse_jsx_children(&f.children);
-                    result.push(JsxNode::Fragment { props: HashMap::new(), children });
+                    let (line, col) = offset_to_line_col(self.source, f.span.start);
+                    result.push(JsxNode::Fragment { props: HashMap::new(), children, line, col });
                 }
                 JSXChild::ExpressionContainer(ec) => {
                     // Check JSXExpression variants
@@ -291,10 +305,12 @@ impl<'src> MxWalker<'src> {
                                 if let Some(jsx) = self.try_jsx_from_expr(&logical.right) {
                                     let cond = self.span_text(logical.left.span()).to_string();
                                     if logical.operator == oxc_ast::ast::LogicalOperator::And {
+                                        let (line, col) = offset_to_line_col(self.source, ec.span.start);
                                         result.push(JsxNode::Conditional {
                                             condition: cond,
                                             then_branch: vec![jsx],
                                             else_branch: vec![],
+                                            line, col
                                         });
                                         continue;
                                     }
@@ -306,7 +322,8 @@ impl<'src> MxWalker<'src> {
                                 let then_branch = self.try_jsx_from_expr(&cond.consequent).map(|n| vec![n]).unwrap_or_default();
                                 let else_branch = self.try_jsx_from_expr(&cond.alternate).map(|n| vec![n]).unwrap_or_default();
                                 if !then_branch.is_empty() || !else_branch.is_empty() {
-                                    result.push(JsxNode::Conditional { condition, then_branch, else_branch });
+                                    let (line, col) = offset_to_line_col(self.source, ec.span.start);
+                                    result.push(JsxNode::Conditional { condition, then_branch, else_branch, line, col });
                                 } else {
                                     result.push(JsxNode::Expression(self.span_text(ec.span).trim_matches(|c| c == '{' || c == '}').trim().to_string()));
                                 }
@@ -347,7 +364,8 @@ impl<'src> MxWalker<'src> {
             Expression::JSXElement(e) => Some(self.parse_jsx_element(e)),
             Expression::JSXFragment(f) => {
                 let children = self.parse_jsx_children(&f.children);
-                Some(JsxNode::Fragment { props: HashMap::new(), children })
+                let (line, col) = offset_to_line_col(self.source, f.span.start);
+                Some(JsxNode::Fragment { props: HashMap::new(), children, line, col })
             }
             Expression::ParenthesizedExpression(pe) => self.try_jsx_from_expr(&pe.expression),
             _ => None,
@@ -390,12 +408,14 @@ impl<'src> MxWalker<'src> {
             }
         }
 
+        let (line, col) = offset_to_line_col(self.source, call.span.start);
         Some(JsxNode::List {
             array_expr: array_src,
             item_param: params.first().cloned().unwrap_or_else(|| "item".to_string()),
             index_param: params.get(1).cloned().unwrap_or_default(),
             key_expr,
             item_template: Box::new(template),
+            line, col
         })
     }
 
@@ -487,7 +507,7 @@ impl<'src> MxWalker<'src> {
         let inner_functions = self.inner_funcs_from_body(body);
         let consts = self.consts_from_body(body);
         let console_logs = self.logs_from_body(body);
-        let jsx = self.jsx_from_body(body).unwrap_or(JsxNode::Fragment { props: HashMap::new(), children: vec![] });
+        let jsx = self.jsx_from_body(body).unwrap_or(JsxNode::Fragment { props: HashMap::new(), children: vec![], line: 0, col: 0 });
 
         self.components.push(MxComponent { name, exported, params, jsx, state_vars, effects, inner_functions, consts, console_logs });
     }
