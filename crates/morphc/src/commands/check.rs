@@ -19,17 +19,12 @@ pub fn run(entry: Option<String>, migrate: bool) -> Result<()> {
     let src_dir = cwd.join("src");
     let mut mx_files = vec![];
     if src_dir.exists() {
-        for entry in walkdir::WalkDir::new(&src_dir)
+        for e in walkdir::WalkDir::new(&src_dir)
             .into_iter()
             .filter_map(|e| e.ok())
         {
-            if entry
-                .path()
-                .extension()
-                .map(|e| e == "mx")
-                .unwrap_or(false)
-            {
-                mx_files.push(entry.path().to_path_buf());
+            if e.path().extension().map(|e| e == "mx").unwrap_or(false) {
+                mx_files.push(e.path().to_path_buf());
             }
         }
     }
@@ -40,46 +35,69 @@ pub fn run(entry: Option<String>, migrate: bool) -> Result<()> {
         return Ok(());
     }
 
+    let mut errors = 0;
     let mut warnings = 0;
-    for f in &mx_files {
-        crate::logger::log_dim(&format!("Checking {}...", f.display()));
-        let content = std::fs::read_to_string(f)?;
 
-        // Simple lint: check for deprecated morphState
-        if content.contains("morphState") {
-            warnings += 1;
-            crate::logger::log_warn(&format!(
-                "Line contains {} (deprecated, use {})",
-                "morphState".yellow(),
-                "morph.state".green()
-            ));
-            if migrate {
-                let new = content.replace("morphState", "morph.state");
-                std::fs::write(f, new)?;
-                crate::logger::log_success(&format!("Migrated {}", f.display()));
+    for f in &mx_files {
+        let content = std::fs::read_to_string(f)?;
+        let filename = f.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+
+        // Parse with Oxc
+        match morph_parser::parse_mx_str(&content, &filename) {
+            Ok(source) => {
+                // Check structural rules
+                let mut file_warnings = Vec::new();
+
+                if source.components.is_empty() {
+                    file_warnings.push("No component found (expected `export default function App()`)");
+                }
+
+                if source.window_config.is_none() {
+                    file_warnings.push("No `windowConfig` export found");
+                }
+
+                // Check for deprecated patterns
+                if content.contains("morphState") {
+                    warnings += 1;
+                    file_warnings.push("Uses `morphState` (deprecated, use `morph.state`)");
+                }
+
+                if file_warnings.is_empty() {
+                    crate::logger::log_success(&format!("{} — OK ({} component(s), {} import(s))",
+                        f.display(),
+                        source.components.len(),
+                        source.imports.len(),
+                    ));
+                } else {
+                    for w in &file_warnings {
+                        warnings += 1;
+                        crate::logger::log_warn(&format!("{}: {}", f.display(), w));
+                    }
+                }
             }
-        } else {
-            crate::logger::log_success(&format!("{} — no issues", f.display()));
+            Err(e) => {
+                errors += 1;
+                crate::logger::log_error(&format!("{}: {}", f.display(), e));
+            }
+        }
+
+        // Migrate deprecated patterns
+        if migrate && content.contains("morphState") {
+            let new = content.replace("morphState", "morph.state");
+            std::fs::write(f, new)?;
+            crate::logger::log_success(&format!("Migrated {}", f.display()));
         }
     }
 
     println!();
-    if migrate {
-        crate::logger::log_success(&format!(
-            "Migration complete. {} files checked.",
-            mx_files.len()
-        ));
+    if errors > 0 {
+        crate::logger::log_error(&format!("{errors} file(s) with parse errors."));
     } else if warnings > 0 {
         crate::logger::log_warn(&format!(
-            "{} file(s) with warnings. Run {} to auto-fix.",
-            warnings,
-            "morph check --migrate".yellow().bold()
+            "{warnings} warning(s). Run `morph check --migrate` to auto-fix."
         ));
     } else {
-        crate::logger::log_success(&format!(
-            "All {} file(s) passed.",
-            mx_files.len()
-        ));
+        crate::logger::log_success(&format!("All {} file(s) passed.", mx_files.len()));
     }
     println!();
 

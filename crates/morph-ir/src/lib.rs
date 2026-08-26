@@ -1,23 +1,14 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
-/// Stub IR — will be expanded with full pipeline
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IRNode {
-    pub id: String,
-    pub tag: String,
-    pub props: std::collections::HashMap<String, String>,
-    pub children: Vec<IRNode>,
-}
+pub mod style;
+pub mod node;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IRWindow {
-    pub width: u32,
-    pub height: u32,
-    pub title: String,
-}
+pub use style::IRStyle;
+pub use node::{IRNode, IRWindow, IREvent, IRAnimation, IRKeyframe};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IRPage {
-    pub window: IRWindow,
-    pub root: IRNode,
+    pub page_id: String,
+    pub nodes: Vec<IRNode>,
 }
