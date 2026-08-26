@@ -213,7 +213,7 @@ class Compiler:
             log_error(f"Source not found: {source_path}")
             return False
 
-        runtime_dir = os.path.join(os.path.dirname(__file__), "../../runtime")
+        runtime_dir = os.path.join(os.path.dirname(__file__), "../../runtime/cpp")
         runtime_dir = os.path.abspath(runtime_dir)
 
         if not shutil.which(self.gpp):
@@ -422,7 +422,7 @@ class Compiler:
         compile uses (GCC validates and silently falls back to a full parse
         on mismatch), so both paths must build their cmd from this one list.
         """
-        runtime_dir = os.path.join(os.path.dirname(__file__), "../../runtime")
+        runtime_dir = os.path.join(os.path.dirname(__file__), "../../runtime/cpp")
         runtime_dir = os.path.abspath(runtime_dir)
         dev_dir = os.path.join(runtime_dir, "dev")
         vendor_dir = os.path.join(runtime_dir, "vendor")

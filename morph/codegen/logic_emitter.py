@@ -363,7 +363,7 @@ def emit_logic(windows: list[IRWindow]) -> str:
     for w in windows:
         for h in w.extra_headers:
             if h not in _BUILTIN_HEADERS:
-                for prefix in ('"../../runtime/', '"../../runtime/types/', '"../../runtime/dev/'):
+                for prefix in ('"../../runtime/cpp/', '"../../runtime/cpp/types/', '"../../runtime/cpp/dev/'):
                     if h.startswith(prefix):
                         h = '"' + h[len(prefix):]
                         break

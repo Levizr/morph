@@ -107,18 +107,18 @@ _TYPE_TO_HEADER: dict[str, str] = {
     "std::format":      "<format>",
     "std::shared_ptr":  "<memory>",
     "std::make_shared": "<memory>",
-    "JsNumber":         "\"../../runtime/types/js_types.h\"",
-    "JsString":         "\"../../runtime/types/js_types.h\"",
-    "JsBoolean":        "\"../../runtime/types/js_types.h\"",
-    "JsArray":          "\"../../runtime/types/js_types.h\"",
-    "JsObject":         "\"../../runtime/types/js_types.h\"",
-    "JsValue":          "\"../../runtime/types/js_types.h\"",
-    "JsUndefined":      "\"../../runtime/types/js_types.h\"",
-    "JsNull":           "\"../../runtime/types/js_types.h\"",
-    "morph::Result":    "\"../../runtime/reactivity/promise.h\"",
-    "morph::Task":      "\"../../runtime/reactivity/task.h\"",
-    "morph::net":       "\"../../runtime/net/net.h\"",
-    "morph::net::Response": "\"../../runtime/net/net.h\"",
+    "JsNumber":         "\"../../runtime/cpp/types/js_types.h\"",
+    "JsString":         "\"../../runtime/cpp/types/js_types.h\"",
+    "JsBoolean":        "\"../../runtime/cpp/types/js_types.h\"",
+    "JsArray":          "\"../../runtime/cpp/types/js_types.h\"",
+    "JsObject":         "\"../../runtime/cpp/types/js_types.h\"",
+    "JsValue":          "\"../../runtime/cpp/types/js_types.h\"",
+    "JsUndefined":      "\"../../runtime/cpp/types/js_types.h\"",
+    "JsNull":           "\"../../runtime/cpp/types/js_types.h\"",
+    "morph::Result":    "\"../../runtime/cpp/reactivity/promise.h\"",
+    "morph::Task":      "\"../../runtime/cpp/reactivity/task.h\"",
+    "morph::net":       "\"../../runtime/cpp/net/net.h\"",
+    "morph::net::Response": "\"../../runtime/cpp/net/net.h\"",
 }
 
 _STRING_TYPES = frozenset(["JsString", "const JsString", "std::string", "const std::string", "std::string_view", "const char*"])
@@ -386,7 +386,7 @@ class TSToCppTranslator:
                 '}'
             )
             body = f"{io_init}\n\n{body}"
-        self._needed.add('"../../runtime/types/js_types.h"')
+        self._needed.add('"../../runtime/cpp/types/js_types.h"')
         includes = self.generate_includes()
         if includes:
             return f"{includes}\n\n{body}"
@@ -501,7 +501,7 @@ class TSToCppTranslator:
         # After body translation, check for infinite loops
         if self._has_infinite_loop and node.name != "main" and not is_async:
             ret = "morph::Task"
-            self._needed.add('"../../runtime/reactivity/task.h"')
+            self._needed.add('"../../runtime/cpp/reactivity/task.h"')
 
         tpl = ""
         if node.type_parameters:
@@ -516,7 +516,7 @@ class TSToCppTranslator:
 
     def _async_main(self, node: TSFunctionDeclaration, ret: str, params: str) -> str:
         """Generate an `int main()` that runs an async JS main as a coroutine."""
-        self._needed.add('"../../runtime/reactivity/task.h"')
+        self._needed.add('"../../runtime/cpp/reactivity/task.h"')
         self._is_async_fn += 1
         self._drop_return_value = True
         body = self._translate_node(node.body).rstrip()
@@ -637,7 +637,7 @@ class TSToCppTranslator:
 
         if is_infinite and self._fn_body_depth > 0:
             self._has_infinite_loop = True
-            self._needed.add('"../../runtime/reactivity/task.h"')
+            self._needed.add('"../../runtime/cpp/reactivity/task.h"')
 
             bi = _INDENT * (self._indent.count(_INDENT) + 1)
             if isinstance(node.body, TSBlockStatement):
@@ -759,7 +759,7 @@ class TSToCppTranslator:
 
         if is_infinite and self._fn_body_depth > 0:
             self._has_infinite_loop = True
-            self._needed.add('"../../runtime/reactivity/task.h"')
+            self._needed.add('"../../runtime/cpp/reactivity/task.h"')
             bi = _INDENT * (self._indent.count(_INDENT) + 1)
             if isinstance(node.body, TSBlockStatement):
                 body_stripped = body.rstrip()
@@ -873,7 +873,7 @@ class TSToCppTranslator:
         # JS fetch() → morph::net::fetch() — awaitable HTTP GET
         if (isinstance(node.callee, TSIdentifier)
                 and node.callee.name == "fetch"):
-            self._needed.add('"../../runtime/net/net.h"')
+            self._needed.add('"../../runtime/cpp/net/net.h"')
             args = [self._translate_node(a) for a in node.arguments]
             return f"morph::net::fetch({', '.join(args)})"
 
@@ -930,7 +930,7 @@ class TSToCppTranslator:
         # ── JS built-in timers: setTimeout / setInterval / clearTimeout / clearInterval ──
         if (isinstance(node.callee, TSIdentifier)
                 and node.callee.name in ("setTimeout", "setInterval", "clearTimeout", "clearInterval")):
-            self._needed.add('"../../runtime/reactivity/task.h"')
+            self._needed.add('"../../runtime/cpp/reactivity/task.h"')
             if node.callee.name == "clearTimeout" or node.callee.name == "clearInterval":
                 args = [self._translate_node(a) for a in node.arguments]
                 return f"morph::clear_timer({', '.join(args)})"
