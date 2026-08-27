@@ -699,10 +699,10 @@ echo "morphc installed! Run 'morph init' to get started."
 - [x] Port Tailwind resolver
 
 ### Phase 4: Codegen (Week 7-8)
-- [ ] Port Jinja2 templates to Tera — in progress
-- [ ] Implement C++ code generation — in progress (stub with feature flags)
-- [ ] Port feature flag detection
-- [ ] Port event/reactive logic emission
+- [x] Port Jinja2 templates to Tera
+- [x] Implement C++ code generation
+- [x] Port feature flag detection
+- [x] Port event/reactive logic emission
 
 ### Phase 5: Build System (Week 9-10)
 - [ ] Implement `morph-build` (compiler invocation)

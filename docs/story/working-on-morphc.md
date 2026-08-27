@@ -227,7 +227,7 @@ The Python version was never meant to ship to end users. It was the prototype th
 - [x] Phase 1: Foundation (CLI, config, parser, init/install)
 - [x] Phase 2: Parser (Oxc + lightningcss)
 - [x] Phase 3: AST + IR (style registry, Tailwind, IRBuilder — verified vs Python)
-- [ ] Phase 4: Codegen (Tera templates) — in progress
+- [x] Phase 4: Codegen (Tera templates, feature flags, node/logic emitters)
 - [ ] Phase 5: Build system
 - [ ] Phase 6: Dev mode
 - [ ] Phase 7: Polish (check, doctor, CI/CD, distribution)
