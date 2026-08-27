@@ -95,6 +95,9 @@ impl<'a> CppEmitter<'a> {
         extra_headers.sort();
         extra_headers.dedup();
 
+        // Premain code (functions like doLogin, logout)
+        let premain_code = self.windows.iter().flat_map(|w| w.premain_functions.clone()).collect::<Vec<_>>().join("\n\n");
+
         // Render via Tera one_off
         let mut ctx = tera::Context::new();
         ctx.insert("windows", &self.windows);
@@ -105,7 +108,7 @@ impl<'a> CppEmitter<'a> {
         ctx.insert("extra_headers", &extra_headers);
         ctx.insert("defines", &defines);
         ctx.insert("dev_mode", &false);
-        ctx.insert("premain_code", &"");
+        ctx.insert("premain_code", &premain_code);
         ctx.insert("state_decls", &state_decls);
         ctx.insert("native_mode", &false);
         let cpp_includes: Vec<serde_json::Value> = vec![];

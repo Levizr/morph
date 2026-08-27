@@ -118,7 +118,34 @@ pub struct MorphConfig {
 
 fn default_name() -> String { "my-app".to_string() }
 fn default_entry() -> String { "src/App.mx".to_string() }
-fn default_output() -> String { ".morph/".to_string() }
+fn default_output() -> String { ".morph/output".to_string() }
+
+pub fn clean_app_name(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    for ch in name.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
+            out.push(ch);
+        } else if ch.is_whitespace() {
+            out.push('_');
+        } else {
+            out.push('_');
+        }
+    }
+    // Collapse multiple _ and trim
+    let mut cleaned = String::new();
+    let mut prev_us = false;
+    for ch in out.chars() {
+        if ch == '_' {
+            if !prev_us { cleaned.push('_'); }
+            prev_us = true;
+        } else {
+            cleaned.push(ch);
+            prev_us = false;
+        }
+    }
+    let cleaned = cleaned.trim_matches('_').to_string();
+    if cleaned.is_empty() { "app".to_string() } else { cleaned }
+}
 fn default_renderer() -> String { "flash".to_string() }
 
 impl Default for MorphConfig {

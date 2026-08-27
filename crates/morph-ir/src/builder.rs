@@ -38,6 +38,12 @@ impl IRBuilder {
             })
         }).collect();
         let wc = source.window_config.as_ref();
+        // Collect premain functions (inner functions like doLogin, logout) from all components
+        let premain: Vec<String> = source.components.iter().flat_map(|c| {
+            c.inner_functions.iter().map(|f| f.source.clone()).chain(
+                c.consts.iter().map(|cst| format!("auto {} = {};", cst.name, cst.rhs))
+            )
+        }).collect();
         let mut window = IRWindow {
             window_id: "w0".into(),
             title: wc.map(|w| w.title.clone()).unwrap_or_else(|| "Morph App".into()),
@@ -52,7 +58,7 @@ impl IRBuilder {
             renderer: "flash".into(),
             nodes: vec![],
             startup_logs: source.console_logs.clone(),
-            premain_functions: vec![],
+            premain_functions: premain,
             extra_headers: vec![],
             state_vars: all_state,
             effect_decls: all_effects,

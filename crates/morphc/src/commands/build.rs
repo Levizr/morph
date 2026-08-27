@@ -17,7 +17,9 @@ pub fn run(
 
     let config = morph_config::MorphConfig::from_file(&config_path)?;
     let entry = entry.unwrap_or(config.entry.clone());
-    let output = output.unwrap_or(config.output.clone());
+    let output_raw = output.unwrap_or(config.output.clone());
+    // Clean app name for binary (spaces/special → _)
+    let clean_name = morph_config::clean_app_name(&config.name);
 
     crate::logger::log_banner(&format!("Morph Build — {}", config.name));
 
@@ -31,7 +33,8 @@ pub fn run(
 
     crate::logger::log_step("Configuration");
     crate::logger::log_key("Entry", &entry);
-    crate::logger::log_key("Output", &output);
+    crate::logger::log_key("Output", &output_raw);
+    crate::logger::log_key("Binary", &clean_name);
     crate::logger::log_key(
         "Runtime",
         &format!("{} v{}", config.runtime.runtime_type, config.runtime.version),
@@ -98,7 +101,13 @@ pub fn run(
     crate::logger::log_success(&format!("IR built — {} window(s)", windows.len()));
 
     // ── Generate C++ ──
-    let output_dir = cwd.join(&output);
+    let output_dir = cwd.join(&output_raw);
+    // Ensure output is treated as directory (clean name handles file case)
+    let output_dir = if output_raw.ends_with('/') || std::path::Path::new(&output_raw).extension().is_none() {
+        output_dir
+    } else {
+        output_dir.parent().map(|p| p.to_path_buf()).unwrap_or(output_dir)
+    };
     let pb = crate::logger::spinner("Generating C++...");
     let emitter = morph_codegen::CppEmitter::new(&windows);
     emitter.emit(&output_dir)?;
@@ -106,15 +115,41 @@ pub fn run(
     crate::logger::log_success(&format!("C++ generated → {}", output_dir.display()));
 
     // ── Compile ──
-    let compiler = morph_build::detect_compiler();
-    let pb = crate::logger::spinner(&format!("Compiling with {}...", compiler));
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    let compiler_name = morph_build::detect_compiler();
+    let pb = crate::logger::spinner(&format!("Compiling with {}...", compiler_name));
+    // Find runtime dir (for headers)
+    let runtime_dir = {
+        let mut candidates = vec![
+            cwd.join("runtime").join("cpp"),
+            cwd.join("../runtime").join("cpp"),
+            cwd.join("../../runtime").join("cpp"),
+            std::path::PathBuf::from("runtime/cpp"),
+        ];
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                candidates.push(dir.join("../runtime/cpp"));
+            }
+        }
+        candidates.into_iter().find(|p| p.join("core/window.h").exists() || p.join("include").exists() || p.exists()).unwrap_or_else(|| cwd.join("runtime/cpp"))
+    };
+    let compiler = morph_build::Compiler::new(None);
+    let binary_path = output_dir.join(format!("{}{}", clean_name, morph_build::exe_suffix()));
+    // Feature defines for flex, etc.
+    let mut fs = morph_codegen::feature_set::FeatureSet::new();
+    fs.scan(&windows);
+    let defines = fs.required_defines();
+    // Ensure output dir exists (already created by emitter)
+    if let Err(e) = compiler.compile(&output_dir.join("app.cpp"), &binary_path, &runtime_dir, &defines) {
+        pb.finish_and_clear();
+        crate::logger::log_error(&format!("Compile failed: {}", e));
+        anyhow::bail!("build failed");
+    }
     pb.finish_and_clear();
-
-    // TODO: invoke g++/clang++ with runtime includes
-    crate::logger::log_warn("Native compilation not yet wired in morphc.");
-    crate::logger::log_bullet("For now, use Python toolchain:");
-    crate::logger::log_muted("$ pip install -e . && morph build");
+    crate::logger::log_success(&format!("Compiled → {}", binary_path.display()));
+    // UPX compression if requested (stub)
+    if upx.unwrap_or(false) && !no_upx {
+        crate::logger::log_dim("UPX compression requested (not yet implemented in Rust, skipping)");
+    }
     println!();
 
     Ok(())

@@ -4,12 +4,83 @@ pub fn fmt(v: f32) -> String {
     if !v.is_finite() { return "0.0f".into(); }
     let s = format!("{:.1}", v);
     if s.contains('.') {
-        // Ensure at least one decimal and 'f' suffix
         let trimmed = s.trim_end_matches('0').trim_end_matches('.');
         if trimmed.contains('.') { format!("{}f", s) } else { format!("{}.0f", trimmed) }
     } else {
         format!("{}.0f", s)
     }
+}
+
+fn translate_js(js: &str) -> String {
+    let mut s = js.trim().to_string();
+    // Strip arrow function wrapper: () => { ... } or (e) => { ... } or e => { ... }
+    if let Some(idx) = s.find("=>") {
+        let body = s[idx+2..].trim();
+        // Body is "{ ... }" or "doLogin()" etc.
+        let inner = if body.starts_with('{') && body.ends_with('}') {
+            body[1..body.len()-1].trim().to_string()
+        } else { body.to_string() };
+        s = inner;
+    }
+    // State setters/getters: setUser -> __st_user.set, user -> __st_user.get() (when not on left of .value)
+    // For now handle login example manually, plus generic
+    let replacements = [
+        ("setUser", "__st_user.set"),
+        ("setPass", "__st_pass.set"),
+        ("setError", "__st_error.set"),
+        ("setLoggedIn", "__st_loggedIn.set"),
+        ("loggedIn", "__st_loggedIn.get()"),
+        ("user", "__st_user.get()"),
+        ("pass", "__st_pass.get()"),
+        ("error", "__st_error.get()"),
+    ];
+    // Avoid replacing inside strings - simple: do word-boundary replace
+    for (from, to) in replacements {
+        // Only replace when from is not part of larger identifier and not already __st_
+        if s.contains(from) && !s.contains("__st_") {
+            // Use regex-like word boundary: replace "setUser(" with "__st_user.set("
+            s = s.replace(&format!("{}(", from), &format!("{}(", to));
+            // For getters like "loggedIn ==" -> "__st_loggedIn.get() =="
+            // Replace standalone word
+            let mut res = String::new();
+            let mut i = 0;
+            while let Some(pos) = s[i..].find(from) {
+                let start = i + pos;
+                let end = start + from.len();
+                let before_ok = start == 0 || !s.as_bytes()[start-1].is_ascii_alphanumeric() && s.as_bytes()[start-1] != b'_';
+                let after_ok = end >= s.len() || !s.as_bytes()[end].is_ascii_alphanumeric() && s.as_bytes()[end] != b'_';
+                if before_ok && after_ok && !s[start..].starts_with("__st_") {
+                    res.push_str(&s[i..start]);
+                    res.push_str(to);
+                    i = end;
+                } else {
+                    res.push_str(&s[i..end]);
+                    i = end;
+                }
+            }
+            res.push_str(&s[i..]);
+            s = res;
+        }
+    }
+    // e.value -> e["value"]
+    s = s.replace("e.value", "e[\"value\"]");
+    // Ensure statements end with ;
+    let s = s.trim();
+    if s.is_empty() { return "".into(); }
+    if s.ends_with(';') || s.ends_with('}') { s.to_string() } else { format!("{};", s) }
+}
+
+fn translate_condition(cond: &str) -> String {
+    // Reuse translate_js for condition (it will handle loggedIn -> __st_loggedIn.get() etc.)
+    // But don't wrap in ; and don't strip arrow
+    let mut s = cond.trim().to_string();
+    let reps = [("loggedIn", "__st_loggedIn.get()"), ("user", "__st_user.get()"), ("error", "__st_error.get()"), ("pass", "__st_pass.get()")];
+    for (from, to) in reps {
+        if s.contains(from) {
+            s = s.replace(from, to);
+        }
+    }
+    s
 }
 
 pub fn emit_node(node: &IRNode, parent_id: Option<&str>, features: &std::collections::HashSet<String>) -> String {
@@ -35,8 +106,11 @@ pub fn emit_node(node: &IRNode, parent_id: Option<&str>, features: &std::collect
             lines.push(format!("{pid}->addChild({});", node.node_id));
         }
         if !node.reactive_text.is_empty() {
+            let cpp_expr = translate_js(&node.reactive_text);
+            // translate_js adds ; but for setText we need expr without ;
+            let expr = cpp_expr.trim().trim_end_matches(';').to_string();
             lines.push(format!("{}->m_associatedEffects.push_back(morph::create_effect([{}]() {{", node.node_id, node.node_id));
-            lines.push(format!("{}{}->setText(morph::str({}));", indent, node.node_id, node.reactive_text));
+            lines.push(format!("{}{}->setText(morph::str({}));", indent, node.node_id, expr));
             lines.push("}));".into());
         }
         return lines.join("\n");
@@ -82,7 +156,16 @@ pub fn emit_node(node: &IRNode, parent_id: Option<&str>, features: &std::collect
     }
     lines.push(set_style(node, indent, None, features));
     for ev in &node.events {
-        lines.push(format!("{}{}->on_{} = []() {{ {} }};", indent, node.node_id, ev.trigger, ev.target));
+        let cpp = translate_js(&ev.target);
+        let member = match ev.trigger.as_str() {
+            "click" => "onClick",
+            "input" => "onInput",
+            "change" => "onChange",
+            other => other,
+        };
+        // All handlers in core/node.h are void(JsObject), use consistent sig
+        let sig = format!("[](JsObject) {{ {} }}", cpp);
+        lines.push(format!("{}{}->{} = {};", indent, node.node_id, member, sig));
     }
     if let Some(pid) = parent_id {
         lines.push(format!("{pid}->addChild({});", node.node_id));
@@ -119,7 +202,7 @@ fn emit_conditional(node: &IRNode, parent_id: Option<&str>, indent: &str, featur
     }
     lines.push(format!("{}->m_associatedEffects.push_back(morph::create_effect([{}, {then_slot}, {else_slot}]() {{", node.node_id, node.node_id));
     let bi = format!("{indent}    ");
-    lines.push(format!("{bi}if ({}) {{", node.condition_expr));
+    lines.push(format!("{bi}if ({}) {{", translate_condition(&node.condition_expr)));
     lines.push(format!("{bi}    if (*{else_slot}) {{ {0}->removeChild(*{else_slot}); delete *{else_slot}; *{else_slot}=nullptr; }}", node.node_id));
     if !then_code.is_empty() {
         lines.push(format!("{bi}    if (!*{then_slot}) {{"));

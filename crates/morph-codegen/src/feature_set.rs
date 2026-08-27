@@ -119,6 +119,10 @@ impl FeatureSet {
         if self.features.contains("button") { h.push("ui/button.h".into()); }
         if self.features.contains("input") { h.push("ui/input.h".into()); }
         if self.features.contains("event") { h.push("core/event.h".into()); }
+        if self.features.contains("event") || self.features.contains("input") {
+            h.push("reactivity/task.h".into());
+            h.push("reactivity/signal.h".into());
+        }
         if self.features.contains("image") { h.push("ui/image.h".into()); }
         if self.features.contains("list") { h.push("ui/morph_list.h".into()); }
         h

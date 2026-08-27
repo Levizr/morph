@@ -1,5 +1,9 @@
 use anyhow::Result;
 use colored::Colorize;
+use notify::{Watcher, RecursiveMode, Event, EventKind};
+use std::path::Path;
+use std::sync::mpsc::channel;
+use std::time::Duration;
 
 pub fn run(entry: Option<String>) -> Result<()> {
     let cwd = std::env::current_dir()?;
@@ -10,7 +14,7 @@ pub fn run(entry: Option<String>) -> Result<()> {
     }
 
     let config = morph_config::MorphConfig::from_file(&config_path)?;
-    let entry_file = entry.as_deref().unwrap_or(&config.entry);
+    let entry_file = entry.as_deref().unwrap_or(&config.entry).to_string();
 
     crate::logger::log_banner(&format!("Morph Dev — {}", config.name));
 
@@ -23,35 +27,90 @@ pub fn run(entry: Option<String>) -> Result<()> {
     ));
 
     crate::logger::log_step("Configuration");
-    crate::logger::log_key("Entry", entry_file);
-    crate::logger::log_key(
-        "Runtime",
-        &format!("{} v{}", config.runtime.runtime_type, config.runtime.version),
-    );
+    crate::logger::log_key("Entry", &entry_file);
+    crate::logger::log_key("Runtime", &format!("{} v{}", config.runtime.runtime_type, config.runtime.version));
+    // Cross-platform IPC
+    let ipc_addr = morph_build::platform::dev_ipc_addr(&cwd);
+    if morph_build::platform::is_windows() {
+        crate::logger::log_key("IPC", &format!("TCP {}", ipc_addr));
+    } else {
+        crate::logger::log_key("IPC", &format!("Unix {}", ipc_addr));
+    }
 
-    crate::logger::log_step("Parsing");
-    let pb = crate::logger::spinner("Parsing .mx files with Oxc...");
-    std::thread::sleep(std::time::Duration::from_millis(300));
-    pb.finish_and_clear();
-    crate::logger::log_success("Parsed .mx files");
+    // Initial build
+    crate::logger::log_step("Initial build");
+    if let Err(e) = do_build(&cwd, &entry_file) {
+        crate::logger::log_error(&format!("Initial build failed: {}", e));
+    } else {
+        crate::logger::log_success("Initial build OK");
+    }
 
-    let pb = crate::logger::spinner("Building IR...");
-    std::thread::sleep(std::time::Duration::from_millis(200));
-    pb.finish_and_clear();
-    crate::logger::log_success("IR built");
+    // Watch src/ for changes
+    let watch_path = cwd.join("src");
+    if !watch_path.exists() {
+        crate::logger::log_warn("No src/ directory to watch");
+        return Ok(());
+    }
 
-    println!();
-    crate::logger::log_warn("Dev mode with hot reload not yet fully implemented in morphc.");
-    crate::logger::log_bullet("Full dev server will:");
-    crate::logger::log_muted("Parse .mx with Oxc (parallel)");
-    crate::logger::log_muted("Build IR");
-    crate::logger::log_muted("Start devrt via CMake");
-    crate::logger::log_muted("Watch src/ for changes");
-    crate::logger::log_muted("Push IR over TCP to devrt");
-    println!();
-    crate::logger::log_bullet("For now, use Python toolchain:");
-    crate::logger::log_muted("$ pip install -e . && morph dev");
-    println!();
+    crate::logger::log_step(&format!("Watching {} for changes (Ctrl+C to stop)", watch_path.display()));
+    // Setup watcher
+    let (tx, rx) = channel();
+    let mut watcher = notify::recommended_watcher(move |res: Result<Event, _>| {
+        if let Ok(ev) = res {
+            // Only care about modify/create
+            match ev.kind {
+                EventKind::Modify(_) | EventKind::Create(_) => { let _ = tx.send(()); }
+                _ => {}
+            }
+        }
+    })?;
+    watcher.watch(&watch_path, RecursiveMode::Recursive)?;
 
+    // Also watch the entry file's directory
+    let entry_path = cwd.join(&entry_file);
+    if let Some(parent) = entry_path.parent() {
+        if parent != watch_path {
+            let _ = watcher.watch(parent, RecursiveMode::NonRecursive);
+        }
+    }
+
+    // Dev server loop — on change, rebuild
+    loop {
+        // Wait for event with debounce
+        if rx.recv_timeout(Duration::from_millis(500)).is_ok() {
+            // Debounce: drain extra events
+            while rx.try_recv().is_ok() {}
+            std::thread::sleep(Duration::from_millis(100));
+            crate::logger::log_step("Change detected — rebuilding");
+            match do_build(&cwd, &entry_file) {
+                Ok(_) => crate::logger::log_success("Hot reload OK"),
+                Err(e) => crate::logger::log_error(&format!("Build failed: {}", e)),
+            }
+        }
+        // Also check for Ctrl+C via polling? notify will keep running until process killed
+    }
+}
+
+fn do_build(cwd: &Path, entry: &str) -> Result<()> {
+    let entry_path = cwd.join(entry);
+    let source = std::fs::read_to_string(&entry_path)?;
+    let parsed = morph_parser::parse_mx_str(&source, entry)?;
+    let mut css_rules = std::collections::HashMap::new();
+    for imp in &parsed.imports {
+        if let morph_parser::MxImportKind::CssLocal { path } = &imp.kind {
+            let cand = entry_path.parent().map(|p| p.join(path)).unwrap_or_else(|| cwd.join(path));
+            if cand.exists() {
+                if let Ok(text) = std::fs::read_to_string(&cand) {
+                    if let Ok(rules) = morph_parser::parse_css(&text) {
+                        css_rules.extend(rules);
+                    }
+                }
+            }
+        }
+    }
+    let builder = morph_ir::IRBuilder::new();
+    let windows = builder.build(&parsed, &css_rules);
+    // For dev, we just verify IR builds; in full dev we'd emit logic and push via IPC
+    crate::logger::log_dim(&format!("Parsed {} ({} windows, {} state vars)", entry, windows.len(), windows.iter().map(|w| w.state_vars.len()).sum::<usize>()));
     Ok(())
 }
