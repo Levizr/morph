@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use crate::ast_types::{JsxNode, LintError, MxSource};
 
@@ -13,8 +13,29 @@ fn offset_to_line_col(source: &str, offset: u32) -> (usize, usize) {
     (line, offset.saturating_sub(last) + 1)
 }
 
+fn build_line_offsets(source: &str) -> Vec<usize> {
+    let mut offsets = vec![0];
+    for (i, ch) in source.char_indices() {
+        if ch == '\n' { offsets.push(i + 1); }
+    }
+    offsets
+}
+
+fn offset_to_line_col_fast(offsets: &[usize], offset: u32) -> (usize, usize) {
+    let off = offset as usize;
+    // binary search for line
+    let line = match offsets.binary_search(&off) {
+        Ok(idx) => idx + 1,
+        Err(idx) => idx,
+    };
+    let line_start = offsets[line.saturating_sub(1)];
+    let col = off.saturating_sub(line_start) + 1;
+    (line, col)
+}
+
 /// Check a .mx file for parse + semantic errors (with caching support via caller)
 pub fn check(source: &str, file_path: &str) -> Vec<LintError> {
+    let offsets = build_line_offsets(source);
     let allocator = oxc_allocator::Allocator::default();
     let source_type = oxc_span::SourceType::from_path("file.tsx").unwrap();
     let ret = oxc_parser::Parser::new(&allocator, source, source_type).parse();
@@ -22,7 +43,7 @@ pub fn check(source: &str, file_path: &str) -> Vec<LintError> {
 
     for diag in &ret.diagnostics {
         let span = diag.labels.first().map(|l| l.span()).unwrap_or(oxc_span::Span::new(0, 0));
-        let (line, col) = offset_to_line_col(source, span.start);
+        let (line, col) = offset_to_line_col_fast(&offsets, span.start);
         errors.push(LintError {
             severity: "error".into(),
             code: "parse-error".into(),
@@ -97,23 +118,25 @@ static TAG_PROPS: &[(&str, &[&str])] = &[
     ("morph-window", &["title","width","height","minWidth","maxWidth","minHeight","maxHeight"]),
 ];
 
-fn supported_tags_set() -> HashSet<&'static str> {
-    SUPPORTED_TAGS.iter().copied().collect()
+#[inline]
+fn is_supported_tag(tag: &str) -> bool {
+    SUPPORTED_TAGS.contains(&tag)
 }
 
+#[inline]
 fn is_component_tag(tag: &str) -> bool {
     tag.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
 }
 
-fn allowed_props_for(tag: &str) -> HashSet<String> {
-    let mut set: HashSet<String> = GLOBAL_PROPS.iter().map(|s| s.to_string()).collect();
-    for p in EVENT_PROPS { set.insert(p.to_string()); }
+#[inline]
+fn is_allowed_prop(tag: &str, prop: &str) -> bool {
+    if GLOBAL_PROPS.contains(&prop) { return true; }
+    if EVENT_PROPS.contains(&prop) { return true; }
+    if prop.starts_with("data-") || prop.starts_with("aria-") { return true; }
     for (t, props) in TAG_PROPS {
-        if *t == tag {
-            for p in *props { set.insert(p.to_string()); }
-        }
+        if *t == tag && props.contains(&prop) { return true; }
     }
-    set
+    false
 }
 
 static UNSUPPORTED_GLOBALS: &[&str] = &[
@@ -147,7 +170,6 @@ pub fn lint(source: &MxSource, content: &str, file_path: &str) -> Vec<LintError>
 
     // ── window checks ──
     if source.window_config.is_none() {
-        // Only warn if component exists but no window config
         if !source.components.is_empty() {
             let has_morph_window = source.components.iter().any(|c| jsx_has_tag(&c.jsx, "morph-window"));
             if !has_morph_window {
@@ -170,10 +192,10 @@ pub fn lint(source: &MxSource, content: &str, file_path: &str) -> Vec<LintError>
 
     // ── JS globals scan (simple substring search with line info) ──
     for (idx, line) in content.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("//") || trimmed.starts_with("/*") { continue; }
         for g in UNSUPPORTED_GLOBALS {
             if line.contains(&format!("{g}.")) || line.contains(&format!("{g}[")) || line.contains(&format!(" {g} ")) {
-                // Avoid false positives inside strings/comments? simple check
-                if line.trim().starts_with("//") || line.trim().starts_with("/*") { continue; }
                 let col = line.find(g).unwrap_or(0) + 1;
                 out.push(LintError {
                     severity: "error".into(),
@@ -209,11 +231,11 @@ fn jsx_has_tag(node: &JsxNode, target: &str) -> bool {
     }
 }
 
-fn lint_jsx(node: &JsxNode, content: &str, file_path: &str, out: &mut Vec<LintError>) {
+fn lint_jsx(node: &JsxNode, _content: &str, file_path: &str, out: &mut Vec<LintError>) {
     match node {
         JsxNode::Element { tag, props, children, line, col, .. } => {
             // ── mx-tag ──
-            if !supported_tags_set().contains(tag.as_str()) && !is_component_tag(tag) && !tag.starts_with("__") {
+            if !is_supported_tag(tag) && !is_component_tag(tag) && !tag.starts_with("__") {
                 if STUB_TAGS.contains(&tag.as_str()) {
                     out.push(LintError {
                         severity: "warning".into(),
@@ -237,7 +259,6 @@ fn lint_jsx(node: &JsxNode, content: &str, file_path: &str, out: &mut Vec<LintEr
             }
 
             // ── mx-prop ──
-            let allowed = allowed_props_for(tag);
             for (prop, _) in props {
                 if prop == "class" {
                     out.push(LintError {
@@ -250,51 +271,43 @@ fn lint_jsx(node: &JsxNode, content: &str, file_path: &str, out: &mut Vec<LintEr
                     });
                     continue;
                 }
-                if prop.starts_with("on") && !allowed.contains(prop) {
-                    // Unknown event
-                    out.push(LintError {
-                        severity: "warning".into(),
-                        code: "mx-prop".into(),
-                        message: format!("Unknown prop `{prop}` on <{tag}>"),
-                        suggestion: Some(format!("Allowed props: {}", allowed.iter().cloned().collect::<Vec<_>>().join(", "))),
-                        file_path: file_path.into(),
-                        line: *line, col: *col,
-                    });
-                } else if !allowed.contains(prop) && !prop.starts_with("data-") && !prop.starts_with("aria-") {
-                    // Only error for clearly invalid props on known tags
-                    if SUPPORTED_TAGS.contains(&tag.as_str()) && !is_component_tag(tag) {
-                        // Don't spam for every custom prop on div — only if it's likely typo
-                        if prop.len() < 20 {
-                            if let Some(s) = suggest_prop(prop, &allowed) {
-                                out.push(LintError {
-                                    severity: "warning".into(),
-                                    code: "mx-prop".into(),
-                                    message: format!("Unknown prop `{prop}` on <{tag}>"),
-                                    suggestion: Some(format!("Did you mean `{s}`?")),
-                                    file_path: file_path.into(),
-                                    line: *line, col: *col,
-                                });
-                            }
+                if !is_allowed_prop(tag, prop) {
+                    if prop.starts_with("on") {
+                        out.push(LintError {
+                            severity: "warning".into(),
+                            code: "mx-prop".into(),
+                            message: format!("Unknown prop `{prop}` on <{tag}>"),
+                            suggestion: Some("Check event name (onClick, onInput, etc.)".into()),
+                            file_path: file_path.into(),
+                            line: *line, col: *col,
+                        });
+                    } else if SUPPORTED_TAGS.contains(&tag.as_str()) && !is_component_tag(tag) && prop.len() < 20 {
+                        if let Some(s) = suggest_prop_for_tag(prop, tag) {
+                            out.push(LintError {
+                                severity: "warning".into(),
+                                code: "mx-prop".into(),
+                                message: format!("Unknown prop `{prop}` on <{tag}>"),
+                                suggestion: Some(format!("Did you mean `{s}`?")),
+                                file_path: file_path.into(),
+                                line: *line, col: *col,
+                            });
                         }
                     }
                 }
             }
 
-            // ── mx-list-key ──
-            // Handled in List node itself
-
             for child in children {
-                lint_jsx(child, content, file_path, out);
+                lint_jsx(child, _content, file_path, out);
             }
         }
         JsxNode::Fragment { children, .. } => {
-            for child in children { lint_jsx(child, content, file_path, out); }
+            for child in children { lint_jsx(child, _content, file_path, out); }
         }
         JsxNode::Conditional { then_branch, else_branch, .. } => {
-            for c in then_branch { lint_jsx(c, content, file_path, out); }
-            for c in else_branch { lint_jsx(c, content, file_path, out); }
+            for c in then_branch { lint_jsx(c, _content, file_path, out); }
+            for c in else_branch { lint_jsx(c, _content, file_path, out); }
         }
-        JsxNode::List { array_expr: _, key_expr, item_template, line, col, .. } => {
+        JsxNode::List { key_expr, item_template, line, col, .. } => {
             if key_expr.is_empty() {
                 out.push(LintError {
                     severity: "warning".into(),
@@ -305,22 +318,25 @@ fn lint_jsx(node: &JsxNode, content: &str, file_path: &str, out: &mut Vec<LintEr
                     line: *line, col: *col,
                 });
             }
-            lint_jsx(item_template, content, file_path, out);
+            lint_jsx(item_template, _content, file_path, out);
         }
         _ => {}
     }
 }
 
-fn suggest_prop(input: &str, allowed: &HashSet<String>) -> Option<String> {
+fn suggest_prop_for_tag(input: &str, tag: &str) -> Option<String> {
     let mut best: Option<(String, f64)> = None;
-    for prop in allowed {
+    let candidates = GLOBAL_PROPS.iter().copied().chain(EVENT_PROPS.iter().copied()).chain(
+        TAG_PROPS.iter().filter(|(t,_)| *t==tag).flat_map(|(_, props)| props.iter().copied())
+    );
+    for prop in candidates {
         let dist = strsim::levenshtein(input, prop) as f64;
         let max_len = input.len().max(prop.len()) as f64;
         let sim = 1.0 - (dist / max_len);
         if sim > 0.6 {
             if let Some((_, best_sim)) = &best {
-                if sim > *best_sim { best = Some((prop.clone(), sim)); }
-            } else { best = Some((prop.clone(), sim)); }
+                if sim > *best_sim { best = Some((prop.to_string(), sim)); }
+            } else { best = Some((prop.to_string(), sim)); }
         }
     }
     best.map(|(s,_)| s)

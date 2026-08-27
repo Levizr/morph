@@ -116,6 +116,14 @@ fn binding_array_elements(bp: &BindingPattern) -> Option<Vec<Option<String>>> {
     }
 }
 
+fn build_line_offsets(source: &str) -> Vec<usize> {
+    let mut offs = vec![0];
+    for (i, ch) in source.char_indices() {
+        if ch == '\n' { offs.push(i + 1); }
+    }
+    offs
+}
+
 fn offset_to_line_col(source: &str, offset: u32) -> (usize, usize) {
     let offset = offset as usize;
     let mut line = 1usize;
@@ -128,10 +136,22 @@ fn offset_to_line_col(source: &str, offset: u32) -> (usize, usize) {
     (line, col)
 }
 
+#[inline]
+fn offset_to_line_col_fast(offsets: &[usize], offset: u32) -> (usize, usize) {
+    let off = offset as usize;
+    let line = match offsets.binary_search(&off) {
+        Ok(idx) => idx + 1,
+        Err(idx) => idx,
+    };
+    let line_start = offsets[line.saturating_sub(1)];
+    (line, off.saturating_sub(line_start) + 1)
+}
+
 // ── Walker ─────────────────────────────────────────────────────────────────
 
 pub struct MxWalker<'src> {
     source: &'src str,
+    line_offsets: Vec<usize>,
     pub imports: Vec<MxImport>,
     pub window_config: Option<WindowConfig>,
     pub components: Vec<MxComponent>,
@@ -148,6 +168,7 @@ impl<'src> MxWalker<'src> {
     pub fn new(source: &'src str) -> Self {
         Self {
             source,
+            line_offsets: build_line_offsets(source),
             imports: Vec::new(),
             window_config: None,
             components: Vec::new(),
@@ -163,6 +184,11 @@ impl<'src> MxWalker<'src> {
 
     fn span_text(&self, span: Span) -> &'src str {
         span.source_text(self.source)
+    }
+
+    #[inline]
+    fn line_col(&self, offset: u32) -> (usize, usize) {
+        offset_to_line_col_fast(&self.line_offsets, offset)
     }
 
     // ── JSX helpers ────────────────────────────────────────────────────────
@@ -278,7 +304,7 @@ impl<'src> MxWalker<'src> {
         let props = self.jsx_props(&elem.opening_element);
         let children = self.parse_jsx_children(&elem.children);
         let self_closing = elem.closing_element.is_none();
-        let (line, col) = offset_to_line_col(self.source, elem.span.start);
+        let (line, col) = self.line_col(elem.span.start);
         JsxNode::Element { tag, props, children, self_closing, line, col }
     }
 
@@ -294,7 +320,7 @@ impl<'src> MxWalker<'src> {
                 JSXChild::Element(e) => result.push(self.parse_jsx_element(e)),
                 JSXChild::Fragment(f) => {
                     let children = self.parse_jsx_children(&f.children);
-                    let (line, col) = offset_to_line_col(self.source, f.span.start);
+                    let (line, col) = self.line_col(f.span.start);
                     result.push(JsxNode::Fragment { props: HashMap::new(), children, line, col });
                 }
                 JSXChild::ExpressionContainer(ec) => {
@@ -305,7 +331,7 @@ impl<'src> MxWalker<'src> {
                                 if let Some(jsx) = self.try_jsx_from_expr(&logical.right) {
                                     let cond = self.span_text(logical.left.span()).to_string();
                                     if logical.operator == oxc_ast::ast::LogicalOperator::And {
-                                        let (line, col) = offset_to_line_col(self.source, ec.span.start);
+                                        let (line, col) = self.line_col(ec.span.start);
                                         result.push(JsxNode::Conditional {
                                             condition: cond,
                                             then_branch: vec![jsx],
@@ -322,7 +348,7 @@ impl<'src> MxWalker<'src> {
                                 let then_branch = self.try_jsx_from_expr(&cond.consequent).map(|n| vec![n]).unwrap_or_default();
                                 let else_branch = self.try_jsx_from_expr(&cond.alternate).map(|n| vec![n]).unwrap_or_default();
                                 if !then_branch.is_empty() || !else_branch.is_empty() {
-                                    let (line, col) = offset_to_line_col(self.source, ec.span.start);
+                                    let (line, col) = self.line_col(ec.span.start);
                                     result.push(JsxNode::Conditional { condition, then_branch, else_branch, line, col });
                                 } else {
                                     result.push(JsxNode::Expression(self.span_text(ec.span).trim_matches(|c| c == '{' || c == '}').trim().to_string()));
@@ -364,7 +390,7 @@ impl<'src> MxWalker<'src> {
             Expression::JSXElement(e) => Some(self.parse_jsx_element(e)),
             Expression::JSXFragment(f) => {
                 let children = self.parse_jsx_children(&f.children);
-                let (line, col) = offset_to_line_col(self.source, f.span.start);
+                let (line, col) = self.line_col(f.span.start);
                 Some(JsxNode::Fragment { props: HashMap::new(), children, line, col })
             }
             Expression::ParenthesizedExpression(pe) => self.try_jsx_from_expr(&pe.expression),
@@ -408,7 +434,7 @@ impl<'src> MxWalker<'src> {
             }
         }
 
-        let (line, col) = offset_to_line_col(self.source, call.span.start);
+        let (line, col) = self.line_col(call.span.start);
         Some(JsxNode::List {
             array_expr: array_src,
             item_param: params.first().cloned().unwrap_or_else(|| "item".to_string()),
