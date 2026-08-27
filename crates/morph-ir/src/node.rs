@@ -80,6 +80,7 @@ pub struct IRWindow {
     pub min_height: Option<u32>,
     pub max_height: Option<u32>,
     pub modal: bool,
+    pub renderer: String,
     pub nodes: Vec<IRNode>,
     pub startup_logs: Vec<String>,
     pub premain_functions: Vec<String>,

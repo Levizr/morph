@@ -49,6 +49,7 @@ impl IRBuilder {
             min_height: wc.and_then(|w| w.min_height),
             max_height: wc.and_then(|w| w.max_height),
             modal: wc.map(|w| w.modal).unwrap_or(false),
+            renderer: "flash".into(),
             nodes: vec![],
             startup_logs: source.console_logs.clone(),
             premain_functions: vec![],
