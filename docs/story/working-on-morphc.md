@@ -228,8 +228,8 @@ The Python version was never meant to ship to end users. It was the prototype th
 - [x] Phase 2: Parser (Oxc + lightningcss)
 - [x] Phase 3: AST + IR (style registry, Tailwind, IRBuilder — verified vs Python)
 - [x] Phase 4: Codegen (Tera templates, feature flags, node/logic emitters)
-- [ ] Phase 5: Build system
-- [ ] Phase 6: Dev mode
+- [x] Phase 5: Build system (platform, g++/clang++ cross-platform, output .morph/output/<clean>)
+- [ ] Phase 6: Dev mode (watch + IPC Unix/TCP — stub, hot reload next)
 - [ ] Phase 7: Polish (check, doctor, CI/CD, distribution)
 
 ## Full implementation plan

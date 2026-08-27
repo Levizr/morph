@@ -705,6 +705,12 @@ echo "morphc installed! Run 'morph init' to get started."
 - [x] Port event/reactive logic emission
 
 ### Phase 5: Build System (Week 9-10)
+- [x] Implement `morph-build` (compiler invocation)
+- [x] Port platform detection
+- [x] Implement `morph build` and `morph run` (output `.morph/output/<clean>`)
+- [ ] Implement `morph dev` with hot reload — stub with notify+IPC
+
+### Phase 5: Build System (Week 9-10)
 - [ ] Implement `morph-build` (compiler invocation)
 - [ ] Port platform detection
 - [ ] Implement `morph build` and `morph run`
