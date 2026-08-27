@@ -679,28 +679,28 @@ echo "morphc installed! Run 'morph init' to get started."
 ## Implementation Phases
 
 ### Phase 1: Foundation (Week 1-2)
-- [ ] Set up Cargo workspace
-- [ ] Implement `morphc` CLI with clap
-- [ ] Implement `morph-config` (config + lock file parsing)
-- [ ] Implement global cache system (`~/.morph/`)
-- [ ] Implement `morph init` with interactive prompt
-- [ ] Implement `morph install` (download + extract + cache + link)
+- [x] Set up Cargo workspace
+- [x] Implement `morphc` CLI with clap
+- [x] Implement `morph-config` (config + lock file parsing)
+- [x] Implement global cache system (`~/.morph/`)
+- [x] Implement `morph init` with interactive prompt
+- [x] Implement `morph install` (download + extract + cache + link)
 
 ### Phase 2: Parser (Week 3-4)
-- [ ] Implement `morph-parser` with Oxc (JSX/TSX)
-- [ ] Implement `morph-parser` with lightningcss (CSS)
-- [ ] JSX walking and component extraction
-- [ ] CSS property parsing
+- [x] Implement `morph-parser` with Oxc (JSX/TSX)
+- [x] Implement `morph-parser` with lightningcss (CSS)
+- [x] JSX walking and component extraction
+- [x] CSS property parsing
 
 ### Phase 3: AST + IR (Week 5-6)
-- [ ] Port Python AST nodes to Rust (`morph-ir`)
-- [ ] Port IR nodes (IRNode, IRWindow, IRPage)
-- [ ] Port style system (CSS property registry)
-- [ ] Port Tailwind resolver
+- [x] Port Python AST nodes to Rust (`morph-ir`)
+- [x] Port IR nodes (IRNode, IRWindow, IRPage)
+- [x] Port style system (CSS property registry)
+- [x] Port Tailwind resolver
 
 ### Phase 4: Codegen (Week 7-8)
-- [ ] Port Jinja2 templates to Tera
-- [ ] Implement C++ code generation
+- [ ] Port Jinja2 templates to Tera — in progress
+- [ ] Implement C++ code generation — in progress (stub with feature flags)
 - [ ] Port feature flag detection
 - [ ] Port event/reactive logic emission
 
