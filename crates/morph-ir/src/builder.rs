@@ -126,7 +126,7 @@ impl IRBuilder {
                 for (i, child) in children.iter().enumerate() {
                     let child_id = format!("{node_id}_{i}");
                     let child_node = self.build_node(child, &child_id, css_rules, depth+1);
-                    if child_node.node_type == "__text__" && child_node.text_content.trim().is_empty() && depth > 0 {
+                    if child_node.node_type == "__text__" && child_node.text_content.trim().is_empty() {
                         continue;
                     }
                     node.children.push(child_node);
