@@ -39,6 +39,16 @@ pub struct IRStyle {
     pub box_sizing: String,
     pub z_index: Option<i32>,
     pub opacity: f32,
+    // ── Scrollbar (feature: scrollbar) ───────────────────────────────
+    pub scrollbar_width: f32,
+    pub scrollbar_track_color: [f32; 4],
+    pub scrollbar_thumb_color: [f32; 4],
+    pub scrollbar_border_radius: f32,
+    // ── Transform (feature: transform) ───────────────────────────────
+    pub transform_ops: Option<Vec<(String, Vec<f32>)>>,
+    pub transform_matrix: Option<[f32; 16]>,
+    pub transform_origin: Option<((f32, bool), (f32, bool))>,
+    pub transform_origin_resolved: Option<(f32, f32)>,
 }
 
 impl IRStyle {
@@ -63,6 +73,10 @@ impl IRStyle {
             text_align: "left".to_string(),
             flex_basis: "auto".to_string(),
             flex_wrap: "nowrap".to_string(),
+            scrollbar_width: 8.0,
+            scrollbar_track_color: [0.85, 0.85, 0.85, 0.4],
+            scrollbar_thumb_color: [0.5, 0.5, 0.5, 0.6],
+            scrollbar_border_radius: 4.0,
             ..Default::default()
         }
     }

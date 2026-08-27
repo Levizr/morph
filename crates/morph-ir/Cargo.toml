@@ -8,3 +8,4 @@ description = "Morph Intermediate Representation"
 anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+morph-parser = { path = "../morph-parser" }

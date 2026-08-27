@@ -1428,6 +1428,7 @@ name = "morph-ir"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "morph-parser",
  "serde",
  "serde_json",
 ]

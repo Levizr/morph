@@ -70,10 +70,30 @@ pub fn run(
     crate::logger::log_key("State vars", &total_state.to_string());
     crate::logger::log_key("Imports", &parsed.imports.len().to_string());
 
-    // ── Build IR ──
+    // ── Build IR (Phase 3: morph-ir builder) ──
     let pb = crate::logger::spinner("Building IR...");
-    std::thread::sleep(std::time::Duration::from_millis(100));
-    let windows = build_ir(&parsed)?;
+    // Collect CSS rules from imports
+    let mut css_rules: std::collections::HashMap<String, morph_parser::CssRule> = std::collections::HashMap::new();
+    for imp in &parsed.imports {
+        if let morph_parser::MxImportKind::CssLocal { path } = &imp.kind {
+            let candidates = [
+                entry_path.parent().map(|p| p.join(path)).unwrap_or_else(|| cwd.join(path)),
+                cwd.join(path),
+            ];
+            for cand in &candidates {
+                if cand.exists() {
+                    if let Ok(text) = std::fs::read_to_string(cand) {
+                        if let Ok(rules) = morph_parser::parse_css(&text) {
+                            css_rules.extend(rules);
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    let builder = morph_ir::IRBuilder::new();
+    let windows = builder.build(&parsed, &css_rules);
     pb.finish_and_clear();
     crate::logger::log_success(&format!("IR built — {} window(s)", windows.len()));
 
