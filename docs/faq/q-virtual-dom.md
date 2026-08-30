@@ -20,7 +20,7 @@ In Morph, a state change flows through three native mechanisms instead of a diff
 
 ### 1. Signals
 
-`morphState` values are signals ([`reactivity/signal.h`](../../runtime/cpp/reactivity/signal.h)). Each signal keeps a list of subscriber effects, and `set()` notifies them directly. `notify_all()` marks each subscribed effect as pending and appends it to a pending queue ([`reactivity/effect.cpp`](../../runtime/cpp/reactivity/effect.cpp)):
+`morphState` values are signals ([`reactivity/signal.h`](https://github.com/Levizir/morph/blob/main/runtime/cpp/reactivity/signal.h)). Each signal keeps a list of subscriber effects, and `set()` notifies them directly. `notify_all()` marks each subscribed effect as pending and appends it to a pending queue ([`reactivity/effect.cpp`](https://github.com/Levizir/morph/blob/main/runtime/cpp/reactivity/effect.cpp)):
 
 ```cpp
 void set(T v) {
@@ -34,7 +34,7 @@ Notice what's *not* here: no tree rebuild, no diff. Only the effects that actual
 
 ### 2. Dirty flags
 
-Each effect that writes the UI marks nodes instead of rebuilding them. Every node carries a set of flags ([`core/node.h`](../../runtime/cpp/core/node.h)):
+Each effect that writes the UI marks nodes instead of rebuilding them. Every node carries a set of flags ([`core/node.h`](https://github.com/Levizir/morph/blob/main/runtime/cpp/core/node.h)):
 
 ```cpp
 enum DirtyFlag : uint8_t {
@@ -49,7 +49,7 @@ enum DirtyFlag : uint8_t {
 
 A style change marks `PaintDirty`; a geometry change marks `LayoutDirty`; any change propagates `SubtreeDirty` up to ancestors. Then the frame only redoes what's flagged:
 
-- **Layout** — `layoutIfNeeded()` skips clean subtrees entirely ([`core/node/node.cpp`](../../runtime/cpp/core/node/node.cpp)) and counts the skips, so you can see how much work was avoided. Dirty nodes relayout; the rest don't move.
+- **Layout** — `layoutIfNeeded()` skips clean subtrees entirely ([`core/node/node.cpp`](https://github.com/Levizir/morph/blob/main/runtime/cpp/core/node/node.cpp)) and counts the skips, so you can see how much work was avoided. Dirty nodes relayout; the rest don't move.
 - **Paint** — only paint-dirty nodes are re-recorded into the flattened draw list.
 
 ### 3. Damage tracking (the render side)
@@ -57,7 +57,7 @@ A style change marks `PaintDirty`; a geometry change marks `LayoutDirty`; any ch
 Downstream of dirty flags, the renderers decide what reaches the screen:
 
 - **flash** — the simple, default renderer: full clear, replay the flattened `RenderFrame`, present. Pixel-correct by construction ([rendering/flash](../rendering/flash.md)).
-- **forge** — a retained compositor that keeps the window's pixels on the GPU and builds a **damage set** of the rectangles that actually changed. It scissor-clears and re-rasterizes only nodes touching the damage, then blits the surface ([`renderers/forge/forge.cpp`](../../runtime/cpp/renderers/forge/forge.cpp)). The same dirty-flag system drives it — `PaintDirty` nodes become damage rects each frame.
+- **forge** — a retained compositor that keeps the window's pixels on the GPU and builds a **damage set** of the rectangles that actually changed. It scissor-clears and re-rasterizes only nodes touching the damage, then blits the surface ([`renderers/forge/forge.cpp`](https://github.com/Levizir/morph/blob/main/runtime/cpp/renderers/forge/forge.cpp)). The same dirty-flag system drives it — `PaintDirty` nodes become damage rects each frame.
 
 Nothing in that chain compares one tree to another, because the tree is never duplicated in the first place. The node you mutate *is* the node that lays out and draws.
 

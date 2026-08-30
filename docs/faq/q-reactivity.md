@@ -32,19 +32,19 @@ Reactivity in Morph is a chain of four native pieces. Each one is a real file yo
 
 ### 1. Signals — `morphState` is a `Signal<T>`
 
-`morphState` compiles down to a `morph::Signal<T>` ([`reactivity/signal.h`](../../runtime/cpp/reactivity/signal.h)). A signal holds a value and a list of subscriber effects. In production builds the signals are declared directly in the generated main ([`codegen/templates/app_main.cpp.tera`](../../crates/morph-codegen/templates/app_main.cpp.tera)); in dev mode they live in a name-keyed `SignalStore` so they survive hot-reload ([`dev/signal_store.h`](../../runtime/cpp/dev/signal_store.h)).
+`morphState` compiles down to a `morph::Signal<T>` ([`reactivity/signal.h`](https://github.com/Levizir/morph/blob/main/runtime/cpp/reactivity/signal.h)). A signal holds a value and a list of subscriber effects. In production builds the signals are declared directly in the generated main ([`codegen/templates/app_main.cpp.tera`](https://github.com/Levizir/morph/blob/main/crates/morph-codegen/templates/app_main.cpp.tera)); in dev mode they live in a name-keyed `SignalStore` so they survive hot-reload ([`dev/signal_store.h`](https://github.com/Levizir/morph/blob/main/runtime/cpp/dev/signal_store.h)).
 
 ### 2. Effects — `morphEffect` is a `create_effect`
 
-Every expression in your JSX and every `morphEffect` body is wrapped in a `create_effect()`. When an effect runs, it sets a **thread-local active context** ([`reactivity/effect.cpp`](../../runtime/cpp/reactivity/effect.cpp)); any signal it reads while that context is set records the effect as a subscriber. That's the "automatic" part — no manual subscribe/unsubscribe calls in your code.
+Every expression in your JSX and every `morphEffect` body is wrapped in a `create_effect()`. When an effect runs, it sets a **thread-local active context** ([`reactivity/effect.cpp`](https://github.com/Levizir/morph/blob/main/runtime/cpp/reactivity/effect.cpp)); any signal it reads while that context is set records the effect as a subscriber. That's the "automatic" part — no manual subscribe/unsubscribe calls in your code.
 
 ### 3. Dirty flags — the tree is marked, not rebuilt
 
-When an effect writes a node, it marks it dirty — `StyleDirty`, `LayoutDirty`, `PaintDirty`, `SubtreeDirty` ([`core/node.h`](../../runtime/cpp/core/node.h)). The next frame only lays out and repaints what's flagged ([`core/node/node.cpp`](../../runtime/cpp/core/node/node.cpp)); clean subtrees are skipped and counted in the frame stats.
+When an effect writes a node, it marks it dirty — `StyleDirty`, `LayoutDirty`, `PaintDirty`, `SubtreeDirty` ([`core/node.h`](https://github.com/Levizir/morph/blob/main/runtime/cpp/core/node.h)). The next frame only lays out and repaints what's flagged ([`core/node/node.cpp`](https://github.com/Levizir/morph/blob/main/runtime/cpp/core/node/node.cpp)); clean subtrees are skipped and counted in the frame stats.
 
 ### 4. Damage — only changed pixels reach the screen
 
-The renderer turns dirty nodes into work: flash replays the flattened frame; forge accumulates a damage set of only the changed rectangles and repaints those ([`renderers/forge/forge.cpp`](../../runtime/cpp/renderers/forge/forge.cpp)).
+The renderer turns dirty nodes into work: flash replays the flattened frame; forge accumulates a damage set of only the changed rectangles and repaints those ([`renderers/forge/forge.cpp`](https://github.com/Levizir/morph/blob/main/runtime/cpp/renderers/forge/forge.cpp)).
 
 So the pipeline is: **signal → effect → dirty flag → damage → present.** Every step is native, and every step is traceable with the frame's `DirtyStats` counters.
 
@@ -78,9 +78,9 @@ The closest "could have been better" candidates are the precision tune-ups above
 Four reasons this is the right architecture *here*, specifically:
 
 1. **It matches a compiler.** Morph knows state variables, JSX expressions, and the node tree at compile time. It can generate signals statically and wire effects directly — no runtime trampoline, no interpreter, no genericity tax.
-2. **It survives hot reload.** Dev mode keeps the app running and reloads the logic module; the `SignalStore` keeps signal state across the reload by name ([`dev/signal_store.h`](../../runtime/cpp/dev/signal_store.h)). A scheduler or a virtual DOM would have made live-reload much harder.
+2. **It survives hot reload.** Dev mode keeps the app running and reloads the logic module; the `SignalStore` keeps signal state across the reload by name ([`dev/signal_store.h`](https://github.com/Levizir/morph/blob/main/runtime/cpp/dev/signal_store.h)). A scheduler or a virtual DOM would have made live-reload much harder.
 3. **It keeps binaries small.** Signals + dirty flags are a few hundred lines of native code. A reconciler plus an entire JS engine is not in the same galaxy as Morph's footprint goal.
-4. **It's debuggable.** Every frame records layout/paint/skip/damage counts in `DirtyStats` ([`core/node.h`](../../runtime/cpp/core/node.h)). You can see reactivity working — which nodes were skipped, which pixels were damaged — instead of trusting a black-box diff.
+4. **It's debuggable.** Every frame records layout/paint/skip/damage counts in `DirtyStats` ([`core/node.h`](https://github.com/Levizir/morph/blob/main/runtime/cpp/core/node.h)). You can see reactivity working — which nodes were skipped, which pixels were damaged — instead of trusting a black-box diff.
 
 The short version: reactivity in Morph is **signals → effects → dirty flags → damage**, chosen because a compiler-plus-native-runtime can own its tree, keep state across hot reloads, and tell you exactly what changed — and because the models that would have been "better" solve problems Morph doesn't have.
 
