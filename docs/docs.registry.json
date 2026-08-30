@@ -1505,6 +1505,25 @@
         "changefreq": "yearly"
       },
       {
+        "title": "Does Morph Use a Virtual DOM like React?",
+        "slug": "faq/q-virtual-dom",
+        "file": "faq/q-virtual-dom",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Does Morph use a virtual DOM like React? No — signals, dirty flags, and damage tracking re-render native nodes directly; there's no DOM and no diffing.",
+        "keywords": [
+          "morph virtual dom",
+          "morph vdom",
+          "morph no reconciliation",
+          "morph dirty flags",
+          "morph signals"
+        ],
+        "lastUpdated": "2026-08-31",
+        "publishedAt": "2026-08-31",
+        "priority": 0.7,
+        "changefreq": "yearly"
+      },
+      {
         "title": "Is Morph for Games or Apps?",
         "slug": "faq/q-games",
         "file": "faq/q-games",

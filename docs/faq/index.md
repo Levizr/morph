@@ -9,6 +9,7 @@ The questions people actually ask — each answered in detail on its own page.
 | Is Morph just Electron with extra steps? | [Q: Electron?](q-electron.md) |
 | Do I need to know C++ to use Morph? | [Q: Do I need C++?](q-cpp.md) |
 | Is it React? Can I use React? | [Q: Is it React?](q-react.md) |
+| Does Morph use a virtual DOM like React? | [Q: Virtual DOM?](q-virtual-dom.md) |
 | Is it for games or for apps? | [Q: Games or apps?](q-games.md) |
 | What about the web — can I build websites with Morph? | [Q: What about the web?](q-web.md) |
 | What happens to my JavaScript at runtime? | [Q: JS at runtime](q-js-runtime.md) |

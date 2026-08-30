@@ -88,6 +88,7 @@ The most common questions live in the [FAQ](../faq/index.md) — each answered i
 | Is Morph just Electron with extra steps? | [Q: Electron?](../faq/q-electron.md) |
 | Do I need to know C++? | [Q: Do I need C++?](../faq/q-cpp.md) |
 | Is it React? Can I use React? | [Q: Is it React?](../faq/q-react.md) |
+| Does Morph use a virtual DOM like React? | [Q: Virtual DOM?](../faq/q-virtual-dom.md) |
 | Is it for games or for apps? | [Q: Games or apps?](../faq/q-games.md) |
 | What about the web — can I build websites? | [Q: What about the web?](../faq/q-web.md) |
 | What happens to my JavaScript at runtime? | [Q: JS at runtime](../faq/q-js-runtime.md) |
