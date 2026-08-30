@@ -1524,6 +1524,25 @@
         "changefreq": "yearly"
       },
       {
+        "title": "What Is Reactivity in Morph?",
+        "slug": "faq/q-reactivity",
+        "file": "faq/q-reactivity",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Reactivity in Morph is signals pushing into a native tree: morphState signals, automatic effects, dirty flags, and damage tracking — and why this was chosen over a virtual DOM.",
+        "keywords": [
+          "morph reactivity",
+          "morph signals",
+          "morph effects",
+          "how reactivity works in morph",
+          "morph reactive state"
+        ],
+        "lastUpdated": "2026-08-31",
+        "publishedAt": "2026-08-31",
+        "priority": 0.7,
+        "changefreq": "yearly"
+      },
+      {
         "title": "Is Morph for Games or Apps?",
         "slug": "faq/q-games",
         "file": "faq/q-games",
