@@ -158,6 +158,7 @@ pub struct MxWalker<'src> {
     pub state_vars: Vec<StateVar>,
     pub effects: Vec<MxEffect>,
     pub inner_functions: Vec<InnerFunction>,
+    pub function_declarations: Vec<InnerFunction>,
     pub global_vars: Vec<String>,
     pub console_logs: Vec<String>,
     pub extra_headers: Vec<String>,
@@ -175,6 +176,7 @@ impl<'src> MxWalker<'src> {
             state_vars: Vec::new(),
             effects: Vec::new(),
             inner_functions: Vec::new(),
+            function_declarations: Vec::new(),
             global_vars: Vec::new(),
             console_logs: Vec::new(),
             extra_headers: Vec::new(),
@@ -768,7 +770,21 @@ impl<'a, 'src> Visit<'a> for MxWalker<'src> {
                 Statement::ExportDeclaration(d) => {
                     if let Declaration::FunctionDeclaration(f) = &d.declaration { self.extract_component(f, true); }
                 }
-                Statement::FunctionDeclaration(f) => self.extract_component(f, false),
+                Statement::FunctionDeclaration(f) => {
+                    // A function that returns JSX is a component; otherwise it's a
+                    // module-level helper function (e.g. `compute`), transpiled into
+                    // premain like Python's `function_declarations`.
+                    if f.body.as_ref().map(|b| b.statements.iter().any(|s| if let Statement::ReturnStatement(ret) = s {
+                        ret.argument.as_ref().map(|a| self.expr_is_jsx(a)).unwrap_or(false)
+                    } else { false })).unwrap_or(false) {
+                        self.extract_component(f, false);
+                    } else if let Some(id) = &f.id {
+                        self.function_declarations.push(InnerFunction {
+                            name: id.name.to_string(),
+                            source: self.span_text(f.span).to_string(),
+                        });
+                    }
+                }
                 _ => {}
             }
         }

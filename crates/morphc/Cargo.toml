@@ -18,6 +18,7 @@ morph-parser = { path = "../morph-parser" }
 morph-ir = { path = "../morph-ir" }
 morph-codegen = { path = "../morph-codegen" }
 morph-build = { path = "../morph-build" }
+morph-js = { path = "../morph-js" }
 clap = { workspace = true }
 anyhow = { workspace = true }
 serde = { workspace = true }

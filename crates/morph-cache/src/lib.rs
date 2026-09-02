@@ -274,6 +274,78 @@ pub fn is_project_runtime_installed(project_morph_dir: &Path) -> bool {
     runtime.exists() && (runtime.join("manifest.json").exists() || runtime.join("include").exists() || runtime.join("morph_api.h").exists() || std::fs::read_dir(&runtime).map(|mut d| d.next().is_some()).unwrap_or(false))
 }
 
+/// Hash all files under `dir` (relative path + content). Returns an empty
+/// string if the directory does not exist. Hidden/.git contents are skipped so
+/// unrelated files (e.g. cached build artifacts) don't force rebuilds.
+pub fn hash_tree(dir: &Path) -> String {
+    if !dir.is_dir() {
+        return String::new();
+    }
+    let mut entries: Vec<String> = Vec::new();
+    for entry in WalkDir::new(dir).follow_links(false).min_depth(1) {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        if entry.file_type().is_dir() {
+            continue;
+        }
+        let rel = match entry.path().strip_prefix(dir) {
+            Ok(r) => r.to_string_lossy().replace('\\', "/"),
+            Err(_) => continue,
+        };
+        if rel.split('/').any(|c| c == ".git" || c.starts_with('.')) {
+            continue;
+        }
+        let content = std::fs::read(entry.path()).unwrap_or_default();
+        let mut h = Sha256::new();
+        h.update(&content);
+        entries.push(format!("{}:{}", rel, hex::encode(h.finalize())));
+    }
+    entries.sort();
+    sha256_string(&entries.join("\n"))
+}
+
+/// Project build-hash dir: <cwd>/.morph/hash
+pub fn project_hash_dir(cwd: &Path) -> PathBuf {
+    cwd.join(".morph").join("hash")
+}
+
+/// Compute sha256 of a string
+pub fn sha256_string(s: &str) -> String {
+    let mut h = Sha256::new();
+    h.update(s.as_bytes());
+    hex::encode(h.finalize())
+}
+
+/// Compose a fingerprint over a set of (relative_path, content) inputs.
+/// The hashes are fed through a final digest so file additions/removals and
+/// ordering changes are reflected. `inputs` earlier in the slice must map to
+/// distinct paths; content may be empty for files that were deleted.
+pub fn fingerprint_inputs(inputs: &[(&str, &str)]) -> String {
+    let mut entries: Vec<String> = inputs
+        .iter()
+        .map(|(p, c)| format!("{}:{}\n", p, sha256_string(c)))
+        .collect();
+    entries.sort();
+    sha256_string(&entries.join(""))
+}
+
+/// Read the previously stored fingerprint for `binary_name`, if any.
+pub fn read_stored_fingerprint(cwd: &Path, binary_name: &str) -> Option<String> {
+    let dir = project_hash_dir(cwd);
+    let file = dir.join(format!("{}.fingerprint", binary_name));
+    std::fs::read_to_string(&file).ok().map(|s| s.trim().to_string())
+}
+
+/// Store the fingerprint for `binary_name` under <cwd>/.morph/hash.
+pub fn write_stored_fingerprint(cwd: &Path, binary_name: &str, fingerprint: &str) -> Result<()> {
+    let dir = project_hash_dir(cwd);
+    std::fs::create_dir_all(&dir)?;
+    std::fs::write(dir.join(format!("{}.fingerprint", binary_name)), fingerprint)?;
+    Ok(())
+}
+
 /// Create morph.lock file
 pub fn write_lock_file(
     project_dir: &Path,

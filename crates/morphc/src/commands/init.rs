@@ -9,8 +9,26 @@ pub fn run(
     height: Option<u32>,
     title: Option<String>,
     entry: Option<String>,
+    ext: Option<String>,
     yes: bool,
 ) -> Result<()> {
+    // Source extension for the scaffolded entry. Defaults to `.mx`. UI entries
+    // need JSX, so only `mx`/`tsx` are scaffoldable — `.ts` is rejected with a
+    // hint, and any JS-family extension is a hard error.
+    let ext = ext.unwrap_or_else(|| "mx".to_string());
+    let ext = ext.trim_start_matches('.').to_string();
+    match ext.as_str() {
+        "mx" | "tsx" => {}
+        "ts" => anyhow::bail!(
+            "`.ts` entry files can't hold JSX — use `--ext tsx` for an entry file, or import `.ts` support modules."
+        ),
+        e if morph_config::is_disallowed_js_ext(e) => anyhow::bail!(
+            "`.{}` files are not supported — Morph only supports strict `.ts`, `.tsx`, and `.mx`. Use `--ext tsx`.",
+            e
+        ),
+        e => anyhow::bail!("unsupported extension `{}` — use `--ext mx` or `--ext tsx`.", e),
+    }
+
     let target = match name.as_deref() {
         Some(".") | None => PathBuf::from("."),
         Some(n) => PathBuf::from(n),
@@ -58,7 +76,12 @@ pub fn run(
         config.window.title = t;
     }
     if let Some(e) = entry.clone() {
+        // Validate provided --entry extension (hard error on .js/.jsx, etc.)
+        morph_config::validate_entry_ext(std::path::Path::new(&e))
+            .map_err(|msg| anyhow::anyhow!(msg))?;
         config.entry = e;
+    } else {
+        config.entry = format!("src/App.{}", ext);
     }
 
     // ── Interactive wizard ──
@@ -92,10 +115,10 @@ pub fn run(
     crate::logger::log_step("Scaffolding project");
     let pb = crate::logger::spinner("Creating project structure...");
     std::thread::sleep(std::time::Duration::from_millis(200));
-    scaffold_project(&project_dir, &config)?;
+    scaffold_project(&project_dir, &config, &ext)?;
     pb.finish_and_clear();
 
-    crate::logger::log_success(&format!("Created {}", "src/App.mx".cyan()));
+    crate::logger::log_success(&format!("Created {} {}", "src/".cyan().dimmed(), format!("App.{ext}").cyan()));
     crate::logger::log_success(&format!("Created {}", "morph.config.json".cyan()));
     crate::logger::log_success(&format!("Created {}", ".gitignore".cyan()));
     crate::logger::log_success(&format!("Created {}", ".morph/ directory".cyan()));
@@ -174,13 +197,13 @@ pub fn run(
     Ok(())
 }
 
-fn scaffold_project(project_dir: &Path, config: &MorphConfig) -> Result<()> {
+fn scaffold_project(project_dir: &Path, config: &MorphConfig, ext: &str) -> Result<()> {
     let src_dir = project_dir.join("src");
     std::fs::create_dir_all(&src_dir)?;
 
-    // src/App.mx
-    let app_mx = format!(
-        r##"import {{ morphState }} from "morph:core";
+    // src/App.{mx,tsx}
+    let app_template = format!(
+        r##"import {{ morphState }} from "morph";
 
 export default function App() {{
   const [count, setCount] = morphState(0);
@@ -200,9 +223,9 @@ export default function App() {{
 }}
 "##
     );
-    let app_path = src_dir.join("App.mx");
+    let app_path = src_dir.join(format!("App.{}", ext));
     if !app_path.exists() {
-        std::fs::write(&app_path, app_mx)?;
+        std::fs::write(&app_path, app_template)?;
     }
 
     // morph.config.json

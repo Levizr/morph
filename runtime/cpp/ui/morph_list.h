@@ -135,7 +135,9 @@ public:
         if (next != children) {
             children = std::move(next);
             m_bindings = std::move(nextBindings);
+#ifdef MORPH_FEATURE_ZINDEX
             invalidatePaintOrder();
+#endif
             markDirty(SubtreeDirty);
         }
     }

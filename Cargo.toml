@@ -6,7 +6,7 @@ members = [
     "crates/morph-ir",
     "crates/morph-codegen",
     "crates/morph-build",
-    "crates/morphc",
+    "crates/morphc", "crates/morph-js",
 ]
 resolver = "2"
 
@@ -37,6 +37,7 @@ oxc_allocator = "0.147"
 oxc_ast = "0.147"
 oxc_ast_visit = "0.147"
 oxc_span = "0.147"
+oxc_syntax = "0.13.0" 
 oxc_diagnostics = "0.147"
 lightningcss = "1.0.0-alpha.72"
 strsim = "0.11"

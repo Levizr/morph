@@ -1,7 +1,6 @@
 {
   "name": "test-hover",
   "entry": "src/App.mx",
-  "output": "dist/",
   "window": {
     "width": 400,
     "height": 300,

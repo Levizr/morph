@@ -146,6 +146,39 @@ pub fn clean_app_name(name: &str) -> String {
     let cleaned = cleaned.trim_matches('_').to_string();
     if cleaned.is_empty() { "app".to_string() } else { cleaned }
 }
+
+/// Source extensions a project entry/scan may use (strict TS/TSX + Morph's .mx).
+pub fn is_supported_source_ext(ext: &str) -> bool {
+    matches!(ext, "mx" | "ts" | "tsx")
+}
+
+/// Detected-but-disallowed JS-family extensions. Morph intentionally only supports
+/// strict TypeScript/TSX, so these trigger a hard error instead of being parsed.
+pub fn is_disallowed_js_ext(ext: &str) -> bool {
+    matches!(ext, "js" | "jsx" | "mjs" | "cjs")
+}
+
+/// Validate a file path's extension as a morph source entry. Returns a hard-error
+/// message when the extension is disallowed, or `None` when it is supported.
+pub fn validate_entry_ext(path: &std::path::Path) -> Result<(), String> {
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    if is_supported_source_ext(ext) {
+        return Ok(());
+    }
+    if is_disallowed_js_ext(ext) {
+        return Err(format!(
+            "`.{}` files are not supported — Morph only supports strict `.ts`, `.tsx`, and `.mx`. Found: {}",
+            ext,
+            path.display()
+        ));
+    }
+    Err(format!(
+        "unsupported source extension `.{}` (expected `.ts`, `.tsx`, or `.mx`): {}",
+        ext,
+        path.display()
+    ))
+}
+
 fn default_renderer() -> String { "flash".to_string() }
 
 impl Default for MorphConfig {

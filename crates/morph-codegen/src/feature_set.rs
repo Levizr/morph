@@ -82,6 +82,9 @@ impl FeatureSet {
             for kfs in win.keyframes.values() {
                 for kf in kfs {
                     self.scan_style(&kf.style);
+                    if kf.raw.keys().any(|p| p == "opacity") { self.features.insert("opacity".into()); }
+                    if kf.raw.keys().any(|p| p == "transform") { self.features.insert("transform".into()); }
+                    if kf.raw.keys().any(|p| p == "left" || p == "top") { self.features.insert("position".into()); }
                 }
             }
             for node in Self::walk(&win.nodes) {
@@ -111,18 +114,24 @@ impl FeatureSet {
         if ["scroll","event","cursor","animation","hover","active"].iter().any(|f| self.features.contains(*f)) {
             self.features.insert("dirty_rendering".into());
         }
+        // The runtime's CSS-animation engine (core/node/animation.cpp) always
+        // touches the transform-revert path, so enabling animation requires the
+        // transform feature to be compiled in too.
+        if self.features.contains("animation") {
+            self.features.insert("transform".into());
+        }
     }
 
     pub fn required_headers(&self) -> Vec<String> {
         let mut h = vec!["ui/rect.h".to_string()];
+        // The main loop always calls process_tasks()/run_pending_effects()/
+        // destroy_all_effects(), so the reactivity headers are unconditional.
+        h.push("reactivity/task.h".into());
+        h.push("reactivity/signal.h".into());
         if self.features.contains("text") { h.push("ui/text.h".into()); }
         if self.features.contains("button") { h.push("ui/button.h".into()); }
         if self.features.contains("input") { h.push("ui/input.h".into()); }
         if self.features.contains("event") { h.push("core/event.h".into()); }
-        if self.features.contains("event") || self.features.contains("input") {
-            h.push("reactivity/task.h".into());
-            h.push("reactivity/signal.h".into());
-        }
         if self.features.contains("image") { h.push("ui/image.h".into()); }
         if self.features.contains("list") { h.push("ui/morph_list.h".into()); }
         h

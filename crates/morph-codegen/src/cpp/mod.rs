@@ -32,6 +32,7 @@ impl<'a> CppEmitter<'a> {
                 let init = sv.get("init").cloned().unwrap_or_else(|| "0".into());
                 let name = sv.get("getter").cloned().unwrap_or_else(|| "unknown".into());
                 let ty = infer_cpp_type(&init);
+                let init = if ty == "JsArray" && is_array_literal(&init) { "JsArray{}".to_string() } else { init.clone() };
                 state_decls.push(serde_json::json!({
                     "signal_name": format!("__st_{}", name),
                     "type": ty,
@@ -40,9 +41,19 @@ impl<'a> CppEmitter<'a> {
             }
         }
 
-        // Window code via node_emitter
+        // Window code via node_emitter (with state map for generic transpilation)
         let mut window_code_parts = Vec::new();
         for win in self.windows {
+            let mut state_map = std::collections::HashMap::new();
+            for sv in &win.state_vars {
+                if let (Some(getter), Some(_setter)) = (sv.get("getter"), sv.get("setter")) {
+                    state_map.insert(getter.clone(), format!("__st_{}.get()", getter));
+                    // setter name is like setUser for getter user, but we have setter field
+                    if let Some(setter) = sv.get("setter") {
+                        state_map.insert(setter.clone(), format!("__st_{}.set", getter));
+                    }
+                }
+            }
             let mut code = String::new();
             let var = format!("win_{}", win.window_id);
             code.push_str(&format!("MorphWindow* {var} = new MorphWindow(\"{}\", {}, {}, {});\n", win.title, win.width, win.height, if win.visible { "true" } else { "false" }));
@@ -55,7 +66,7 @@ impl<'a> CppEmitter<'a> {
                 code.push_str(&format!("{var}->setConstraints({min_w}, {min_h}, {max_w}, {max_h});\n"));
             }
             for node in &win.nodes {
-                let c = node_emitter::emit_node(node, Some(&var), &fs.features);
+                let c = node_emitter::emit_node_with_state(node, Some(&var), &fs.features, &state_map, None);
                 if !c.is_empty() { code.push_str(&c); code.push('\n'); }
             }
             for log in &win.startup_logs {
@@ -68,10 +79,18 @@ impl<'a> CppEmitter<'a> {
         // List factories
         let mut factories = Vec::new();
         for w in self.windows {
+            let mut state_map = std::collections::HashMap::new();
+            for sv in &w.state_vars {
+                if let Some(getter) = sv.get("getter") {
+                    state_map.insert(getter.clone(), format!("__st_{}.get()", getter));
+                    if let Some(setter) = sv.get("setter") {
+                        state_map.insert(setter.clone(), format!("__st_{}.set", getter));
+                    }
+                }
+            }
             for n in logic_emitter::collect_list_nodes(&w.nodes) {
-                // emit item factory
                 if let Some(ref tmpl) = n.item_template {
-                    let body = node_emitter::emit_node(tmpl, None, &fs.features);
+                    let body = node_emitter::emit_node_with_state(tmpl, None, &fs.features, &state_map, None);
                     let mut caps = String::new();
                     if body.contains("__it") { caps.push_str(", &__it"); }
                     if body.contains("__index") { caps.push_str(", &__index"); }
@@ -87,8 +106,14 @@ impl<'a> CppEmitter<'a> {
         }
         let list_factory_code = factories.join("\n\n");
 
-        // Keyframe code (stub)
-        let keyframe_code = String::new();
+        // Keyframe registration (per-window keyframes are app-global) — port of
+        // Python emitter.py which registers them once before any window.
+        let mut keyframe_parts = Vec::new();
+        for w in self.windows {
+            let kf = node_emitter::keyframe_registration_code(&w.keyframes, &fs.features);
+            if !kf.is_empty() { keyframe_parts.push(kf); }
+        }
+        let keyframe_code = keyframe_parts.join("\n");
 
         // Extra headers (dedup)
         let mut extra_headers: Vec<String> = self.windows.iter().flat_map(|w| w.extra_headers.clone()).collect();
@@ -127,5 +152,11 @@ fn infer_cpp_type(init: &str) -> String {
     if s.starts_with('"') || s.starts_with('\'') { return "std::string".into(); }
     if s.contains('.') { return "double".into(); }
     if s.parse::<i64>().is_ok() { return "int".into(); }
+    if is_array_literal(s) { return "JsArray".into(); }
     "auto".into()
+}
+
+fn is_array_literal(s: &str) -> bool {
+    let t = s.trim();
+    t.starts_with('[') && t.ends_with(']')
 }

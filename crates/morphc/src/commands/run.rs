@@ -7,28 +7,17 @@ pub fn run(
     output: Option<String>,
     static_: bool,
 ) -> Result<()> {
-    crate::logger::log_banner("Morph Run");
+    let cwd = std::env::current_dir()?;
+    let cfg = morph_config::MorphConfig::from_file(&cwd.join("morph.config.json")).unwrap_or_default();
+    crate::logger::log_banner(&format!("Morph Run — {}", cfg.name));
 
-    crate::logger::log_step("Building");
-    // Need to capture output/clean_name for later binary lookup — pass through
-    let output_clone = output.clone();
-    crate::commands::build::run(entry, output, static_, None, false)?;
-
-    let bin_path = if let Some(bin) = binary {
+    // Build with the same detail logs as `morph build`, but without the
+    // "Morph Build" banner or raw compiler command.
+    let input_binary = binary.clone();
+    let bin_path = if let Some(bin) = input_binary {
         std::path::PathBuf::from(bin)
     } else {
-        // Resolve from config
-        let cwd = std::env::current_dir()?;
-        let cfg = morph_config::MorphConfig::from_file(&cwd.join("morph.config.json")).unwrap_or_default();
-        let out_raw = output_clone.unwrap_or(cfg.output);
-        let clean = morph_config::clean_app_name(&cfg.name);
-        let out_dir = cwd.join(&out_raw);
-        let out_dir = if out_raw.ends_with('/') || std::path::Path::new(&out_raw).extension().is_none() {
-            out_dir
-        } else {
-            out_dir.parent().map(|p| p.to_path_buf()).unwrap_or(out_dir)
-        };
-        out_dir.join(format!("{}{}", clean, morph_build::exe_suffix()))
+        crate::commands::build::run(entry, output, static_, None, false, true)?
     };
 
     if bin_path.exists() {

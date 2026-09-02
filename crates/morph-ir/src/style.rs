@@ -60,6 +60,7 @@ impl IRStyle {
             height: None,
             font_size: 16.0,
             display: "block".to_string(),
+            position: "static".to_string(),
             flex_dir: "row".to_string(),
             justify_content: "flex-start".to_string(),
             align_items: "stretch".to_string(),
@@ -79,5 +80,43 @@ impl IRStyle {
             scrollbar_border_radius: 4.0,
             ..Default::default()
         }
+    }
+
+    /// True when no meaningful style delta has been applied for a pseudo
+    /// (hover/active) bucket, i.e. every field is still at its default.
+    pub fn is_empty_style(&self) -> bool {
+        self.bg_color == [0.0, 0.0, 0.0, 0.0]
+            && self.color == [0.0, 0.0, 0.0, 1.0]
+            && self.border_color == [0.0, 0.0, 0.0, 1.0]
+            && self.border_width == 0.0
+            && self.border_style == "none"
+            && self.width.is_none()
+            && self.height.is_none()
+            && self.min_width.is_none()
+            && self.max_width.is_none()
+            && self.min_height.is_none()
+            && self.max_height.is_none()
+            && self.padding == [0.0, 0.0, 0.0, 0.0]
+            && self.margin == [0.0, 0.0, 0.0, 0.0]
+            && self.border_radius == 0.0
+            && self.font_size == 16.0
+            && self.font_weight == "normal"
+            && self.text_align == "left"
+            && self.display == "block"
+            && self.flex_dir == "row"
+            && self.gap == 0.0
+            && self.position == "static"
+            && self.justify_content == "flex-start"
+            && self.align_items == "stretch"
+            && self.flex_wrap == "nowrap"
+            && self.cursor == "default"
+            && self.overflow == "visible"
+            && self.box_sizing == "content-box"
+            && self.opacity == 1.0
+            && self.z_index.is_none()
+            && self.left.is_none()
+            && self.right.is_none()
+            && self.top.is_none()
+            && self.bottom.is_none()
     }
 }

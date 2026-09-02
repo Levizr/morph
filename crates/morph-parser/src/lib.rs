@@ -48,6 +48,7 @@ pub fn parse_mx_str(source: &str, filename: &str) -> Result<MxSource> {
         state_vars: walker.state_vars,
         effects: walker.effects,
         inner_functions: walker.inner_functions,
+        function_declarations: walker.function_declarations,
         global_vars: walker.global_vars,
         console_logs: walker.console_logs,
         extra_headers: walker.extra_headers,
@@ -55,7 +56,7 @@ pub fn parse_mx_str(source: &str, filename: &str) -> Result<MxSource> {
     })
 }
 
-/// Parse external CSS text into a rules map.
-pub fn parse_css(source: &str) -> Result<std::collections::HashMap<String, CssRule>> {
+/// Parse external CSS text into style rules + `@keyframes`.
+pub fn parse_css(source: &str) -> Result<ast_types::CssData> {
     css_parser::parse_css(source)
 }

@@ -1,7 +1,6 @@
 {
   "name": "animation-test-2.0",
   "entry": "src/App.mx",
-  "output": "dist/",
   "window": {
     "width": 900,
     "height": 700,

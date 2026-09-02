@@ -23,6 +23,9 @@ static const double DBL_CLICK_THRESHOLD = 0.3;
 // depending on GLFW themselves.
 static GLFWwindow* s_clipboardWindow = nullptr;
 
+// Used by MorphWindow::render()'s non-dirty path before its (later) definition.
+static void clearAllDirty(MorphNode *n);
+
 namespace morph {
 void setClipboard(const std::string &text) {
     if (s_clipboardWindow)

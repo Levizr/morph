@@ -8,5 +8,5 @@ pub mod tailwind;
 pub mod builder;
 
 pub use style::IRStyle;
-pub use node::{IRNode, IRWindow, IREvent, IRAnimation, IRKeyframe};
+pub use node::{IRNode, IRWindow, IREvent, IRAnimation, IRKeyframe, IRConditionalClassEffect};
 pub use builder::IRBuilder;

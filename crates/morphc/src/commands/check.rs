@@ -4,6 +4,15 @@ use std::path::{Path, PathBuf};
 
 use morph_parser::LintError;
 
+/// True for files Morph will lint (strict TS/TSX + .mx). JS-family files are
+/// intentionally excluded so they don't silently pass.
+fn is_source_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| morph_config::is_supported_source_ext(e))
+        .unwrap_or(false)
+}
+
 fn cache_path(cwd: &Path) -> PathBuf {
     let proj_cache = cwd.join(".morph").join("lint_cache.json");
     if cwd.join(".morph").exists() {
@@ -60,13 +69,13 @@ pub fn run(path: Option<PathBuf>, entry: Option<String>, _migrate: bool) -> Resu
             let src_dir = cwd.join("src");
             if src_dir.exists() {
                 for e in walkdir::WalkDir::new(&src_dir).into_iter().filter_map(|e| e.ok()) {
-                    if e.path().extension().map(|e| e == "mx").unwrap_or(false) {
+                    if is_source_file(e.path()) {
                         mx_files.push(e.path().to_path_buf());
                     }
                 }
             } else {
                 for e in walkdir::WalkDir::new(&cwd).max_depth(2).into_iter().filter_map(|e| e.ok()) {
-                    if e.path().extension().map(|e| e == "mx").unwrap_or(false) {
+                    if is_source_file(e.path()) {
                         mx_files.push(e.path().to_path_buf());
                     }
                 }
@@ -77,13 +86,13 @@ pub fn run(path: Option<PathBuf>, entry: Option<String>, _migrate: bool) -> Resu
             let src_dir = cwd.join("src");
             if src_dir.exists() {
                 for e in walkdir::WalkDir::new(&src_dir).into_iter().filter_map(|e| e.ok()) {
-                    if e.path().extension().map(|e| e == "mx").unwrap_or(false) {
+                    if is_source_file(e.path()) {
                         mx_files.push(e.path().to_path_buf());
                     }
                 }
             }
             let entry_path = cwd.join(&entry_val);
-            if entry_path.exists() && entry_path.extension().map(|e| e == "mx").unwrap_or(false) && !mx_files.contains(&entry_path) {
+            if entry_path.exists() && is_source_file(&entry_path) && !mx_files.contains(&entry_path) {
                 mx_files.push(entry_path);
             }
             project_root = Some(cwd.clone());
@@ -91,7 +100,7 @@ pub fn run(path: Option<PathBuf>, entry: Option<String>, _migrate: bool) -> Resu
     }
 
     let display_root = project_root.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| cwd.display().to_string());
-    crate::logger::log_banner("Morph Check — Lint .mx Files");
+    crate::logger::log_banner("Morph Check — Lint Source Files");
     if mx_files.len() == 1 {
         crate::logger::log_step(&format!("Checking {}", mx_files[0].display()));
     } else {
@@ -99,7 +108,7 @@ pub fn run(path: Option<PathBuf>, entry: Option<String>, _migrate: bool) -> Resu
     }
 
     if mx_files.is_empty() {
-        crate::logger::log_warn("No .mx files found.");
+        crate::logger::log_warn("No supported source files found (.ts/.tsx/.mx).");
         if let Some(root) = project_root {
             crate::logger::log_dim(&format!("Searched: {}", root.display()));
         } else {

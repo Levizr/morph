@@ -1,7 +1,6 @@
 {
   "name": "calculator",
   "entry": "src/App.mx",
-  "output": "dist/",
 
   "window": {
     "width": 340,

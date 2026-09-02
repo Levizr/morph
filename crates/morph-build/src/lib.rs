@@ -36,26 +36,76 @@ impl Compiler {
         Self { gpp, silent: false }
     }
 
+    /// Suppress printing of the raw compiler command line.
+    pub fn silent(mut self) -> Self {
+        self.silent = true;
+        self
+    }
+
+    /// The runtime .cpp sources that must be compiled and linked alongside the
+    /// generated app.cpp (mirrors morph/build/compiler.py runtime_sources).
+    fn runtime_sources(&self, runtime_dir: &Path) -> Vec<PathBuf> {
+        let node_dir = runtime_dir.join("core/node");
+        let mut srcs = vec![
+            node_dir.join("node.cpp"),
+            node_dir.join("events.cpp"),
+            node_dir.join("flatten.cpp"),
+            node_dir.join("style.cpp"),
+            node_dir.join("animation.cpp"),
+            node_dir.join("layout.cpp"),
+            node_dir.join("paint_order.cpp"),
+            runtime_dir.join("core/window.cpp"),
+            runtime_dir.join("render/gl_renderer.cpp"),
+            runtime_dir.join("core/compositor.cpp"),
+            runtime_dir.join("reactivity/effect.cpp"),
+            runtime_dir.join("reactivity/task.cpp"),
+            runtime_dir.join("net/net.cpp"),
+            runtime_dir.join("renderers/renderer.cpp"),
+            runtime_dir.join("renderers/flash/flash.cpp"),
+            runtime_dir.join("renderers/forge/forge.cpp"),
+            runtime_dir.join("renderers/forge/damage.cpp"),
+        ];
+        // Only include sources that actually exist (some may be optional)
+        srcs.retain(|p| p.exists());
+        srcs
+    }
+
     /// Compile `source_path` → `binary_path` (executable)
     pub fn compile(&self, source_path: &Path, binary_path: &Path, runtime_dir: &Path, defines: &[String]) -> Result<()> {
         let mut cmd = vec![self.gpp.clone()];
         cmd.push("-std=c++20".into());
         cmd.push("-O2".into());
+        cmd.push("-ffunction-sections".into());
+        cmd.push("-fdata-sections".into());
         // Include runtime headers
         cmd.push(format!("-I{}", runtime_dir.display()));
         cmd.push(format!("-I{}", runtime_dir.join("include").display()));
-        // Source and output
+        cmd.push(format!("-I{}", runtime_dir.join("vendor").display()));
+        cmd.push(format!("-I{}", runtime_dir.join("renderers").display()));
+        // Generated app source
         cmd.push(source_path.display().to_string());
+        // Runtime .cpp sources
+        for s in self.runtime_sources(runtime_dir) {
+            cmd.push(s.display().to_string());
+        }
+        // Vendor C sources
+        let vendor_glad = runtime_dir.join("vendor/glad/glad.c");
+        let vendor_stb = runtime_dir.join("vendor/stb_image.c");
+        if vendor_glad.exists() { cmd.push(vendor_glad.display().to_string()); }
+        if vendor_stb.exists() { cmd.push(vendor_stb.display().to_string()); }
+        // Output
         cmd.push("-o".into());
         cmd.push(binary_path.display().to_string());
+        // GC dead code eliminated by the renderer backend dispatch
+        cmd.push(if is_macos() { "-Wl,-dead_strip".to_string() } else { "-Wl,--gc-sections".to_string() });
 
         // Platform libs
         if is_macos() {
             cmd.extend(["-framework".into(), "Cocoa".into(), "-framework".into(), "OpenGL".into(), "-framework".into(), "IOKit".into(), "-framework".into(), "CoreVideo".into(), "-lpthread".into()]);
         } else if is_windows() {
-            cmd.extend(["-lopengl32".into(), "-lgdi32".into(), "-lshell32".into(), "-luser32".into(), "-lpthread".into()]);
+            cmd.extend(["-lopengl32".into(), "-lgdi32".into(), "-lshell32".into(), "-luser32".into(), "-lcomdlg32".into(), "-lole32".into(), "-lws2_32".into(), "-lpthread".into(), "-lm".into()]);
         } else {
-            cmd.extend(["-lglfw".into(), "-lGL".into(), "-lX11".into(), "-lpthread".into(), "-ldl".into()]);
+            cmd.extend(["-lglfw".into(), "-lGL".into(), "-lX11".into(), "-lXrandr".into(), "-lXinerama".into(), "-lXcursor".into(), "-lXi".into(), "-lrt".into(), "-lpthread".into(), "-ldl".into(), "-lm".into()]);
         }
 
         // Feature defines

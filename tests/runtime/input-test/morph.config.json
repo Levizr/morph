@@ -1,7 +1,6 @@
 {
   "name": "input-test",
   "entry": "src/App.mx",
-  "output": "dist/",
   "window": {
     "width": 520,
     "height": 640,

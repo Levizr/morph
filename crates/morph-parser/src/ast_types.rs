@@ -10,6 +10,7 @@ pub struct MxSource {
     pub state_vars: Vec<StateVar>,
     pub effects: Vec<MxEffect>,
     pub inner_functions: Vec<InnerFunction>,
+    pub function_declarations: Vec<InnerFunction>,
     pub global_vars: Vec<String>,
     pub console_logs: Vec<String>,
     pub extra_headers: Vec<String>,
@@ -153,7 +154,25 @@ pub enum StyleValue {
     Expr(String),
 }
 
+/// A single CSS style rule: its selector plus its declarations.
 #[derive(Debug, Clone)]
 pub struct CssRule {
+    pub selector: String,
     pub properties: HashMap<String, String>,
+}
+
+/// A single `@keyframes` entry: a selector offset (0..1) plus its declarations.
+#[derive(Debug, Clone)]
+pub struct CssKeyframe {
+    pub offset: f32,
+    pub properties: HashMap<String, String>,
+}
+
+/// The result of parsing a CSS file: style rules in source order (so equal
+/// specificity resolves by last-write like a browser), and the raw `@keyframes`
+/// registry keyed by animation name.
+#[derive(Debug, Clone, Default)]
+pub struct CssData {
+    pub rules: Vec<(String, CssRule)>,
+    pub keyframes: HashMap<String, Vec<CssKeyframe>>,
 }

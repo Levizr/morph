@@ -12,7 +12,7 @@ use std::path::PathBuf;
     name = "morphc",
     disable_version_flag = true,
     about = "Build native OpenGL Applications from HTML, CSS, and JavaScript",
-    long_about = "Morph — Build native OpenGL Applications\n\nCompile .mx files to native OpenGL binaries.\nNo browser. No Electron. No WebView.\n\nDirect file morphing (.ts/.js only):\n  morph app.ts              → morph to C++ (default)\n  morph app.ts --to cpp     → morph to C++\n  morph app.ts --to rust    → morph to Rust\n\nNote: .tsx/.jsx/.mx files use `morph build`/`morph run`.\n\nProject commands:\n  morph new                 → scaffold a new .mx project\n  morph dev                 → start dev mode with hot reload\n  morph build               → compile to production binary\n  morph run                 → build and run\n  morph install             → download runtime sources\n  morph update              → update runtime or morphc\n  morph check               → lint .mx files\n  morph doctor              → verify system dependencies\n  morph cache               → manage cache"
+    long_about = "Morph — Build native OpenGL Applications\n\nCompile strict TypeScript (.ts/.tsx) and Morph (.mx) projects to native OpenGL\nbinaries. No browser. No Electron. No WebView.\n\nMorph only supports strict .ts / .tsx / .mx source. .js and .jsx are rejected.\n\nDirect file morphing (.ts/.js only):\n  morph app.ts              → morph to C++ (default)\n  morph app.ts --to cpp     → morph to C++\n  morph app.ts --to rust    → morph to Rust\n\nProject commands:\n  morph new                 → scaffold a new .mx or .tsx project\n  morph dev                 → start dev mode with hot reload\n  morph build               → compile to production binary\n  morph run                 → build and run\n  morph install             → download runtime sources\n  morph update              → update runtime or morphc\n  morph check               → lint source files\n  morph doctor              → verify system dependencies\n  morph cache               → manage cache"
 )]
 struct Cli {
     /// Show version
@@ -33,7 +33,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Scaffold a new .mx project
+    /// Scaffold a new project
     New {
         /// Project name (use '.' for current directory)
         name: Option<String>,
@@ -45,6 +45,9 @@ enum Commands {
         title: Option<String>,
         #[arg(long)]
         entry: Option<String>,
+        /// Source extension for the entry file: mx | tsx (default: mx)
+        #[arg(long)]
+        ext: Option<String>,
         #[arg(long, short = 'y')]
         yes: bool,
     },
@@ -57,12 +60,12 @@ enum Commands {
         #[arg(long = "self")]
         self_update: bool,
     },
-    /// Start dev mode with live reload
+    /// Start dev mode with live reload of .ts/.tsx/.mx source
     Dev {
         #[arg(long)]
         entry: Option<String>,
     },
-    /// Build optimized production binary
+    /// Build optimized production binary from .ts/.tsx/.mx source
     Build {
         #[arg(long)]
         entry: Option<String>,
@@ -85,7 +88,7 @@ enum Commands {
         #[arg(long)]
         static_: bool,
     },
-    /// Lint .mx files for framework rules
+    /// Lint source files (.ts/.tsx/.mx) for framework rules
     Check {
         /// File or directory to check (overrides morph.config.json)
         #[arg(value_name = "PATH")]
@@ -194,8 +197,8 @@ fn main() {
 
     // ── Subcommand dispatch ──
     let result = match cli.command {
-        Some(Commands::New { name, width, height, title, entry, yes }) => {
-            commands::init::run(name, width, height, title, entry, yes)
+        Some(Commands::New { name, width, height, title, entry, ext, yes }) => {
+            commands::init::run(name, width, height, title, entry, ext, yes)
         }
         Some(Commands::Install) => commands::install::run(),
         Some(Commands::Update { runtime, self_update }) => {
@@ -203,7 +206,7 @@ fn main() {
         }
         Some(Commands::Dev { entry }) => commands::dev::run(entry),
         Some(Commands::Build { entry, output, static_, upx, no_upx }) => {
-            commands::build::run(entry, output, static_, upx, no_upx)
+            commands::build::run(entry, output, static_, upx, no_upx, false).map(|_| ())
         }
         Some(Commands::Run { binary, entry, output, static_ }) => {
             commands::run::run(binary, entry, output, static_)
@@ -239,12 +242,12 @@ fn print_welcome() {
     // ── Project commands ──
     crate::logger::log_section("PROJECT");
     let project_cmds = [
-        ("new",     "Scaffold a new .mx project",        "◆"),
+        ("new",     "Scaffold a new .mx or .tsx project", "◆"),
         ("install", "Download runtime sources",           "⬇"),
         ("dev",     "Start dev mode with live hot reload", "⚡"),
-        ("build",   "Compile .mx → native OpenGL binary", "▣"),
+        ("build",   "Compile .ts/.tsx/.mx → native binary", "▣"),
         ("run",     "Build and run production binary",    "▶"),
-        ("check",   "Lint .mx files for framework rules", "✓"),
+        ("check",   "Lint source files (.ts/.tsx/.mx)",   "✓"),
     ];
     for (cmd, desc, icon) in project_cmds {
         println!(

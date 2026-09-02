@@ -1434,6 +1434,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "morph-js"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "oxc_allocator",
+ "oxc_ast",
+ "oxc_ast_visit",
+ "oxc_diagnostics",
+ "oxc_parser",
+ "oxc_span",
+ "serde",
+ "serde_json",
+ "strsim",
+ "thiserror",
+]
+
+[[package]]
 name = "morph-parser"
 version = "0.1.0"
 dependencies = [
@@ -1467,6 +1484,7 @@ dependencies = [
  "morph-codegen",
  "morph-config",
  "morph-ir",
+ "morph-js",
  "morph-parser",
  "notify",
  "reqwest",

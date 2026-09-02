@@ -1,5 +1,6 @@
 use anyhow::Result;
 use colored::Colorize;
+use std::path::PathBuf;
 
 pub fn run(
     entry: Option<String>,
@@ -7,7 +8,8 @@ pub fn run(
     static_: bool,
     upx: Option<bool>,
     no_upx: bool,
-) -> Result<()> {
+    suppress_banner: bool,
+) -> Result<PathBuf> {
     let cwd = std::env::current_dir()?;
     let config_path = cwd.join("morph.config.json");
 
@@ -21,7 +23,9 @@ pub fn run(
     // Clean app name for binary (spaces/special → _)
     let clean_name = morph_config::clean_app_name(&config.name);
 
-    crate::logger::log_banner(&format!("Morph Build — {}", config.name));
+    if !suppress_banner {
+        crate::logger::log_banner(&format!("Morph Build — {}", config.name));
+    }
 
     crate::logger::log_step("Verifying runtime");
     crate::commands::install::ensure_runtime(&cwd)?;
@@ -49,14 +53,19 @@ pub fn run(
         crate::logger::log_key("UPX", "disabled");
     }
 
-    // ── Parse .mx files ──
+    // ── Parse source ──
     crate::logger::log_step("Parsing");
 
-    let pb = crate::logger::spinner("Parsing .mx files...");
+    let pb = crate::logger::spinner("Parsing source...");
     let entry_path = cwd.join(&entry);
     if !entry_path.exists() {
         pb.finish_and_clear();
         anyhow::bail!("Entry file not found: {}", entry_path.display());
+    }
+    // Morph only supports strict .ts/.tsx/.mx entries — hard error otherwise.
+    if let Err(msg) = morph_config::validate_entry_ext(&entry_path) {
+        pb.finish_and_clear();
+        anyhow::bail!(msg);
     }
 
     let source = std::fs::read_to_string(&entry_path)?;
@@ -76,7 +85,8 @@ pub fn run(
     // ── Build IR (Phase 3: morph-ir builder) ──
     let pb = crate::logger::spinner("Building IR...");
     // Collect CSS rules from imports
-    let mut css_rules: std::collections::HashMap<String, morph_parser::CssRule> = std::collections::HashMap::new();
+    let mut css_rules: Vec<(String, morph_parser::CssRule)> = Vec::new();
+    let mut css_keyframes: std::collections::HashMap<String, Vec<morph_parser::CssKeyframe>> = std::collections::HashMap::new();
     for imp in &parsed.imports {
         if let morph_parser::MxImportKind::CssLocal { path } = &imp.kind {
             let candidates = [
@@ -86,8 +96,8 @@ pub fn run(
             for cand in &candidates {
                 if cand.exists() {
                     if let Ok(text) = std::fs::read_to_string(cand) {
-                        if let Ok(rules) = morph_parser::parse_css(&text) {
-                            css_rules.extend(rules);
+                        if let Ok(data) = morph_parser::parse_css(&text) {
+                            css_rules.extend(data.rules);                            for (k, v) in data.keyframes { css_keyframes.entry(k).or_default().extend(v); }
                         }
                     }
                     break;
@@ -95,8 +105,8 @@ pub fn run(
             }
         }
     }
-    let builder = morph_ir::IRBuilder::new();
-    let windows = builder.build(&parsed, &css_rules);
+    let mut builder = morph_ir::IRBuilder::new();
+    let windows = builder.build(&parsed, &css_rules, &css_keyframes);
     pb.finish_and_clear();
     crate::logger::log_success(&format!("IR built — {} window(s)", windows.len()));
 
@@ -114,26 +124,71 @@ pub fn run(
     pb.finish_and_clear();
     crate::logger::log_success(&format!("C++ generated → {}", output_dir.display()));
 
-    // ── Compile ──
+    // ── Compile (skip when nothing changed, like cargo run) ──
     let compiler_name = morph_build::detect_compiler();
-    let pb = crate::logger::spinner(&format!("Compiling with {}...", compiler_name));
     // Find runtime dir (for headers)
     let runtime_dir = {
         let mut candidates = vec![
             cwd.join("runtime").join("cpp"),
             cwd.join("../runtime").join("cpp"),
             cwd.join("../../runtime").join("cpp"),
+            cwd.join("../../../runtime").join("cpp"),
+            cwd.join("../../../../runtime").join("cpp"),
             std::path::PathBuf::from("runtime/cpp"),
         ];
         if let Ok(exe) = std::env::current_exe() {
             if let Some(dir) = exe.parent() {
                 candidates.push(dir.join("../runtime/cpp"));
+                candidates.push(dir.join("../../runtime/cpp"));
+                candidates.push(dir.join("../../../runtime/cpp"));
             }
         }
         candidates.into_iter().find(|p| p.join("core/window.h").exists() || p.join("include").exists() || p.exists()).unwrap_or_else(|| cwd.join("runtime/cpp"))
     };
-    let compiler = morph_build::Compiler::new(None);
+    let compiler = morph_build::Compiler::new(None).silent();
     let binary_path = output_dir.join(format!("{}{}", clean_name, morph_build::exe_suffix()));
+
+    // A build is "fresh" (cargo-style) only when every input fingerprint is
+    // unchanged AND the binary already exists. On any change we rebuild.
+    let config_text = std::fs::read_to_string(&config_path).unwrap_or_default();
+    let runtime_hash = morph_cache::hash_tree(&runtime_dir);
+    let mut owned_inputs: Vec<(String, String)> = vec![
+        ("morph.config.json".to_string(), config_text),
+        ("entry".to_string(), source.clone()),
+        ("runtime".to_string(), runtime_hash),
+    ];
+    let entry_parent = entry_path.parent().unwrap_or(cwd.as_path());
+    for imp in &parsed.imports {
+        let path = match &imp.kind {
+            morph_parser::MxImportKind::CssLocal { path } => path,
+            morph_parser::MxImportKind::Component { path, .. } => path,
+            morph_parser::MxImportKind::CppLocal { path, .. } => path,
+            morph_parser::MxImportKind::CssUrl { .. } => continue,
+        };
+        let candidates = [
+            entry_parent.join(path),
+            cwd.join(path),
+        ];
+        let text = if let Some(cand) = candidates.iter().find(|c| c.exists()) {
+            std::fs::read_to_string(cand).unwrap_or_default()
+        } else {
+            String::new()
+        };
+        owned_inputs.push((path.clone(), text));
+    }
+    let fingerprint_inputs: Vec<(&str, &str)> = owned_inputs
+        .iter()
+        .map(|(p, c)| (p.as_str(), c.as_str()))
+        .collect();
+    let fingerprint = morph_cache::fingerprint_inputs(&fingerprint_inputs);
+    let stored = morph_cache::read_stored_fingerprint(&cwd, &clean_name);
+    if stored.as_deref() == Some(fingerprint.as_str()) && binary_path.exists() {
+        crate::logger::log_success(&format!("Up to date — nothing to compile ({})", binary_path.display()));
+        println!();
+        return Ok(binary_path);
+    }
+
+    let pb = crate::logger::spinner(&format!("Compiling with {}...", compiler_name));
     // Feature defines for flex, etc.
     let mut fs = morph_codegen::feature_set::FeatureSet::new();
     fs.scan(&windows);
@@ -141,10 +196,14 @@ pub fn run(
     // Ensure output dir exists (already created by emitter)
     if let Err(e) = compiler.compile(&output_dir.join("app.cpp"), &binary_path, &runtime_dir, &defines) {
         pb.finish_and_clear();
+        // On failure we STOP and do not run any stale binary.
         crate::logger::log_error(&format!("Compile failed: {}", e));
+        crate::logger::log_error("Fix the error above, then re-run `morph run`/`morph build`.");
         anyhow::bail!("build failed");
     }
     pb.finish_and_clear();
+    // Only record the fingerprint after a successful compile.
+    let _ = morph_cache::write_stored_fingerprint(&cwd, &clean_name, &fingerprint);
     crate::logger::log_success(&format!("Compiled → {}", binary_path.display()));
     // UPX compression if requested (stub)
     if upx.unwrap_or(false) && !no_upx {
@@ -152,209 +211,5 @@ pub fn run(
     }
     println!();
 
-    Ok(())
-}
-
-fn build_ir(parsed: &morph_parser::MxSource) -> Result<Vec<morph_ir::IRWindow>> {
-    use morph_ir::{IRWindow, IRNode, IRStyle};
-    use std::collections::HashMap;
-
-    // Aggregate state/effects from all components
-    let all_state: Vec<HashMap<String, String>> = parsed.components.iter().flat_map(|c| {
-        c.state_vars.iter().map(|sv| {
-            let mut m = HashMap::new();
-            m.insert("getter".to_string(), sv.getter.clone());
-            m.insert("setter".to_string(), sv.setter.clone());
-            m.insert("init".to_string(), sv.init.clone());
-            m
-        })
-    }).collect();
-    let all_effects: Vec<HashMap<String, String>> = parsed.components.iter().flat_map(|c| {
-        c.effects.iter().map(|e| {
-            let mut m = HashMap::new();
-            m.insert("callback".to_string(), e.callback.clone());
-            m.insert("deps".to_string(), e.deps.clone());
-            m
-        })
-    }).collect();
-
-    let wc = parsed.window_config.as_ref().map(|wc| {
-        morph_ir::IRWindow {
-            window_id: "w0".to_string(),
-            title: wc.title.clone(),
-            width: wc.width,
-            height: wc.height,
-            visible: true,
-            min_width: wc.min_width,
-            max_width: wc.max_width,
-            min_height: wc.min_height,
-            max_height: wc.max_height,
-            modal: wc.modal,
-            renderer: "flash".into(),
-            nodes: vec![],
-            startup_logs: parsed.console_logs.clone(),
-            premain_functions: vec![],
-            extra_headers: vec![],
-            state_vars: all_state.clone(),
-            effect_decls: all_effects.clone(),
-            cpp_imports: parsed.cpp_imports.iter().map(|ci| {
-                let mut m = HashMap::new();
-                m.insert("path".to_string(), ci.path.clone());
-                m.insert("specifiers".to_string(), ci.specifiers.join(", "));
-                m
-            }).collect(),
-            keyframes: HashMap::new(),
-        }
-    }).unwrap_or_else(|| {
-        IRWindow {
-            window_id: "w0".to_string(),
-            title: "Morph App".to_string(),
-            width: 800,
-            height: 600,
-            visible: true,
-            min_width: None,
-            max_width: None,
-            min_height: None,
-            max_height: None,
-            modal: false,
-            renderer: "flash".into(),
-            nodes: vec![],
-            startup_logs: parsed.console_logs.clone(),
-            premain_functions: vec![],
-            extra_headers: vec![],
-            state_vars: all_state.clone(),
-            effect_decls: all_effects.clone(),
-            cpp_imports: parsed.cpp_imports.iter().map(|ci| {
-                let mut m = HashMap::new();
-                m.insert("path".to_string(), ci.path.clone());
-                m.insert("specifiers".to_string(), ci.specifiers.join(", "));
-                m
-            }).collect(),
-            keyframes: HashMap::new(),
-        }
-    });
-
-    let mut windows = vec![wc];
-
-    // Build IR nodes from parsed components
-    for comp in &parsed.components {
-        let root = jsx_to_ir_node(&comp.jsx, "root");
-        windows[0].nodes.push(root);
-    }
-
-    Ok(windows)
-}
-
-fn jsx_to_ir_node(jsx: &morph_parser::JsxNode, node_id: &str) -> morph_ir::IRNode {
-    use morph_ir::{IRNode, IRStyle, IREvent};
-    use std::collections::HashMap;
-
-    match jsx {
-        morph_parser::JsxNode::Element { tag, props, children, self_closing: _, .. } => {
-            let mut node = IRNode::default();
-            node.node_id = node_id.to_string();
-            node.node_type = tag.clone();
-
-            // Extract static props
-            if let Some(morph_parser::JsxPropValue::String(val)) = props.get("className") {
-                node.reactive_class = val.clone();
-            }
-            if let Some(morph_parser::JsxPropValue::String(val)) = props.get("id") {
-                node.attrs.insert("id".to_string(), val.clone());
-            }
-            if let Some(morph_parser::JsxPropValue::String(val)) = props.get("placeholder") {
-                node.attrs.insert("placeholder".to_string(), val.clone());
-            }
-            if let Some(morph_parser::JsxPropValue::String(val)) = props.get("src") {
-                node.attrs.insert("src".to_string(), val.clone());
-            }
-            if let Some(morph_parser::JsxPropValue::String(val)) = props.get("type") {
-                node.attrs.insert("type".to_string(), val.clone());
-            }
-
-            // Extract text content
-            let text_parts: Vec<String> = children.iter().filter_map(|c| {
-                if let morph_parser::JsxNode::Text(t) = c {
-                    Some(t.clone())
-                } else {
-                    None
-                }
-            }).collect();
-            if !text_parts.is_empty() {
-                node.text_content = text_parts.join("");
-            }
-
-            // Events
-            if let Some(morph_parser::JsxPropValue::Fn(expr)) = props.get("onClick") {
-                node.events.push(IREvent {
-                    trigger: "click".to_string(),
-                    action: "call".to_string(),
-                    target: expr.clone(),
-                });
-            }
-            if let Some(morph_parser::JsxPropValue::Fn(expr)) = props.get("onInput") {
-                node.events.push(IREvent {
-                    trigger: "input".to_string(),
-                    action: "call".to_string(),
-                    target: expr.clone(),
-                });
-            }
-
-            // Children
-            for (i, child) in children.iter().enumerate() {
-                let child_id = format!("{node_id}_{i}");
-                node.children.push(jsx_to_ir_node(child, &child_id));
-            }
-
-            node
-        }
-        morph_parser::JsxNode::Fragment { children, .. } => {
-            let mut node = IRNode::default();
-            node.node_id = node_id.to_string();
-            node.node_type = "__fragment__".to_string();
-            for (i, child) in children.iter().enumerate() {
-                let child_id = format!("{node_id}_{i}");
-                node.children.push(jsx_to_ir_node(child, &child_id));
-            }
-            node
-        }
-        morph_parser::JsxNode::Text(text) => {
-            let mut node = IRNode::default();
-            node.node_id = node_id.to_string();
-            node.node_type = "__text__".to_string();
-            node.text_content = text.clone();
-            node
-        }
-        morph_parser::JsxNode::Expression(expr) => {
-            let mut node = IRNode::default();
-            node.node_id = node_id.to_string();
-            node.node_type = "__expr__".to_string();
-            node.reactive_text = expr.clone();
-            node
-        }
-        morph_parser::JsxNode::Conditional { condition, then_branch, else_branch, .. } => {
-            let mut node = IRNode::default();
-            node.node_id = node_id.to_string();
-            node.node_type = "__conditional__".to_string();
-            node.condition_expr = condition.clone();
-            for (i, child) in then_branch.iter().enumerate() {
-                let child_id = format!("{node_id}_then_{i}");
-                node.then_nodes.push(jsx_to_ir_node(child, &child_id));
-            }
-            for (i, child) in else_branch.iter().enumerate() {
-                let child_id = format!("{node_id}_else_{i}");
-                node.else_nodes.push(jsx_to_ir_node(child, &child_id));
-            }
-            node
-        }
-        morph_parser::JsxNode::List { array_expr, key_expr, item_template, .. } => {
-            let mut node = IRNode::default();
-            node.node_id = node_id.to_string();
-            node.node_type = "__list__".to_string();
-            node.list_expr = array_expr.clone();
-            node.list_key_expr = key_expr.clone();
-            node.item_template = Some(Box::new(jsx_to_ir_node(item_template, &format!("{node_id}_item"))));
-            node
-        }
-    }
+    Ok(binary_path)
 }

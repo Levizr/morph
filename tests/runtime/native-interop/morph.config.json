@@ -1,7 +1,6 @@
 {
   "name": "native-interop-test",
   "entry": "src/App.mx",
-  "output": "dist/",
   "window": {
     "width": 640,
     "height": 560,

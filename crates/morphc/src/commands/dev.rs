@@ -38,6 +38,10 @@ pub fn run(entry: Option<String>) -> Result<()> {
     }
 
     // Initial build
+    // Morph only supports strict .ts/.tsx/.mx entries — hard error otherwise.
+    morph_config::validate_entry_ext(&cwd.join(&entry_file))
+        .map_err(|msg| anyhow::anyhow!(msg))?;
+
     crate::logger::log_step("Initial build");
     if let Err(e) = do_build(&cwd, &entry_file) {
         crate::logger::log_error(&format!("Initial build failed: {}", e));
@@ -95,21 +99,22 @@ fn do_build(cwd: &Path, entry: &str) -> Result<()> {
     let entry_path = cwd.join(entry);
     let source = std::fs::read_to_string(&entry_path)?;
     let parsed = morph_parser::parse_mx_str(&source, entry)?;
-    let mut css_rules = std::collections::HashMap::new();
+    let mut css = morph_parser::CssData::default();
     for imp in &parsed.imports {
         if let morph_parser::MxImportKind::CssLocal { path } = &imp.kind {
             let cand = entry_path.parent().map(|p| p.join(path)).unwrap_or_else(|| cwd.join(path));
             if cand.exists() {
                 if let Ok(text) = std::fs::read_to_string(&cand) {
-                    if let Ok(rules) = morph_parser::parse_css(&text) {
-                        css_rules.extend(rules);
+                    if let Ok(data) = morph_parser::parse_css(&text) {
+                        css.rules.extend(data.rules);
+                        for (k, v) in data.keyframes { css.keyframes.entry(k).or_default().extend(v); }
                     }
                 }
             }
         }
     }
-    let builder = morph_ir::IRBuilder::new();
-    let windows = builder.build(&parsed, &css_rules);
+    let mut builder = morph_ir::IRBuilder::new();
+    let windows = builder.build(&parsed, &css.rules, &css.keyframes);
     // For dev, we just verify IR builds; in full dev we'd emit logic and push via IPC
     crate::logger::log_dim(&format!("Parsed {} ({} windows, {} state vars)", entry, windows.len(), windows.iter().map(|w| w.state_vars.len()).sum::<usize>()));
     Ok(())

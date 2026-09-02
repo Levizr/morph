@@ -82,6 +82,7 @@ pub fn check(source: &str, file_path: &str) -> Vec<LintError> {
         state_vars: walker.state_vars,
         effects: walker.effects,
         inner_functions: walker.inner_functions,
+        function_declarations: walker.function_declarations,
         global_vars: walker.global_vars,
         console_logs: walker.console_logs,
         extra_headers: walker.extra_headers,

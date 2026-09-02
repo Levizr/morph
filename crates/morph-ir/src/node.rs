@@ -18,6 +18,7 @@ pub struct IRNode {
     pub reactive_text: String,
     pub reactive_class: String,
     pub reactive_style: HashMap<String, String>,
+    pub class_conditional_effects: Vec<IRConditionalClassEffect>,
     pub condition_expr: String,
     pub then_nodes: Vec<IRNode>,
     pub else_nodes: Vec<IRNode>,
@@ -50,6 +51,7 @@ impl Default for IRNode {
             reactive_text: String::new(),
             reactive_class: String::new(),
             reactive_style: HashMap::new(),
+            class_conditional_effects: vec![],
             condition_expr: String::new(),
             then_nodes: vec![],
             else_nodes: vec![],
@@ -98,6 +100,16 @@ pub struct IREvent {
     pub target: String,
 }
 
+/// A conditional class style effect: when `condition` (a C++ bool expr) is
+/// true, apply `on_styles`; otherwise apply `off_styles` (CSS property → value),
+/// or reset affected fields to defaults when `off_styles` is empty.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IRConditionalClassEffect {
+    pub condition: String,
+    pub on_styles: HashMap<String, String>,
+    pub off_styles: HashMap<String, String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IRAnimation {
     pub name: String,
@@ -110,9 +122,28 @@ pub struct IRAnimation {
     pub iterations: f32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl Default for IRAnimation {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            easing: "linear".into(),
+            direction: "normal".into(),
+            fill_mode: "none".into(),
+            play_state: "running".into(),
+            duration: 0.0,
+            delay: 0.0,
+            iterations: 1.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct IRKeyframe {
     pub offset: f32,
     pub style: IRStyle,
+    /// IR style field names explicitly declared (e.g. "opacity", "bg_color").
     pub declared: Vec<String>,
+    /// Raw CSS values needing layout-time resolution (transforms, % lengths).
+    /// Property name (CSS) → CSS string.
+    pub raw: HashMap<String, String>,
 }
