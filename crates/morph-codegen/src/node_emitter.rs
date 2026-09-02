@@ -231,7 +231,7 @@ fn js_transform_leaf(s: &str) -> String {
 // at the `.` in `.length`.
 fn js_left_operand_start(s: &str) -> usize {
     let b = s.as_bytes();
-    let mut i = s.len(); // one past end; we only call with s = text before '.'
+    let i = s.len(); // one past end; we only call with s = text before '.'
     // i points past the object expression; back up one
     let mut pos = i;
     while pos > 0 {
@@ -525,7 +525,7 @@ fn emit_conditional(node: &IRNode, parent_id: Option<&str>, indent: &str, featur
     lines.join("\n")
 }
 
-fn emit_list(node: &IRNode, parent_id: Option<&str>, indent: &str, state_map: &std::collections::HashMap<String, String>) -> String {
+fn emit_list(node: &IRNode, parent_id: Option<&str>, _indent: &str, state_map: &std::collections::HashMap<String, String>) -> String {
     let mut lines = vec![format!("morph::ListContainer* {} = new morph::ListContainer({}, {}, {}, {});", node.node_id, fmt(node.x), fmt(node.y), fmt(node.w), fmt(node.h))];
     if let Some(pid) = parent_id { lines.push(format!("{pid}->addChild({});", node.node_id)); }
     let array_expr = translate_js(&node.list_expr, state_map);

@@ -326,9 +326,9 @@ impl<'a> RustTranslator<'a> {
                     let ret = m.value.return_type.as_ref().map(|rt| self.ts_type_to_rust(&rt.type_annotation)).unwrap_or_else(|| "()".to_string());
                     let ret_str = if ret == "()" { "".to_string() } else { format!(" -> {}", ret) };
                     let body = m.value.body.as_ref().map(|b| self.emit_function_body(b)).unwrap_or_else(|| "{}".to_string());
-                    // Heuristic: if method uses `this`, make it &self
-                    let self_param = if body.contains("self.") || body.contains("this") { " &self, " } else { "" };
-                    let params_str = if self_param.is_empty() { params.join(", ") } else { format!("{} {}", self_param.trim_end_matches(", "), params.join(", ")).trim().to_string().trim_start_matches(',').trim().to_string() };
+                    // Heuristic: if method uses `this`, make it &self (kept for future use)
+                    let _self_param = if body.contains("self.") || body.contains("this") { " &self, " } else { "" };
+                    let _params_str = if _self_param.is_empty() { params.join(", ") } else { format!("{} {}", _self_param.trim_end_matches(", "), params.join(", ")).trim().to_string().trim_start_matches(',').trim().to_string() };
                     // Simpler: always include &self for methods not static
                     let prefix = if m.r#static { "" } else { "&self, " };
                     let all_params = if params.is_empty() { if m.r#static { "".to_string() } else { "&self".to_string() } } else { format!("{}{}", prefix, params.join(", ")) };

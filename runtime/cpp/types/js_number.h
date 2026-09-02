@@ -159,6 +159,27 @@ inline JsNumber operator-(int64_t a, const JsNumber& b) { return JsNumber(a) - b
 inline JsNumber operator*(int64_t a, const JsNumber& b) { return JsNumber(a) * b; }
 inline JsNumber operator/(int64_t a, const JsNumber& b) { return JsNumber(a) / b; }
 inline JsNumber operator%(int64_t a, const JsNumber& b) { return JsNumber(a) % b; }
+// Exact `int` overloads to avoid ISO ambiguity with `JsString + int` (JsNumber->JsString user-defined vs int->int64_t standard)
+inline JsNumber operator+(const JsNumber& a, int b) { return a + JsNumber((int64_t)b); }
+inline JsNumber operator-(const JsNumber& a, int b) { return a - JsNumber((int64_t)b); }
+inline JsNumber operator*(const JsNumber& a, int b) { return a * JsNumber((int64_t)b); }
+inline JsNumber operator/(const JsNumber& a, int b) { return a / JsNumber((int64_t)b); }
+inline JsNumber operator%(const JsNumber& a, int b) { return a % JsNumber((int64_t)b); }
+inline JsNumber operator+(int a, const JsNumber& b) { return JsNumber((int64_t)a) + b; }
+inline JsNumber operator-(int a, const JsNumber& b) { return JsNumber((int64_t)a) - b; }
+inline JsNumber operator*(int a, const JsNumber& b) { return JsNumber((int64_t)a) * b; }
+inline JsNumber operator/(int a, const JsNumber& b) { return JsNumber((int64_t)a) / b; }
+inline JsNumber operator%(int a, const JsNumber& b) { return JsNumber((int64_t)a) % b; }
+
+// ── JsNumber with double (for 3.14 * JsNumber) ──
+inline JsNumber operator*(double a, const JsNumber& b) { return JsNumber(a) * b; }
+inline JsNumber operator*(const JsNumber& a, double b) { return a * JsNumber(b); }
+inline JsNumber operator/(double a, const JsNumber& b) { return JsNumber(a) / b; }
+inline JsNumber operator/(const JsNumber& a, double b) { return a / JsNumber(b); }
+inline JsNumber operator+(double a, const JsNumber& b) { return JsNumber(a) + b; }
+inline JsNumber operator+(const JsNumber& a, double b) { return a + JsNumber(b); }
+inline JsNumber operator-(double a, const JsNumber& b) { return JsNumber(a) - b; }
+inline JsNumber operator-(const JsNumber& a, double b) { return a - JsNumber(b); }
 
 // ── JsNumber comparison with int64_t (disambiguate from JsValue overloads) ──
 inline bool operator==(const JsNumber& a, int64_t b) { return a.as_double() == (double)b; }
@@ -177,9 +198,7 @@ inline bool operator>(size_t a, const JsNumber& b) { return (int64_t)a > b.as_in
 inline bool operator>=(size_t a, const JsNumber& b) { return (int64_t)a >= b.as_int(); }
 
 // ── std::formatter for std::format ──
-// Guarded so older libc++ (macOS Xcode <= 16) still compiles.
-// std::formatter<JsNumber> moved to the opt-in types/js_value_format.h
-// (<format> costs ~1.5s parse per TU — bad for dev hot-reload).
+// See types/js_value_format.h (included by default via js_types.h).
 
 inline std::string JsNumber::as_string() const {
     if (is_int()) return std::to_string(std::get<int64_t>(value));

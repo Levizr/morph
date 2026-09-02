@@ -1,4 +1,6 @@
+#[allow(unused_imports)]
 use serde::{Deserialize, Serialize};
+#[allow(unused_imports)]
 use std::collections::HashMap;
 
 pub mod style;

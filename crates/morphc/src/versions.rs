@@ -2,6 +2,7 @@ use anyhow::Result;
 use morph_config::VersionFile;
 use std::path::Path;
 
+#[allow(dead_code)]
 pub fn read_version_file(path: &Path) -> Result<VersionFile> {
     VersionFile::from_file(path)
 }

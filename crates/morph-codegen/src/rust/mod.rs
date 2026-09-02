@@ -3,6 +3,7 @@ use morph_ir::IRWindow;
 use std::path::Path;
 
 pub struct RustEmitter<'a> {
+    #[allow(dead_code)]
     windows: &'a [IRWindow],
 }
 

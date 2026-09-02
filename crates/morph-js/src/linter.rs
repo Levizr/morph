@@ -2,7 +2,7 @@ use oxc_allocator::Allocator;
 use oxc_ast::ast::*;
 use oxc_parser::Parser;
 use oxc_span::{GetSpan, SourceType, Span};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use morph_parser::LintError;
 
@@ -24,7 +24,7 @@ fn offset_to_line_col(offsets: &[usize], offset: u32) -> (usize, usize) {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-enum Strictness { Strict, Permissive } // Strict = .ts , Permissive = .js
+pub enum Strictness { Strict, Permissive } // Strict = .ts , Permissive = .js
 
 pub fn check_str(content: &str, file_path: &str) -> Vec<LintError> {
     let is_js = file_path.ends_with(".js") || file_path.ends_with(".jsx") || file_path.ends_with(".mjs") || file_path.ends_with(".cjs");
@@ -165,7 +165,7 @@ impl<'a> Linter<'a> {
         let right_looks_bool = right_is_bool || right_src == "true" || right_src == "false";
 
         let has_string = left_looks_str || right_looks_str;
-        let has_number = left_looks_num || right_looks_num || left_looks_bool || right_looks_bool;
+        let _has_number = left_looks_num || right_looks_num || left_looks_bool || right_looks_bool;
 
         // For the user's example: `2 + "Hello"` => left_looks_num && right_looks_str => has_string && has_number
         // `"This " + add(2,5)` where add returns int is also number+string but we can't see return type, so we also check the right_src for call expression
@@ -231,48 +231,7 @@ impl<'a> Linter<'a> {
     fn visit_statement(&mut self, stmt: &Statement<'a>) {
         match stmt {
             Statement::VariableDeclaration(decl) => {
-                // Rule: no `var`, only `let`/`const`
-                if decl.kind == VariableDeclarationKind::Var {
-                    let (line,col)= self.line_col(decl.span);
-                    self.push(decl.span, "ts-no-var", "error",
-                        "Don't use `var` — it behaves differently in C++. Use `let` for values that change or `const` for values that don't.".into(),
-                        Some("Change `var x = ...` to `let x = ...` or `const x = ...`".into()));
-                }
-                for d in &decl.declarations {
-                    let (name, _) = Self::binding_name(&d.id);
-                    if let Some(n)=name { self.declare(n); }
-                    // Rule: must have type annotation in strict mode
-                    if self.in_strict && d.type_annotation.is_none() {
-                        // Try to infer if initializer is simple and we could suggest a type
-                        let inferred = d.init.as_ref().and_then(|e| self.type_str_of_expr(e));
-                        let (line,col)= self.line_col(d.id.span());
-                        let init_src = d.init.as_ref().map(|e| e.span().source_text(self.source).chars().take(20).collect::<String>()).unwrap_or_default();
-                        let msg = if let Some(n)= &name {
-                            format!("`{n}` needs a type. In TypeScript every variable must say what it is.")
-                        } else {
-                            "This variable needs a type.".into()
-                        };
-                        let sugg = if let Some(t)= inferred {
-                            format!("Add a type like `: {t}` — example: `let {}: {} = {}`", name.clone().unwrap_or("x".into()), t, init_src)
-                        } else if let Some(n)= &name {
-                            format!("Add a type — is `{n}` a string, a number, or something else? Example: `let {n}: number = 1` or `let {n}: string = \"hello\"`")
-                        } else {
-                            "Add a type like `: number` or `: string`".into()
-                        };
-                        self.push(d.span, "ts-require-type", "error", msg, Some(sugg));
-                    }
-                    if let Some(init)= &d.init {
-                        self.visit_expression(init);
-                    }
-                    // Check for `any`
-                    if let Some(ta)= &d.type_annotation {
-                        if ta.type_annotation.span().source_text(self.source).trim() == "any" {
-                            self.push(ta.span, "ts-no-any", "error",
-                                "Don't use `any` — it hides mistakes that will crash in C++.".into(),
-                                Some("Use a real type like `number`, `string`, or `unknown` and check it.".into()));
-                        }
-                    }
-                }
+                self.visit_variable_declaration(decl);
             }
             Statement::FunctionDeclaration(f) => {
                 if let Some(id)= &f.id {
@@ -295,10 +254,8 @@ impl<'a> Linter<'a> {
                     // Check param types
                     for p in &f.params.items {
                         let (n,_) = Self::binding_name(&p.pattern);
-                        if let Some(name)= n { self.declare(name); }
-                        if self.in_strict && p.type_annotation.is_none() && p.pattern.type_annotation().is_none() {
-                            // p.pattern.type_annotation() is via BindingPattern? Check via FormalParameter's type_annotation? Actually FormalParameter doesn't have type_annotation directly, need to check p.pattern
-                            // For now, check if pattern has type annotation via source text `:` 
+                        if let Some(name)= n.clone() { self.declare(name); }
+                        if self.in_strict && p.type_annotation.is_none() {
                             let param_src = p.span.source_text(self.source);
                             if !param_src.contains(':') {
                                 self.push(p.span, "ts-require-param-type", "error",
@@ -320,7 +277,12 @@ impl<'a> Linter<'a> {
             Statement::DoWhileStatement(d) => { self.visit_statement(&d.body); self.visit_expression(&d.test); },
             Statement::ForStatement(f) => {
                 self.push_scope();
-                if let Some(init)=&f.init { match init { ForStatementInit::VariableDeclaration(v) => self.visit_statement(&Statement::VariableDeclaration(v.clone())), _ => if let Some(e)=init.as_expression(){ self.visit_expression(e); } } }
+                if let Some(init)=&f.init {
+                    match init {
+                        ForStatementInit::VariableDeclaration(v) => self.visit_variable_declaration(v),
+                        _ => if let Some(e)=init.as_expression(){ self.visit_expression(e); }
+                    }
+                }
                 if let Some(t)=&f.test { self.visit_expression(t); }
                 if let Some(u)=&f.update { self.visit_expression(u); }
                 self.visit_statement(&f.body);
@@ -329,7 +291,21 @@ impl<'a> Linter<'a> {
             Statement::ForInStatement(f) => { self.visit_expression(&f.right); self.push_scope(); self.visit_statement(&f.body); self.pop_scope(); }
             Statement::ForOfStatement(f) => { self.visit_expression(&f.right); self.push_scope(); self.visit_statement(&f.body); self.pop_scope(); }
             Statement::SwitchStatement(s) => { self.visit_expression(&s.discriminant); for c in &s.cases { if let Some(t)=&c.test { self.visit_expression(t); } for st in &c.consequent { self.visit_statement(st); } } }
-            Statement::TryStatement(t) => { self.visit_statement(&Statement::BlockStatement(t.block.clone())); if let Some(h)=&t.handler { self.push_scope(); for st in &h.body.body { self.visit_statement(st); } self.pop_scope(); } if let Some(f)=&t.finalizer { self.visit_statement(&Statement::BlockStatement(f.clone())); } }
+            Statement::TryStatement(t) => {
+                self.push_scope();
+                for st in &t.block.body { self.visit_statement(st); }
+                self.pop_scope();
+                if let Some(h)=&t.handler {
+                    self.push_scope();
+                    for st in &h.body.body { self.visit_statement(st); }
+                    self.pop_scope();
+                }
+                if let Some(finalizer)=&t.finalizer {
+                    self.push_scope();
+                    for st in &finalizer.body { self.visit_statement(st); }
+                    self.pop_scope();
+                }
+            }
             Statement::ThrowStatement(t) => self.visit_expression(&t.argument),
             Statement::ClassDeclaration(c) => {
                 if let Some(id)=&c.id { self.declare(id.name.to_string()); }
@@ -364,6 +340,46 @@ impl<'a> Linter<'a> {
             _ => {}
         }
     }
+
+    fn visit_variable_declaration(&mut self, decl: &VariableDeclaration<'a>) {
+        if decl.kind == VariableDeclarationKind::Var {
+            self.push(decl.span, "ts-no-var", "error",
+                "Don't use `var` — it behaves differently in C++. Use `let` for values that change or `const` for values that don't.".into(),
+                Some("Change `var x = ...` to `let x = ...` or `const x = ...`".into()));
+        }
+        for d in &decl.declarations {
+            let (name, _) = Self::binding_name(&d.id);
+            if let Some(n)= &name { self.declare(n.clone()); }
+            if self.in_strict && d.type_annotation.is_none() {
+                let inferred = d.init.as_ref().and_then(|e| self.type_str_of_expr(e));
+                let init_src = d.init.as_ref().map(|e| e.span().source_text(self.source).chars().take(20).collect::<String>()).unwrap_or_default();
+                let msg = if let Some(n)= &name {
+                    format!("`{n}` needs a type. In TypeScript every variable must say what it is.")
+                } else {
+                    "This variable needs a type.".into()
+                };
+                let sugg = if let Some(t)= inferred {
+                    format!("Add a type like `: {t}` — example: `let {}: {} = {}`", name.clone().unwrap_or("x".into()), t, init_src)
+                } else if let Some(n)= &name {
+                    format!("Add a type — is `{n}` a string, a number, or something else? Example: `let {n}: number = 1` or `let {n}: string = \"hello\"`")
+                } else {
+                    "Add a type like `: number` or `: string`".into()
+                };
+                self.push(d.span, "ts-require-type", "error", msg, Some(sugg));
+            }
+            if let Some(init)= &d.init {
+                self.visit_expression(init);
+            }
+            if let Some(ta)= &d.type_annotation {
+                if ta.type_annotation.span().source_text(self.source).trim() == "any" {
+                    self.push(ta.span, "ts-no-any", "error",
+                        "Don't use `any` — it hides mistakes that will crash in C++.".into(),
+                        Some("Use a real type like `number`, `string`, or `unknown` and check it.".into()));
+                }
+            }
+        }
+    }
+
     fn visit_expression(&mut self, expr: &Expression<'a>) {
         match expr {
             Expression::BinaryExpression(b) => {
@@ -407,13 +423,9 @@ impl<'a> Linter<'a> {
                 for arg in &c.arguments { if let Some(e)= arg.as_expression() { self.visit_expression(e); } }
                 self.visit_expression(&c.callee);
             }
-            Expression::MemberExpression(m) => {
-                match m {
-                    MemberExpression::StaticMemberExpression(s) => self.visit_expression(&s.object),
-                    MemberExpression::ComputedMemberExpression(c) => { self.visit_expression(&c.object); self.visit_expression(&c.expression); }
-                    MemberExpression::PrivateFieldExpression(p) => self.visit_expression(&p.object),
-                }
-            }
+            Expression::StaticMemberExpression(s) => self.visit_expression(&s.object),
+            Expression::ComputedMemberExpression(c) => { self.visit_expression(&c.object); self.visit_expression(&c.expression); }
+            Expression::PrivateFieldExpression(p) => self.visit_expression(&p.object),
             Expression::ConditionalExpression(c) => { self.visit_expression(&c.test); self.visit_expression(&c.consequent); self.visit_expression(&c.alternate); }
             Expression::ArrayExpression(a) => for el in &a.elements { if let Some(e)= el.as_expression() { self.visit_expression(e); } },
             Expression::ObjectExpression(o) => for p in &o.properties { if let ObjectPropertyKind::ObjectProperty(prop)= p { self.visit_expression(&prop.value); } },
@@ -424,9 +436,13 @@ impl<'a> Linter<'a> {
             Expression::AwaitExpression(a) => self.visit_expression(&a.argument),
             Expression::YieldExpression(y) => if let Some(a)=&y.argument { self.visit_expression(a); },
             Expression::ChainExpression(c) => match &c.expression {
-                ChainElement::CallExpression(call) => self.visit_expression(&Expression::CallExpression(call.clone())),
-                ChainElement::StaticMemberExpression(s) => self.visit_expression(&Expression::StaticMemberExpression(s.clone())),
-                ChainElement::ComputedMemberExpression(c) => self.visit_expression(&Expression::ComputedMemberExpression(c.clone())),
+                ChainElement::CallExpression(call) => {
+                    self.visit_expression(&call.callee);
+                    for arg in &call.arguments { if let Some(e)= arg.as_expression() { self.visit_expression(e); } }
+                },
+                ChainElement::StaticMemberExpression(s) => self.visit_expression(&s.object),
+                ChainElement::ComputedMemberExpression(comp) => { self.visit_expression(&comp.object); self.visit_expression(&comp.expression); },
+                ChainElement::PrivateFieldExpression(p) => self.visit_expression(&p.object),
                 _ => {}
             },
             Expression::ArrowFunctionExpression(f) => {
@@ -456,13 +472,13 @@ impl<'a> Linter<'a> {
                     }
                 }
             }
-            Expression::Super(_) | Expression::ThisExpression(_) | Expression::NullLiteral(_) | Expression::BooleanLiteral(_) | Expression::NumericLiteral(_) | Expression::StringLiteral(_) | Expression::BigIntLiteral(_) | Expression::RegExpLiteral(_) | Expression::TemplateLiteral(_) | Expression::JSXElement(_) | Expression::JSXFragment(_) => {},
+            Expression::Super(_) | Expression::ThisExpression(_) | Expression::NullLiteral(_) | Expression::BooleanLiteral(_) | Expression::NumericLiteral(_) | Expression::StringLiteral(_) | Expression::BigIntLiteral(_) | Expression::RegExpLiteral(_) | Expression::JSXElement(_) | Expression::JSXFragment(_) => {},
             _ => {},
         }
     }
 
     fn binding_name(pat: &BindingPattern<'a>) -> (Option<String>, Option<String>) {
-        Self::binding_name_opt(pat).unwrap_or((None,None))
+        Self::binding_name_opt(pat).map(|(a, b)| (Some(a), b)).unwrap_or((None,None))
     }
     fn binding_name_opt(pat: &BindingPattern<'a>) -> Option<(String, Option<String>)> {
         match pat {

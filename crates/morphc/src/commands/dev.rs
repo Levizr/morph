@@ -113,7 +113,7 @@ fn do_build(cwd: &Path, entry: &str) -> Result<()> {
             }
         }
     }
-    let mut builder = morph_ir::IRBuilder::new();
+    let builder = morph_ir::IRBuilder::new();
     let windows = builder.build(&parsed, &css.rules, &css.keyframes);
     // For dev, we just verify IR builds; in full dev we'd emit logic and push via IPC
     crate::logger::log_dim(&format!("Parsed {} ({} windows, {} state vars)", entry, windows.len(), windows.iter().map(|w| w.state_vars.len()).sum::<usize>()));

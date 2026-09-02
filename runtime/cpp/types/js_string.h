@@ -111,6 +111,4 @@ inline bool operator!=(const std::string& a, const JsString& b) { return a != b.
 inline bool operator!=(const JsString& a, const std::string& b) { return a.value != b; }
 
 // ── std::formatter for std::format ──
-// Guarded so older libc++ (macOS Xcode <= 16) still compiles.
-// std::formatter<JsString> moved to the opt-in types/js_value_format.h
-// (<format> costs ~1.5s parse per TU — bad for dev hot-reload).
+// See types/js_value_format.h (included by default via js_types.h).

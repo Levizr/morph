@@ -39,4 +39,10 @@ struct JsArray {
     JsValue& operator[](int64_t idx);
     JsValue operator[](const JsNumber& idx) const;
     JsValue& operator[](const JsNumber& idx);
+
+    // ── Range-for support (for...of) ──
+    auto begin() const { return elements->begin(); }
+    auto end() const { return elements->end(); }
+    auto begin() { return elements->begin(); }
+    auto end() { return elements->end(); }
 };

@@ -245,107 +245,210 @@ fn find_global_runtime() -> Option<std::path::PathBuf> {
     None
 }
 
-fn should_wrap_in_main(code: &str) -> bool {
-    if code.contains("int main") {
+fn is_top_level_executable(trimmed: &str) -> bool {
+    if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with("//") || trimmed.starts_with("/*") {
         return false;
     }
+    if trimmed.starts_with("class ") || trimmed.starts_with("struct ") || trimmed.starts_with("template") || trimmed.starts_with("namespace") || trimmed.starts_with("enum ") || trimmed.starts_with("using ") || trimmed.starts_with("typedef ") {
+        return false;
+    }
+    if trimmed.starts_with("inline ") || trimmed.starts_with("constexpr ") {
+        return false;
+    }
+    // Declarations at file scope (static) should stay
+    if trimmed.starts_with("static ") {
+        return false;
+    }
+    // Control flow at file scope is executable (for, while, if, try, etc.)
+    if trimmed.starts_with("for (") || trimmed.starts_with("for(") || trimmed.starts_with("while (") || trimmed.starts_with("while(") || trimmed.starts_with("if (") || trimmed.starts_with("if(") || trimmed.starts_with("try ") || trimmed.starts_with("catch ") || trimmed.starts_with("switch ") || trimmed.starts_with("do ") {
+        return true;
+    }
+    // Expression statements: contains ; and looks like executable
+    if trimmed.ends_with(';') {
+        // Already filtered static declarations, so any other ; at file scope is likely executable
+        // This catches `c->increment();`, `arr.push(4);`, `x++;`, `sum += x;`, etc.
+        return true;
+    }
+    if trimmed.ends_with('{') && (trimmed.contains("for ") || trimmed.contains("while ") || trimmed.contains("if ") || trimmed.contains("try ") ) {
+        return true;
+    }
+    false
+}
+
+fn should_wrap_in_main(code: &str) -> bool {
     let mut brace_depth: i32 = 0;
     for line in code.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
+            // Update depth even for preprocessor? No, they don't have braces
             continue;
         }
         let open = line.matches('{').count() as i32;
         let close = line.matches('}').count() as i32;
         let prev_depth = brace_depth;
-        brace_depth += open - close;
-        if prev_depth == 0 {
-            if trimmed.starts_with("morph::dev_log")
-                || trimmed.starts_with("std::cout")
-                || trimmed.starts_with("std::cerr")
-                || trimmed.starts_with("std::println")
-                || trimmed.starts_with("for (")
-                || trimmed.starts_with("while (")
-                || trimmed.starts_with("if (")
-                || trimmed.starts_with("auto ")
-                || trimmed.starts_with("Js")
-            {
-                if trimmed.starts_with("morph::dev_log")
-                    || trimmed.starts_with("std::cout")
-                    || trimmed.starts_with("std::cerr")
-                    || trimmed.starts_with("std::println") {
-                    return true;
-                }
-                if trimmed.ends_with(';') && (trimmed.starts_with("for ") || trimmed.starts_with("while ") || trimmed.starts_with("if ") || trimmed.contains("dev_log") || trimmed.contains("cout") || trimmed.contains("println")) {
-                    return true;
-                }
-            }
+        // Check at file scope before updating depth
+        if prev_depth == 0 && is_top_level_executable(trimmed) {
+            return true;
         }
+        brace_depth += open - close;
+        if brace_depth < 0 { brace_depth = 0; }
     }
     false
 }
 
 fn wrap_top_level_in_main(code: &str) -> String {
-    // Simple wrapper: extract top-level executable statements and put them in main
-    // For now, we just append a main that will be used if the file has top-level executable code
-    // We keep original code as is, but add a main that contains the executable statements
-    // Heuristic: find lines that are at file scope and look like executable, collect them
-    let mut header_lines = Vec::new();
-    let mut main_body = Vec::new();
-    let mut brace_depth: i32 = 0;
-    let mut in_main_wrapper = false;
-    for line in code.lines() {
-        let trimmed = line.trim();
-        // Track depth before processing line
-        let open = line.matches('{').count() as i32;
-        let close = line.matches('}').count() as i32;
-        // If this line is at file scope and looks like executable, move it to main
-        let is_file_scope = brace_depth == 0;
-        let is_executable = is_file_scope
-            && !trimmed.is_empty()
-            && !trimmed.starts_with('#')
-            && !trimmed.starts_with("class ")
-            && !trimmed.starts_with("struct ")
-            && !trimmed.starts_with("template")
-            && !trimmed.starts_with("static ")
-            && !trimmed.starts_with("inline")
-            && !trimmed.starts_with("namespace")
-            && !trimmed.starts_with("//")
-            && !trimmed.starts_with("/*")
-            && (trimmed.starts_with("morph::dev_log")
-                || trimmed.starts_with("std::cout")
-                || trimmed.starts_with("std::cerr")
-                || trimmed.starts_with("std::println")
-                || trimmed.starts_with("for (")
-                || trimmed.starts_with("while (")
-                || trimmed.starts_with("if (")
-                || trimmed.starts_with("try {")
-                || trimmed.starts_with("auto ")
-                    && trimmed.contains("std::make_shared"))
-            ;
-        if is_executable {
-            // Strip leading indent and add to main body with indent
-            main_body.push(format!("    {}", trimmed));
-            in_main_wrapper = true;
+    // Extract top-level executable statements (and their blocks) and put them in main
+    // Handles both cases: file has no main, or file already has a main (then inject into existing main)
+    let has_existing_main = code.contains("int main");
+    if has_existing_main {
+        // Need to extract top-level executables outside main and inject into main
+        // For simplicity, collect all top-level executables that are not inside any function/class
+        // and are outside the existing main, then inject them into main's body
+        let mut header_lines: Vec<String> = Vec::new();
+        let mut to_inject: Vec<String> = Vec::new();
+        let mut brace_depth: i32 = 0;
+        let mut inside_main = false;
+        let mut main_brace_depth = 0;
+        let mut i = 0;
+        let lines: Vec<&str> = code.lines().collect();
+        while i < lines.len() {
+            let line = lines[i];
+            let trimmed = line.trim();
+            let open = line.matches('{').count() as i32;
+            let close = line.matches('}').count() as i32;
+            // Detect entering main
+            if trimmed.starts_with("int main") {
+                inside_main = true;
+                main_brace_depth = 0;
+            }
+            let is_file_scope = brace_depth == 0 && !inside_main;
+            if is_file_scope && is_top_level_executable(trimmed) {
+                // Collect this executable and its block if it opens a brace
+                if trimmed.ends_with('{') || trimmed.contains("for (") || trimmed.contains("while (") || trimmed.contains("if (") || trimmed.starts_with("try") {
+                    // Block: collect until matching }
+                    let mut block_lines = vec![line.to_string()];
+                    let mut depth = open - close;
+                    // depth should be 1 for `for (...) {`
+                    i += 1;
+                    while i < lines.len() && depth > 0 {
+                        let l = lines[i];
+                        block_lines.push(l.to_string());
+                        depth += l.matches('{').count() as i32 - l.matches('}').count() as i32;
+                        i += 1;
+                    }
+                    // Add entire block to inject (with indent)
+                    let block_depth: i32 = block_lines.iter().map(|l| l.matches('{').count() as i32 - l.matches('}').count() as i32).sum();
+                    for bl in &block_lines {
+                        // Remove leading file-scope indent and add main indent
+                        to_inject.push(format!("    {}", bl.trim()));
+                    }
+                    // Update brace_depth for the block we just consumed
+                    brace_depth += block_depth;
+                    continue;
+                } else {
+                    // Single statement
+                    to_inject.push(format!("    {}", trimmed));
+                    // Don't add to header
+                    brace_depth += open - close;
+                    i += 1;
+                    continue;
+                }
+            } else {
+                header_lines.push(line.to_string());
+            }
+            // Update depth and main tracking
+            brace_depth += open - close;
+            if inside_main {
+                main_brace_depth += open - close;
+                if main_brace_depth <= 0 && open == 0 && close > 0 {
+                    // Exiting main's outer brace
+                    inside_main = false;
+                }
+                if brace_depth < 0 { brace_depth = 0; }
+            }
+            if brace_depth < 0 { brace_depth = 0; }
+            i += 1;
+        }
+        if to_inject.is_empty() {
+            return String::new();
+        }
+        // Now inject to_inject into existing main before its `return 0;` or before closing `}`
+        let mut out = header_lines.join("\n");
+        // Find the last `return 0;` or `}` of main in `out` and inject before it
+        if let Some(pos) = out.rfind("    return 0;") {
+            let inject_str = to_inject.join("\n") + "\n";
+            out.insert_str(pos, &inject_str);
+        } else if let Some(pos) = out.rfind('}') {
+            // Fallback: inject before last }
+            let inject_str = to_inject.join("\n") + "\n";
+            out.insert_str(pos, &inject_str);
         } else {
-            header_lines.push(line.to_string());
-            // Update depth after
+            // Fallback: append
+            out.push_str("\n");
+            out.push_str(&to_inject.join("\n"));
         }
-        brace_depth += open - close;
-        if brace_depth < 0 {
-            brace_depth = 0;
+        return out;
+    } else {
+        // No existing main: create new main with top-level executables
+        let mut header_lines: Vec<String> = Vec::new();
+        let mut main_body: Vec<String> = Vec::new();
+        let mut brace_depth: i32 = 0;
+        let mut i = 0;
+        let lines: Vec<&str> = code.lines().collect();
+        while i < lines.len() {
+            let line = lines[i];
+            let trimmed = line.trim();
+            let open = line.matches('{').count() as i32;
+            let close = line.matches('}').count() as i32;
+            let is_file_scope = brace_depth == 0;
+            if is_file_scope && is_top_level_executable(trimmed) {
+                if trimmed.ends_with('{') || trimmed.starts_with("for ") || trimmed.starts_with("while ") || trimmed.starts_with("if ") || trimmed.starts_with("try ") {
+                    // Block
+                    let mut block_lines = Vec::new();
+                    // Collect block
+                    let mut j = i;
+                    let mut d = 0;
+                    while j < lines.len() {
+                        let l = lines[j];
+                        block_lines.push(l.to_string());
+                        d += l.matches('{').count() as i32 - l.matches('}').count() as i32;
+                        j += 1;
+                        if d == 0 && j > i+1 {
+                            break;
+                        }
+                        if j - i > 1000 { break; } // safety
+                    }
+                    let block_depth: i32 = block_lines.iter().map(|l| l.matches('{').count() as i32 - l.matches('}').count() as i32).sum();
+                    for bl in &block_lines {
+                        main_body.push(format!("    {}", bl.trim()));
+                    }
+                    // Update brace_depth for entire block
+                    brace_depth += block_depth;
+                    i = j;
+                    continue;
+                } else {
+                    main_body.push(format!("    {}", trimmed));
+                    brace_depth += open - close;
+                    i += 1;
+                    continue;
+                }
+            } else {
+                header_lines.push(line.to_string());
+                brace_depth += open - close;
+            }
+            if brace_depth < 0 { brace_depth = 0; }
+            i += 1;
         }
+        if main_body.is_empty() {
+            return String::new();
+        }
+        let mut out = header_lines.join("\n");
+        out.push_str("\n\nint main() {\n");
+        for line in main_body {
+            out.push_str(&line);
+            out.push('\n');
+        }
+        out.push_str("    return 0;\n}\n");
+        return out;
     }
-    if !in_main_wrapper || main_body.is_empty() {
-        return String::new();
-    }
-    // Reconstruct: header + main wrapper
-    let mut out = header_lines.join("\n");
-    out.push_str("\n\nint main() {\n");
-    for line in main_body {
-        out.push_str(&line);
-        out.push('\n');
-    }
-    out.push_str("    return 0;\n}\n");
-    out
 }

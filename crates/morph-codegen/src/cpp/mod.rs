@@ -1,5 +1,5 @@
 use anyhow::Result;
-use morph_ir::{IRWindow, IRNode};
+use morph_ir::IRWindow;
 use std::path::Path;
 
 use crate::feature_set::FeatureSet;

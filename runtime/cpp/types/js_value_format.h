@@ -1,16 +1,31 @@
-// std::formatter specializations for the Js* types — OPT-IN header.
+// std::formatter specializations for the Js* types.
 //
-// <format> costs ~1.5s of parse time per translation unit, which is brutal
-// for dev hot-reload where every millisecond counts. The formatter specs are
-// only needed by code that actually formats a Js* value via std::format /
-// std::println, so they live here instead of the js_*.h type headers.
-// Include this header explicitly in those (rare) TUs:
-//
-//     #include "types/js_value_format.h"
+// Included by default via js_types.h so std::format/std::println work with
+// Js* types out of the box. You can also include this header directly when
+// you only need formatting without the full js_types.h umbrella.
+// Define MORPH_NO_FORMAT before including js_types.h to opt-out of the
+// <format> parse cost (~1.5s per TU) in hot-reload critical paths.
+// Codegen adds <format> only when `${}` is used.
 #pragma once
 
 #include <format>
 #include "js_value.h"
+
+template <>
+struct std::formatter<JsUndefined> {
+    constexpr auto parse(auto& ctx) { return ctx.begin(); }
+    auto format(const JsUndefined& v, auto& ctx) const {
+        return std::format_to(ctx.out(), "undefined");
+    }
+};
+
+template <>
+struct std::formatter<JsNull> {
+    constexpr auto parse(auto& ctx) { return ctx.begin(); }
+    auto format(const JsNull& v, auto& ctx) const {
+        return std::format_to(ctx.out(), "null");
+    }
+};
 
 template <>
 struct std::formatter<JsBoolean> {

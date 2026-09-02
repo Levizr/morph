@@ -94,7 +94,7 @@ impl IRBuilder {
         depth: usize,
     ) -> IRNode {
         match jsx {
-            morph_parser::JsxNode::Element { tag, props, children, line, col, .. } => {
+            morph_parser::JsxNode::Element { tag, props, children, line: _, col: _, .. } => {
                 let node_id = self.next_id();
                 let mut node = IRNode {
                     node_id: node_id.clone(),
@@ -156,7 +156,7 @@ impl IRBuilder {
                 }
                 let text_parts: Vec<String> = children.iter().filter_map(|c| if let morph_parser::JsxNode::Text(t) = c { Some(t.clone()) } else { None }).collect();
                 if !text_parts.is_empty() { node.text_content = text_parts.join(""); }
-                for (i, child) in children.iter().enumerate() {
+                for child in children.iter() {
                     let child_node = self.build_node(child, css_rules, depth + 1);
                     if child_node.node_type == "__text__" && child_node.text_content.trim().is_empty() {
                         continue;

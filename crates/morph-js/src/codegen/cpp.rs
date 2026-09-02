@@ -1,6 +1,6 @@
 use oxc_ast::ast::*;
 use oxc_span::GetSpan;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use super::context::{Ctx, INDENT};
 use super::type_resolver::{param_type, resolve_type, resolve_type_annotation, ts_type_name_to_string};
@@ -37,7 +37,7 @@ impl<'a> CppTranslator<'a> {
                 }
             }
         }
-        let mut body = lines.join("\n");
+        let body = lines.join("\n");
         if self.ctx.needed.contains("<print>") {
             // C++23 <print> is self-contained, no need for iostream sync
         }
@@ -183,7 +183,7 @@ impl<'a> CppTranslator<'a> {
         if name.starts_with("/*") {
             return Some(format!("{}/* destructuring not supported */", self.indent()));
         }
-        let type_str = if let Some(ann) = &d.init {
+        let type_str = if let Some(_ann) = &d.init {
             // Check if d has type_annotation
             if let Some(ta) = &d.type_annotation {
                 resolve_type_annotation(Some(ta), "auto", &self.ctx.template_params, false, &self.ctx.class_names)
@@ -276,15 +276,14 @@ impl<'a> CppTranslator<'a> {
         }
     }
 
-    fn emit_if(&mut self, i: &IfStatement<'a>) -> String {
+     fn emit_if(&mut self, i: &IfStatement<'a>) -> String {
         let cond = self.emit_expression(&i.test);
         let cons_code = self.emit_statement(&i.consequent).unwrap_or_else(|| "{}".to_string());
-        let mut result = String::new();
-        if matches!(&i.consequent, Statement::BlockStatement(_)) {
-            result = format!("{}if ({}) {}", self.indent(), cond, cons_code);
+        let mut result = if matches!(&i.consequent, Statement::BlockStatement(_)) {
+            format!("{}if ({}) {}", self.indent(), cond, cons_code)
         } else {
-            result = format!("{}if ({}) {{\n{}\n{}}}", self.indent(), cond, cons_code, self.indent());
-        }
+            format!("{}if ({}) {{\n{}\n{}}}", self.indent(), cond, cons_code, self.indent())
+        };
         if let Some(alt) = &i.alternate {
             let alt_code = self.emit_statement(alt).unwrap_or_default();
             if matches!(alt, Statement::IfStatement(_) | Statement::BlockStatement(_)) {
@@ -989,6 +988,18 @@ impl<'a> CppTranslator<'a> {
         match expr {
             Expression::Identifier(id) => {
                 if let Some(mapped) = self.ctx.state_vars.get(id.name.as_str()) { return mapped.clone(); }
+                if id.name == "undefined" {
+                    return "JsUndefined{}".to_string();
+                }
+                if id.name == "null" {
+                    return "JsNull{}".to_string();
+                }
+                if id.name == "NaN" {
+                    return "std::numeric_limits<double>::quiet_NaN()".to_string();
+                }
+                if id.name == "Infinity" {
+                    return "std::numeric_limits<double>::infinity()".to_string();
+                }
                 id.name.to_string()
             }
             Expression::NumericLiteral(n) => self.emit_number(n),
@@ -1001,7 +1012,17 @@ impl<'a> CppTranslator<'a> {
             Expression::CallExpression(c) => self.emit_call(c),
             Expression::AwaitExpression(a) => format!("co_await {}", self.emit_expression(&a.argument)),
             Expression::BinaryExpression(b) => self.emit_binary(b),
-            Expression::LogicalExpression(b) => format!("{} {} {}", self.emit_expression(&b.left), b.operator.as_str(), self.emit_expression(&b.right)),
+            Expression::LogicalExpression(b) => {
+                let op = b.operator.as_str();
+                if op == "??" {
+                    let left = self.emit_expression(&b.left);
+                    let right = self.emit_expression(&b.right);
+                    // Need JsValue for is_undefined/is_null checks
+                    self.ctx.need("JsValue");
+                    return format!("(JsValue({}).is_undefined() || JsValue({}).is_null() ? JsValue({}) : JsValue({}))", left, left, right, left);
+                }
+                format!("{} {} {}", self.emit_expression(&b.left), op, self.emit_expression(&b.right))
+            }
             Expression::UnaryExpression(u) => format!("{}{}", u.operator.as_str(), self.emit_expression(&u.argument)),
             Expression::UpdateExpression(u) => {
                 let arg = self.emit_simple_target(&u.argument);
@@ -1081,6 +1102,8 @@ impl<'a> CppTranslator<'a> {
         let esc = fmt_str.replace('\\', "\\\\").replace('"', "\\\"");
         if args.is_empty() { return format!("\"{}\"", esc); }
         self.ctx.need("std::format");
+        // Formatter for Js* types is provided by js_types.h (which includes
+        // js_value_format.h by default), so no need to add js_value_format.h here.
         format!("std::format(\"{}\", {})", esc, args.join(", "))
     }
 
@@ -1261,32 +1284,37 @@ impl<'a> CppTranslator<'a> {
             if let Expression::Identifier(obj) = &m.object {
                 if obj.name.as_str() == "console" && matches!(m.property.name.as_str(), "log" | "warn" | "error" | "info") {
                     self.ctx.needed.insert("<print>".to_string());
-                    // Check if any arg is Js type that needs formatter
-                    let mut needs_js_format = false;
-                    for a in &call.arguments {
-                        if let Some(expr) = a.as_expression() {
-                            let code = self.emit_expression(expr);
-                            if code.contains("JsString") || code.contains("JsNumber") || code.contains("JsValue") {
-                                needs_js_format = true;
-                            }
-                            if let Expression::Identifier(id) = expr {
-                                if let Some(ty) = self.ctx.var_types.get(id.name.as_str()) {
-                                    if ty.starts_with("Js") {
-                                        needs_js_format = true;
+                    // Formatter for Js* types is provided by js_types.h (which includes
+                    // js_value_format.h by default), so no explicit insert needed here.
+                    let is_warn = m.property.name.as_str() == "warn";
+                    let is_error = m.property.name.as_str() == "error";
+                    // Fast path: single template literal -> use println directly, no <format> needed
+                    if call.arguments.len() == 1 {
+                        if let Some(expr) = call.arguments[0].as_expression() {
+                            if let Expression::TemplateLiteral(t) = expr {
+                                let (fstr, targs) = self.extract_template_parts(t);
+                                if targs.is_empty() {
+                                    let esc = fstr.replace('\\', "\\\\").replace('"', "\\\"");
+                                    if is_warn || is_error {
+                                        return format!("std::println(stderr, \"{}\")", esc);
                                     }
+                                    return format!("std::println(\"{}\")", esc);
                                 }
+                                let esc = fstr.replace('\\', "\\\\").replace('"', "\\\"");
+                                if is_warn || is_error {
+                                    return format!("std::println(stderr, \"{}\", {})", esc, targs.join(", "));
+                                }
+                                return format!("std::println(\"{}\", {})", esc, targs.join(", "));
                             }
-                            // Binary op that results in JsString (e.g., x + " world" where x is JsString)
-                            if matches!(expr, Expression::BinaryExpression(_)) && code.contains("JsString") {
-                                needs_js_format = true;
+                            if let Expression::StringLiteral(s) = expr {
+                                let esc = s.value.replace('\\', "\\\\").replace('"', "\\\"");
+                                if is_warn || is_error {
+                                    return format!("std::println(stderr, \"{}\")", esc);
+                                }
+                                return format!("std::println(\"{}\")", esc);
                             }
                         }
                     }
-                    if needs_js_format {
-                        self.ctx.needed.insert("\"../../runtime/cpp/types/js_value_format.h\"".to_string());
-                    }
-                    let is_warn = m.property.name.as_str() == "warn";
-                    let is_error = m.property.name.as_str() == "error";
                     let mut args: Vec<String> = Vec::new();
                     for a in &call.arguments {
                         if let Some(expr) = a.as_expression() {
@@ -1301,7 +1329,7 @@ impl<'a> CppTranslator<'a> {
                         }
                         return "std::println(\"\")".to_string();
                     }
-                    // Single arg handling with template/string optimization
+                    // Single arg handling (non-template/string already handled above, but keep for safety)
                     if args.len() == 1 {
                         if let Some(expr) = call.arguments[0].as_expression() {
                             if let Expression::StringLiteral(s) = expr {
@@ -1376,7 +1404,8 @@ impl<'a> CppTranslator<'a> {
         if let Expression::Identifier(id) = obj {
             return self.ctx.var_types.get(id.name.as_str()).map(|t| t == "JsObject").unwrap_or(false);
         }
-        if matches!(obj, Expression::StaticMemberExpression(_) | Expression::ComputedMemberExpression(_)) { return true; }
+        // For `a.b` or `a[i]` where `a` is JsObject, check via var_types or obj_str
+        // Don't return true for generic ComputedMemberExpression like `vector[0]` which is JsString
         false
     }
 
@@ -1391,8 +1420,25 @@ impl<'a> CppTranslator<'a> {
             if let Some(cls) = &self.ctx.class_name { return format!("{}::{}", cls, prop); }
             return format!("/* super */{}", prop);
         }
-        if prop == "length" { return format!("(int)({}.length())", obj); }
-        if self.should_use_bracket(&m.object, &obj) { return format!("{}[\"{}\"]", obj, prop); }
+        if prop == "length" {
+            // Handle std::vector from split (has size(), not length())
+            if obj.to_lowercase().contains("split") {
+                return format!("(int)({}.size())", obj);
+            }
+            // Also check if object is a call to split via AST
+            if let Expression::CallExpression(call) = &m.object {
+                if let Expression::StaticMemberExpression(mem) = &call.callee {
+                    if mem.property.name == "split" {
+                        return format!("(int)({}.size())", obj);
+                    }
+                }
+            }
+            return format!("(int)({}.length())", obj);
+        }
+        // Known JsString/JsArray methods should use dot, not bracket
+        if matches!(prop.as_str(), "toUpperCase" | "toLowerCase" | "charAt" | "indexOf" | "substring" | "slice" | "trim" | "replace" | "split" | "toString" | "length" | "push" | "pop") {
+            // Use dot
+        } else if self.should_use_bracket(&m.object, &obj) { return format!("{}[\"{}\"]", obj, prop); }
         if self.ctx.shared_ptr_vars.contains(&obj) { return format!("{}->{}", obj, prop); }
         if let Expression::Identifier(id) = &m.object { if self.ctx.class_names.contains(id.name.as_str()) { return format!("{}::{}", obj, prop); } }
         format!("{}.{}", obj, prop)
@@ -1402,8 +1448,15 @@ impl<'a> CppTranslator<'a> {
         if let Expression::Identifier(id) = obj_node {
             return matches!(self.ctx.var_types.get(id.name.as_str()).map(|s| s.as_str()), Some("JsObject") | Some("JsValue"));
         }
-        if matches!(obj_node, Expression::StaticMemberExpression(_) | Expression::ComputedMemberExpression(_)) { return true; }
+        // For chained access like `a.b.c` or `arr[i].prop`, be conservative:
+        // Only use bracket for JsObject/JsValue property access, not for JsString/JsArray methods
+        // `arr[i]` returns JsValue, but `arr[i].toUpperCase()` should be dot, not bracket
+        // So don't automatically return true for Static/ComputedMemberExpression
         if let Some(t) = self.ctx.var_types.get(obj_str) { return t == "JsObject" || t == "JsValue"; }
+        // Also check if obj_str looks like an object access (contains ["), then likely JsObject
+        if obj_str.contains("[\"") {
+            return true;
+        }
         false
     }
 
@@ -1495,6 +1548,7 @@ impl<'a> CppTranslator<'a> {
             let base = f.return_type.as_ref().map(|rt| resolve_type_annotation(Some(rt), "JsValue", &self.ctx.template_params, false, &self.ctx.class_names)).unwrap_or_else(|| "JsValue".to_string());
             self.ctx.async_result_type(&base)
         } else { "JsValue".to_string() };
+        
         self.ctx.need(&ret);
         let body = if let Some(b) = &f.body {
             if is_async {

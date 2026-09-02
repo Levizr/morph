@@ -64,6 +64,7 @@ pub fn log_step(msg: &str) {
     println!("\n  {} {}", "→".blue().bold(), msg.bold().white());
 }
 
+#[allow(dead_code)]
 pub fn log_header(msg: &str) {
     println!("\n  {}", msg.bold().white());
 }
@@ -77,6 +78,7 @@ pub fn log_banner(title: &str) {
     println!("  {}", line.dimmed());
 }
 
+#[allow(dead_code)]
 pub fn log_banner_simple(title: &str) {
     println!();
     println!("  {}", title.bold().white());
@@ -144,6 +146,7 @@ pub fn spinner(msg: &str) -> indicatif::ProgressBar {
     pb
 }
 
+#[allow(dead_code)]
 pub fn progress_bar(len: u64, msg: &str) -> indicatif::ProgressBar {
     let pb = indicatif::ProgressBar::new(len);
     pb.set_style(
@@ -196,7 +199,7 @@ pub fn log_lint_errors(errors: &[morph_parser::LintError], contents: &std::colle
     if n_warn > 0 { summary += &format!(" {}", format!("{n_warn} warning(s)").yellow().bold()); }
     println!("\n  {}  {}", "◆".cyan().bold(), summary.bold());
     for e in errors {
-        let color = if e.severity == "error" { "red" } else { "yellow" };
+        let _color = if e.severity == "error" { "red" } else { "yellow" };
         let label = e.severity.clone();
         let label_colored = if e.severity == "error" { label.red().bold() } else { label.yellow().bold() };
         println!("\n  {} {} {} {}", label_colored, ":".dimmed(), e.code.bold(), format!(": {}", e.message).dimmed());
@@ -212,6 +215,7 @@ pub fn log_lint_errors(errors: &[morph_parser::LintError], contents: &std::colle
     }
 }
 
+#[allow(dead_code)]
 pub fn log_parse_error(file_path: &str, line: usize, col: usize, message: &str, source_lines: &[String]) {
     println!("\n  {} {} {}", "error".red().bold(), ":".dimmed(), message.bold());
     print_code_frame(file_path, line, col, source_lines);

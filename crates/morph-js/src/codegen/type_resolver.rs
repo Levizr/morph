@@ -1,7 +1,6 @@
 use oxc_ast::ast::*;
-use oxc_span::GetSpan;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 // Maps from codegen.py
 const CPP_NATIVE_TYPES: &[(&str, &str)] = &[
@@ -118,15 +117,11 @@ pub fn resolve_type<'a>(
         | TSType::TSTypeQuery(_)
         | TSType::TSImportType(_)
         | TSType::TSConditionalType(_)
-        | TSType::TSTypeLiteral(_)
         | TSType::TSTypeOperatorType(_)
         | TSType::TSIndexedAccessType(_)
         | TSType::TSInferType(_)
         | TSType::TSTemplateLiteralType(_)
-        | TSType::TSTypeOperatorType(_)
         | TSType::TSLiteralType(_)
-        | TSType::TSTupleType(_)
-        | TSType::TSIntersectionType(_)
         | TSType::TSMappedType(_)
         | TSType::JSDocNullableType(_)
         | TSType::JSDocNonNullableType(_)
@@ -264,7 +259,7 @@ pub fn resolve_type_annotation<'a>(
 
 pub fn headers_for(cpp_type: &str) -> Vec<&'static str> {
     // Mirrors _TYPE_TO_HEADER in python
-    const MAP: &[(&str, &str)] = &[
+    const MAP: &[(&str, &str)] = &[ 
         ("std::string", "<string>"),
         ("std::string_view", "<string_view>"),
         ("std::vector", "<vector>"),

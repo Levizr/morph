@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use crate::ast_types::{JsxNode, LintError, MxSource};
 
+#[allow(dead_code)]
 fn offset_to_line_col(source: &str, offset: u32) -> (usize, usize) {
     let offset = offset as usize;
     let mut line = 1usize;

@@ -51,6 +51,7 @@ fn normalize_jsx_text(raw: &str) -> Option<String> {
     Some(parts.join(" "))
 }
 
+#[allow(dead_code)]
 fn member_expr_to_string(expr: &MemberExpression) -> String {
     match expr {
         MemberExpression::ComputedMemberExpression(c) => {
@@ -65,6 +66,7 @@ fn member_expr_to_string(expr: &MemberExpression) -> String {
     }
 }
 
+#[allow(dead_code)]
 fn member_expr_obj_str(expr: &Expression) -> String {
     match expr {
         Expression::Identifier(id) => id.name.to_string(),
@@ -124,6 +126,7 @@ fn build_line_offsets(source: &str) -> Vec<usize> {
     offs
 }
 
+#[allow(dead_code)]
 fn offset_to_line_col(source: &str, offset: u32) -> (usize, usize) {
     let offset = offset as usize;
     let mut line = 1usize;
