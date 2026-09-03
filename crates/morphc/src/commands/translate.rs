@@ -442,13 +442,28 @@ fn wrap_top_level_in_main(code: &str) -> String {
         if main_body.is_empty() {
             return String::new();
         }
+        let needs_async = main_body.iter().any(|line| line.contains("co_await"));
         let mut out = header_lines.join("\n");
-        out.push_str("\n\nint main() {\n");
-        for line in main_body {
-            out.push_str(&line);
-            out.push('\n');
+        if needs_async {
+            out.push_str("\n\nint main() {\n");
+            out.push_str("    morph::Task _main_task = [&]() -> morph::Task {\n");
+            for line in main_body {
+                out.push_str(&format!("        {}\n", line));
+            }
+            out.push_str("        co_return;\n");
+            out.push_str("    }();\n");
+            out.push_str("    while (!_main_task.done()) {\n");
+            out.push_str("        morph::process_tasks();\n");
+            out.push_str("    }\n");
+            out.push_str("    return 0;\n}\n");
+        } else {
+            out.push_str("\n\nint main() {\n");
+            for line in main_body {
+                out.push_str(&line);
+                out.push('\n');
+            }
+            out.push_str("    return 0;\n}\n");
         }
-        out.push_str("    return 0;\n}\n");
         return out;
     }
 }

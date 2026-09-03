@@ -298,7 +298,7 @@ inline JsString::JsString(const JsNumber& num) {
     }
 }
 
-// ── JsNumber assignment from JsValue ──
+// ── JsNumber assignment/construction from JsValue ──
 
 inline JsNumber& JsNumber::operator=(const JsValue& v) {
     if (v.is_number()) {
@@ -309,6 +309,10 @@ inline JsNumber& JsNumber::operator=(const JsValue& v) {
     }
     // If not a number, leave as-is (JS allows this loosely)
     return *this;
+}
+
+inline JsNumber::JsNumber(const JsValue& v) : value(int64_t(0)) {
+    *this = v;
 }
 
 // ── JsArray methods that depend on JsValue ──
@@ -475,6 +479,14 @@ inline JsString operator+(int64_t a, const JsString& b) {
     return std::to_string(a) + b.value;
 }
 
+// JsString + JsValue (disambiguate from JsValue+JsValue via implicit conversion)
+inline JsString operator+(const JsString& a, const JsValue& b) {
+    return a.value + _js_to_string(b);
+}
+inline JsString operator+(const JsValue& a, const JsString& b) {
+    return _js_to_string(a) + b.value;
+}
+
 // ── JsValue arithmetic (extract numbers, fall back to undefined) ──
 
 inline JsValue operator/(const JsValue& a, const JsValue& b) {
@@ -525,6 +537,17 @@ inline JsValue operator+(const JsValue& a, int64_t b) { return a + JsValue(b); }
 inline JsValue operator%(const JsValue& a, int64_t b) { return a % JsValue(b); }
 inline JsValue operator+(int64_t a, const JsValue& b) { return JsValue(a) + b; }
 inline JsValue operator%(int64_t a, const JsValue& b) { return JsValue(a) % b; }
+// Exact `int` overloads for disambiguation
+inline JsValue operator/(const JsValue& a, int b) { return a / JsValue((int64_t)b); }
+inline JsValue operator*(const JsValue& a, int b) { return a * JsValue((int64_t)b); }
+inline JsValue operator-(const JsValue& a, int b) { return a - JsValue((int64_t)b); }
+inline JsValue operator+(const JsValue& a, int b) { return a + JsValue((int64_t)b); }
+inline JsValue operator%(const JsValue& a, int b) { return a % JsValue((int64_t)b); }
+inline JsValue operator+(int a, const JsValue& b) { return JsValue((int64_t)a) + b; }
+inline JsValue operator-(int a, const JsValue& b) { return JsValue((int64_t)a) - b; }
+inline JsValue operator*(int a, const JsValue& b) { return JsValue((int64_t)a) * b; }
+inline JsValue operator/(int a, const JsValue& b) { return JsValue((int64_t)a) / b; }
+inline JsValue operator%(int a, const JsValue& b) { return JsValue((int64_t)a) % b; }
 
 // ── JsNumber <-> JsValue interop (for arr[i] where arr[i] is JsValue) ──
 inline JsNumber operator+(const JsNumber& a, const JsValue& b) {

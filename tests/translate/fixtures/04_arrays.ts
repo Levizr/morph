@@ -22,16 +22,15 @@ console.log(empty.length);
 empty.push(10);
 console.log(empty[0]);
 
-// sum via index (avoid for..of with JsArray which needs special handling)
-let sum: any = 0;
+// sum via index
+let sum: number = 0;
 for (let i: number = 0; i < arr.length; i++) {
-    let val: any = arr[i];
-    sum = sum + val;
+    sum = sum + arr[i];
 }
 console.log(sum);
 
-// for loop with array (using any to handle JsValue)
-let sum2: any = 0;
+// for loop with array
+let sum2: number = 0;
 for (let i: number = 0; i < arr.length; i++) {
     sum2 = sum2 + arr[i];
 }

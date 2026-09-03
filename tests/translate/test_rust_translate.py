@@ -171,7 +171,7 @@ def test_translate_and_run(fixture: Path, tmp_path: Path):
     # We don't hardcode expected string per fixture here, just ensure non-empty or at least runs
     # For more strict checks, we compare with Node.js via tsx if available
     assert result.returncode == 0
-    # Optionally compare with Node.js if tsx available
+    # Compare with Node.js via tsx (ground truth) - map output formats
     if shutil.which("npx"):
         try:
             node_out = subprocess.run(
@@ -179,18 +179,49 @@ def test_translate_and_run(fixture: Path, tmp_path: Path):
                 capture_output=True, text=True, timeout=10, cwd=str(REPO_ROOT)
             )
             if node_out.returncode == 0:
-                # Compare first few lines (allow minor formatting diffs like true vs 1)
-                cpp_lines = result.stdout.strip().splitlines()
-                node_lines = node_out.stdout.strip().splitlines()
-                # At least check line counts match or cpp produced output
-                # We don't fail hard on mismatch, just ensure cpp output is non-empty when node is
-                if node_lines and not cpp_lines:
-                    pytest.fail(f"C++ produced no output but Node did for {fixture.name}")
-        except Exception:
-            pass
-    # Ensure output is not empty for fixtures that should print
-    # Most fixtures have multiple console.log, so expect at least one line
-    assert len(result.stdout.strip()) > 0 or "no output expected" in fixture.read_text()
+                def _normalize(s: str) -> list[str]:
+                    # JS vs C++: true/false, null/undefined, number formatting
+                    lines = s.strip().splitlines()
+                    norm = []
+                    for l in lines:
+                        # Node prints `true`/`false`, C++ via formatter does same
+                        # Node prints `null`/`undefined`, C++ does same via JsNull/JsUndefined formatter
+                        # Numbers: Node may print 3.14 vs C++ 3.14 (both via as_string)
+                        # Trim and normalize
+                        norm.append(l.strip())
+                    return norm
+                cpp_lines = _normalize(result.stdout)
+                node_lines = _normalize(node_out.stdout)
+                # For fixtures that are expected to be runnable, compare line counts and content
+                # Allow small differences for object/array printing ([object Object] vs [object Array])
+                if node_lines:
+                    assert len(cpp_lines) == len(node_lines), f"Line count mismatch for {fixture.name}: C++ {len(cpp_lines)} vs Node {len(node_lines)}\nC++: {cpp_lines}\nNode: {node_lines}"
+                    for cl, nl in zip(cpp_lines, node_lines):
+                        # Allow C++ to print `true` vs Node `true` (same)
+                        # Allow `1` vs `1` etc.
+                        # For objects, both should be [object Object] or similar
+                        # We do exact match for now, but can be lenient for float formatting
+                        if cl != nl:
+                            # Try numeric tolerance for floats
+                            try:
+                                if abs(float(cl) - float(nl)) < 0.001:
+                                    continue
+                            except:
+                                pass
+                            # For boolean null etc., check case-insensitive
+                            if cl.lower() == nl.lower():
+                                continue
+                            pytest.fail(f"Output mismatch for {fixture.name}:\n  C++: {cl}\n  Node: {nl}\nFull C++: {result.stdout}\nFull Node: {node_out.stdout}")
+                else:
+                    assert len(result.stdout.strip()) > 0 or "no output expected" in fixture.read_text()
+            else:
+                # Node failed to run (maybe uses fetch/Promise which needs network) - just check C++ ran
+                assert len(result.stdout.strip()) > 0 or "no output expected" in fixture.read_text()
+        except Exception as e:
+            # If npx tsx not available or fails, just check C++ output
+            assert len(result.stdout.strip()) > 0 or "no output expected" in fixture.read_text()
+    else:
+        assert len(result.stdout.strip()) > 0 or "no output expected" in fixture.read_text()
 
 def test_js_number_println_specific(tmp_path: Path):
     """Regression for JsNumber formatter bug: JsNumber must work with println."""

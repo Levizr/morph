@@ -51,6 +51,10 @@ fn lookup(m: &[(&str, &str)], k: &str) -> Option<String> {
 }
 
 fn is_plain_cpp_type(name: &str) -> bool {
+    // Handle placeholder for std:: types (std_string, std_vector etc. from normalize)
+    if name.starts_with("std_") || name.starts_with("Std_") || name.starts_with("__Std") {
+        return true;
+    }
     // Mirrors Python: name.isidentifier() or startswith std::
     if name.starts_with("std::") {
         return true;
@@ -166,7 +170,23 @@ pub fn resolve_type<'a>(
             format!("std::vector<{}>", elem)
         }
         TSType::TSTypeReference(r) => {
-            let name = ts_type_name_to_string(&r.type_name);
+            let mut name = ts_type_name_to_string(&r.type_name);
+            // Denormalize placeholder for std:: types (from normalize_cpp_types)
+            // e.g., std_string -> std::string, std_vector -> std::vector
+            if name.starts_with("std_") {
+                name = name.replacen("std_", "std::", 1);
+                // Handle __COLON__ placeholder if any remain
+                name = name.replace("__COLON__", "::").replace("_", "::");
+                // Fix double colons
+                name = name.replace("::::", "::");
+            }
+            if name == "__StdString__" {
+                name = "std::string".to_string();
+            }
+            if name == "__StdOptional__" {
+                name = "std::optional".to_string();
+            }
+            // Also handle generic placeholder: Array was used for std::vector
             let type_args: Vec<String> = r
                 .type_arguments
                 .as_ref()
@@ -179,6 +199,11 @@ pub fn resolve_type<'a>(
                 .unwrap_or_default();
             if type_args.is_empty() {
                 let raw = name.as_str();
+                // Denormalize for lookup
+                let lookup_name = raw.replace("std_", "std::").replace("__COLON__", "::");
+                if let Some(n) = lookup(CPP_NATIVE_TYPES, &lookup_name) {
+                    return n;
+                }
                 if let Some(n) = lookup(CPP_NATIVE_TYPES, raw) {
                     return n;
                 }
@@ -191,9 +216,28 @@ pub fn resolve_type<'a>(
                 if wrap_shared && (class_names.contains(raw) || template_params.contains(raw)) {
                     return format!("std::shared_ptr<{}>", raw);
                 }
+                // For std_string etc., return std::string directly
+                if raw == "std_string" || raw == "__StdString__" || raw == "StdString" {
+                    return "std::string".to_string();
+                }
+                if raw.starts_with("std_") || raw.contains("__COLON__") {
+                    return raw.replace("std_", "std::").replace("__COLON__", "::");
+                }
                 return raw.to_string();
             }
             // Generic handling
+            // Handle std_vector, std_optional etc. from placeholder (std:: -> std_)
+            if name == "std_vector" || name == "StdVector" || name == "__StdVector__" || name == "std__vector" {
+                let elem = type_args.first().cloned().unwrap_or_else(|| "auto".to_string());
+                return format!("std::vector<{}>", elem);
+            }
+            if name == "std_optional" || name == "__StdOptional__" {
+                let elem = type_args.first().cloned().unwrap_or_else(|| "auto".to_string());
+                return format!("std::optional<{}>", elem);
+            }
+            if name == "std_map" || name == "std_unordered_map" {
+                return format!("std::map<{}>", type_args.join(", "));
+            }
             if name == "Array" || name == "ReadonlyArray" {
                 let elem = type_args.first().cloned().unwrap_or_else(|| "auto".to_string());
                 // Need wrap_shared for element

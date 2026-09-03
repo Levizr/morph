@@ -27,16 +27,15 @@ console.log(user.getHobbyCount());
 console.log(user.hobbies.length);
 console.log(user.hobbies[0]);
 
-function processUsers(users: any[]): any {
-    let totalAge: any = 0;
+function processUsers(users: number[]): number {
+    let totalAge: number = 0;
     for (let i: number = 0; i < users.length; i++) {
-        let u: any = users[i];
-        totalAge = totalAge + u;
+        totalAge = totalAge + (users[i] as number);
     }
     return totalAge;
 }
 
-let users: any[] = [1, 2, 3];
+let users: number[] = [1, 2, 3];
 console.log(users.length);
 console.log(processUsers(users));
 
@@ -48,16 +47,15 @@ console.log(data["count"]);
 console.log(data["title"]);
 
 let numbers: number[] = [1, 2, 3, 4, 5];
-let sum: any = 0;
+let sum: number = 0;
 for (let i: number = 0; i < numbers.length; i++) {
-    let val: any = numbers[i];
-    sum = sum + val;
+    sum = sum + numbers[i];
 }
 console.log(sum);
 
-let filtered: any[] = [];
+let filtered: number[] = [];
 for (let i: number = 0; i < numbers.length; i++) {
-    let n: any = numbers[i];
+    let n: number = numbers[i];
     if (n % 2 === 1) {
         filtered.push(n);
     }

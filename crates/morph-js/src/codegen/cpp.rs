@@ -213,7 +213,13 @@ impl<'a> CppTranslator<'a> {
         }
         let prefix = if self.ctx.indent_level == 0 { "static " } else { "" };
         if let Some(init) = &d.init {
-            let init_code = self.emit_expression(init);
+            let init_code = if cpp_type.starts_with("std::vector<") && matches!(init, Expression::ArrayExpression(_)) {
+                self.emit_std_vector_literal(init)
+            } else if cpp_type == "char" && matches!(init, Expression::StringLiteral(_)) {
+                self.emit_char_literal(init)
+            } else {
+                self.emit_expression(init)
+            };
             if matches!(init, Expression::NewExpression(_)) {
                 self.ctx.shared_ptr_vars.insert(name.clone());
             }
@@ -391,7 +397,13 @@ impl<'a> CppTranslator<'a> {
                         format!("const {}", cpp_type)
                     } else { cpp_type };
                     if let Some(init) = &decl.init {
-                        let init_code = self.emit_expression(init);
+                        let init_code = if final_type.starts_with("std::vector<") && matches!(init, Expression::ArrayExpression(_)) {
+                            self.emit_std_vector_literal(init)
+                        } else if final_type == "char" && matches!(init, Expression::StringLiteral(_)) {
+                            self.emit_char_literal(init)
+                        } else {
+                            self.emit_expression(init)
+                        };
                         if matches!(init, Expression::NewExpression(_)) {
                             self.ctx.shared_ptr_vars.insert(name.clone());
                         }
@@ -409,8 +421,12 @@ impl<'a> CppTranslator<'a> {
     fn emit_for_in(&mut self, f: &ForInStatement<'a>) -> String {
         let left = self.emit_for_left(&f.left);
         let right = self.emit_expression(&f.right);
+        let is_obj = if let Expression::Identifier(id) = &f.right {
+            self.ctx.var_types.get(id.name.as_str()).map(|t| t == "JsObject" || t == "JsValue").unwrap_or(false)
+        } else { false };
+        let iter = if is_obj { format!("{}.keys()", right) } else { right };
         let body = self.emit_statement(&f.body).unwrap_or_else(|| "{}".to_string());
-        format!("{}for (auto {} : {}) {}", self.indent(), left, right, body)
+        format!("{}for (auto {} : {}) {}", self.indent(), left, iter, body)
     }
 
     fn emit_for_of(&mut self, f: &ForOfStatement<'a>) -> String {
@@ -908,7 +924,9 @@ impl<'a> CppTranslator<'a> {
                     if m.value.r#async { final_ret = self.ctx.async_result_type(&final_ret); }
                     final_ret = self.wrap_type(&final_ret);
                     self.ctx.need(&final_ret);
+                    if m.value.r#async { self.ctx.is_async_fn += 1; }
                     let body = m.value.body.as_ref().map(|b| self.emit_function_body(b)).unwrap_or_else(|| "{}".to_string());
+                    if m.value.r#async { self.ctx.is_async_fn -= 1; }
                     let static_prefix = if m.r#static { "static " } else { "" };
                     return (access, format!("{}{} {}({}) {}", static_prefix, final_ret, name, params, body));
                 }
@@ -1400,6 +1418,30 @@ impl<'a> CppTranslator<'a> {
         }
     }
 
+    fn emit_std_vector_literal(&mut self, init: &Expression<'a>) -> String {
+        if let Expression::ArrayExpression(arr) = init {
+            let elems: Vec<String> = arr.elements.iter().filter_map(|e| {
+                match e {
+                    ArrayExpressionElement::Elision(_) => None,
+                    _ => e.as_expression().map(|ex| self.emit_expression(ex)),
+                }
+            }).collect();
+            format!("{{{}}}", elems.join(", "))
+        } else {
+            self.emit_expression(init)
+        }
+    }
+
+    fn emit_char_literal(&mut self, init: &Expression<'a>) -> String {
+        if let Expression::StringLiteral(s) = init {
+            let ch = s.value.as_str();
+            if ch.len() == 1 {
+                return format!("'{}'", ch.replace('\\', "\\\\").replace('\'', "\\'"));
+            }
+        }
+        self.emit_expression(init)
+    }
+
     fn is_js_object_type(&self, obj: &Expression<'a>) -> bool {
         if let Expression::Identifier(id) = obj {
             return self.ctx.var_types.get(id.name.as_str()).map(|t| t == "JsObject").unwrap_or(false);
@@ -1420,7 +1462,23 @@ impl<'a> CppTranslator<'a> {
             if let Some(cls) = &self.ctx.class_name { return format!("{}::{}", cls, prop); }
             return format!("/* super */{}", prop);
         }
+        // Response.ok is a method, not a field: r.ok -> r.ok()
+        if prop == "ok" {
+            // Heuristic: if obj is Response (from fetch), call ok()
+            let is_response = self.ctx.var_types.get(obj.as_str()).map(|t| t.contains("Response")).unwrap_or(false)
+                || obj.contains("Response") || obj == "r" || obj.contains("fetch") || self.ctx.needed.iter().any(|h| h.contains("net.h"));
+            if is_response {
+                return format!("{}.ok()", obj);
+            }
+        }
         if prop == "length" {
+            // Check if object is std::vector type (use .size() instead of .length())
+            let is_vector = if let Expression::Identifier(id) = &m.object {
+                self.ctx.var_types.get(id.name.as_str()).map(|t| t.starts_with("std::vector<")).unwrap_or(false)
+            } else { false };
+            if is_vector {
+                return format!("(int)({}.size())", obj);
+            }
             // Handle std::vector from split (has size(), not length())
             if obj.to_lowercase().contains("split") {
                 return format!("(int)({}.size())", obj);

@@ -9,6 +9,8 @@
 #pragma once
 
 #include <format>
+#include <vector>
+#include <optional>
 #include "js_value.h"
 
 template <>
@@ -75,7 +77,30 @@ template <>
 struct std::formatter<JsObject> {
     constexpr auto parse(auto& ctx) { return ctx.begin(); }
     auto format(const JsObject& v, auto& ctx) const {
-        return std::formatter<JsValue>{}.format(JsValue(v), ctx);
+        auto out = ctx.out();
+        *out++ = '{';
+        *out++ = ' ';
+        if (v.properties) {
+            bool first = true;
+            for (auto& [key, val] : *v.properties) {
+                if (!first) { *out++ = ','; *out++ = ' '; }
+                first = false;
+                out = std::format_to(out, "{}", key);
+                *out++ = ':';
+                *out++ = ' ';
+                // Quote string values like Node.js
+                if (val.is_string()) {
+                    *out++ = '\'';
+                    out = std::format_to(out, "{}", std::get<JsString>(val.inner).value);
+                    *out++ = '\'';
+                } else {
+                    out = std::format_to(out, "{}", val);
+                }
+            }
+        }
+        *out++ = ' ';
+        *out++ = '}';
+        return out;
     }
 };
 
@@ -83,6 +108,43 @@ template <>
 struct std::formatter<JsArray> {
     constexpr auto parse(auto& ctx) { return ctx.begin(); }
     auto format(const JsArray& v, auto& ctx) const {
-        return std::formatter<JsValue>{}.format(JsValue(v), ctx);
+        auto out = ctx.out();
+        *out++ = '[';
+        *out++ = ' ';
+        if (v.elements) {
+            for (size_t i = 0; i < v.elements->size(); ++i) {
+                if (i > 0) { *out++ = ','; *out++ = ' '; }
+                out = std::format_to(out, "{}", (*v.elements)[i]);
+            }
+        }
+        *out++ = ' ';
+        *out++ = ']';
+        return out;
+    }
+};
+
+template <typename T>
+struct std::formatter<std::vector<T>> {
+    constexpr auto parse(auto& ctx) { return ctx.begin(); }
+    auto format(const std::vector<T>& v, auto& ctx) const {
+        auto out = ctx.out();
+        *out++ = '[';
+        *out++ = ' ';
+        for (size_t i = 0; i < v.size(); ++i) {
+            if (i > 0) { *out++ = ','; *out++ = ' '; }
+            out = std::format_to(out, "{}", v[i]);
+        }
+        *out++ = ' ';
+        *out++ = ']';
+        return out;
+    }
+};
+
+template <typename T>
+struct std::formatter<std::optional<T>> {
+    constexpr auto parse(auto& ctx) { return ctx.begin(); }
+    auto format(const std::optional<T>& v, auto& ctx) const {
+        if (v.has_value()) return std::format_to(ctx.out(), "{}", *v);
+        return std::format_to(ctx.out(), "undefined");
     }
 };

@@ -25,4 +25,5 @@ morph/bin/morph_devrt*
 morph/bin/.devrt_source_hash
 temp/
 tests/translate/fixtures/*.cpp
+tests/translate/fixtures/main
 *.log

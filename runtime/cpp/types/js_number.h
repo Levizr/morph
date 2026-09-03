@@ -21,6 +21,7 @@ struct JsNumber {
     JsNumber(double v) : value(v) {}
     explicit JsNumber(const char* v) : value(std::string(v)) {}
     explicit JsNumber(const std::string& v) : value(v) {}
+    JsNumber(const JsValue& v); // defined in js_value.h after JsValue complete
 
     bool is_int() const { return std::holds_alternative<int64_t>(value); }
     bool is_double() const { return std::holds_alternative<double>(value); }
@@ -108,6 +109,16 @@ struct JsNumber {
     JsNumber& operator&=(const JsNumber& o) { *this = *this & o; return *this; }
     JsNumber& operator|=(const JsNumber& o) { *this = *this | o; return *this; }
     JsNumber& operator^=(const JsNumber& o) { *this = *this ^ o; return *this; }
+    JsNumber& operator+=(int o) { *this = *this + JsNumber((int64_t)o); return *this; }
+    JsNumber& operator-=(int o) { *this = *this - JsNumber((int64_t)o); return *this; }
+    JsNumber& operator*=(int o) { *this = *this * JsNumber((int64_t)o); return *this; }
+    JsNumber& operator/=(int o) { *this = *this / JsNumber((int64_t)o); return *this; }
+    JsNumber& operator%=(int o) { *this = *this % JsNumber((int64_t)o); return *this; }
+    JsNumber& operator+=(int64_t o) { *this = *this + JsNumber(o); return *this; }
+    JsNumber& operator-=(int64_t o) { *this = *this - JsNumber(o); return *this; }
+    JsNumber& operator*=(int64_t o) { *this = *this * JsNumber(o); return *this; }
+    JsNumber& operator/=(int64_t o) { *this = *this / JsNumber(o); return *this; }
+    JsNumber& operator%=(int64_t o) { *this = *this % JsNumber(o); return *this; }
 
     // ── Unary ──
     JsNumber operator-() const {

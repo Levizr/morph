@@ -26,11 +26,36 @@ pub fn translate_to_cpp(source: &str, filename: &str, indent_level: usize) -> Re
 
     let ret = Parser::new(&allocator, source, source_type).parse();
 
+    // Handle panicked (Rust-specific strictness for `std::` qualified types)
+    // Python tree-sitter is lenient and recovers via ERROR nodes, but oxc panics on `::`
+    // Fallback: normalize C++ types to valid TS and re-parse
     if ret.panicked {
+        // Try to normalize `std::vector<int>` -> `Array<number>`, `std::string` -> `string`, etc.
+        let normalized = normalize_cpp_types(source);
+        if normalized != source {
+            let alloc2 = Allocator::default();
+            let ret2 = Parser::new(&alloc2, &normalized, source_type).parse();
+            if !ret2.panicked && ret2.diagnostics.is_empty() {
+                let mut translator = CppTranslator::new(&normalized, indent_level);
+                let code = translator.translate_program(&ret2.program);
+                return Ok(code);
+            }
+        }
         return Err(MorphJsError::Parse(format!("parser panicked on {}", filename)));
     }
     if !ret.diagnostics.is_empty() {
         let msgs: Vec<String> = ret.diagnostics.iter().map(|e| e.message.to_string()).collect();
+        // Also try normalized fallback for diagnostics
+        let normalized = normalize_cpp_types(source);
+        if normalized != source {
+            let alloc2 = Allocator::default();
+            let ret2 = Parser::new(&alloc2, &normalized, source_type).parse();
+            if !ret2.panicked && ret2.diagnostics.is_empty() {
+                let mut translator = CppTranslator::new(&normalized, indent_level);
+                let code = translator.translate_program(&ret2.program);
+                return Ok(code);
+            }
+        }
         return Err(MorphJsError::Parse(format!(
             "parse errors in {}: {}",
             filename,
@@ -41,6 +66,24 @@ pub fn translate_to_cpp(source: &str, filename: &str, indent_level: usize) -> Re
     let mut translator = CppTranslator::new(source, indent_level);
     let code = translator.translate_program(&ret.program);
     Ok(code)
+}
+
+fn normalize_cpp_types(source: &str) -> String {
+    // Map C++ qualified types to valid TS equivalents for oxc parser
+    // User proposal: std::string -> std_string (valid TS identifier) then remap "_" -> "::" after oxc
+    // This makes `std::vector<int>` etc. valid TS for oxc strict parser
+    let mut s = source.to_string();
+    // Generic `::` -> `_` placeholder for all std:: types (e.g., std::string -> std_string, std::vector -> std_vector)
+    // This is more generic than hardcoding each type and handles any std:: qualified type
+    if s.contains("::") {
+        s = s.replace("::", "_");
+    }
+    // For std::vector, std::optional etc. with `<`, the `<` remains valid TS generics
+    // e.g., std_vector<int> is valid TS as generic type `std_vector<int>` (identifier with `<int>`)
+    // No further change needed for `<>`
+    // Handle std::string that was not caught by `::` replacement due to already being `std_string`
+    // (already handled above via `::` -> `_`)
+    s
 }
 
 pub fn translate_to_rust(source: &str, filename: &str, indent_level: usize) -> Result<String, MorphJsError> {
@@ -54,10 +97,28 @@ pub fn translate_to_rust(source: &str, filename: &str, indent_level: usize) -> R
     };
     let ret = Parser::new(&allocator, source, source_type).parse();
     if ret.panicked {
+        let normalized = normalize_cpp_types(source);
+        if normalized != source {
+            let alloc2 = Allocator::default();
+            let ret2 = Parser::new(&alloc2, &normalized, source_type).parse();
+            if !ret2.panicked && ret2.diagnostics.is_empty() {
+                let mut translator = RustTranslator::new(&normalized, indent_level);
+                return Ok(translator.translate_program(&ret2.program));
+            }
+        }
         return Err(MorphJsError::Parse(format!("parser panicked on {}", filename)));
     }
     if !ret.diagnostics.is_empty() {
         let msgs: Vec<String> = ret.diagnostics.iter().map(|e| e.message.to_string()).collect();
+        let normalized = normalize_cpp_types(source);
+        if normalized != source {
+            let alloc2 = Allocator::default();
+            let ret2 = Parser::new(&alloc2, &normalized, source_type).parse();
+            if !ret2.panicked && ret2.diagnostics.is_empty() {
+                let mut translator = RustTranslator::new(&normalized, indent_level);
+                return Ok(translator.translate_program(&ret2.program));
+            }
+        }
         return Err(MorphJsError::Parse(format!("parse errors in {}: {}", filename, msgs.join("; "))));
     }
     let mut translator = RustTranslator::new(source, indent_level);

@@ -1,6 +1,6 @@
 #include "net.h"
 #include "../dev/dev_net.h"
-
+ 
 // ── Socket portability ────────────────────────────────────────────
 // One implementation of the HTTP stack serves every OS; only the socket
 // primitives differ (WinSock vs POSIX sockets).
@@ -43,8 +43,10 @@ namespace detail {
 void HttpAwaitable::await_suspend(std::coroutine_handle<> h) noexcept {
     std::shared_ptr<SharedState> st = state;
     std::thread([st, h]() mutable {
-        int netId = devNetBegin("GET", st->url);
-        st->response = http_get(st->url);
+        #ifdef MORPH_FEATURE_DEV 
+        int netId = devNetBegin(st->method.c_str(), st->url.c_str());
+        #endif
+        st->response = http_request(st->url, st->method, st->requestHeaders, st->requestBody);
         std::string err;
         if (st->response.status == 0) {
             err = "Failed to fetch " + st->url +
@@ -59,8 +61,10 @@ void HttpAwaitable::await_suspend(std::coroutine_handle<> h) noexcept {
         std::string preview = st->response.body;
         if (preview.size() > kMaxPreview)
             preview.resize(kMaxPreview);
+        #ifdef MORPH_FEATURE_DEV 
         devNetEnd(netId, st->response.status, st->response.body.size(), err,
                   st->response.requestHead, respHead, preview);
+        #endif
         h.resume();
         // If the coroutine completed during resume, reclaim its frame.
         // Covers the common fire-and-forget pattern where the caller
@@ -114,14 +118,25 @@ bool parse_url(const std::string& raw, UrlParts& out) {
     return !out.host.empty();
 }
 
-std::string build_request(const UrlParts& parts, const std::string& host_header) {
+std::string build_request(const UrlParts& parts, const std::string& host_header, const std::string& method, const Headers& headers, const std::string& body) {
     std::ostringstream req;
-    req << "GET " << parts.path << " HTTP/1.1\r\n";
+    req << method << " " << parts.path << " HTTP/1.1\r\n";
     req << "Host: " << host_header << "\r\n";
     req << "User-Agent: morph-net/0.1\r\n";
     req << "Accept: */*\r\n";
+    // Custom headers
+    for (auto& kv : headers.map) {
+        req << kv.first << ": " << kv.second << "\r\n";
+    }
+    if (!body.empty()) {
+        req << "Content-Length: " << body.size() << "\r\n";
+    }
     req << "Connection: close\r\n\r\n";
+    if (!body.empty()) req << body;
     return req.str();
+}
+std::string build_request(const UrlParts& parts, const std::string& host_header) {
+    return build_request(parts, host_header, "GET", Headers{}, "");
 }
 
 std::string recv_all(SocketT fd) {
@@ -136,10 +151,13 @@ std::string recv_all(SocketT fd) {
 
 } // anonymous namespace
 
-Response http_get(const std::string& url) {
+Response http_request(const std::string& url, const std::string& method, const Headers& headers, const std::string& body) {
     Response resp;
+    resp.url = url;
     UrlParts parts;
     if (!parse_url(url, parts)) {
+        resp.statusText = "Invalid URL";
+        resp.type = "error";
         return resp;
     }
 
@@ -172,36 +190,64 @@ Response http_get(const std::string& url) {
     }
 
     std::string host_header = parts.host;
-    if (parts.port != 80) {
+    if (parts.port != 80 && parts.port != 443) {
         host_header += ":" + std::to_string(parts.port);
     }
-    std::string req = build_request(parts, host_header);
+    std::string req = build_request(parts, host_header, method, headers, body);
     resp.requestHead = req;
     if (::send(fd, req.data(), static_cast<int>(req.size()), 0) < 0) {
         closeSocket(fd);
+        resp.statusText = "Network Error";
+        resp.type = "error";
         return resp;
     }
 
     std::string raw = recv_all(fd);
     closeSocket(fd);
     if (raw.empty()) {
+        resp.statusText = "Empty Reply";
+        resp.type = "error";
         return resp;
     }
 
     // Split headers from body.
     auto sep = raw.find("\r\n\r\n");
     std::string head = (sep == std::string::npos) ? raw : raw.substr(0, sep);
-    std::string body = (sep == std::string::npos) ? "" : raw.substr(sep + 4);
+    std::string resp_body = (sep == std::string::npos) ? "" : raw.substr(sep + 4);
 
     // Status line: HTTP/1.1 200 OK
     std::istringstream hs(head);
     std::string line;
     if (std::getline(hs, line)) {
+        // Remove \r
+        if (!line.empty() && line.back() == '\r') line.pop_back();
         std::istringstream ls(line);
         std::string http_ver;
         int status = 0;
+        std::string statusText;
         if (ls >> http_ver >> status) {
             resp.status = status;
+            // Rest of line is statusText
+            std::getline(ls, statusText);
+            // Trim leading space
+            while (!statusText.empty() && statusText.front() == ' ') statusText.erase(statusText.begin());
+            if (!statusText.empty() && statusText.back() == '\r') statusText.pop_back();
+            resp.statusText = statusText;
+            if (resp.statusText.empty()) {
+                if (resp.status == 200) resp.statusText = "OK";
+                else if (resp.status == 404) resp.statusText = "Not Found";
+                else if (resp.status >= 300 && resp.status < 400) resp.statusText = "Redirect";
+                else resp.statusText = std::to_string(resp.status);
+            }
+        }
+        // Check for redirect
+        if (resp.status >= 300 && resp.status < 400) {
+            resp.redirected = true;
+            resp.type = "cors";
+        } else if (resp.status >= 200 && resp.status < 300) {
+            resp.type = "basic";
+        } else {
+            resp.type = "basic";
         }
     }
     while (std::getline(hs, line)) {
@@ -220,11 +266,16 @@ Response http_get(const std::string& url) {
         while (!val.empty() && (val.back() == '\r' || val.back() == '\n')) {
             val.pop_back();
         }
-        resp.headers[key] = val;
+        resp.headers.set(key, val);
     }
 
-    resp.body = std::move(body);
+    resp.body = std::move(resp_body);
+    // bodyUsed stays false until text()/json() called
     return resp;
+}
+
+Response http_get(const std::string& url) {
+    return http_request(url, "GET", Headers{}, "");
 }
 
 } // namespace morph::net
