@@ -2,7 +2,7 @@ use anyhow::Result;
 use colored::Colorize;
 use std::path::Path;
 
-pub fn run(file: String, to: String) -> Result<()> {
+pub fn run(file: String, to: String, optimize: bool) -> Result<()> {
     let path = Path::new(&file);
     if !path.exists() {
         anyhow::bail!("file not found: {}", file);
@@ -21,6 +21,9 @@ pub fn run(file: String, to: String) -> Result<()> {
     crate::logger::log_key("File", &file);
     crate::logger::log_key("Size", &format!("{} bytes", content.len()));
     crate::logger::log_key("Target", &target);
+    if optimize {
+        crate::logger::log_key("Optimize", "ON (intent-based codegen)");
+    }
 
     crate::logger::log_step("Parsing");
     let pb = crate::logger::spinner(&format!("Parsing {} with Oxc...", file));
@@ -44,7 +47,7 @@ pub fn run(file: String, to: String) -> Result<()> {
                 }
             }
         }
-        _ => match morph_js::translate(&content, &file) {
+        _ => match morph_js::translate_to_cpp(&content, &file, 0, optimize) {
             Ok(cpp) => ("cpp", cpp),
             Err(e) => {
                 pb.finish_and_clear();

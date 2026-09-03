@@ -2,23 +2,32 @@ use oxc_ast::ast::*;
 use oxc_span::GetSpan;
 use std::collections::HashMap;
 
+use super::analyzer::{EscapeAnalyzer, AnalysisResult, EscapeKind, WidenedType};
 use super::context::{Ctx, INDENT};
 use super::type_resolver::{param_type, resolve_type, resolve_type_annotation, ts_type_name_to_string};
 
 pub struct CppTranslator<'a> {
     source: &'a str,
     pub ctx: Ctx,
+    optimize: bool,
+    analysis: Option<crate::codegen::analyzer::AnalysisResult>,
 }
 
 impl<'a> CppTranslator<'a> {
-    pub fn new(source: &'a str, indent_level: usize) -> Self {
+    pub fn new(source: &'a str, indent_level: usize, optimize: bool) -> Self {
         let mut ctx = Ctx::default();
         ctx.indent_level = indent_level;
-        Self { source, ctx }
+        let mut this = Self { source, ctx, optimize, analysis: None };
+        this
     }
 
     fn span_text(&self, span: oxc_span::Span) -> &'a str {
         span.source_text(self.source)
+    }
+
+    fn run_analysis(&mut self, program: &Program<'a>) {
+        let mut analyzer = EscapeAnalyzer::new();
+        self.analysis = Some(analyzer.analyze_program(program));
     }
 
     fn indent(&self) -> String {
@@ -26,6 +35,9 @@ impl<'a> CppTranslator<'a> {
     }
 
     pub fn translate_program(&mut self, program: &Program<'a>) -> String {
+        if self.optimize && self.analysis.is_none() {
+            self.run_analysis(program);
+        }
         let mut lines = Vec::new();
         for stmt in &program.body {
             if self.is_main_call(stmt) {
@@ -183,8 +195,16 @@ impl<'a> CppTranslator<'a> {
         if name.starts_with("/*") {
             return Some(format!("{}/* destructuring not supported */", self.indent()));
         }
+        
+        if self.optimize && self.analysis.is_some() {
+            self.emit_optimized_variable_declarator(d, &name, kind)
+        } else {
+            self.emit_legacy_variable_declarator(d, &name, kind)
+        }
+    }
+
+    fn emit_legacy_variable_declarator(&mut self, d: &VariableDeclarator<'a>, name: &str, kind: &str) -> Option<String> {
         let type_str = if let Some(_ann) = &d.init {
-            // Check if d has type_annotation
             if let Some(ta) = &d.type_annotation {
                 resolve_type_annotation(Some(ta), "auto", &self.ctx.template_params, false, &self.ctx.class_names)
             } else {
@@ -204,7 +224,7 @@ impl<'a> CppTranslator<'a> {
             }
         }
         self.ctx.need(&cpp_type);
-        self.ctx.var_types.insert(name.clone(), cpp_type.clone());
+        self.ctx.var_types.insert(name.to_string(), cpp_type.clone());
         let mut final_type = cpp_type.clone();
         if kind == "const" && matches!(cpp_type.as_str(), "JsNumber" | "JsBoolean" | "JsString" | "JsUndefined" | "JsNull") {
             if !cpp_type.starts_with("const ") {
@@ -221,7 +241,101 @@ impl<'a> CppTranslator<'a> {
                 self.emit_expression(init)
             };
             if matches!(init, Expression::NewExpression(_)) {
-                self.ctx.shared_ptr_vars.insert(name.clone());
+                self.ctx.shared_ptr_vars.insert(name.to_string());
+            }
+            Some(format!("{}{}{} {} = {};", self.indent(), prefix, final_type, name, init_code))
+        } else {
+            Some(format!("{}{}{} {}{{}};", self.indent(), prefix, final_type, name))
+        }
+    }
+
+    // Optimized variable declarator using escape analysis and type widening
+    fn emit_optimized_variable_declarator(&mut self, d: &VariableDeclarator<'a>, name: &str, kind: &str) -> Option<String> {
+        let analysis = self.analysis.as_ref().unwrap();
+        let escape_kind = analysis.escapes.get(name).cloned().unwrap_or(EscapeKind::None);
+        let widened = analysis.widens.get(name).cloned().unwrap_or(WidenedType::None);
+        
+        // Determine base C++ type from annotation or inference
+        let mut base_type = if let Some(ta) = &d.type_annotation {
+            resolve_type_annotation(Some(ta), "auto", &self.ctx.template_params, false, &self.ctx.class_names)
+        } else if let Some(init) = &d.init {
+            self.infer_type_from_init(init).unwrap_or_else(|| "auto".to_string())
+        } else {
+            "auto".to_string()
+        };
+        
+        // Apply type widening
+        let cpp_type = match widened {
+            WidenedType::ToJsNumber => "JsNumber".to_string(),
+            WidenedType::ToJsString => "JsString".to_string(),
+            WidenedType::ToJsValue => "JsValue".to_string(),
+            WidenedType::None => {
+                if base_type == "auto" {
+                    if let Some(init) = &d.init {
+                        self.infer_type_from_init(init).unwrap_or_else(|| "JsValue".to_string())
+                    } else {
+                        "JsValue".to_string()
+                    }
+                } else {
+                    base_type
+                }
+            }
+        };
+        
+        // Determine allocation strategy based on escape kind
+        let (alloc_type, init_code) = if let Some(init) = &d.init {
+            match escape_kind {
+                EscapeKind::None => {
+                    // Stack allocation with native type
+                    let init_code = if cpp_type.starts_with("std::vector<") && matches!(init, Expression::ArrayExpression(_)) {
+                        self.emit_std_vector_literal(init)
+                    } else if cpp_type == "char" && matches!(init, Expression::StringLiteral(_)) {
+                        self.emit_char_literal(init)
+                    } else {
+                        self.emit_expression(init)
+                    };
+                    (cpp_type.clone(), init_code)
+                }
+                EscapeKind::Return | EscapeKind::Global => {
+                    // unique_ptr + move for single-owner escapes
+                    let alloc = format!("std::unique_ptr<{}>", cpp_type);
+                    let init_code = if matches!(init, Expression::ArrayExpression(_)) {
+                        format!("std::make_unique<{}>(std::vector{{{}}})", cpp_type, self.emit_std_vector_literal(init).trim_start_matches('{').trim_end_matches('}'))
+                    } else {
+                        format!("std::make_unique<{}>({})", cpp_type, self.emit_expression(init))
+                    };
+                    (alloc, init_code)
+                }
+                EscapeKind::ClosureCapture | EscapeKind::MultipleRefs | EscapeKind::AsyncBoundary => {
+                    // shared_ptr for shared ownership
+                    let alloc = format!("std::shared_ptr<{}>", cpp_type);
+                    let init_code = format!("std::make_shared<{}>({})", cpp_type, self.emit_expression(init));
+                    (alloc, init_code)
+                }
+            }
+        } else {
+            // No initializer
+            match escape_kind {
+                EscapeKind::None => (cpp_type.clone(), String::new()),
+                EscapeKind::Return | EscapeKind::Global => (format!("std::unique_ptr<{}>", cpp_type), String::new()),
+                EscapeKind::ClosureCapture | EscapeKind::MultipleRefs | EscapeKind::AsyncBoundary => (format!("std::shared_ptr<{}>", cpp_type), String::new()),
+            }
+        };
+        
+        self.ctx.need(&alloc_type);
+        self.ctx.var_types.insert(name.to_string(), alloc_type.clone());
+        
+        let prefix = if self.ctx.indent_level == 0 { "static " } else { "" };
+        let mut final_type = alloc_type;
+        if kind == "const" && matches!(final_type.as_str(), "JsNumber" | "JsBoolean" | "JsString" | "JsUndefined" | "JsNull") {
+            if !final_type.starts_with("const ") {
+                final_type = format!("const {}", final_type);
+            }
+        }
+        
+        if let Some(init) = &d.init {
+            if matches!(init, Expression::NewExpression(_)) {
+                self.ctx.shared_ptr_vars.insert(name.to_string());
             }
             Some(format!("{}{}{} {} = {};", self.indent(), prefix, final_type, name, init_code))
         } else {
@@ -392,7 +506,7 @@ impl<'a> CppTranslator<'a> {
                         }
                     }
                     self.ctx.need(&cpp_type);
-                    self.ctx.var_types.insert(name.clone(), cpp_type.clone());
+self.ctx.var_types.insert(name.to_string(), cpp_type.clone());
                     let final_type = if kind == "const" && matches!(cpp_type.as_str(), "JsNumber" | "JsBoolean" | "JsString" | "JsUndefined" | "JsNull") {
                         format!("const {}", cpp_type)
                     } else { cpp_type };
@@ -404,9 +518,9 @@ impl<'a> CppTranslator<'a> {
                         } else {
                             self.emit_expression(init)
                         };
-                        if matches!(init, Expression::NewExpression(_)) {
-                            self.ctx.shared_ptr_vars.insert(name.clone());
-                        }
+if matches!(init, Expression::NewExpression(_)) {
+                self.ctx.shared_ptr_vars.insert(name.to_string());
+            }
                         parts.push(format!("{} {} = {}", final_type, name, init_code));
                     } else {
                         parts.push(format!("{} {}", final_type, name));

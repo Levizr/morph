@@ -9,12 +9,12 @@ pub use parser::{translate_str, translate_to_cpp, translate_to_rust};
 /// High-level translate API used by morphc and other crates
 /// Returns generated C++ code string
 pub fn translate(source: &str, filename: &str) -> Result<String, MorphJsError> {
-    parser::translate_to_cpp(source, filename, 0)
+    parser::translate_to_cpp(source, filename, 0, false)
 }
 
 /// Translate with custom indent (for embedded usage)
 pub fn translate_with_indent(source: &str, filename: &str, indent: usize) -> Result<String, MorphJsError> {
-    parser::translate_to_cpp(source, filename, indent)
+    parser::translate_to_cpp(source, filename, indent, false)
 }
 
 pub fn translate_rust(source: &str, filename: &str) -> Result<String, MorphJsError> {

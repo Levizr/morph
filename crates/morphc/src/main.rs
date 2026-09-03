@@ -19,13 +19,17 @@ struct Cli {
     #[arg(short = 'v', long = "version")]
     version: bool,
 
-    /// Direct file morphing: morph <file> [--to cpp|rust]
+    /// Direct file morphing: morph <file> [--to cpp|rust] [--optimize]
     #[arg(value_name = "FILE")]
     file: Option<PathBuf>,
 
     /// Target for file morphing (cpp, c++, rust)
     #[arg(long = "to", value_name = "TARGET", alias = "target")]
     to: Option<String>,
+
+    /// Enable optimized intent-based codegen (escape analysis, native types)
+    #[arg(long = "optimize")]
+    optimize: bool,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -183,7 +187,7 @@ fn main() {
         }
 
         let target = cli.to.unwrap_or_else(|| "cpp".to_string());
-        let res = commands::translate::run(file.display().to_string(), target);
+        let res = commands::translate::run(file.display().to_string(), target, cli.optimize);
         if let Err(e) = res {
             eprintln!("\n    {} {}", "error:".red().bold(), e);
             for cause in e.chain().skip(1) {

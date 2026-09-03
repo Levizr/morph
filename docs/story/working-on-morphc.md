@@ -10,6 +10,27 @@ The Python toolchain that compiles `.mx` files into native binaries is being rew
 
 **Why?** Python was the right choice to prove the concept. Now the concept is proven, and compile speed matters. A Rust compiler removes the Python dependency, makes `morph dev` instant, and gives users a single binary to install.
 
+## Intent-Based Codegen & Memory Management (New)
+
+We're also redesigning the **JS/TS → C++ translator** (`morph-js` crate) to use **intent-based codegen with compile-time escape analysis**:
+
+- **No garbage collector** — instead, static escape analysis determines ownership at compile time
+- **`shared_ptr` only where semantically required** — closures, shared mutable refs, async boundaries
+- **Stack allocation for non-escaping locals** — `int`, `std::string`, `std::vector` on stack
+- **`unique_ptr` + move for single-owner escapes** — returns, global storage
+- **Type widening when needed** — `int` assigned from dynamic source → `JsNumber` automatically
+- **Template bloat eliminated** — `<format>` only for template literals, not `console.log`
+- **Native types preferred** — `int64_t` not `JsNumber` when usage allows
+
+**Current status (Sept 2026)**: 
+- **Semantic Analyzer implemented** in `crates/morph-js/src/codegen/analyzer.rs` — performs escape analysis, type widening, async boundary detection, and closure capture detection
+- **Optimized Emitter implemented** — uses escape analysis to emit native types (`int64_t`, `std::string`, `std::vector`), `unique_ptr` + move, `shared_ptr` based on escape analysis
+- **21/24 tests passing** (3 failing: 17_async, 18_promises, 19_fetch async issues — pre-existing)
+- **Analyzer integrated** — runs during translation with `--optimize` flag, produces `AnalysisResult` with escape kinds, widened types, and variable info
+- **Full test suite**: 21/24 passing with `--optimize` (3 failing are pre-existing async issues)
+
+See [full plan](../../help/js-memory-management-without-gc-and-intent-based-codegen.md).
+
 ## Architecture
 
 ### Pipeline (before → after)
@@ -235,6 +256,10 @@ The Python version was never meant to ship to end users. It was the prototype th
 ## Full implementation plan
 
 For the complete technical plan — crate structure, all CLI commands, config files, GitHub Actions workflows, binary distribution, and implementation phases — see the [full rewrite plan](../../help/morphc-rust-rewrite-plan.md) in the help section.
+
+## Intent-Based Codegen & Memory Management (New)
+
+For the strategy on translating JS/TS to optimized C++ using compile-time escape analysis and intent-based codegen (no GC, no template bloat), see the [memory management & intent-based codegen plan](../../help/js-memory-management-without-gc-and-intent-based-codegen.md).
 
 ## Follow the progress
 

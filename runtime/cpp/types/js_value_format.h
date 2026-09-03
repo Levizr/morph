@@ -79,8 +79,9 @@ struct std::formatter<JsObject> {
     auto format(const JsObject& v, auto& ctx) const {
         auto out = ctx.out();
         *out++ = '{';
-        *out++ = ' ';
-        if (v.properties) {
+        bool has_props = v.properties && !v.properties->empty();
+        if (has_props) {
+            *out++ = ' ';
             bool first = true;
             for (auto& [key, val] : *v.properties) {
                 if (!first) { *out++ = ','; *out++ = ' '; }
@@ -88,7 +89,6 @@ struct std::formatter<JsObject> {
                 out = std::format_to(out, "{}", key);
                 *out++ = ':';
                 *out++ = ' ';
-                // Quote string values like Node.js
                 if (val.is_string()) {
                     *out++ = '\'';
                     out = std::format_to(out, "{}", std::get<JsString>(val.inner).value);
@@ -97,8 +97,8 @@ struct std::formatter<JsObject> {
                     out = std::format_to(out, "{}", val);
                 }
             }
+            *out++ = ' ';
         }
-        *out++ = ' ';
         *out++ = '}';
         return out;
     }
@@ -133,6 +133,46 @@ struct std::formatter<std::vector<T>> {
         for (size_t i = 0; i < v.size(); ++i) {
             if (i > 0) { *out++ = ','; *out++ = ' '; }
             out = std::format_to(out, "{}", v[i]);
+        }
+        *out++ = ' ';
+        *out++ = ']';
+        return out;
+    }
+};
+
+// std::vector<std::string> — quote elements like Node.js
+template <>
+struct std::formatter<std::vector<std::string>> {
+    constexpr auto parse(auto& ctx) { return ctx.begin(); }
+    auto format(const std::vector<std::string>& v, auto& ctx) const {
+        auto out = ctx.out();
+        *out++ = '[';
+        *out++ = ' ';
+        for (size_t i = 0; i < v.size(); ++i) {
+            if (i > 0) { *out++ = ','; *out++ = ' '; }
+            *out++ = '\'';
+            out = std::format_to(out, "{}", v[i]);
+            *out++ = '\'';
+        }
+        *out++ = ' ';
+        *out++ = ']';
+        return out;
+    }
+};
+
+// std::vector<JsString> — quote elements like Node.js
+template <>
+struct std::formatter<std::vector<JsString>> {
+    constexpr auto parse(auto& ctx) { return ctx.begin(); }
+    auto format(const std::vector<JsString>& v, auto& ctx) const {
+        auto out = ctx.out();
+        *out++ = '[';
+        *out++ = ' ';
+        for (size_t i = 0; i < v.size(); ++i) {
+            if (i > 0) { *out++ = ','; *out++ = ' '; }
+            *out++ = '\'';
+            out = std::format_to(out, "{}", v[i].value);
+            *out++ = '\'';
         }
         *out++ = ' ';
         *out++ = ']';
