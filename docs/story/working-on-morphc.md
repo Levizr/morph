@@ -25,9 +25,9 @@ We're also redesigning the **JS/TS → C++ translator** (`morph-js` crate) to us
 **Current status (Sept 2026)**: 
 - **Semantic Analyzer implemented** in `crates/morph-js/src/codegen/analyzer.rs` — performs escape analysis, type widening, async boundary detection, and closure capture detection
 - **Optimized Emitter implemented** — uses escape analysis to emit native types (`int64_t`, `std::string`, `std::vector`), `unique_ptr` + move, `shared_ptr` based on escape analysis
-- **21/24 tests passing** (3 failing: 17_async, 18_promises, 19_fetch async issues — pre-existing)
-- **Analyzer integrated** — runs during translation with `--optimize` flag, produces `AnalysisResult` with escape kinds, widened types, and variable info
-- **Full test suite**: 21/24 passing with `--optimize` (3 failing are pre-existing async issues)
+- **24/24 tests passing** (previously 21/24; fixed 17_async file-scope moves, 18_promises Promise/Result handling, 19_fetch linking, 11_complex OOB + try/finally)
+- **Analyzer integrated** — runs during translation with `--optimize` flag (e.g. `morph app.ts --to cpp --optimize`), produces `AnalysisResult` with escape kinds, widened types, variable info, and async function set
+- **CLI**: direct file morphing `morph <file> [--to cpp|rust] [--optimize]` (no `translate` subcommand)
 
 See [full plan](../../help/js-memory-management-without-gc-and-intent-based-codegen.md).
 

@@ -10,6 +10,7 @@
 #include <cctype>
 
 #include "../types/js_types.h"
+#include "../reactivity/promise.h"
 
 namespace morph::net {
 
@@ -86,9 +87,8 @@ struct Response {
     }
     bool bodyUsedFn() const { return bodyUsed; }
 
-    // For JS `await fetch(...)` in string context yields the body text
+// For JS `await fetch(...)` in string context yields the body text
     operator JsString() const { return JsString(body); }
-    operator JsString() { return JsString(body); }
     operator std::string() const { return body; }
 
     // Clone for JS Response.clone()
@@ -136,19 +136,23 @@ struct HttpAwaitable {
 // ── fetch ────────────────────────────────────────────────────────
 // JS: `let r = await fetch("https://...")` or `fetch(url, {method, headers, body})`
 // C++: `auto r = co_await morph::net::fetch("https://...")`
-inline detail::HttpAwaitable fetch(const std::string& url) {
+// Returns a Result<JsString> (Promise-like) that can be co_awaited
+inline morph::Result<JsString> fetch(const std::string& url) {
     auto state = std::make_shared<detail::SharedState>();
     state->url = url;
     state->response.url = url;
-    return detail::HttpAwaitable{std::move(state)};
+    // Wrap the HttpAwaitable in a Result coroutine
+    return [state]() -> morph::Result<JsString> {
+        co_return (co_await detail::HttpAwaitable{state}).text();
+    }();
 }
-inline detail::HttpAwaitable fetch(const char* url) {
+inline morph::Result<JsString> fetch(const char* url) {
     return fetch(std::string(url));
 }
-inline detail::HttpAwaitable fetch(const JsString& url) {
+inline morph::Result<JsString> fetch(const JsString& url) {
     return fetch(url.value);
 }
-inline detail::HttpAwaitable fetch(const std::string& url, const JsValue& init) {
+inline morph::Result<JsString> fetch(const std::string& url, const JsValue& init) {
     auto state = std::make_shared<detail::SharedState>();
     state->url = url;
     state->response.url = url;
@@ -170,24 +174,26 @@ inline detail::HttpAwaitable fetch(const std::string& url, const JsValue& init) 
             if (b.is_string()) state->requestBody = std::get<JsString>(b.inner).value;
         }
     }
-    return detail::HttpAwaitable{std::move(state)};
+    return [state]() -> morph::Result<JsString> {
+        co_return (co_await detail::HttpAwaitable{state}).text();
+    }();
 }
-inline detail::HttpAwaitable fetch(const char* url, const JsValue& init) {
+inline morph::Result<JsString> fetch(const char* url, const JsValue& init) {
     return fetch(std::string(url), init);
 }
-inline detail::HttpAwaitable fetch(const JsString& url, const JsValue& init) {
+inline morph::Result<JsString> fetch(const JsString& url, const JsValue& init) {
     return fetch(url.value, init);
 }
-inline detail::HttpAwaitable fetch(const std::string& url, const JsObject& init) {
+inline morph::Result<JsString> fetch(const std::string& url, const JsObject& init) {
     return fetch(url, JsValue(init));
 }
-inline detail::HttpAwaitable fetch(const char* url, const JsObject& init) {
+inline morph::Result<JsString> fetch(const char* url, const JsObject& init) {
     return fetch(std::string(url), JsValue(init));
 }
-inline detail::HttpAwaitable fetch(const JsString& url, const JsObject& init) {
+inline morph::Result<JsString> fetch(const JsString& url, const JsObject& init) {
     return fetch(url.value, JsValue(init));
 }
-inline detail::HttpAwaitable fetch(const char* url, const char* init) = delete; // avoid ambiguity
+inline morph::Result<JsString> fetch(const char* url, const char* init) = delete; // avoid ambiguity
 
 // ── Synchronous helpers ──────────────────────────────────────────
 Response http_get(const std::string& url);
@@ -222,5 +228,14 @@ struct std::formatter<morph::net::Response> {
             "Response {{ status: {}, statusText: \"{}\", headers: {{{}}}, body: \"{}\", bodyUsed: {}, ok: {}, redirected: {}, type: \"{}\", url: \"{}\" }}",
             r.status, r.statusText, hdr, esc, r.bodyUsed ? "true" : "false",
             r.ok() ? "true" : "false", r.redirected ? "true" : "false", r.type, r.url);
+    }
+};
+
+// ── Formatter for HttpAwaitable (for std::println of un-awaited fetch) ──
+template <>
+struct std::formatter<morph::net::detail::HttpAwaitable> {
+    constexpr auto parse(auto& ctx) { return ctx.begin(); }
+    auto format(const morph::net::detail::HttpAwaitable& a, auto& ctx) const {
+        return std::format_to(ctx.out(), "HttpAwaitable(url={})", a.state ? a.state->url : "?");
     }
 };

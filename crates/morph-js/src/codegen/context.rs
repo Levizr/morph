@@ -23,6 +23,7 @@ pub struct Ctx {
     pub event_handler: bool,
     pub state_vars: HashMap<String, String>,
     pub js_object_params: HashSet<String>,
+    pub async_fns: HashSet<String>,
 }
 
 impl Default for Ctx {
@@ -45,6 +46,7 @@ impl Default for Ctx {
             event_handler: false,
             state_vars: HashMap::new(),
             js_object_params: HashSet::new(),
+            async_fns: HashSet::new(),
         }
     }
 }
@@ -73,6 +75,7 @@ impl Ctx {
             event_handler: self.event_handler,
             state_vars: self.state_vars.clone(),
             js_object_params: self.js_object_params.clone(),
+            async_fns: self.async_fns.clone(),
             ..Default::default()
         };
         // Preserve indent_level correctly: sub indent = parent+1
@@ -93,6 +96,9 @@ impl Ctx {
         }
         for v in child.shared_ptr_vars {
             self.shared_ptr_vars.insert(v);
+        }
+        for v in child.async_fns {
+            self.async_fns.insert(v);
         }
     }
 

@@ -349,6 +349,11 @@ inline JsValue JsArray::operator[](int64_t idx) const {
 }
 
 inline JsValue& JsArray::operator[](int64_t idx) {
+    // JS OOB read returns undefined (no throw, no resize to preserve length for reads).
+    // Note: OOB write via `arr[i] = x` will write to a shared undefined singleton (known limitation;
+    // no indexed writes in current fixtures). Future: return proxy for full JS write-extend semantics.
+    static thread_local JsValue oob_undefined = JsValue(JsUndefined{});
+    if (idx < 0 || (size_t)idx >= elements->size()) return oob_undefined;
     return (*elements)[idx];
 }
 

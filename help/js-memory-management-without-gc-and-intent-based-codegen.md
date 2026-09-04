@@ -10,7 +10,7 @@ This document outlines the strategy for translating JavaScript/TypeScript to opt
 
 ## Current Status (Sept 2026)
 
-### What Works (21/24 tests passing)
+### What Works (24/24 tests passing)
 
 | Feature | Status |
 |---------|--------|
@@ -26,15 +26,16 @@ This document outlines the strategy for translating JavaScript/TypeScript to opt
 | **Semantic Analyzer** (escape analysis, type widening, async boundary, closure capture) | ✅ Built & integrated |
 | **Optimized Emitter** (native types, unique_ptr, shared_ptr based on escape analysis) | ✅ Working |
 
-### What's Broken (3 tests failing)
+### Previously Broken (now fixed – 24/24 passing)
 
-| Test | Issue |
-|------|-------|
-| `17_async.ts` | `Response` → `Result<JsString>` conversion in `co_return` |
-| `18_promises.ts` | Same type mismatch in async chains |
-| `19_fetch.ts` | `HttpAwaitable` not formattable; top-level `co_await` needs async main |
+| Test | Fix Applied |
+|------|-------------|
+| `17_async.ts` | File-scope async calls moved into async main coroutine body |
+| `18_promises.ts` | `Promise<T>` → `Result<T>` mapping, `Result::resolved()` + `pending()`, `Task`/`Result` formatters, sync `wrap<T>` stripped to `T`, `wp` stripped to `JsNumber` |
+| `19_fetch.ts` | `fetch()` returns `Result<JsString>`, `HttpAwaitable` formatter, runtime sources linked in tests |
+| `11_complex.ts` | OOB `JsArray::operator[]` returns undefined (no UB), try/finally single-`done` via `__morph_caught` flag |
 
-**Note**: The analyzer is now built and integrated in `crates/morph-js/src/codegen/analyzer.rs`. It runs during translation and produces `AnalysisResult` with escape kinds, widened types, and variable info. The optimized emitter (`--optimize` flag) uses escape analysis to emit:
+**Note**: The analyzer is now built and integrated in `crates/morph-js/src/codegen/analyzer.rs`. It runs during translation and produces `AnalysisResult` with escape kinds, widened types, variable info, and async function set. The optimized emitter (`--optimize` flag, e.g. `morph app.ts --to cpp --optimize`) uses escape analysis to emit:
 - Stack allocation for non-escaping locals (`int`, `std::string`, `std::vector`)
 - `unique_ptr` + `move` for single-owner escapes (returns, globals)
 - `shared_ptr` for shared ownership (closures, multiple refs, async boundaries)

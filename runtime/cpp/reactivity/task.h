@@ -102,3 +102,12 @@ int set_interval(std::function<void()> fn, int ms);
 void clear_timer(int id);
 
 } // namespace morph
+
+#include <format>
+template <>
+struct std::formatter<morph::Task> {
+    constexpr auto parse(auto& ctx) { return ctx.begin(); }
+    auto format(const morph::Task&, auto& ctx) const {
+        return std::format_to(ctx.out(), "Promise {{ undefined }}");
+    }
+};

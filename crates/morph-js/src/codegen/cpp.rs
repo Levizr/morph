@@ -223,6 +223,12 @@ impl<'a> CppTranslator<'a> {
                 }
             }
         }
+        // Intent-based: Promise<T> annotated but init is sync plain call -> use T (match JS runtime)
+        if let Some(init) = &d.init {
+            if let Some(stripped) = self.strip_result_for_sync_call(&cpp_type, init) {
+                cpp_type = stripped;
+            }
+        }
         self.ctx.need(&cpp_type);
         self.ctx.var_types.insert(name.to_string(), cpp_type.clone());
         let mut final_type = cpp_type.clone();
@@ -265,7 +271,7 @@ impl<'a> CppTranslator<'a> {
         };
         
         // Apply type widening
-        let cpp_type = match widened {
+        let mut cpp_type = match widened {
             WidenedType::ToJsNumber => "JsNumber".to_string(),
             WidenedType::ToJsString => "JsString".to_string(),
             WidenedType::ToJsValue => "JsValue".to_string(),
@@ -281,6 +287,12 @@ impl<'a> CppTranslator<'a> {
                 }
             }
         };
+        // Intent-based: strip Result<T> to T when init is sync plain call
+        if let Some(init) = &d.init {
+            if let Some(stripped) = self.strip_result_for_sync_call(&cpp_type, init) {
+                cpp_type = stripped;
+            }
+        }
         
         // Determine allocation strategy based on escape kind
         let (alloc_type, init_code) = if let Some(init) = &d.init {
@@ -344,14 +356,49 @@ impl<'a> CppTranslator<'a> {
     }
 
     fn infer_type_from_init(&self, node: &Expression<'a>) -> Option<String> {
+        if self.optimize {
+            self.infer_optimized_type(node)
+        } else {
+            match node {
+                Expression::StringLiteral(_) => Some("std::string".to_string()),
+                Expression::BooleanLiteral(_) => Some("bool".to_string()),
+                Expression::NumericLiteral(n) => {
+                    if n.value.fract() == 0.0 && n.value.abs() <= i64::MAX as f64 {
+                        Some("int64_t".to_string())
+                    } else {
+                        Some("double".to_string())
+                    }
+                }
+                Expression::NullLiteral(_) => Some("JsNull".to_string()),
+                Expression::ArrayExpression(_) => Some("std::vector<JsValue>".to_string()),
+                Expression::ObjectExpression(_) => Some("JsObject".to_string()),
+                Expression::Identifier(id) => self.ctx.var_types.get(id.name.as_str()).cloned(),
+                _ => None,
+            }
+        }
+    }
+
+    fn infer_optimized_type(&self, node: &Expression<'a>) -> Option<String> {
         match node {
-            Expression::StringLiteral(_) => Some("JsString".to_string()),
-            Expression::BooleanLiteral(_) => Some("JsBoolean".to_string()),
-            Expression::NumericLiteral(_) => Some("JsNumber".to_string()),
+            Expression::StringLiteral(_) => Some("std::string".to_string()),
+            Expression::BooleanLiteral(_) => Some("bool".to_string()),
+            Expression::NumericLiteral(n) => {
+                let val = n.value;
+                if val.fract() == 0.0 {
+                    // Integer - use standard int types (not overly narrow)
+                    let int_val = val as i64;
+                    if int_val >= i32::MIN as i64 && int_val <= i32::MAX as i64 {
+                        Some("int32_t".to_string())
+                    } else {
+                        Some("int64_t".to_string())
+                    }
+                } else {
+                    Some("double".to_string())
+                }
+            }
             Expression::NullLiteral(_) => Some("JsNull".to_string()),
-            Expression::ArrayExpression(_) => Some("JsArray".to_string()),
+            Expression::ArrayExpression(_) => Some("std::vector<JsValue>".to_string()),
             Expression::ObjectExpression(_) => Some("JsObject".to_string()),
-            // Python only infers for TSLiteral string, object, array, new — not template literal, so keep auto for template
             Expression::Identifier(id) => self.ctx.var_types.get(id.name.as_str()).cloned(),
             _ => None,
         }
@@ -591,9 +638,15 @@ if matches!(init, Expression::NewExpression(_)) {
     }
 
     fn emit_try(&mut self, t: &TryStatement<'a>) -> String {
-        // Mirror Python's _try_statement exactly for 1:1 output
         let bi = INDENT.repeat(self.ctx.indent_level + 1);
         let mut lines: Vec<String> = Vec::new();
+        let has_finally = t.finalizer.is_some();
+        let has_handler = t.handler.is_some();
+        // For catch+finally, use flag to avoid double finally (once in catch, once after)
+        let use_caught_flag = has_handler && has_finally;
+        if use_caught_flag {
+            lines.push(format!("{}{{ bool __morph_caught = false;", self.indent()));
+        }
         // try body — use emit_block and strip trailing } like Python
         let raw_body = self.emit_block(&t.block);
         let mut body_stripped = raw_body.trim_end().to_string();
@@ -616,6 +669,9 @@ if matches!(init, Expression::NewExpression(_)) {
             let h = self.emit_block(&handler.body);
             let h_lines: Vec<&str> = h.split('\n').collect();
             lines.push(format!("{}}} catch (JsValue& {}) {{", self.indent(), param));
+            if use_caught_flag {
+                lines.push(format!("{}__morph_caught = true;", bi));
+            }
             for l in &h_lines[1..h_lines.len()-1] {
                 lines.push(l.to_string());
             }
@@ -672,6 +728,19 @@ if matches!(init, Expression::NewExpression(_)) {
                     lines.push(l.to_string());
                 }
                 lines.push(format!("{}}}", self.indent()));
+                // Trailing finally for normal path only (caught path already ran finally)
+                if use_caught_flag {
+                    lines.push(format!("{}if (!__morph_caught) {{", self.indent()));
+                    for l in &f_lines[1..f_lines.len()-1] {
+                        let stripped = l.trim();
+                        if !stripped.is_empty() {
+                            lines.push(format!("{}{}", bi, stripped));
+                        }
+                    }
+                    lines.push(format!("{}}}", self.indent()));
+                    lines.push(format!("{}}}", self.indent()));
+                    return lines.join("\n");
+                }
                 for l in &f_lines[1..f_lines.len()-1] {
                     let stripped = l.trim();
                     if !stripped.is_empty() {
@@ -681,6 +750,9 @@ if matches!(init, Expression::NewExpression(_)) {
                 return lines.join("\n");
             }
         } else if !has_catch {
+            lines.push(format!("{}}}", self.indent()));
+        }
+        if use_caught_flag {
             lines.push(format!("{}}}", self.indent()));
         }
         lines.join("\n")
@@ -696,6 +768,9 @@ if matches!(init, Expression::NewExpression(_)) {
         let name = id.name.to_string();
         if f.body.is_none() { return None; }
         let is_async = f.r#async;
+        if is_async {
+            self.ctx.async_fns.insert(name.clone());
+        }
         let old_has_loop = self.ctx.has_infinite_loop;
         self.ctx.has_infinite_loop = false;
         let ret = if let Some(rt) = &f.return_type {
@@ -714,12 +789,30 @@ if matches!(init, Expression::NewExpression(_)) {
         }
         let mut final_ret = ret.clone();
         if is_async { final_ret = self.ctx.async_result_type(&ret); }
+        // Intent-based: sync fn annotated Promise<T> (Result<T>) but returning plain value
+        // should return T directly to match JS runtime (e.g. wrap<T>(x:T): Promise<T> { return x; })
+        if !is_async && final_ret.starts_with("morph::Result<") {
+            if let Some(body_ref) = f.body.as_ref() {
+                if Self::all_returns_plain(body_ref) {
+                    if let Some(inner) = Self::result_inner(&final_ret) {
+                        final_ret = inner;
+                    }
+                }
+            }
+        }
         self.ctx.need(&final_ret);
         self.ctx.fn_body_depth += 1;
         if is_async { self.ctx.is_async_fn += 1; }
-        let body = self.emit_function_body(f.body.as_ref().unwrap());
+        let mut body = self.emit_function_body(f.body.as_ref().unwrap());
         if is_async { self.ctx.is_async_fn -= 1; }
         self.ctx.fn_body_depth -= 1;
+        // Ensure async void (Task) fns are coroutines even with no await/return
+        if is_async && final_ret == "morph::Task" && !body.contains("co_return") && !body.contains("co_await") {
+            // Inject co_return; before final }
+            if let Some(pos) = body.rfind('}') {
+                body.insert_str(pos, "    co_return;\n");
+            }
+        }
         if self.ctx.has_infinite_loop && name != "main" && !is_async {
             final_ret = "morph::Task".to_string();
             self.ctx.needed.insert("\"../../runtime/cpp/reactivity/task.h\"".to_string());
@@ -749,6 +842,131 @@ if matches!(init, Expression::NewExpression(_)) {
             Statement::IfStatement(i) => self.stmt_has_return(&i.consequent) || i.alternate.as_ref().map(|a| self.stmt_has_return(a)).unwrap_or(false),
             _ => false,
         }
+    }
+
+    fn result_inner(s: &str) -> Option<String> {
+        let prefix = "morph::Result<";
+        if !s.starts_with(prefix) || !s.ends_with('>') {
+            return None;
+        }
+        let inner = &s[prefix.len()..s.len() - 1];
+        Some(inner.trim().to_string())
+    }
+
+    fn unwrap_expr<'b>(e: &'b Expression<'a>) -> &'b Expression<'a> {
+        match e {
+            Expression::TSAsExpression(a) => Self::unwrap_expr(&a.expression),
+            Expression::TSSatisfiesExpression(s) => Self::unwrap_expr(&s.expression),
+            Expression::TSNonNullExpression(n) => Self::unwrap_expr(&n.expression),
+            Expression::ParenthesizedExpression(p) => Self::unwrap_expr(&p.expression),
+            Expression::TSInstantiationExpression(x) => Self::unwrap_expr(&x.expression),
+            _ => e,
+        }
+    }
+
+    fn return_arg_is_plain(arg: &Expression<'a>) -> bool {
+        let u = Self::unwrap_expr(arg);
+        match u {
+            Expression::CallExpression(_) => false,
+            Expression::NewExpression(_) => false,
+            Expression::AwaitExpression(_) => false,
+            Expression::YieldExpression(_) => false,
+            Expression::ImportExpression(_) => false,
+            _ => true,
+        }
+    }
+
+    fn callee_name(e: &Expression<'a>) -> Option<String> {
+        let u = Self::unwrap_expr(e);
+        match u {
+            Expression::Identifier(id) => Some(id.name.to_string()),
+            Expression::StaticMemberExpression(m) => {
+                // For obj.method(), return method name? For async check we need base? Return method for simplicity
+                Some(m.property.name.to_string())
+            }
+            _ => None,
+        }
+    }
+
+    fn is_async_callee(&self, name: &str) -> bool {
+        if name == "fetch" {
+            return true;
+        }
+        if self.ctx.async_fns.contains(name) {
+            return true;
+        }
+        if let Some(a) = self.analysis.as_ref() {
+            if a.async_functions.contains(name) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn strip_result_for_sync_call(&self, cpp_type: &str, init: &Expression<'a>) -> Option<String> {
+        let inner = Self::result_inner(cpp_type)?;
+        let u = Self::unwrap_expr(init);
+        if let Expression::CallExpression(call) = u {
+            if let Some(callee) = Self::callee_name(&call.callee) {
+                if self.is_async_callee(&callee) {
+                    return None;
+                }
+                // Sync call returning plain value but annotated Result -> use inner
+                return Some(inner);
+            }
+            // Unknown callee (e.g. method call) - be conservative, keep Result
+            return None;
+        }
+        None
+    }
+
+    fn collect_returns<'b>(stmts: &'b [Statement<'a>], out: &mut Vec<&'b Expression<'a>>) {
+        for s in stmts {
+            match s {
+                Statement::ReturnStatement(r) => {
+                    if let Some(arg) = &r.argument {
+                        out.push(arg);
+                    }
+                }
+                Statement::BlockStatement(b) => Self::collect_returns(&b.body, out),
+                Statement::IfStatement(i) => {
+                    Self::collect_returns(std::slice::from_ref(&i.consequent), out);
+                    if let Some(alt) = &i.alternate {
+                        Self::collect_returns(std::slice::from_ref(alt), out);
+                    }
+                }
+                Statement::ForStatement(f) => Self::collect_returns(std::slice::from_ref(&f.body), out),
+                Statement::ForInStatement(f) => Self::collect_returns(std::slice::from_ref(&f.body), out),
+                Statement::ForOfStatement(f) => Self::collect_returns(std::slice::from_ref(&f.body), out),
+                Statement::WhileStatement(w) => Self::collect_returns(std::slice::from_ref(&w.body), out),
+                Statement::DoWhileStatement(d) => Self::collect_returns(std::slice::from_ref(&d.body), out),
+                Statement::TryStatement(t) => {
+                    Self::collect_returns(&t.block.body, out);
+                    if let Some(h) = &t.handler {
+                        Self::collect_returns(&h.body.body, out);
+                    }
+                    if let Some(fin) = &t.finalizer {
+                        Self::collect_returns(&fin.body, out);
+                    }
+                }
+                Statement::SwitchStatement(sw) => {
+                    for c in &sw.cases {
+                        Self::collect_returns(&c.consequent, out);
+                    }
+                }
+                Statement::LabeledStatement(l) => Self::collect_returns(std::slice::from_ref(&l.body), out),
+                _ => {}
+            }
+        }
+    }
+
+    fn all_returns_plain(body: &FunctionBody<'a>) -> bool {
+        let mut args = Vec::new();
+        Self::collect_returns(&body.statements, &mut args);
+        if args.is_empty() {
+            return false;
+        }
+        args.iter().all(|a| Self::return_arg_is_plain(a))
     }
 
     fn emit_async_main(&mut self, f: &Function<'a>, _ret: &str, _params: &str) -> String {
@@ -1389,6 +1607,12 @@ if matches!(init, Expression::NewExpression(_)) {
 
     fn emit_call(&mut self, call: &CallExpression<'a>) -> String {
         let callee_str = self.emit_expression(&call.callee);
+        let type_args_str = if let Some(ta) = &call.type_arguments {
+            let targs: Vec<String> = ta.params.iter().map(|t| resolve_type(Some(t), "auto", &self.ctx.template_params, false, &self.ctx.class_names)).collect();
+            if targs.is_empty() { String::new() } else { format!("<{}>", targs.join(", ")) }
+        } else {
+            String::new()
+        };
         if let Expression::Identifier(id) = &call.callee {
             if id.name.as_str() == "fetch" {
                 self.ctx.needed.insert("\"../../runtime/cpp/net/net.h\"".to_string());
@@ -1509,20 +1733,20 @@ if matches!(init, Expression::NewExpression(_)) {
             }
         }
         let args: Vec<String> = call.arguments.iter().map(|a| self.emit_argument(a)).collect();
-        if let Expression::Super(_) = &call.callee { return format!("super({})", args.join(", ")); }
+        if let Expression::Super(_) = &call.callee { return format!("super{}({})", type_args_str, args.join(", ")); }
         if let Expression::StaticMemberExpression(m) = &call.callee {
             if !m.optional {
                 let obj_str = self.emit_expression(&m.object);
                 if self.ctx.shared_ptr_vars.contains(&obj_str) {
-                    return format!("{}({})", callee_str, args.join(", "));
+                    return format!("{}{}({})", callee_str, type_args_str, args.join(", "));
                 }
                 if !self.is_js_object_type(&m.object) {
-                    return format!("{}({})", callee_str, args.join(", "));
+                    return format!("{}{}({})", callee_str, type_args_str, args.join(", "));
                 }
-                return format!("{}({}{})", callee_str, obj_str, if args.is_empty() { String::new() } else { format!(", {}", args.join(", ")) });
+                return format!("{}{}({}{})", callee_str, type_args_str, obj_str, if args.is_empty() { String::new() } else { format!(", {}", args.join(", ")) });
             }
         }
-        format!("{}({})", callee_str, args.join(", "))
+        format!("{}{}({})", callee_str, type_args_str, args.join(", "))
     }
 
     fn emit_argument(&mut self, arg: &Argument<'a>) -> String {
@@ -1650,6 +1874,51 @@ if matches!(init, Expression::NewExpression(_)) {
             self.ctx.need("JsObject");
             let pairs = format!("{{\"name\", JsString(\"Error\")}}, {{\"message\", {}}}", msg);
             return format!("JsObject{{{}}}", pairs);
+        }
+        // Handle Promise constructor specially
+        if callee == "Promise" {
+            self.ctx.need("morph::Result");
+            // Promise<T> constructor with resolver callback
+            // Pattern: new Promise<T>((resolve) => { resolve(value); })
+            // Get the type argument from Promise<T>
+            let promise_type_arg = if let Some(ta) = &n.type_arguments {
+                ta.params.iter().map(|t| resolve_type(Some(t), "auto", &self.ctx.template_params, false, &self.ctx.class_names)).collect::<Vec<_>>().join(", ")
+            } else {
+                "JsValue".to_string()
+            };
+            if let Some(arg) = n.arguments.first() {
+                if let Some(resolver_arg_expr) = arg.as_expression() {
+                    if let Expression::ArrowFunctionExpression(arrow) = resolver_arg_expr {
+                        // Check both expression body and block statement body
+                        if let Some(body_expr) = arrow.body.as_expression() {
+                            if let Expression::CallExpression(call) = body_expr {
+                                if let Expression::Identifier(id) = &call.callee {
+                                    if id.name.as_str() == "resolve" && !call.arguments.is_empty() {
+                                        let resolved_value = self.emit_argument(&call.arguments[0]);
+                                        return format!("morph::Result<{}>::resolved({})", promise_type_arg, resolved_value);
+                                    }
+                                }
+                            }
+                        } else if let Some(body_block) = arrow.body.as_function_body() {
+                            // Check block statement body for resolve(value) call
+                            for stmt in &body_block.statements {
+                                if let Statement::ExpressionStatement(es) = stmt {
+                                    if let Expression::CallExpression(call) = &es.expression {
+                                        if let Expression::Identifier(id) = &call.callee {
+                                            if id.name.as_str() == "resolve" && !call.arguments.is_empty() {
+                                                let resolved_value = self.emit_argument(&call.arguments[0]);
+                                                return format!("morph::Result<{}>::resolved({})", promise_type_arg, resolved_value);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    return format!("morph::Result<{}>::resolved(/* from Promise */ 0)", promise_type_arg);
+                }
+            }
+            return format!("morph::Result<{}>::pending()", promise_type_arg);
         }
         let type_args = if let Some(ta) = &n.type_arguments {
             let args: Vec<String> = ta.params.iter().map(|t| resolve_type(Some(t), "auto", &self.ctx.template_params, false, &self.ctx.class_names)).collect();

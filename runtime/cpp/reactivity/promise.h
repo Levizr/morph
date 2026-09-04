@@ -40,6 +40,24 @@ public:
 
     Result(Result&& other) noexcept : handle(std::exchange(other.handle, nullptr)) {}
 
+    // Create an already-resolved Result from a value
+    static Result resolved(T v) {
+        return [v = std::move(v)]() mutable -> Result {
+            co_return std::move(v);
+        }();
+    }
+
+    static Result pending() {
+        return Result{};
+    }
+
+    // Allow implicit construction from T for sync `return x;` in Promise<T> fns
+    // (JS `return x as Promise<T>` returns plain value at runtime)
+    Result(T v) {
+        Result r = resolved(std::move(v));
+        handle = std::exchange(r.handle, nullptr);
+    }
+
     Result& operator=(Result&& other) noexcept {
         if (this != &other) {
             handle = std::exchange(other.handle, nullptr);
@@ -73,6 +91,34 @@ public:
     auto operator co_await() noexcept {
         return ValueAwaiter{handle};
     }
+
+    auto operator co_await() const noexcept {
+        // const version for printing? co_await on const Result not typical
+        return ValueAwaiter{handle};
+    }
 };
 
 } // namespace morph
+
+#include <format>
+template <typename T>
+struct std::formatter<morph::Result<T>> {
+    constexpr auto parse(auto& ctx) { return ctx.begin(); }
+    auto format(const morph::Result<T>& r, auto& ctx) const {
+        if (!r.handle) {
+            return std::format_to(ctx.out(), "Promise {{ <pending> }}");
+        }
+        try {
+            auto& prom = r.handle.promise();
+            if (prom.eptr) {
+                return std::format_to(ctx.out(), "Promise {{ <rejected> }}");
+            }
+            if (!prom.value) {
+                return std::format_to(ctx.out(), "Promise {{ <pending> }}");
+            }
+            return std::format_to(ctx.out(), "Promise {{ {} }}", *prom.value);
+        } catch (...) {
+            return std::format_to(ctx.out(), "Promise {{ <pending> }}");
+        }
+    }
+};

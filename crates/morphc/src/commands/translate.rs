@@ -69,11 +69,8 @@ pub fn run(file: String, to: String, optimize: bool) -> Result<()> {
     let has_global = global_runtime.is_some();
     if let Some(runtime_path) = &global_runtime {
         let runtime_str = runtime_path.display().to_string();
-        // Generated code has #include "../../runtime/cpp/..." — replace with absolute
-        // Do the most specific first to avoid double replacement
-        standalone_code = standalone_code.replace("../../runtime/cpp/types/js_types.h", &format!("{}/types/js_types.h", runtime_str));
-        standalone_code = standalone_code.replace("../../runtime/cpp", &runtime_str);
-        standalone_code = standalone_code.replace("\"../../runtime", &format!("\"{}", runtime_str));
+        // Use relative paths for includes (generated code already uses relative paths)
+        // Only replace if somehow absolute paths were generated
     } else {
         // No global runtime found — tell user
         crate::logger::log_warn("No global runtime found in ~/.morph/cache/runtimes/cpp — generated file will be self-contained");
@@ -126,17 +123,11 @@ inline void dev_log_error(auto&& x) { std::cerr << "ERROR: " << str(x) << std::e
     // Heuristic: if code contains `morph::dev_log` at file scope (line starting without indent and not inside class/function), wrap
     let needs_main_wrapper = should_wrap_in_main(&standalone_code);
     if needs_main_wrapper {
-        // Extract top-level executable lines (those that are not `class`, `static`, `template`, `#include`, etc.)
-        // For now, just wrap the entire file's executable tail in main if no `int main` already exists
-        if !standalone_code.contains("int main") {
-            // Find where to insert main: after includes and class/function defs, before top-level statements
-            // Simpler: append a main that contains the top-level statements that were at file scope
-            // For now, we keep the file as is but add a main wrapper that calls the top-level code
-            // Instead, we will extract lines that look like executable statements at file scope
-            let wrapped = wrap_top_level_in_main(&standalone_code);
-            if !wrapped.is_empty() {
-                standalone_code = wrapped;
-            }
+        // Always wrap/inject top-level executable statements, even if there's already a main
+        // wrap_top_level_in_main handles both cases: creating new main or injecting into existing
+        let wrapped = wrap_top_level_in_main(&standalone_code);
+        if !wrapped.is_empty() {
+            standalone_code = wrapped;
         }
     }
 
@@ -248,6 +239,68 @@ fn find_global_runtime() -> Option<std::path::PathBuf> {
     None
 }
 
+fn split_static_init(trimmed: &str) -> Option<(Option<String>, String)> {
+    // Split `static [inline] Type Name = Init;` into decl + assign to preserve JS order
+    // Returns (header_decl_opt, main_assign)
+    // For `auto` type, header is None and main gets `auto Name = Init;` (local, no static)
+    // For explicit types, header gets `static Type Name;` and main gets `Name = Init;`
+    let t = trimmed.trim();
+    if !t.starts_with("static ") || !t.contains('=') || !t.ends_with(';') {
+        return None;
+    }
+    // Find assignment `=` (not ==, !=, <=, >=)
+    let bytes = t.as_bytes();
+    let mut eq_pos: Option<usize> = None;
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'=' {
+            let before_ok = i == 0 || !matches!(bytes[i - 1], b'=' | b'!' | b'<' | b'>');
+            let after_ok = i + 1 >= bytes.len() || bytes[i + 1] != b'=';
+            // Skip `=>` (arrow): `=` followed by `>` (before is `(` or space, after is `>` not `=`, so would pass without this check)
+            if before_ok && after_ok && !(i + 1 < bytes.len() && bytes[i + 1] == b'>') {
+                eq_pos = Some(i);
+                break;
+            }
+        }
+        i += 1;
+    }
+    let eq = eq_pos?;
+    let left = t[..eq].trim();
+    let right = t[eq + 1..].trim();
+    // left like `static morph::Task p4` or `static auto ac`
+    // right like `voidPromise();`
+    let left_tokens: Vec<&str> = left.split_whitespace().collect();
+    if left_tokens.len() < 3 {
+        return None;
+    }
+    // left_tokens[0] == "static", last == name, middle == type parts
+    if left_tokens[0] != "static" {
+        return None;
+    }
+    let name = left_tokens.last()?.to_string();
+    // Basic sanity: name should be identifier (alnum + _)
+    if name.is_empty() || !name.chars().all(|c| c.is_alphanumeric() || c == '_' ) {
+        return None;
+    }
+    let type_part = left_tokens[1..left_tokens.len() - 1].join(" ");
+    if type_part.is_empty() {
+        return None;
+    }
+    // If type contains `auto`, only split when init contains co_await (must move, can't stay at file scope)
+    // Otherwise keep at file scope (auto needs init, and may be used by other functions like testTry)
+    if type_part.split_whitespace().any(|tok| tok == "auto") {
+        if t.contains("co_await") {
+            let main_stmt = format!("auto {} = {}", name, right);
+            return Some((None, main_stmt));
+        } else {
+            return None;
+        }
+    }
+    let header = format!("static {} {};", type_part, name);
+    let main_stmt = format!("{} = {}", name, right);
+    Some((Some(header), main_stmt))
+}
+
 fn is_top_level_executable(trimmed: &str) -> bool {
     if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with("//") || trimmed.starts_with("/*") {
         return false;
@@ -258,7 +311,38 @@ fn is_top_level_executable(trimmed: &str) -> bool {
     if trimmed.starts_with("inline ") || trimmed.starts_with("constexpr ") {
         return false;
     }
-    // Declarations at file scope (static) should stay
+    // Static declarations with co_await are executable (must be moved to async main)
+    if trimmed.starts_with("static ") && trimmed.contains("co_await") {
+        return true;
+    }
+    // Static variable with Call initializer may have side effects (e.g. voidPromise() prints)
+    // Move to main to preserve JS top-level execution order: `static T x = f();` -> decl + `x = f();` in main
+    // Exclude `auto` (needs init, may be used by other fns like testTry) unless co_await (must move, co_await already handled above)
+    if trimmed.starts_with("static ") && trimmed.contains('=') && trimmed.contains('(') && trimmed.ends_with(';') {
+        // Skip `auto` types (keep at file scope to avoid breaking cross-function uses)
+        let is_auto = trimmed.split_whitespace().any(|tok| tok == "auto");
+        if !is_auto {
+            if let (Some(eq_pos), Some(paren_pos)) = (trimmed.find('='), trimmed.find('(')) {
+                let bytes = trimmed.as_bytes();
+                let before_ok = eq_pos == 0 || !matches!(bytes[eq_pos.saturating_sub(1)], b'=' | b'!' | b'<' | b'>');
+                let after_ok = eq_pos + 1 >= bytes.len() || bytes[eq_pos + 1] != b'=';
+                if before_ok && after_ok && eq_pos < paren_pos {
+                    return true;
+                }
+            }
+        }
+    }
+    // Function calls at file scope (not static declarations) are executable
+    // Detect: `identifier(...)` or `identifier->method(...)` or `identifier.method(...)` at file scope
+    if trimmed.ends_with(';') && !trimmed.starts_with("static ") && !trimmed.starts_with("const ") {
+        // Check if it looks like a function/method call: contains `(` and `)` before `;`
+        if let Some(paren) = trimmed.find('(') {
+            if trimmed[paren..].contains(')') && trimmed[paren..].find(')').unwrap() < trimmed[paren..].find(';').unwrap_or(usize::MAX) {
+                return true;
+            }
+        }
+    }
+    // Other static declarations at file scope should stay
     if trimmed.starts_with("static ") {
         return false;
     }
@@ -349,9 +433,16 @@ fn wrap_top_level_in_main(code: &str) -> String {
                     brace_depth += block_depth;
                     continue;
                 } else {
-                    // Single statement
-                    to_inject.push(format!("    {}", trimmed));
-                    // Don't add to header
+                    // Single statement - split static inits to preserve order
+                    if let Some((header_opt, main_stmt)) = split_static_init(trimmed) {
+                        if let Some(h) = header_opt {
+                            header_lines.push(h);
+                        }
+                        to_inject.push(format!("    {}", main_stmt));
+                    } else {
+                        to_inject.push(format!("    {}", trimmed));
+                    }
+                    // Don't add original to header
                     brace_depth += open - close;
                     i += 1;
                     continue;
@@ -375,22 +466,40 @@ fn wrap_top_level_in_main(code: &str) -> String {
         if to_inject.is_empty() {
             return String::new();
         }
-        // Now inject to_inject into existing main before its `return 0;` or before closing `}`
         let mut out = header_lines.join("\n");
-        // Find the last `return 0;` or `}` of main in `out` and inject before it
-        if let Some(pos) = out.rfind("    return 0;") {
-            let inject_str = to_inject.join("\n") + "\n";
-            out.insert_str(pos, &inject_str);
-        } else if let Some(pos) = out.rfind('}') {
-            // Fallback: inject before last }
-            let inject_str = to_inject.join("\n") + "\n";
-            out.insert_str(pos, &inject_str);
+        let inject_str = to_inject.join("\n") + "\n";
+        if code.contains("co_await") {
+            // For async code with Task main, inject into the coroutine lambda body
+            if let Some(pos) = out.find("-> morph::Task {\n{\n") {
+                let search_start = pos + "-> morph::Task {\n".len();
+                if let Some(brace_pos) = out[search_start..].find('{') {
+                    let insert_pos = search_start + brace_pos + 1;
+                    out.insert_str(insert_pos, &inject_str);
+                    return out;
+                }
+            }
+            // Fallback: inject before return 0 or last }
+            if let Some(pos) = out.rfind("    return 0;") {
+                out.insert_str(pos, &inject_str);
+            } else if let Some(pos) = out.rfind('}') {
+                out.insert_str(pos, &inject_str);
+            } else {
+                out.push_str("\n");
+                out.push_str(&inject_str);
+            }
+            return out;
         } else {
-            // Fallback: append
-            out.push_str("\n");
-            out.push_str(&to_inject.join("\n"));
+            // Sync code - inject before return 0 or last }
+            if let Some(pos) = out.rfind("    return 0;") {
+                out.insert_str(pos, &inject_str);
+            } else if let Some(pos) = out.rfind('}') {
+                out.insert_str(pos, &inject_str);
+            } else {
+                out.push_str("\n");
+                out.push_str(&inject_str);
+            }
+            return out;
         }
-        return out;
     } else {
         // No existing main: create new main with top-level executables
         let mut header_lines: Vec<String> = Vec::new();
@@ -430,7 +539,15 @@ fn wrap_top_level_in_main(code: &str) -> String {
                     i = j;
                     continue;
                 } else {
-                    main_body.push(format!("    {}", trimmed));
+                    // Split static inits to preserve order (decl in header, assign in main)
+                    if let Some((header_opt, main_stmt)) = split_static_init(trimmed) {
+                        if let Some(h) = header_opt {
+                            header_lines.push(h);
+                        }
+                        main_body.push(format!("    {}", main_stmt));
+                    } else {
+                        main_body.push(format!("    {}", trimmed));
+                    }
                     brace_depth += open - close;
                     i += 1;
                     continue;
@@ -445,7 +562,7 @@ fn wrap_top_level_in_main(code: &str) -> String {
         if main_body.is_empty() {
             return String::new();
         }
-        let needs_async = main_body.iter().any(|line| line.contains("co_await"));
+        let needs_async = code.contains("co_await");
         let mut out = header_lines.join("\n");
         if needs_async {
             out.push_str("\n\nint main() {\n");

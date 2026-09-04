@@ -138,15 +138,20 @@ def _compile_and_run(cpp_path: Path, tmpdir: Path) -> subprocess.CompletedProces
     compiler = shutil.which("g++-14") or shutil.which("g++")
     if not compiler:
         pytest.skip("g++ not found")
-    # Compile - include runtime cpp headers
+    # Compile - include runtime cpp headers and link runtime sources
+    # Core runtime sources that are always needed
+    runtime_sources = [
+        RUNTIME_CPP / "net" / "net.cpp",
+        RUNTIME_CPP / "reactivity" / "task.cpp",
+    ]
     compile_cmd = [
         compiler,
         str(cpp_path),
+        *[str(s) for s in runtime_sources if s.exists()],
         "-o", str(exe),
         "-std=c++23",
         f"-I{RUNTIME_CPP}",
         f"-I{REPO_ROOT}/runtime",
-        # Link libs if needed (for net etc., but most fixtures don't need)
     ]
     comp = subprocess.run(compile_cmd, capture_output=True, text=True, timeout=30)
     assert comp.returncode == 0, f"Compile failed for {cpp_path.name}:\n{comp.stdout}\n{comp.stderr}\n--- cpp ---\n{cpp_path.read_text()}"

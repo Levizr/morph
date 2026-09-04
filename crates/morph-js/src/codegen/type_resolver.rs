@@ -256,7 +256,13 @@ pub fn resolve_type<'a>(
                 return format!("std::vector<{}>", elem_resolved);
             }
             if name == "Promise" || name == "Readonly" {
-                return type_args.first().cloned().unwrap_or_else(|| "auto".to_string());
+                // Promise<T> maps to morph::Result<T>
+                // But Promise<void> should map to morph::Task (not Result<void> which has optional<void> issues)
+                let inner = type_args.first().cloned().unwrap_or_else(|| "auto".to_string());
+                if inner == "void" {
+                    return "morph::Task".to_string();
+                }
+                return format!("morph::Result<{}>", inner);
             }
             if name == "Record" {
                 return "std::unordered_map<std::string, auto>".to_string();

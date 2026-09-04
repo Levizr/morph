@@ -36,23 +36,30 @@ pub struct VarInfo {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum UsageKind {
-    ArithmeticOp,
-    ComparisonOp,
-    PropertyRead,
-    PropertyWrite,
-    MethodCall,
-    ToStringCall,
-    DynamicAssign,
-    AssignedToVar,
-    AssignedFromVar,
-    Returned,
-    CapturedInClosure,
-    Awaited,
-    CoReturned,
-    StoredInGlobal,
-    Indexed,
-    Iterated,
-    Spread,
+    ArithmeticOp,        // +, -, *, /, %, etc.
+    ComparisonOp,        // ==, !=, <, >, etc.
+    PropertyRead,        // obj.prop
+    PropertyWrite,       // obj.prop = val
+    MethodCall,          // obj.method()
+    ToStringCall,        // .toString(), .toFixed(), etc.
+    DynamicAssign,       // Assigned from await, fetch, unknown
+    AssignedToVar,       // other = this_var
+    AssignedFromVar,     // this_var = other
+    Returned,            // return this_var
+    CapturedInClosure,   // Used in nested function
+    Awaited,             // await this_var
+    CoReturned,          // co_return this_var
+    StoredInGlobal,      // global.push(this_var)
+    Indexed,             // arr[i]
+    Iterated,            // for (x of arr)
+    Spread,              // [...arr]
+    NumericLiteralAssign, // Assigned numeric literal
+    FloatLiteralAssign,   // Assigned float literal
+    IntLiteralAssign,     // Assigned int literal
+    StringLiteralAssign,  // Assigned string literal
+    BoolLiteralAssign,    // Assigned bool literal
+    NullAssign,           // Assigned null
+    UndefinedAssign,      // Assigned undefined
 }
 
 pub struct EscapeAnalyzer {
@@ -103,6 +110,7 @@ impl EscapeAnalyzer {
             escapes: self.escapes.clone(),
             widens: self.widens.clone(),
             var_infos: self.var_infos.clone(),
+            async_functions: self.async_functions.clone(),
         }
     }
 
@@ -301,6 +309,18 @@ impl EscapeAnalyzer {
                 if self.is_dynamic_source(init) {
                     var_info.widened_type = WidenedType::ToJsNumber;
                     self.widens.insert(name.clone(), WidenedType::ToJsNumber);
+                }
+                // Track async arrow assigned to var: let f = async (...) => ...
+                if let Expression::ArrowFunctionExpression(arrow) = init {
+                    if arrow.r#async {
+                        self.async_functions.insert(name.clone());
+                    }
+                }
+                // Track async function expression assigned to var
+                if let Expression::FunctionExpression(func) = init {
+                    if func.r#async {
+                        self.async_functions.insert(name.clone());
+                    }
                 }
             }
 
@@ -746,6 +766,7 @@ pub struct AnalysisResult {
     pub escapes: HashMap<String, EscapeKind>,
     pub widens: HashMap<String, WidenedType>,
     pub var_infos: HashMap<String, VarInfo>,
+    pub async_functions: HashSet<String>,
 }
 
 impl Default for EscapeAnalyzer {
