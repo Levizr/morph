@@ -1,6 +1,6 @@
 # Native C++ Types
 
-Morph lets you annotate variables, parameters, and return values with real C++ primitive types directly in your `.mx` logic. The moment you annotate with a native type, you get the native thing: direct, unboxed, no overhead.
+Morph lets you annotate variables, parameters, and return values with real C++ primitive types directly in `.mx` logic. When you annotate with a native type, you get the native thing: direct, unboxed, no overhead.
 
 ## The Native Types
 
@@ -17,7 +17,7 @@ These annotations map straight to C++:
 | `size_t` | `size_t` |
 | `byte` | `uint8_t` |
 
-Everything else maps to Morph's runtime wrappers: `string` → `JsString`, `number` → `JsNumber`, `boolean` → `JsBoolean`, `any` → `JsValue`. See [Runtime Types](/docs/javascript/types).
+Everything else maps to Morph's runtime wrappers: `string` → `JsString`, `number` → `JsNumber`, `boolean` → `JsBoolean`, `any` → `JsValue`. See [Runtime Types](./types.md).
 
 ## What the Compiler Generates
 
@@ -55,13 +55,13 @@ int jsxHelper(int x)
 
 **Zero-overhead arithmetic.** A `JsNumber` is a wrapper around a variant — safe, but not free. A raw `int` is a register. Hot loops (physics ticks, particle counts, pixel math) run at full native speed with no boxing or unboxing.
 
-**Direct C++ interop.** Native functions callable from C++ (see [C++ / JSX Interop](/docs/guides/native-cpp)) need real C++ signatures. Annotating `x: int` produces `int jsxHelper(int x)` — something native code can call without knowing anything about Morph's runtime types.
+**Direct C++ interop.** Native functions callable from C++ (see [C++ / JSX Interop](../guides/native-cpp.md)) need real C++ signatures. Annotating `x: int` produces `int jsxHelper(int x)` — something native code can call without knowing anything about Morph's runtime types.
 
 **Precision and memory control.** `int64` for IDs beyond 2^53, `float` over `double` when memory matters, `byte` for raw buffers. JavaScript's single `number` type can't express these choices; C++ annotations can.
 
-## The Problems
+## Trade-offs
 
-The power is real, and so are the trade-offs. A raw C++ primitive is **not a JavaScript value** — it has no methods, no coercion, no wrapper.
+A raw C++ primitive is **not a JavaScript value** — it has no methods, no coercion, no wrapper.
 
 ### No JS Methods
 
@@ -93,26 +93,26 @@ What works and what doesn't:
 
 ### The Linter Won't Catch It
 
-`morph check` flags JS-only methods on state getters and string literals, but it does not track variables annotated with native types. `a.toFixed(2)` on a `let a: int = 5` passes `morph check` cleanly — and then fails during C++ compilation. When you mix native annotations into logic, expect the error surface to move from the linter to g++.
+`morphc check` flags JS-only methods on state getters and string literals, but it does not track variables annotated with native types. `a.toFixed(2)` on a `let a: int = 5` passes `morphc check` cleanly — and then fails during C++ compilation. When mixing native annotations into logic, expect the error surface to move from the linter to g++.
 
 ### `const` Is Not `const`
 
-JavaScript `const` only becomes C++ `const` for the wrapper types (`JsNumber`, `JsString`, ...). A `const a: int = 100` compiles to a **mutable** `int a = 100;` — the compiler trusts you meant a native variable, and native variables don't inherit JS semantics.
+JavaScript `const` only becomes C++ `const` for the wrapper types (`JsNumber`, `JsString`, ...). A `const a: int = 100` compiles to a **mutable** `int a = 100;` — the compiler trusts the intent for a native variable, and native variables don't inherit JS semantics.
 
 ### State Signals Ignore Annotations
 
-`morphState` picks its signal type from the initializer, not your annotation. `const [n, setN] = morphState(0)` gives `Signal<int>` no matter what you annotate — setters take the initializer's type, not yours.
+`morphState` picks its signal type from the initializer, not the annotation. `const [n, setN] = morphState(0)` gives `Signal<int>` no matter what is annotated — setters take the initializer's type.
 
 ## Rules of Thumb
 
 - Use native annotations (`int`, `double`) at the boundaries: function parameters and returns for C++ interop, counters and indices inside hot loops.
-- Use plain JavaScript types (`number`, `string`) everywhere you want JS behavior — methods, coercion, JSX text interpolation.
+- Use plain JavaScript types (`number`, `string`) everywhere JS behavior is wanted — methods, coercion, JSX text interpolation.
 - Need a string from a native int? Concatenate (`"count: " + a`) or keep the value as `number` and call `.toString()`.
 - If a value flows into JSX markup or state, leave it unannotated and let it stay a runtime type.
 
 ## Open Question: JS Methods on Native Types
 
-Right now, methods on native primitives fail to compile (see [No JS Methods](#no-js-methods)). One possible fix: let JS methods work on native types by wrapping the call site automatically.
+Currently, methods on native primitives fail to compile (see [No JS Methods](#no-js-methods)). One possible fix: let JS methods work on native types by wrapping the call site automatically.
 
 ```tsx
 let a: int = 100;
@@ -137,7 +137,7 @@ So the design isn't settled:
 - **Keep natives pure + explicit `String(a)`?** Honest, but noisy at interop boundaries.
 - **Checker errors with fix hints, no sugar?** Safest, worst ergonomics.
 
-**We want your opinion.** If you use native annotations in Morph — or would, if methods worked on them — tell us what you'd expect. Real usage decides this one.
+**We want feedback.** If native annotations are used in Morph — or would be, if methods worked on them — what behavior is expected? Real usage decides this.
 
 - **Email:** [`suggestions.morph@levizr.com`](mailto:suggestions.morph@levizr.com)
 - **GitHub:** [open an issue](https://github.com/Levizr/morph/issues) on `Levizr/morph`

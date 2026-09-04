@@ -1,15 +1,14 @@
 # Installation
 
+Morph ships as a single native binary (`morphc`) — no Python, no Node.js, no runtime to install separately.
+
 ## Prerequisites
 
-Morph requires Python 3.10+ and a C++ compiler with C++23 support.
+You only need a C++ compiler with C++23 support. Morph's build system will download the C++ runtime automatically.
 
 ### Linux (Debian/Ubuntu)
 
 ```bash
-# Python
-sudo apt install python3 python3-pip
-
 # C++ toolchain
 sudo apt install g++ cmake make pkg-config
 
@@ -23,9 +22,6 @@ sudo apt install libfreetype-dev libharfbuzz-dev
 ### macOS
 
 ```bash
-# Python
-brew install python@3.12
-
 # C++ toolchain (Xcode includes clang++)
 xcode-select --install
 
@@ -35,27 +31,25 @@ brew install glfw freetype harfbuzz cmake pkg-config
 
 ### Windows
 
-Use MSVC (Visual Studio) or MinGW with C++23 support. GLFW, FreeType, and HarfBuzz are bundled for Windows builds — no manual installation needed.
+Use MSVC (Visual Studio 2022+) or MinGW with C++23 support. GLFW, FreeType, and HarfBuzz are bundled — no manual installation needed.
 
 ## Install Morph
 
-### Stable Release
+### Stable Release (Recommended)
 
 ```bash
-pip install levizr-morph
+cargo install morphc
 ```
 
-### Latest Features (From Source)
+This downloads and compiles the Rust binary. First run takes 1-2 minutes; subsequent runs are instant.
 
-Want features that haven't shipped to PyPI yet? Install straight from the repo:
+### From Source (Latest Features)
 
 ```bash
 git clone https://github.com/Levizr/morph.git
 cd morph
-pip install ".[dev]"
+cargo install --path crates/morphc
 ```
-
-The `[dev]` extra pulls in the development dependencies (test tooling, linters) alongside Morph itself.
 
 ## Verify Your System
 
@@ -63,16 +57,14 @@ The `[dev]` extra pulls in the development dependencies (test tooling, linters) 
 morph doctor
 ```
 
-This checks your toolchain (g++, cmake, make, pkg-config), graphics libs (GLFW, OpenGL), text libs (FreeType, HarfBuzz), and bundled vendor files. If anything is missing, it offers to install it automatically:
+Checks your toolchain (g++, cmake, pkg-config), graphics libs (GLFW, OpenGL), and text libs (FreeType, HarfBuzz).
 
 ```bash
-morph doctor -y    # auto-install missing packages
+morph doctor -y    # auto-install missing packages (Linux only)
 morph doctor -v    # show detailed version info
 ```
 
-## Supported Package Managers
-
-`morph doctor` detects your system package manager and uses the correct install commands:
+## Supported Package Managers (for `morph doctor -y`)
 
 | Manager | OS |
 |---|---|
@@ -84,3 +76,10 @@ morph doctor -v    # show detailed version info
 | brew | macOS |
 | winget | Windows |
 | choco | Windows |
+
+## What Gets Installed
+
+- `morphc` binary (~10-15 MB) — the compiler and CLI
+- No Python dependencies
+- No Node.js / npm
+- Runtime sources are downloaded on first `morph dev` or `morph build` and cached globally at `~/.morph/cache/runtimes/`

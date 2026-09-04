@@ -5,47 +5,47 @@ Morph is a **compiler**, not an interpreter. Your source files never ship — on
 ## The Pipeline
 
 ```
-src/App.mx  ──►  MorphParser  ──►  JSXWalker  ──►  IRBuilder  ──►  LayoutEngine  ──►  IRSerializer
-                                                                                    │
-                                                    ┌───────────────────────────────┴──────────────┐
-                                                    ▼                                               ▼
-                                           [Dev: IPC Socket]                              [Build: C++ Codegen]
-                                           morph_devrt binary                     node_emitter → g++ → binary
-                                           + logic.so (dlopen)                    TS→C++ (logic) → g++ → logic
+src/App.mx  ──►  Oxc Parser  ──►  lightningcss  ──►  IRBuilder  ──►  LayoutEngine  ──►  IRSerializer
+                                                                                   │
+                                                           ┌────────────────────────┴──────────────┐
+                                                           ▼                                       ▼
+                                                  [Dev: IPC Socket]                          [Build: C++ Codegen]
+                                                  morph_devrt binary                   node_emitter → g++ → binary
+                                                  + logic.so (dlopen)                    TS→C++ (logic) → g++ → logic
 ```
 
-### Step by step
+### Step by Step
 
-1. **MorphParser** — tree-sitter parses your `.mx` file using the TypeScript grammar into an AST
-2. **JSXWalker** — walks the AST and extracts imports, components, props, and JSX structure
-3. **CSS Parser** — parses CSS files and resolves Tailwind classes into property dictionaries
-4. **IRBuilder** — merges the walked JSX with CSS rules and Tailwind classes into an Intermediate Representation (IR) — a list of windows containing a tree of styled nodes
-5. **LayoutEngine** — computes positions and sizes using box model math (margin, padding, flex, inline)
-6. **IRSerializer** — converts the IR to a JSON-safe dictionary
+1. **Oxc Parser** — Parses your `.mx` / `.tsx` / `.ts` file using the TypeScript grammar into an AST (3× faster than SWC, arena-allocated)
+2. **lightningcss** — Parses CSS files and resolves Tailwind classes into property dictionaries (browser-grade, parallel)
+3. **IRBuilder** — Merges the walked JSX with CSS rules and Tailwind classes into an Intermediate Representation (IR) — a list of windows containing a tree of styled nodes
+4. **LayoutEngine** — Computes positions and sizes using box model math (margin, padding, flex, inline)
+5. **IRSerializer** — Converts the IR to a JSON-safe dictionary
 
 From here, the pipeline splits:
 
-- **Dev mode** — sends the IR dict over a Unix socket to the pre-compiled `morph_devrt` renderer. Your JS logic is compiled to a `logic.so` shared library loaded via `dlopen`.
-- **Build mode** — feeds the IR into Jinja2 C++ code generation, producing `app.cpp` which is compiled with g++ into a standalone binary.
+- **Dev mode** — Sends the IR dict over a Unix socket to the pre-compiled `morph_devrt` renderer. Your JS logic is compiled to a `logic.so` shared library loaded via `dlopen`.
+- **Build mode** — Feeds the IR into Tera C++ code generation, producing `app.cpp` which is compiled with g++/clang++ into a standalone binary.
 
 ## What Gets Compiled
 
-Python handles the toolchain:
-- `.mx` parsing (tree-sitter)
+**Rust (morphc) handles the toolchain:**
+- `.mx`/`.tsx`/`.ts` parsing (Oxc)
+- CSS parsing (lightningcss)
 - IR building
 - Layout math
 - CSS cascade and Tailwind resolution
-- C++ code generation (Jinja2 templates)
-- TypeScript → C++ translation
+- C++ code generation (Tera templates)
+- TypeScript → C++ translation (morph-js crate)
 
-C++ handles the runtime:
-- OpenGL rendering
-- Window management
+**C++ handles the runtime:**
+- OpenGL rendering (Flash / Forge backends)
+- Window management (GLFW)
 - Event handling
 - Reactivity (signals, effects)
-- Coroutines and networking
+- Coroutines and networking (fetch, timers)
 
-The final binary contains **zero Python** and **zero Node.js**.
+The final binary contains **zero Rust** (compiler only), **zero Python**, and **zero Node.js**.
 
 ## The .mx Format
 
@@ -85,3 +85,106 @@ Morph scans the IR tree and detects which features your app actually uses. Only 
 - and more...
 
 This is why Morph binaries are so small — a simple "Hello World" app doesn't include image loading, animation, or scroll code.
+
+## Two Codegen Modes (JS/TS → C++)
+
+| Mode | Command | Behavior |
+|---|---|---|
+| **Legacy** | `morphc file.ts` | `auto` inference, `Js*` types everywhere, no escape analysis |
+| **Optimized** | `morphc file.ts --optimize` | Intent-based: escape analysis → stack/`unique_ptr`/`shared_ptr`, native types (`int32_t`, `std::string`, `std::vector`), type widening only when needed |
+
+See [Intent-Based Codegen](../guides/intent-based-codegen.md) for the full memory management strategy.
+
+## Dev Mode Detail
+
+```
+┌──────────────┐      Unix Socket       ┌──────────────────┐
+│   morphc     │  ◄──────────────────►  │   morph_devrt    │
+│  (watcher)   │      JSON IR +         │  (always running)│
+│              │      logic.so path     │                  │
+└──────┬───────┘                        └────────┬─────────┘
+       │                                         │
+       ▼                                         ▼
+┌──────────────┐                        ┌──────────────────┐
+│  Rebuild     │                        │  Hot Reload      │
+│  logic.so    │                        │  - dlopen new    │
+│  (g++ -shared)                       │    logic.so      │
+└──────────────┘                        │  - Rewire signals│
+                                        │  - Re-run effects│
+                                        └──────────────────┘
+```
+
+- `morph_devrt` is a pre-compiled renderer binary (shipped with runtime)
+- Only the **logic layer** recompiles on edit (~300-500 ms)
+- Window, GL context, layout tree **stay alive** — zero flicker
+
+## Build Mode Detail
+
+```
+.mx source
+    │
+    ▼
+┌──────────────────────────────────────┐
+│  Feature Detection (FeatureSet)      │
+│  - Scans IR nodes for used features  │
+│  - Emits only required #defines      │
+└──────────────┬───────────────────────┘
+               │
+               ▼
+┌──────────────────────────────────────┐
+│  Tera Templates (app_main.cpp.tera)  │
+│  - window_code + keyframe_code       │
+│  - list_factory_code                 │
+│  - headers + defines                 │
+│  - premain_functions                 │
+│  - state_decls                       │
+└──────────────┬───────────────────────┘
+               │
+               ▼
+┌──────────────────────────────────────┐
+│  g++ -std=c++20 -O2                  │
+│  -ffunction-sections                 │
+│  -fdata-sections                     │
+│  -Wl,--gc-sections                   │
+└──────────────┬───────────────────────┘
+               │
+               ▼
+        native binary (~200-800 KB)
+```
+
+**Dead code elimination**: Linker GC sections removes unused runtime code. A hello-world with only `<div>` + `<button>` includes ~15 KB of runtime; adding `<img>` pulls in stb_image (~50 KB).
+
+## Version & Cache System
+
+```
+~/.morph/
+├── cache/
+│   └── runtimes/
+│       └── cpp/
+│           ├── v0.1.0/        # Runtime source (symlinked to .morph/runtime/)
+│           ├── v0.2.0/
+│           └── v0.3.0/
+└── index.json                 # Metadata
+
+Project:
+.morph/
+├── runtime/        → ~/.morph/cache/runtimes/cpp/v0.2.0/ (symlink or copy)
+├── build/          # Object files, fingerprints, logic.so
+└── cache/
+    ├── css/        # Remote CSS + @font-face files (MD5 keyed)
+    └── *.fingerprint  # Content hashes for incremental builds
+```
+
+- **Never re-download** same runtime version
+- **Fingerprint** = SHA256(`morph.config.json` + entry source + runtime tree + imported files)
+- **morph.lock** pins exact version + hash for reproducibility
+
+## Distribution
+
+| Artifact | How It's Built |
+|---|---|
+| `morphc` binary | `cargo install --locked` → static musl on Linux, native on macOS/Windows |
+| C++ runtime | GitHub Actions: `g++-14` build → tar.gz → GitHub Release (tagged by `versions/runtime/cpp.json`) |
+| Version files | `versions/{morphc,version.json}` + `versions/runtime/cpp.json` — push to `main` = auto-release |
+
+Security: `CODEOWNERS` protects `versions/**`, semver validation in CI, sha256 verified on download, only `main` branch triggers releases.

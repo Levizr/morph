@@ -1,6 +1,6 @@
 # Async & Networking
 
-Morph supports async/await with coroutines and has a built-in HTTP `fetch()` client.
+Morph supports async/await with C++20 coroutines and has a built-in HTTP `fetch()` client.
 
 ## fetch()
 
@@ -24,6 +24,14 @@ async function load() {
 | `response.ok()` | Returns `true` if status is 200-299 |
 | `response.text()` | Returns the response body as a string |
 | `response.headers` | Response headers |
+| `response.statusText` | HTTP status text |
+| `response.url` | Final URL (after redirects) |
+| `response.redirected` | Whether the request was redirected |
+| `response.type` | Response type: `"basic"`, `"cors"`, `"error"`, `"opaque"` |
+| `response.bodyUsed` | Whether the body has been consumed |
+| `response.json()` | Parses body as JSON (returns `JsValue`) |
+| `response.arrayBuffer()` | Returns body as raw bytes |
+| `response.clone()` | Creates a copy for multiple reads |
 
 ### Error Handling
 
@@ -88,7 +96,7 @@ clearInterval(id)  // cancels an interval
 
 ## Coroutines
 
-Async functions compile to C++ coroutines (`morph::Task`). Each `await` point suspends the coroutine and resumes it when the result is available, without blocking the UI thread.
+Async functions compile to C++ coroutines (`morph::Result<T>` for `Promise<T>`, `morph::Task` for `Promise<void>`). Each `await` point suspends the coroutine and resumes it when the result is available, without blocking the UI thread.
 
 ```tsx
 async function loadData() {
@@ -102,9 +110,42 @@ async function loadData() {
 You can also await the next frame:
 
 ```tsx
+import { next_frame } from 'morph'
+
 async function animate() {
   // runs on the next frame tick
   await next_frame
   console.log("next frame")
 }
 ```
+
+## Top-Level Await
+
+Top-level `await` is supported in entry files. Morph wraps the module in an async main coroutine:
+
+```tsx
+// src/App.mx (top-level)
+const data = await fetch("https://api.example.com/config")
+console.log("Loaded config:", data)
+```
+
+This compiles to:
+
+```cpp
+int main() {
+  morph::run_async([]() -> morph::Task {
+    auto data = co_await morph::net::fetch("https://api.example.com/config");
+    std::println("Loaded config: {}", data);
+    co_return;
+  });
+  while (!morph::is_done()) morph::process_tasks();
+}
+```
+
+## Implementation Notes
+
+- `fetch()` is implemented in `runtime/cpp/net/net.h` using `HttpAwaitable` coroutine
+- Requests run on a worker thread pool; responses resume on the main thread via the scheduler
+- `morph::Result<T>` and `morph::Task` are in `runtime/cpp/reactivity/promise.h` and `task.h`
+- The scheduler (`process_tasks()`) drives all coroutines and timers
+- `--optimize` mode uses escape analysis to determine smart pointer strategy for async variables

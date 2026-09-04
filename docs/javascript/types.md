@@ -30,7 +30,7 @@ typeof(true)       → "boolean"
 
 ### Truthiness
 
-Same rules as JavaScript: `0`, `""`, `null`, `undefined`, `false` are falsy. Everything else is truthy.
+Same rules as JavaScript: `0`, `""`, `null`, `undefined`, `false` are falsy. Everything else is truthy. Arrays and objects are truthy (arrays are truthy even when empty).
 
 ### Equality
 
@@ -46,7 +46,7 @@ JsNumber(3.14)       // double
 JsNumber("12345678901234567890")  // big string
 ```
 
-Arithmetic operators (`+`, `-`, `*`, `/`) work with proper coercion. `fmt_double()` renders numbers cleanly — `8` not `8.0`, `2.5` not `2.500000`, `"Error"` not `nan`/`inf`.
+Arithmetic operators (`+`, `-`, `*`, `/`) work with proper coercion. Number formatting renders cleanly — `8` not `8.0`, `2.5` not `2.500000`, `"Error"` not `nan`/`inf`.
 
 ## JsString
 
@@ -89,3 +89,7 @@ Object backed by `shared_ptr<map<string, JsValue>>`:
 ## JsBoolean
 
 Wrapper around `bool` with truthiness semantics.
+
+## Formatting
+
+All `Js*` types support `std::format` and `std::println` via formatters in `runtime/cpp/types/js_value_format.h`. Define `MORPH_NO_FORMAT` before including `js_types.h` to opt out of the `<format>` parse cost (~1.5s per TU) in hot-reload critical paths.

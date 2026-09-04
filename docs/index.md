@@ -3,9 +3,9 @@
 Build native desktop applications with HTML, CSS, and JavaScript. No browser, no Electron, no WebView — just a lightweight native binary.
 
 ```
-morph init my-app
+morphc new my-app
 cd my-app
-morph dev
+morphc dev
 ```
 
 Write familiar `.mx` files (JSX + CSS + TypeScript). Morph compiles them directly to native OpenGL binaries with zero runtime overhead.
@@ -34,8 +34,8 @@ export default function App() {
 ```
 
 ```bash
-morph dev      # live window, hot reload
-morph run      # optimized native binary
+morphc dev      # live window, hot reload
+morphc run      # optimized native binary
 ```
 
 ## Why Morph?
@@ -57,9 +57,12 @@ morph run      # optimized native binary
 - **C++ interop** — Import user `.cpp` files directly into your JSX
 - **DevTools** — Built-in element inspector, rendering profiler, network log
 - **Tiny binaries** — Feature-based dead code elimination, optional UPX compression
+- **Intent-based codegen** — `--optimize` flag uses escape analysis for native types, zero GC
 
 ## Next Steps
 
 - [Installation](getting-started/installation.md) — Set up your system
 - [Quick Start](getting-started/quick-start.md) — Build your first app in 2 minutes
 - [Configuration](getting-started/configuration.md) — All `morph.config.json` options
+- [Architecture](../concepts/architecture.md) — How the compiler and runtime work
+- [Intent-Based Codegen](../guides/intent-based-codegen.md) — Memory management without GC

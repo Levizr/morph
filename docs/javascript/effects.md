@@ -93,3 +93,11 @@ morphEffect(() => {
   return () => clearInterval(id)
 }, [])
 ```
+
+## Implementation Notes
+
+- Effects are implemented via `create_effect` in the C++ runtime (`runtime/cpp/reactivity/signal.h`)
+- Each effect tracks its dependencies by reading signal values during execution
+- When a dependency signal changes, the effect is scheduled to re-run on the next frame
+- Cleanup functions are stored and called before the next effect execution or on unmount
+- Effects run after layout + paint, so DOM measurements are accurate

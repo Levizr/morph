@@ -1,143 +1,178 @@
 # CLI Commands
 
-Global flags: `morph --version` prints the CLI version; `morph -h` / `morph --help` lists all commands.
+Global flags: `morphc --version` prints the CLI version; `morphc -h` / `morphc --help` lists all commands.
 
-## morph init
+## Direct File Morphing (No Project Required)
 
-Scaffold a new `.mx` project.
+Translate a `.ts` or `.js` file to C++ or Rust instantly:
 
+```bash
+morphc app.ts              # → app.cpp (default target: C++)
+morphc app.ts --to cpp     # → app.cpp
+morphc app.ts --to rust    # → app.rs (experimental)
+morphc app.ts --to cpp --optimize  # intent-based codegen with escape analysis
 ```
-morph init [name]
+
+- Only `.ts` / `.js` files allowed (`.tsx`/`.jsx`/`.mx` rejected — use `morphc build` for projects)
+- Output: `<basename>.cpp` or `<basename>.rs` with trailing newline
+- Standalone: includes minimal shim (`morph::str`, `morph::dev_log`)
+- Top-level statements wrapped in `int main()`
+
+## Project Commands
+
+### `morphc new` — Scaffold a New Project
+
+```bash
+morphc new [name]
 ```
 
 | Option | Description |
 |---|---|
+| `name` | Project name (use `.` for current directory) |
 | `--width` | Window width (default: 800) |
 | `--height` | Window height (default: 600) |
 | `--title` | Window title (default: project name) |
-| `--entry` | Entry `.mx` file (default: `src/App.mx`) |
+| `--entry` | Entry file (default: `src/App.mx`) |
+| `--ext` | Source extension: `mx` \| `tsx` (default: `mx`) |
 | `-y`, `--yes` | Skip interactive wizard, use defaults |
 
-Without arguments, launches an interactive wizard that asks for project name, window dimensions, title, and entry file.
+```bash
+# Interactive
+morphc new my-app
 
-Use `.` as the name to scaffold into the current directory instead of creating a new folder:
+# Non-interactive
+morphc new my-app --width 1024 --height 768 --title "My App" -y
+
+# Into current directory
+morphc new . --ext tsx
+```
+
+### `morphc install` — Download Runtime Sources
 
 ```bash
-morph init .
+morphc install
 ```
 
-## morph dev
+Downloads the C++ runtime (matching `morph.config.json` `runtime.version`) from GitHub Releases into the global cache `~/.morph/cache/runtimes/cpp/vX.Y.Z/` and symlinks it into `.morph/runtime/`. Creates/updates `morph.lock`.
 
-Start dev mode with live hot reload.
+Run this once after `morphc new` or when switching runtime versions manually.
 
-```
-morph dev
-```
+### `morphc update` — Update Runtime or morphc
 
-| Option | Description |
-|---|---|
-| `--entry` | Override entry `.mx` file |
-
-Builds the dev runtime, connects via IPC, watches source files, and hot-reloads on save.
-
-## morph build
-
-Build an optimized production binary.
-
-```
-morph build
+```bash
+morphc update              # show current versions + available updates
+morphc update --runtime    # update runtime to latest compatible version
+morphc update --self       # update morphc binary (cargo install)
 ```
 
-| Option | Description |
-|---|---|
-| `--entry` | Override entry `.mx` file |
-| `--output` | Output directory (default: `output` from config, `dist/`) |
-| `--static` | Statically link GLFW/FreeType/HarfBuzz (single self-contained file; needs `.a` dev archives) |
-| `--upx` | Compress the binary with UPX |
-| `--no-upx` | Skip UPX compression |
-| `--upx-version` | Pin a specific UPX release (e.g. `4.2.4`); overrides `build.upx_version` in config |
+- `--runtime`: reads `versions/runtime/cpp.json` from GitHub, rewrites `morph.config.json` + `morph.lock`, re-links runtime
+- `--self`: runs `cargo install --git https://github.com/Levizr/morph.git morphc`
 
-Feature detection is automatic: static linking, symbol stripping, and UPX compression are applied only when all required libraries exist on the system.
+### `morphc dev` — Start Dev Mode with Hot Reload
 
-## morph check
-
-Lint `.mx` files against the framework's supported surface without compiling. Exit code `0` = clean, `1` = lint errors (or parse failure) — CI-friendly.
-
+```bash
+morphc dev [--entry src/App.mx]
 ```
-morph check
+
+- Ensures runtime is installed
+- Builds dev runtime (CMake + g++/clang++)
+- Starts file watcher on `src/` + entry dir (100ms debounce)
+- On save: re-runs parse → CSS → IR → compiles `logic.<hash>.so` → pushes IR over Unix socket to `morph_devrt`
+- IPC: Unix socket `.morph/dev.sock` (Linux/macOS), TCP `127.0.0.1:3000` (Windows)
+
+### `morphc build` — Compile Production Binary
+
+```bash
+morphc build [--entry src/App.mx] [--output bin/] [--static] [--upx true|false] [--no-upx]
 ```
 
 | Option | Description |
 |---|---|
-| `--entry` | Override entry `.mx` file |
+| `--entry` | Override entry file |
+| `--output` | Output directory (default: config `output`, `.morph/output`) |
+| `--static` | Statically link GLFW/FreeType/HarfBuzz (needs `.a` archives) |
+| `--upx` / `--no-upx` | Override UPX compression (default: config `build.upx`) |
 
-Checks elements, props, events, inline styles, imported CSS files, imports, `morphState`/`morphEffect` usage, and JS→C++ compatibility. Errors block `morph dev`/`morph build`; warnings are reported only. Tune rules via the `lint` section of `morph.config.json` (see [Configuration](../getting-started/configuration.md)).
+- Parses `.mx`/`.tsx`/`.ts` → lightningcss → IR → `CppEmitter` (Tera templates) → `app.cpp`
+- Fingerprinting: if `morph.config.json` + entry + runtime hash unchanged → "Up to date — nothing to compile"
+- Compiles with `-std=c++20 -O2 -ffunction-sections -fdata-sections -Wl,--gc-sections`
+- Links runtime sources: core, render, reactivity, net, renderers (flash/forge)
+- UPX compression applied if available
 
-## morph run
+### `morphc run` — Build and Run
 
-Build and run in one step.
-
-```
-morph run [binary]
-```
-
-| Option | Description |
-|---|---|
-| `binary` | Path to binary (default: `<output>/app`) |
-| `--entry` | Override entry `.mx` file |
-| `--output` | Output directory (default: `output` from config, `dist/`) |
-| `--static` | Statically link GLFW/FreeType/HarfBuzz |
-| `--upx` | Compress the binary with UPX |
-| `--no-upx` | Skip UPX compression |
-| `--upx-version` | Pin a specific UPX release |
-
-## morph pkg
-
-Package manager for Morph.
-
-```
-morph pkg <subcommand> [package]
+```bash
+morphc run [binary] [--entry src/App.mx] [--output bin/] [--static]
 ```
 
-| Subcommand | Description |
-|---|---|
-| `morph pkg add <package>` | Install a package |
-| `morph pkg remove <package>` | Remove a package |
-| `morph pkg search <query>` | Search for packages |
-| `morph pkg install` | Restore all packages from config |
-| `morph pkg list` | List installed packages |
+If `binary` given, runs it directly. Otherwise builds first, then launches.
 
-## morph doctor
+### `morphc check` — Lint Source Files
 
-Check system dependencies.
-
-```
-morph doctor
+```bash
+morphc check [PATH] [--entry src/App.mx] [--migrate]
 ```
 
-| Option | Description |
-|---|---|
-| `-v`, `--verbose` | Show detailed version info and paths |
-| `-y`, `--yes` | Auto-install missing dependencies without prompting |
+- `PATH`: file or directory to check (overrides config entry)
+- `--migrate`: auto-fix deprecated patterns (stub)
+- Walks `src/` for `.mx`/`.tsx`/`.ts`, runs `morph-parser::linter::check`
+- Aggregates `LintError` (severity, code, message, suggestion, file, line, col)
+- Exit code `0` = clean, `1` = errors — CI-friendly
 
-Checks Python 3.10+, g++ 14+, cmake, make, pkg-config, GLFW, OpenGL, X11, FreeType, HarfBuzz, and optional tools (Node.js, npm, Tailwind).
+### `morphc doctor` — Verify System Dependencies
 
-## morph cache
-
-Clear the fetched CSS cache.
-
-```
-morph cache
+```bash
+morphc doctor [-v/--verbose] [-y/--yes]
 ```
 
-Deletes `.morph/css-cache/`.
+Checks: `g++`/`clang++`, `cmake`, `pkg-config`, GLFW, OpenGL, FreeType, HarfBuzz.
 
-## morph translate
+### `morphc cache` — Manage Fetched CSS Cache
 
-Translate a `.ts` or `.js` file to C++.
-
-```
-morph translate <file>
+```bash
+morphc cache
 ```
 
-Converts TypeScript/JavaScript source into equivalent C++ code.
+Shows size of `.morph/cache/` and prompts to clear. Global cache `~/.morph/cache/` is read-only hint.
+
+## Version System
+
+Two independent versions:
+
+- **morphc binary** — the CLI tool (e.g., `v0.3.0`)
+- **Runtime** — the C++ runtime source (e.g., `v0.2.0`)
+
+### Version Files (Release Triggers)
+
+```json
+// versions/runtime/cpp.json
+{
+  "version": "0.3.0",
+  "changelog": "Added signal() support, improved render performance",
+  "breaking": false
+}
+```
+
+Edit the file, push to `main`, GitHub Actions builds automatically. No manual trigger needed.
+
+### Compatibility Matrix
+
+```
+morphc v0.3.0 + runtime v0.2.0 → ✓ Works
+morphc v0.3.0 + runtime v0.1.0 → ⚠ Deprecated (update recommended)
+morphc v0.3.0 + runtime v0.4.0 → ✗ Incompatible (update morphc)
+```
+
+### `morph.lock`
+
+Generated on first `install`/`dev`/`build`:
+
+```json
+{
+  "runtime": { "type": "cpp", "version": "0.1.0", "sha256": "...", "downloaded_at": "..." },
+  "generated_by": "morphc 0.3.0",
+  "generated_at": "..."
+}
+```
+
+Commit this file for reproducible builds.

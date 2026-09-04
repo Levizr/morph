@@ -33,7 +33,7 @@ Morph renders native elements using OpenGL. Not all HTML elements are supported 
 | `<mark>` | Highlighted text. |
 | `<sub>`, `<sup>` | Subscript / superscript. |
 | `<ins>`, `<u>` | Underline. |
-| `<del>`, `<s>` | Strikethrough. |
+| `<del>`, `` | Strikethrough. |
 | `<q>` | Inline quotation (styled as inline text). |
 | `<label>` | Inline label text. |
 | `<a>` | Link (no navigation, styled as text). |
@@ -133,3 +133,10 @@ return (
 ```
 
 Supported formats: PNG, JPEG, WebP, GIF, BMP, TGA, PSD, HDR, PNM, PIC. Images are loaded via `stb_image` and cached as GPU textures. `border-radius` clipping works on images via stencil buffers.
+
+## Implementation Notes
+
+- All elements are implemented as C++ classes in `runtime/cpp/ui/` and `runtime/cpp/widgets/`
+- `<button>` → `ButtonNode`, `<input>` → `InputNode`, `<img>` → `ImageNode`, `<div>`/`<span>`/`<body>` → `RectNode` + `TextNode`
+- Unsupported tags are caught by the linter (`mx-tag` error) with suggestions via string similarity
+- `<select>` and `<textarea>` render as containers but lack full editing behavior — tracked in [future/text-input](../future/text-input.md)

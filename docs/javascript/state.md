@@ -106,3 +106,10 @@ return (
   </div>
 )
 ```
+
+## Implementation Notes
+
+- State is implemented via `Signal<T>` in the C++ runtime (`runtime/cpp/reactivity/signal.h`)
+- Each `morphState` call creates a new signal with a unique ID
+- Setting state marks dependent nodes as dirty; layout + paint runs on the next frame
+- Batching: multiple `setState` calls in the same event handler tick are coalesced into a single re-render
