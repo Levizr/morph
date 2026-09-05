@@ -64,5 +64,7 @@ morph run      # optimized native binary
 - [Installation](getting-started/installation.md) — Set up your system
 - [Quick Start](getting-started/quick-start.md) — Build your first app in 2 minutes
 - [Configuration](getting-started/configuration.md) — All `morph.config.json` options
-- [Architecture](../concepts/architecture.md) — How the compiler and runtime work
-- [Intent-Based Codegen](../guides/intent-based-codegen.md) — Memory management without GC
+- [Architecture](concepts/architecture.md) — How the compiler and runtime work
+- [Intent-Based Codegen](guides/intent-based-codegen.md) — Memory management without GC
+- [Deployment](guides/deployment.md) — Ship AppImage, DMG, MSI, and sign releases
+- [Debugging](guides/debugging.md) — GDB, DevTools, profiling, sanitizers

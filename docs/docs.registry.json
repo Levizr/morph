@@ -91,10 +91,109 @@
           "morph dist output",
           "morph project layout"
         ],
-        "lastUpdated": "2026-09-05",
-        "publishedAt": "2026-08-18",
-        "priority": 0.9,
+"lastUpdated": "2026-09-05",
+        "publishedAt": "2026-09-05",
+        "priority": 0.8,
         "changefreq": "weekly"
+      },
+      {
+        "title": "How to Deploy and Package Morph Apps",
+        "slug": "guides/deployment",
+        "file": "guides/deployment",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "How to distribute Morph apps as standalone binaries and platform packages: AppImage, Flatpak, Snap, macOS .app/DMG, Windows MSI, code signing, and CI/CD.",
+        "keywords": [
+          "morph deployment",
+          "morph packaging",
+          "morph appimage",
+          "morph dmg",
+          "morph msi",
+          "morph code signing",
+          "morph distribution"
+        ],
+        "lastUpdated": "2026-09-05",
+        "publishedAt": "2026-09-05",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "How to Debug and Profile Morph Apps",
+        "slug": "guides/debugging",
+        "file": "guides/debugging",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "How to debug Morph applications: GDB/LLDB with pretty printers, Visual Studio Natvis, DevTools tabs, CPU/memory/GPU profiling, hot reload debugging, sanitizers, and common issues.",
+        "keywords": [
+          "morph debugging",
+          "morph profiling",
+          "morph gdb",
+          "morph devtools",
+          "morph perf",
+          "morph valgrind",
+          "morph sanitizers"
+        ],
+        "lastUpdated": "2026-09-05",
+        "publishedAt": "2026-09-05",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Migration Guide: Python Morph to morph",
+        "slug": "guides/migration",
+        "file": "guides/migration",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "How to migrate from the legacy Python morph CLI to the new Rust morph binary: command mapping, config changes, runtime system, file structure, CI/CD updates, and rollback.",
+        "keywords": [
+          "morph migration",
+          "morph python to rust",
+          "morphc to morph",
+          "morph upgrade guide"
+        ],
+        "lastUpdated": "2026-09-05",
+        "publishedAt": "2026-09-05",
+        "priority": 0.8,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Morph Runtime Internals Deep Dive",
+        "slug": "guides/runtime-internals",
+        "file": "guides/runtime-internals",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Internal architecture of the Morph C++ runtime: scene graph, rendering backends (Flash/Forge), compositor thread, reactivity (signals/effects), coroutines, networking, JS types, style system, and extending the runtime.",
+        "keywords": [
+          "morph runtime internals",
+          "morph c++ runtime",
+          "morph scene graph",
+          "morph compositor",
+          "morph signals",
+          "morph coroutines"
+        ],
+        "lastUpdated": "2026-09-05",
+        "publishedAt": "2026-09-05",
+        "priority": 0.6,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "How to Test Morph Apps",
+        "slug": "guides/testing",
+        "file": "guides/testing",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "How to test Morph apps and the translator: 24 fixture tests, cargo unit tests, lint-first workflow, logic unit tests, golden-output tests, CI example, and writing new fixtures.",
+        "keywords": [
+          "morph testing",
+          "morph fixture tests",
+          "morph pytest",
+          "morph cargo test",
+          "morph CI"
+        ],
+        "lastUpdated": "2026-09-05",
+        "publishedAt": "2026-09-05",
+        "priority": 0.7,
+        "changefreq": "monthly"
       }
     ]
   },
@@ -1687,6 +1786,86 @@
         "publishedAt": "2026-08-20",
         "priority": 0.7,
         "changefreq": "yearly"
+      },
+      {
+        "title": "How Do I Install Morph?",
+        "slug": "faq/q-installation",
+        "file": "faq/q-installation",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "How to install Morph: single binary via cargo install, system requirements, verify with morph doctor, no Python or Node.js needed.",
+        "keywords": [
+          "install morph",
+          "morph installation",
+          "morph requirements",
+          "morph doctor",
+          "cargo install morph"
+        ],
+        "lastUpdated": "2026-09-05",
+        "publishedAt": "2026-09-05",
+        "priority": 0.9,
+        "changefreq": "weekly"
+      },
+      {
+        "title": "What Are the New morph Commands?",
+        "slug": "faq/q-cli-commands",
+        "file": "faq/q-cli-commands",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "What are the new morph CLI commands: direct file morphing (morph app.ts --to cpp), project commands (new, dev, build, run), version system, and migration from Python morph.",
+        "keywords": [
+          "morph commands",
+          "morph cli",
+          "morph new dev build run",
+          "morph file morphing",
+          "morph version system"
+        ],
+        "lastUpdated": "2026-09-05",
+        "publishedAt": "2026-09-05",
+        "priority": 0.8,
+        "changefreq": "weekly"
+      },
+      {
+        "title": "How Do I Deploy and Distribute My Morph App?",
+        "slug": "faq/q-deployment",
+        "file": "faq/q-deployment",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "How to deploy Morph apps: standalone binary, AppImage, Flatpak, Snap, macOS .app/DMG, Windows MSI, code signing, CI/CD, and runtime version pinning.",
+        "keywords": [
+          "morph deployment",
+          "morph packaging",
+          "morph appimage",
+          "morph dmg",
+          "morph msi",
+          "morph code signing",
+          "morph distribution"
+        ],
+        "lastUpdated": "2026-09-05",
+        "publishedAt": "2026-09-05",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "How Do I Debug a Morph App?",
+        "slug": "faq/q-debugging",
+        "file": "faq/q-debugging",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "How to debug Morph applications: GDB/LLDB with pretty printers, Visual Studio Natvis, DevTools (F12), CPU/memory/GPU profiling, hot reload debugging, sanitizers, and common issues.",
+        "keywords": [
+          "morph debugging",
+          "morph profiling",
+          "morph gdb",
+          "morph devtools",
+          "morph perf",
+          "morph valgrind",
+          "morph sanitizers"
+        ],
+        "lastUpdated": "2026-09-05",
+        "publishedAt": "2026-09-05",
+        "priority": 0.7,
+        "changefreq": "monthly"
       }
     ]
   }

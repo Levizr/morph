@@ -5,8 +5,10 @@ Morph is distributed as a single native binary called `morph`. No Python, no Nod
 ## Quick Install
 
 ```bash
-cargo install morph
+cargo install morphc
 ```
+
+This installs the `morphc` package, which provides the `morph` binary.
 
 That's it. First run downloads and compiles the Rust toolchain (~1-2 minutes). Subsequent runs are instant.
 
@@ -17,7 +19,7 @@ You only need a C++ compiler with C++23 support. Morph's build system downloads 
 ### Linux (Debian/Ubuntu)
 
 ```bash
-sudo apt install g++ cmake make pkg-config libglfw3-dev libgl1-mesa-dev libx11-dev libfreetype-dev libharfbuzz-dev
+sudo apt install g++-14 cmake make pkg-config libglfw3-dev libgl1-mesa-dev libx11-dev libfreetype-dev libharfbuzz-dev
 ```
 
 ### macOS
@@ -50,7 +52,7 @@ morph doctor -v    # show detailed version info
 ```bash
 git clone https://github.com/Levizr/morph.git
 cd morph
-cargo install --path crates/morph
+cargo install --path crates/morphc
 ```
 
 ## What Gets Installed

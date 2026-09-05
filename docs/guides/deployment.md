@@ -273,7 +273,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Install morph
-        run: cargo install morph
+        run: cargo install morphc
       - name: Install system deps
         if: runner.os == 'Linux'
         run: sudo apt update && sudo apt install -y g++-14 cmake libglfw3-dev libfreetype-dev libharfbuzz-dev upx

@@ -320,7 +320,7 @@ morph app.ts --to cpp --optimize
 | `crates/morph-js/src/codegen/cpp.rs` | `emit_optimized_variable_declarator`, `infer_optimized_type`, `strip_result_for_sync_call`, `emit_new` (Promise→Result) |
 | `crates/morph-js/src/codegen/type_resolver.rs` | Native type maps, `Promise`→`Result`, denormalization |
 | `crates/morph-js/src/codegen/context.rs` | `Ctx` with `var_types`, `async_fns`, `escape_hints` |
-| `crates/morph/src/commands/translate.rs` | `--optimize` flag, `wrap_top_level_in_main` |
+| `crates/morphc/src/commands/translate.rs` | `--optimize` flag, `wrap_top_level_in_main` |
 
 ## Future Work
 

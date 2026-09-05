@@ -30,13 +30,13 @@ pip install "morph @ git+https://github.com/Levizr/morph.git"
 ### After (Rust)
 
 ```bash
-# Stable
-cargo install morph
+# Stable (installs the `morph` binary from the `morphc` package)
+cargo install morphc
 
 # From source (latest)
 git clone https://github.com/Levizr/morph.git
 cd morph
-cargo install --path crates/morph
+cargo install --path crates/morphc
 ```
 
 **No Python required.** No `pip`, no virtual environments, no `python3` on PATH.
@@ -212,7 +212,7 @@ my-app/
 - name: Install Rust
   uses: dtolnay/rust-toolchain@stable
 - name: Install morph
-  run: cargo install morph
+  run: cargo install morphc
 ```
 
 ### Build Step
@@ -229,7 +229,7 @@ my-app/
 
 - [ ] Update `morph.config.json` with `runtime` section
 - [ ] Commit `morph.lock`
-- [ ] Update CI to install `morph` via `cargo install`
+- [ ] Update CI to install the `morph` binary via `cargo install morphc`
 - [ ] Replace `morph translate` with `morph file.ts --to cpp`
 - [ ] Replace `morph init` with `morph new`
 - [ ] Remove Python from build environment
