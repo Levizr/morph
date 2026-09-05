@@ -1,6 +1,6 @@
 # Dev Mode
 
-`morphc dev` starts a development environment with live hot reload. The native window stays open while you edit — changes appear instantly without restarting.
+`morph dev` starts a development environment with live hot reload. The native window stays open while you edit — changes appear instantly without restarting.
 
 ## What Happens
 
@@ -19,7 +19,7 @@ File save  →  File watcher  →  Pipeline  →  IR dict  →  Unix socket  →
 ## Starting Dev Mode
 
 ```bash
-morphc dev
+morph dev
 ```
 
 This will:
@@ -74,7 +74,7 @@ See the [DevTools](../devtools/index.md) section for details on each tab.
 
 ## Tips
 
-- **Wayland issues** — If the window doesn't open, try: `GDK_BACKEND=x11 morphc dev`
+- **Wayland issues** — If the window doesn't open, try: `GDK_BACKEND=x11 morph dev`
 - **Slow reload** — Check if your CSS files are large or if you have many Tailwind classes
 - **Socket errors** — Delete `.morph/dev.sock` and restart
-- **Binary missing** — Run `morphc doctor` to verify cmake, g++, and make are installed
+- **Binary missing** — Run `morph doctor` to verify cmake, g++, and make are installed

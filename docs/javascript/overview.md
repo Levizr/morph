@@ -80,13 +80,13 @@ Binary (`+`, `-`, `*`, `/`, `===`, `!==`, `==`, `!=`, `<`, `>`, etc.), unary (`!
 - The `typeof` operator (compare against `undefined`/`null` instead)
 - JS-only string/array methods the native types don't implement — `.split()`, `.includes()`, `.startsWith()`, `.map()`, `.filter()`, `.join()`, etc.
 
-The linter (`morphc check`) rejects unsupported operators and methods with a clear error before building.
+The linter (`morph check`) rejects unsupported operators and methods with a clear error before building.
 
 ## Two Codegen Modes
 
 | Mode | Command | Behavior |
 |---|---|---|
-| **Legacy** | `morphc file.ts` | `auto` inference, `Js*` types everywhere, no escape analysis |
-| **Optimized** | `morphc file.ts --optimize` | Intent-based: escape analysis → stack/`unique_ptr`/`shared_ptr`, native types (`int32_t`, `std::string`, `std::vector`), type widening only when needed |
+| **Legacy** | `morph file.ts` | `auto` inference, `Js*` types everywhere, no escape analysis |
+| **Optimized** | `morph file.ts --optimize` | Intent-based: escape analysis → stack/`unique_ptr`/`shared_ptr`, native types (`int32_t`, `std::string`, `std::vector`), type widening only when needed |
 
 See [Intent-Based Codegen](../guides/intent-based-codegen.md) for the full memory management strategy.

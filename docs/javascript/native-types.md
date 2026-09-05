@@ -93,7 +93,7 @@ What works and what doesn't:
 
 ### The Linter Won't Catch It
 
-`morphc check` flags JS-only methods on state getters and string literals, but it does not track variables annotated with native types. `a.toFixed(2)` on a `let a: int = 5` passes `morphc check` cleanly — and then fails during C++ compilation. When mixing native annotations into logic, expect the error surface to move from the linter to g++.
+`morph check` flags JS-only methods on state getters and string literals, but it does not track variables annotated with native types. `a.toFixed(2)` on a `let a: int = 5` passes `morph check` cleanly — and then fails during C++ compilation. When mixing native annotations into logic, expect the error surface to move from the linter to g++.
 
 ### `const` Is Not `const`
 

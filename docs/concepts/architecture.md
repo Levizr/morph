@@ -8,27 +8,27 @@ Morph is a **native UI framework** where your TypeScript/JSX source compiles dir
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                           MORPHC (Rust Binary)                              │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│  .mx/.tsx/.ts  ──►  Oxc Parser  ──►  lightningcss  ──►  IRBuilder  ──►    │
-│       │                                                            │      │
-│       │                    ┌─────────────────────────────────────┘      │
-│       ▼                    ▼                                            │
-│  ┌─────────┐         ┌─────────┐                                       │
-│  │Dev Mode │         │Build    │                                       │
-│  └────┬────┘         └────┬────┘                                       │
-│       │                   │                                             │
-│       ▼                   ▼                                             │
-│  IPC Socket          CppEmitter                                        │
-│  (Unix/TCP)             │                                              │
-│       │                 ▼                                              │
-│       ▼          ┌─────────────┐                                       │
-│  morph_devrt     │  app.cpp    │                                       │
-│  (prebuilt)      └──────┬──────┘                                       │
-│                        │                                               │
-│                        ▼                                               │
-│                 g++/clang++                                           │
-│                        │                                               │
-│                        ▼                                               │
-│                   native binary                                       │
+│  .mx/.tsx/.ts  ──►  Oxc Parser  ──►  lightningcss  ──►  IRBuilder  ──►      │
+│       │                                                                │    │
+│       │                    ┌───────────────────────────────────────────┘    │
+│       ▼                    ▼                                                │
+│  ┌─────────┐         ┌─────────┐                                            │
+│  │Dev Mode │         │Build    │                                            │
+│  └────┬────┘         └────┬────┘                                            │
+│       │                   │                                                 │
+│       ▼                   ▼                                                 │
+│  IPC Socket          CppEmitter                                             │
+│  (Unix/TCP)             │                                                   │
+│       │                 ▼                                                   │
+│       ▼          ┌─────────────┐                                            │
+│  morph_devrt     │  app.cpp    │                                            │
+│  (prebuilt)      └──────┬──────┘                                            │
+│                        │                                                    │
+│                        ▼                                                    │
+│                 g++/clang++                                                 │
+│                        │                                                    │
+│                        ▼                                                    │
+│                   native binary                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -38,7 +38,7 @@ Morph is a **native UI framework** where your TypeScript/JSX source compiles dir
 morph/
 ├── Cargo.toml                    # Workspace root
 ├── crates/
-│   ├── morphc/                   # CLI binary (~12 MB)
+│   ├── morph/                   # CLI binary (~12 MB)
 │   │   ├── src/main.rs           # CLI entry, command dispatch
 │   │   └── src/commands/         # new/install/update/dev/build/run/check/doctor/cache
 │   ├── morph-config/             # morph.config.json + morph.lock parsing/validation
@@ -54,7 +54,7 @@ morph/
 ├── runtime/
 │   └── cpp/                      # C++ runtime source (shipped as release artifact)
 └── versions/                     # Version files = release triggers
-    ├── morphc/version.json
+    ├── morph/version.json
     └── runtime/cpp.json
 ```
 
@@ -65,7 +65,7 @@ morph/
 | Reason | Detail |
 |---|---|
 | **Speed** | Oxc parser = 3× SWC, arena-allocated, zero-copy |
-| **Single binary** | `cargo install morphc` → no Python/Node deps |
+| **Single binary** | `cargo install morph` → no Python/Node deps |
 | **Parallelism** | Rayon-based parallel parsing, CSS resolution, codegen |
 | **Type safety** | AST → IR → Codegen with compile-time guarantees |
 
@@ -93,7 +93,7 @@ morph/
 
 ```
 ┌──────────────┐      Unix Socket       ┌──────────────────┐
-│   morphc     │  ◄──────────────────►  │   morph_devrt    │
+│   morph     │  ◄──────────────────►  │   morph_devrt    │
 │  (watcher)   │      JSON IR +         │  (always running)│
 │              │      logic.so path     │                  │
 └──────┬───────┘                        └────────┬─────────┘
@@ -102,7 +102,7 @@ morph/
 ┌──────────────┐                        ┌──────────────────┐
 │  Rebuild     │                        │  Hot Reload      │
 │  logic.so    │                        │  - dlopen new    │
-│  (g++ -shared)                       │    logic.so      │
+│  (g++ -shared)                        │    logic.so      │
 └──────────────┘                        │  - Rewire signals│
                                         │  - Re-run effects│
                                         └──────────────────┘
@@ -207,8 +207,8 @@ Two modes:
 
 | Mode | Command | Behavior |
 |---|---|---|
-| **Legacy** | `morphc file.ts` | `auto` inference, `Js*` types everywhere, no escape analysis |
-| **Optimized** | `morphc file.ts --optimize` | Intent-based: escape analysis → stack/`unique_ptr`/`shared_ptr`, native types (`int32_t`, `std::string`, `std::vector`), type widening only when needed |
+| **Legacy** | `morph file.ts` | `auto` inference, `Js*` types everywhere, no escape analysis |
+| **Optimized** | `morph file.ts --optimize` | Intent-based: escape analysis → stack/`unique_ptr`/`shared_ptr`, native types (`int32_t`, `std::string`, `std::vector`), type widening only when needed |
 
 See [Intent-Based Codegen](../guides/intent-based-codegen.md) for details.
 
@@ -241,8 +241,8 @@ Project:
 
 | Artifact | How It's Built |
 |---|---|
-| `morphc` binary | `cargo install --locked` → static musl on Linux, native on macOS/Windows |
+| `morph` binary | `cargo install --locked` → static musl on Linux, native on macOS/Windows |
 | C++ runtime | GitHub Actions: `g++-14` build → tar.gz → GitHub Release (tagged by `versions/runtime/cpp.json`) |
-| Version files | `versions/{morphc,version.json}` + `versions/runtime/cpp.json` — push to `main` = auto-release |
+| Version files | `versions/{morph,version.json}` + `versions/runtime/cpp.json` — push to `main` = auto-release |
 
 Security: `CODEOWNERS` protects `versions/**`, semver validation in CI, sha256 verified on download, only `main` branch triggers releases.

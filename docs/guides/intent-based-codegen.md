@@ -22,10 +22,10 @@ TypeScript Source
          ▼
 ┌──────────────────┐
 │ Semantic Analyzer│  →  Annotated AST
-│  - Escape analysis│     EscapeKind (None/Return/Global/Closure/...)
-│  - Type widening │     WidenedType (None/ToJsNumber/ToJsString/...)
-│  - Async graph   │     UsageKind (Arithmetic/DynamicAssign/ToString/...)
-│  - Closure detect│
+│ - Escape analysis│     EscapeKind (None/Return/Global/Closure/...)
+│ - Type widening  │     WidenedType (None/ToJsNumber/ToJsString/...)
+│ - Async graph    │     UsageKind (Arithmetic/DynamicAssign/ToString/...)
+│ - Closure detect │
 └────────┬─────────┘
          │
          ▼
@@ -293,7 +293,7 @@ No blanket `js_types.h` unless a `Js*` type is actually emitted.
 
 ```bash
 # Direct file morph with optimization
-morphc app.ts --to cpp --optimize
+morph app.ts --to cpp --optimize
 
 # In a project (add to morph.config.json build flags)
 # Not yet exposed — currently only for direct file morph
@@ -320,7 +320,7 @@ morphc app.ts --to cpp --optimize
 | `crates/morph-js/src/codegen/cpp.rs` | `emit_optimized_variable_declarator`, `infer_optimized_type`, `strip_result_for_sync_call`, `emit_new` (Promise→Result) |
 | `crates/morph-js/src/codegen/type_resolver.rs` | Native type maps, `Promise`→`Result`, denormalization |
 | `crates/morph-js/src/codegen/context.rs` | `Ctx` with `var_types`, `async_fns`, `escape_hints` |
-| `crates/morphc/src/commands/translate.rs` | `--optimize` flag, `wrap_top_level_in_main` |
+| `crates/morph/src/commands/translate.rs` | `--optimize` flag, `wrap_top_level_in_main` |
 
 ## Future Work
 

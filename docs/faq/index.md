@@ -17,6 +17,10 @@ The questions people actually ask — each answered in detail on its own page.
 | Can I use npm packages? | [Q: npm packages](q-npm.md) |
 | How does hot reload work if everything is compiled? | [Q: Hot reload](q-hot-reload.md) |
 | Is it production-ready? | [Q: Production-ready](q-production.md) |
+| **How do I install Morph?** | [Q: Installation](q-installation.md) |
+| **What are the new morph commands?** | [Q: CLI commands](q-cli-commands.md) |
+| **How do I deploy/distribute my app?** | [Q: Deployment](q-deployment.md) |
+| **How do I debug a Morph app?** | [Q: Debugging](q-debugging.md) |
 
 ## Ask a new question
 

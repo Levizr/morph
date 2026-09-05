@@ -1,4 +1,4 @@
-# Working on morphc — The Rust Rewrite
+# Working on morph — The Rust Rewrite
 
 **Part of:** [The Story of Morph](index.md)
 
@@ -6,7 +6,7 @@
 
 ## What's happening
 
-The Python toolchain that compiles `.mx` files into native binaries is being rewritten in Rust. The new binary is called **`morphc`** (Morph Compiler) — a single, lightweight binary that replaces the entire Python dependency.
+The Python toolchain that compiles `.mx` files into native binaries is being rewritten in Rust. The new binary is called **`morph`** (Morph Compiler) — a single, lightweight binary that replaces the entire Python dependency.
 
 **Why?** Python was the right choice to prove the concept. Now the concept is proven, and compile speed matters. A Rust compiler removes the Python dependency, makes `morph dev` instant, and gives users a single binary to install.
 
@@ -49,7 +49,7 @@ After (Rust):     .mx → Oxc → Typed AST → IR → Tera → C++ → g++/clan
 | Template engine | **Tera** | Jinja2-compatible syntax, fast runtime compilation |
 | CLI framework | **clap** (derive) | Industry standard, derive macros, completions |
 | Runtime naming | `cpp` / `rust` | Simple, clear |
-| Binary name | `morphc` | Follows `rustc`, `gcc` convention |
+| Binary name | `morph` | Follows `rustc`, `gcc` convention |
 
 ### Repository structure (single repo)
 
@@ -59,7 +59,7 @@ Everything lives in `levizr/morph` — no separate repos:
 morph/
 ├── Cargo.toml              # Rust workspace
 ├── crates/
-│   ├── morphc/             # CLI binary (~10-15MB)
+│   ├── morph/             # CLI binary (~10-15MB)
 │   ├── morph-parser/       # Oxc + lightningcss
 │   ├── morph-ir/           # Intermediate Representation
 │   ├── morph-codegen/      # C++ / Rust code generation
@@ -69,7 +69,7 @@ morph/
 │   ├── cpp/                # C++ runtime source
 │   └── rust/               # Future Rust runtime
 ├── versions/               # Version files (release triggers)
-│   ├── morphc/
+│   ├── morph/
 │   │   └── version.json
 │   └── runtime/
 │       ├── cpp.json
@@ -111,7 +111,7 @@ my-app/
 | `morph init [name]` | Create project, scaffold files, prompt to install runtime |
 | `morph install` | Download runtime from GitHub Releases, cache globally |
 | `morph update --runtime` | Update runtime version, show migration notes |
-| `morph update --self` | Update morphc binary |
+| `morph update --self` | Update morph binary |
 | `morph dev` | Start dev mode with hot reload |
 | `morph build` | Compile .mx → native binary |
 | `morph run` | Build + run |
@@ -124,7 +124,7 @@ my-app/
 
 ### Two separate versions
 
-- **morphc binary** — the CLI tool (e.g., `v0.3.0`)
+- **morph binary** — the CLI tool (e.g., `v0.3.0`)
 - **Runtime** — the C++/Rust runtime source (e.g., `v0.2.0`)
 
 ### Version files (release triggers)
@@ -143,9 +143,9 @@ Edit the file, push, GitHub Actions builds automatically. No manual trigger need
 ### Compatibility
 
 ```
-morphc v0.3.0 + runtime v0.2.0 → ✓ Works
-morphc v0.3.0 + runtime v0.1.0 → ⚠ Deprecated (update recommended)
-morphc v0.3.0 + runtime v0.4.0 → ✗ Incompatible (update morphc)
+morph v0.3.0 + runtime v0.2.0 → ✓ Works
+morph v0.3.0 + runtime v0.1.0 → ⚠ Deprecated (update recommended)
+morph v0.3.0 + runtime v0.4.0 → ✗ Incompatible (update morph)
 ```
 
 ### morph.config.json
@@ -216,7 +216,7 @@ Sign artifacts with GPG key for production releases. Users verify before install
 ### Worst case
 Invalid version gets a GitHub Release with broken artifacts. But users are protected because:
 - `morph install` checks sha256 hash
-- morphc verifies runtime compatibility
+- morph verifies runtime compatibility
 - Bad releases can be deleted manually
 
 ## What stays the same for users
@@ -241,7 +241,7 @@ The Python toolchain served Morph well. It proved the concept, enabled rapid ite
 
 The Python version was never meant to ship to end users. It was the prototype that became the blueprint. The Rust version is the production tool that honors that work by being everything Python couldn't be: fast, self-contained, and zero-dependency.
 
-> `morph-legacy` will be published as-is, with a README pointing to `morphc`. No maintenance, no updates — just preserved history.
+> `morph-legacy` will be published as-is, with a README pointing to `morph`. No maintenance, no updates — just preserved history.
 
 ## Implementation phases
 
@@ -255,7 +255,7 @@ The Python version was never meant to ship to end users. It was the prototype th
 
 ## Full implementation plan
 
-For the complete technical plan — crate structure, all CLI commands, config files, GitHub Actions workflows, binary distribution, and implementation phases — see the [full rewrite plan](../../help/morphc-rust-rewrite-plan.md) in the help section.
+For the complete technical plan — crate structure, all CLI commands, config files, GitHub Actions workflows, binary distribution, and implementation phases — see the [full rewrite plan](../../help/morph-rust-rewrite-plan.md) in the help section.
 
 ## Intent-Based Codegen & Memory Management (New)
 

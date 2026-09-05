@@ -29,7 +29,7 @@ From here, the pipeline splits:
 
 ## What Gets Compiled
 
-**Rust (morphc) handles the toolchain:**
+**Rust (morph) handles the toolchain:**
 - `.mx`/`.tsx`/`.ts` parsing (Oxc)
 - CSS parsing (lightningcss)
 - IR building
@@ -90,8 +90,8 @@ This is why Morph binaries are so small — a simple "Hello World" app doesn't i
 
 | Mode | Command | Behavior |
 |---|---|---|
-| **Legacy** | `morphc file.ts` | `auto` inference, `Js*` types everywhere, no escape analysis |
-| **Optimized** | `morphc file.ts --optimize` | Intent-based: escape analysis → stack/`unique_ptr`/`shared_ptr`, native types (`int32_t`, `std::string`, `std::vector`), type widening only when needed |
+| **Legacy** | `morph file.ts` | `auto` inference, `Js*` types everywhere, no escape analysis |
+| **Optimized** | `morph file.ts --optimize` | Intent-based: escape analysis → stack/`unique_ptr`/`shared_ptr`, native types (`int32_t`, `std::string`, `std::vector`), type widening only when needed |
 
 See [Intent-Based Codegen](../guides/intent-based-codegen.md) for the full memory management strategy.
 
@@ -99,7 +99,7 @@ See [Intent-Based Codegen](../guides/intent-based-codegen.md) for the full memor
 
 ```
 ┌──────────────┐      Unix Socket       ┌──────────────────┐
-│   morphc     │  ◄──────────────────►  │   morph_devrt    │
+│   morph     │  ◄──────────────────►  │   morph_devrt    │
 │  (watcher)   │      JSON IR +         │  (always running)│
 │              │      logic.so path     │                  │
 └──────┬───────┘                        └────────┬─────────┘
@@ -108,7 +108,7 @@ See [Intent-Based Codegen](../guides/intent-based-codegen.md) for the full memor
 ┌──────────────┐                        ┌──────────────────┐
 │  Rebuild     │                        │  Hot Reload      │
 │  logic.so    │                        │  - dlopen new    │
-│  (g++ -shared)                       │    logic.so      │
+│  (g++ -shared)                        │    logic.so      │
 └──────────────┘                        │  - Rewire signals│
                                         │  - Re-run effects│
                                         └──────────────────┘
@@ -183,8 +183,8 @@ Project:
 
 | Artifact | How It's Built |
 |---|---|
-| `morphc` binary | `cargo install --locked` → static musl on Linux, native on macOS/Windows |
+| `morph` binary | `cargo install --locked` → static musl on Linux, native on macOS/Windows |
 | C++ runtime | GitHub Actions: `g++-14` build → tar.gz → GitHub Release (tagged by `versions/runtime/cpp.json`) |
-| Version files | `versions/{morphc,version.json}` + `versions/runtime/cpp.json` — push to `main` = auto-release |
+| Version files | `versions/{morph,version.json}` + `versions/runtime/cpp.json` — push to `main` = auto-release |
 
 Security: `CODEOWNERS` protects `versions/**`, semver validation in CI, sha256 verified on download, only `main` branch triggers releases.

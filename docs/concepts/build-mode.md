@@ -1,12 +1,12 @@
 # Build Mode
 
-`morphc build` compiles your `.mx` / `.tsx` / `.ts` source into an optimized native binary. `morphc run` builds and then runs it.
+`morph build` compiles your `.mx` / `.tsx` / `.ts` source into an optimized native binary. `morph run` builds and then runs it.
 
 ## Building
 
 ```bash
-morphc build          # compile only
-morphc run            # compile + run
+morph build          # compile only
+morph run            # compile + run
 ```
 
 ## What Happens
@@ -24,11 +24,11 @@ src/App.mx  →  Pipeline  →  IR dict  →  Feature scan  →  C++ codegen  �
 ## Build Flags
 
 ```bash
-morphc build --static           # statically link GLFW/FreeType/HarfBuzz
-morphc build --no-upx           # skip UPX compression
-morphc build --upx-version 4.2  # pin UPX version
-morphc build --output bin/      # custom output directory
-morphc build --entry src/App.mx # override entry file
+morph build --static           # statically link GLFW/FreeType/HarfBuzz
+morph build --no-upx           # skip UPX compression
+morph build --upx-version 4.2  # pin UPX version
+morph build --output bin/      # custom output directory
+morph build --entry src/App.mx # override entry file
 ```
 
 These override the corresponding fields in `morph.config.json`.
@@ -36,7 +36,7 @@ These override the corresponding fields in `morph.config.json`.
 ## Static Linking
 
 ```bash
-morphc build --static
+morph build --static
 ```
 
 This bundles GLFW, FreeType, and HarfBuzz into a single self-contained binary. The binary has zero external dependencies — it runs on any compatible Linux/macOS system without installing libraries.
@@ -48,8 +48,8 @@ Requires the `.a` dev archives. Morph can auto-build FreeType from source if the
 By default, Morph compresses the binary with UPX (an executable compressor). This typically reduces binary size by 50-70%.
 
 ```bash
-morphc build --no-upx    # skip compression
-morphc build --upx       # force compression (default)
+morph build --no-upx    # skip compression
+morph build --upx       # force compression (default)
 ```
 
 Configure in `morph.config.json`:
@@ -76,7 +76,7 @@ The build outputs to the `output` directory (default: `.morph/output`, or `dist/
 Build output includes timing and size breakdown:
 
 ```
- morphc build
+ morph build
 ──────────────────────────────
  Analyzing source
  Assets & features
@@ -111,7 +111,7 @@ Fingerprint = SHA256(
 If the fingerprint matches `.morph/hash/<app>.fingerprint` and the binary exists:
 
 ```
- morphc build
+ morph build
  Up to date — nothing to compile
 ```
 
@@ -121,8 +121,8 @@ The compiled binary is a standalone executable:
 
 ```bash
 ./.morph/output/app      # run directly
-morphc run               # build + run
-morphc run ./my-bin      # run a specific binary
+morph run               # build + run
+morph run ./my-bin      # run a specific binary
 ```
 
 Press `Ctrl+C` to stop.

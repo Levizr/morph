@@ -75,7 +75,7 @@ The story is really a series of choices. Each has its own page:
 
 | What | Status | Full plan |
 |------|--------|-----------|
-| morphc — the Rust rewrite | In progress | [Working on morphc](working-on-morphc.md) |
+| morph — the Rust rewrite | In progress | [Working on morph](working-on-morph.md) |
 
 The Rust rewrite replaces the Python toolchain with a single native binary. Updated as work progresses.
 
