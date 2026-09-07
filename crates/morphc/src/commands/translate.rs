@@ -86,7 +86,9 @@ pub fn run(file: String, to: String, optimize: bool, type_mode: TypeMode) -> Res
     // Always add shim for morph::str / dev_log so the file is workable standalone
     let needs_str_shim = standalone_code.contains("morph::str") || standalone_code.contains("morph::dev_log");
     let has_str_shim = standalone_code.contains("inline std::string str");
-    if needs_str_shim && !has_str_shim {
+    // Don't add shim if js_string_helpers.h is already included (it provides its own morph::str)
+    let has_helpers = standalone_code.contains("js_string_helpers.h");
+    if needs_str_shim && !has_str_shim && !has_helpers {
         let shim = r#"#include <iostream>
 #include <string>
 namespace morph {

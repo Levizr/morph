@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use super::analyzer::{EscapeAnalyzer, AnalysisResult, EscapeKind, WidenedType};
 use super::context::{Ctx, INDENT, TypeMode};
+use super::string_methods::StringMethodHandler;
 use super::type_resolver::{param_type, resolve_type, resolve_type_annotation, ts_type_name_to_string};
 
 pub struct CppTranslator<'a> {
@@ -26,6 +27,39 @@ impl<'a> CppTranslator<'a> {
 
     fn span_text(&self, span: oxc_span::Span) -> &'a str {
         span.source_text(self.source)
+    }
+
+    /// Static helper to emit expression without needing self
+    fn emit_expression_static(expr: &Expression<'a>) -> String {
+        match expr {
+            Expression::StringLiteral(s) => format!("\"{}\"", s.value.replace('\\', "\\\\").replace('"', "\\\"")),
+            Expression::NumericLiteral(n) => {
+                if n.value.fract() == 0.0 { format!("{}", n.value as i64) } else { format!("{}", n.value) }
+            }
+            Expression::BooleanLiteral(b) => if b.value { "true".to_string() } else { "false".to_string() },
+            Expression::NullLiteral(_) => "JsNull{}".to_string(),
+            Expression::Identifier(id) => id.name.to_string(),
+            Expression::TemplateLiteral(t) => {
+                if t.expressions.is_empty() {
+                    let raw: String = t.quasis.iter().map(|q| q.value.raw.as_str().to_string()).collect();
+                    format!("\"{}\"", raw.replace('\\', "\\\\").replace('"', "\\\""))
+                } else {
+                    let mut fmt_str = String::new();
+                    let mut args = Vec::new();
+                    for (i, quasi) in t.quasis.iter().enumerate() {
+                        let text = quasi.value.cooked.as_ref().map(|c| c.as_str()).unwrap_or(quasi.value.raw.as_str());
+                        fmt_str.push_str(&text.replace('{', "{{").replace('}', "}}"));
+                        if let Some(expr) = t.expressions.get(i) {
+                            fmt_str.push_str("{}");
+                            args.push(Self::emit_expression_static(expr));
+                        }
+                    }
+                    let esc = fmt_str.replace('\\', "\\\\").replace('"', "\\\"");
+                    format!("std::format(\"{}\", {})", esc, args.join(", "))
+                }
+            }
+            _ => format!("/* expr */"),
+        }
     }
 
     fn run_analysis(&mut self, program: &Program<'a>) {
@@ -230,10 +264,25 @@ impl<'a> CppTranslator<'a> {
             }
         };
         // Apply type widening from analyzer (if available)
-        let widened = self.analysis.as_ref().and_then(|a| a.widens.get(name)).cloned().unwrap_or(WidenedType::None);
+        // In infer mode, skip widening - keep native types and use helpers
+        let widened = if matches!(self.type_mode, TypeMode::Infer) {
+            WidenedType::None
+        } else {
+            self.analysis.as_ref().and_then(|a| a.widens.get(name)).cloned().unwrap_or(WidenedType::None)
+        };
+        
+        // Check if the base type is a class type (shouldn't be widened to JS primitives)
+        let is_class_type = cpp_type.starts_with("std::shared_ptr<") || self.ctx.class_names.contains(cpp_type.as_str());
+        
         let mut cpp_type = match widened {
             WidenedType::ToJsNumber => "JsNumber".to_string(),
-            WidenedType::ToJsString => "JsString".to_string(),
+            WidenedType::ToJsString => {
+                if is_class_type {
+                    cpp_type  // Keep class type, don't widen to JsString
+                } else {
+                    "JsString".to_string()
+                }
+            }
             WidenedType::ToJsValue => "JsValue".to_string(),
             WidenedType::ToJsArray => "JsArray".to_string(),
             WidenedType::None => cpp_type,
@@ -391,6 +440,7 @@ impl<'a> CppTranslator<'a> {
         } else {
             match node {
                 Expression::StringLiteral(_) => Some("std::string".to_string()),
+                Expression::TemplateLiteral(_) => Some("std::string".to_string()),
                 Expression::BooleanLiteral(_) => Some("bool".to_string()),
                 Expression::NumericLiteral(n) => {
                     if n.value.fract() == 0.0 && n.value.abs() <= i64::MAX as f64 {
@@ -403,6 +453,25 @@ impl<'a> CppTranslator<'a> {
                 Expression::Identifier(id) if id.name.as_str() == "undefined" => Some("JsUndefined".to_string()),
                 Expression::ArrayExpression(_) => Some("std::vector<JsValue>".to_string()),
                 Expression::ObjectExpression(_) => Some("JsObject".to_string()),
+                Expression::ComputedMemberExpression(m) => {
+                    // Check if we're indexing into a JsArray
+                    if let Expression::Identifier(id) = &m.object {
+                        if let Some(var_type) = self.ctx.var_types.get(id.name.as_str()) {
+                            if var_type == "JsArray" {
+                                return Some("JsValue".to_string());
+                            }
+                        }
+                    }
+                    None
+                }
+                Expression::NewExpression(n) => {
+                    if let Expression::Identifier(id) = &n.callee {
+                        if self.ctx.class_names.contains(id.name.as_str()) {
+                            return Some(format!("std::shared_ptr<{}>", id.name));
+                        }
+                    }
+                    Some("JsValue".to_string())
+                }
                 Expression::Identifier(id) => self.ctx.var_types.get(id.name.as_str()).cloned(),
                 _ => None,
             }
@@ -412,6 +481,7 @@ impl<'a> CppTranslator<'a> {
     fn infer_optimized_type(&self, node: &Expression<'a>) -> Option<String> {
         match node {
             Expression::StringLiteral(_) => Some("std::string".to_string()),
+            Expression::TemplateLiteral(_) => Some("std::string".to_string()),
             Expression::BooleanLiteral(_) => Some("bool".to_string()),
             Expression::NumericLiteral(n) => {
                 let val = n.value;
@@ -428,6 +498,15 @@ impl<'a> CppTranslator<'a> {
             }
             Expression::NullLiteral(_) => Some("JsNull".to_string()),
             Expression::Identifier(id) if id.name.as_str() == "undefined" => Some("JsUndefined".to_string()),
+            Expression::NewExpression(n) => {
+                // For class instantiation, return the class name as type (wrapped in shared_ptr by emit_new)
+                if let Expression::Identifier(id) = &n.callee {
+                    if self.ctx.class_names.contains(id.name.as_str()) {
+                        return Some(format!("std::shared_ptr<{}>", id.name));
+                    }
+                }
+                Some("JsValue".to_string())
+            }
             Expression::ArrayExpression(arr) => {
                 if arr.elements.is_empty() {
                     return Some("std::vector<JsValue>".to_string());
@@ -451,6 +530,17 @@ impl<'a> CppTranslator<'a> {
                 }
             }
             Expression::ObjectExpression(_) => Some("JsObject".to_string()),
+            Expression::ComputedMemberExpression(m) => {
+                // Check if we're indexing into a JsArray - return element type
+                if let Expression::Identifier(id) = &m.object {
+                    if let Some(var_type) = self.ctx.var_types.get(id.name.as_str()) {
+                        if var_type == "JsArray" {
+                            return Some("int32_t".to_string()); // Element type of JsArray<number>
+                        }
+                    }
+                }
+                None
+            }
             Expression::Identifier(id) => self.ctx.var_types.get(id.name.as_str()).cloned(),
             _ => None,
         }
@@ -677,7 +767,12 @@ if matches!(init, Expression::NewExpression(_)) {
 
     fn emit_switch(&mut self, sw: &SwitchStatement<'a>) -> String {
         let disc = self.emit_expression(&sw.discriminant);
-        let disc_code = format!("({}).as_int()", disc);
+        // Only apply .as_int() if discriminant is JsValue type
+        let disc_code = if self.is_jsvalue_type(&sw.discriminant) {
+            format!("({}).as_int()", disc)
+        } else {
+            disc
+        };
         let mut lines = vec![format!("{}switch ({}) {{", self.indent(), disc_code)];
         let bi = INDENT.repeat(self.ctx.indent_level + 1);
         for case in &sw.cases {
@@ -1574,8 +1669,8 @@ if matches!(init, Expression::NewExpression(_)) {
         let op = b.operator.as_str();
         
         // Check if we need to convert JsValue to number for arithmetic
-        let needs_left_convert = self.is_jsarray_index(&b.left);
-        let needs_right_convert = self.is_jsarray_index(&b.right);
+        let needs_left_convert = self.is_jsarray_index(&b.left) || self.is_jsvalue_var(&b.left);
+        let needs_right_convert = self.is_jsarray_index(&b.right) || self.is_jsvalue_var(&b.right);
         
         let mut left = self.emit_expression(&b.left);
         let mut right = self.emit_expression(&b.right);
@@ -1591,14 +1686,56 @@ if matches!(init, Expression::NewExpression(_)) {
         let is_right_str = matches!(&b.right, Expression::StringLiteral(_));
         if is_left_str { left = format!("JsString({})", left); }
         if is_right_str { right = format!("JsString({})", right); }
-        if op == "+" {
-            // handle number+string ambiguity already partly
+        
+        // For division, use double to match JS semantics (float division)
+        if op == "/" {
+            // Check if operands are integer types that need float promotion
+            let left_is_int = self.is_integer_type(&b.left);
+            let right_is_int = self.is_integer_type(&b.right);
+            if left_is_int || right_is_int {
+                left = format!("static_cast<double>({})", left);
+                right = format!("static_cast<double>({})", right);
+            }
         }
+        
         let op_mapped = match op { "===" => "==", "!==" => "!=", "**" => "/* pow */", ">>>" => "/* >>> */", _ => op };
         if op == "??" {
             return format!("(JsValue({}).is_undefined() || JsValue({}).is_null() ? JsValue({}) : JsValue({}))", left, left, right, left);
         }
         format!("{} {} {}", left, op_mapped, right)
+    }
+    
+    fn is_jsvalue_var(&self, expr: &Expression<'a>) -> bool {
+        // Check if expression is a variable that holds a JsValue (e.g., from array element)
+        if let Expression::Identifier(id) = expr {
+            if let Some(var_type) = self.ctx.var_types.get(id.name.as_str()) {
+                return var_type == "JsValue";
+            }
+        }
+        // Also check if it's a computed member expression on JsArray
+        if let Expression::ComputedMemberExpression(m) = expr {
+            if let Expression::Identifier(id) = &m.object {
+                if let Some(var_type) = self.ctx.var_types.get(id.name.as_str()) {
+                    return var_type == "JsArray";
+                }
+            }
+        }
+        false
+    }
+    
+    fn is_integer_type(&self, expr: &Expression<'a>) -> bool {
+        // Check if expression is a numeric literal or variable with integer type
+        match expr {
+            Expression::NumericLiteral(n) => n.value.fract() == 0.0,
+            Expression::Identifier(id) => {
+                if let Some(var_type) = self.ctx.var_types.get(id.name.as_str()) {
+                    matches!(var_type.as_str(), "int32_t" | "int64_t" | "int" | "long" | "short")
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
     }
     
     fn is_jsarray_index(&self, expr: &Expression<'a>) -> bool {
@@ -1612,10 +1749,26 @@ if matches!(init, Expression::NewExpression(_)) {
         }
         false
     }
+    
+    fn is_jsvalue_type(&self, expr: &Expression<'a>) -> bool {
+        // Check if expression is a JsValue type
+        if let Expression::Identifier(id) = expr {
+            if let Some(var_type) = self.ctx.var_types.get(id.name.as_str()) {
+                return var_type == "JsValue" || var_type == "JsArray" || var_type == "JsObject";
+            }
+        }
+        false
+    }
 
     fn emit_assignment(&mut self, a: &AssignmentExpression<'a>) -> String {
         let left = self.emit_assignment_target(&a.left);
         let right = self.emit_expression(&a.right);
+        // Check if we need to convert JsValue from array element to int
+        let right = if self.is_jsvalue_var(&a.right) {
+            format!("std::get<JsNumber>({}.inner).as_int()", right)
+        } else {
+            right
+        };
         let op = match a.operator.as_str() { "&&=" => "/* &&= */", "||=" => "/* ||= */", "??=" => "/* ??= */", x => x };
         format!("({} {} {})", left, op, right)
     }
@@ -1817,7 +1970,24 @@ if matches!(init, Expression::NewExpression(_)) {
             if m.property.name.as_str() == "push" && call.arguments.len() == 1 {
                 let obj = self.emit_expression(&m.object);
                 let arg = self.emit_argument(&call.arguments[0]);
-                return format!("{}.push({})", obj, arg);
+return format!("{}.push({})", obj, arg);
+            }
+        }
+        // Handle string methods on native std::string types
+        if let Expression::StaticMemberExpression(m) = &call.callee {
+            if let Expression::Identifier(obj_id) = &m.object {
+                let obj_name = obj_id.name.to_string();
+                let method = m.property.name.as_str();
+                if StringMethodHandler::is_string_method(method) {
+                    // Check if the object is a native std::string (not JsString)
+                    let var_type = self.ctx.var_types.get(&obj_name).cloned().unwrap_or_default();
+                    let is_jsstring = var_type == "JsString" || var_type == "JsValue" || var_type == "JsArray" || var_type == "JsObject";
+                    if !is_jsstring && (var_type == "std::string" || var_type.starts_with("std::string") || var_type == "auto" || var_type.is_empty()) {
+                        let obj_expr = self.emit_expression(&m.object);
+                        let args: Vec<String> = call.arguments.iter().filter_map(|a| a.as_expression()).map(|e| Self::emit_expression_static(e)).collect();
+                        return StringMethodHandler::translate_method(&mut self.ctx, &obj_expr, method, &args, false);
+                    }
+                }
             }
         }
         let args: Vec<String> = call.arguments.iter().map(|a| self.emit_argument(a)).collect();

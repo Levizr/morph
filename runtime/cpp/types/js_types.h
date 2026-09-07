@@ -12,3 +12,6 @@
 #ifndef MORPH_NO_FORMAT
 #include "js_value_format.h"
 #endif
+
+// String helpers for native std::string (used when compiler chooses native types over JsString)
+#include "js_string_helpers.h"

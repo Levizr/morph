@@ -415,7 +415,12 @@ impl EscapeAnalyzer {
                 let obj_name = obj.name.to_string();
                 self.record_usage(&obj_name, UsageKind::MethodCall);
                 let method = m.property.name.as_str();
-                if matches!(method, "toString" | "toFixed" | "toPrecision" | "toLocaleString") {
+                if matches!(method, "toString" | "toFixed" | "toPrecision" | "toLocaleString" 
+                    | "toUpperCase" | "toLowerCase" | "charAt" | "indexOf" | "lastIndexOf" 
+                    | "substring" | "substr" | "slice" | "trim" | "trimStart" | "trimEnd"
+                    | "replace" | "replaceAll" | "split" | "match" | "matchAll" | "search"
+                    | "padStart" | "padEnd" | "repeat" | "startsWith" | "endsWith" | "includes"
+                    | "localeCompare" | "normalize" | "toLocaleUpperCase" | "toLocaleLowerCase") {
                     self.record_usage(&obj_name, UsageKind::ToStringCall);
                     self.widens.insert(obj_name.clone(), WidenedType::ToJsString);
                 }
