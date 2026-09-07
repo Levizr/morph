@@ -6,7 +6,7 @@ members = [
     "crates/morph-ir",
     "crates/morph-codegen",
     "crates/morph-build",
-    "crates/morphc", "crates/morph-js",
+    "crates/morphc", "crates/morpher",
 ]
 resolver = "2"
 

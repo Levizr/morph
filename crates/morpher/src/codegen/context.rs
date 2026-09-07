@@ -1,13 +1,47 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::str::FromStr;
 
 use super::type_resolver::headers_for;
 
 pub const INDENT: &str = "    ";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TypeMode {
+    /// Respect user-declared type annotations; infer types only for unannotated vars
+    Strict,
+    /// Ignore user annotations and always analyze the code to pick the best native type
+    #[default]
+    Infer,
+}
+
+impl FromStr for TypeMode {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "strict" => Ok(TypeMode::Strict),
+            "infer" => Ok(TypeMode::Infer),
+            _ => Err(format!("invalid type mode: {} (expected 'strict' or 'infer')", s)),
+        }
+    }
+}
+
+impl std::fmt::Display for TypeMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TypeMode::Strict => write!(f, "strict"),
+            TypeMode::Infer => write!(f, "infer"),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Ctx {
     pub indent_level: usize,
     pub needed: BTreeSet<String>,
+    /// Absolute path to the runtime cpp directory (used to emit global includes).
+    pub runtime_path: Option<String>,
+    /// Type resolution mode (strict vs infer).
+    pub type_mode: TypeMode,
     pub template_params: HashSet<String>,
     pub class_names: HashSet<String>,
     pub interface_props: HashMap<String, HashMap<String, String>>, // iface name -> prop -> cpp type
@@ -31,6 +65,8 @@ impl Default for Ctx {
         Self {
             indent_level: 1,
             needed: BTreeSet::new(),
+            runtime_path: None,
+            type_mode: TypeMode::Infer,
             template_params: HashSet::new(),
             class_names: HashSet::new(),
             interface_props: HashMap::new(),
@@ -60,6 +96,8 @@ impl Ctx {
         let mut sub = Ctx {
             indent_level: self.indent_level + 1,
             needed: BTreeSet::new(),
+            runtime_path: self.runtime_path.clone(),
+            type_mode: self.type_mode,
             template_params: self.template_params.clone(),
             class_names: self.class_names.clone(),
             interface_props: self.interface_props.clone(),
@@ -114,7 +152,21 @@ impl Ctx {
         }
         let mut out = String::new();
         for h in &self.needed {
-            out.push_str(&format!("#include {}\n", h));
+            let include = if let Some(ref rt) = self.runtime_path {
+                // Transform relative runtime includes to absolute paths
+                if h.starts_with("\"../../runtime/cpp/") {
+                    // h is like "\"../../runtime/cpp/types/js_types.h\"" (with quotes)
+                    // Remove leading quote, prefix, and trailing quote
+                    let without_prefix = &h[19..]; // remove "\"../../runtime/cpp/"
+                    let suffix = without_prefix.trim_end_matches('"');
+                    format!("\"{}/{}\"", rt.trim_end_matches('/'), suffix)
+                } else {
+                    h.to_string()
+                }
+            } else {
+                h.to_string()
+            };
+            out.push_str(&format!("#include {}\n", include));
         }
         out.trim_end().to_string()
     }

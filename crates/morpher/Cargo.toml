@@ -1,5 +1,5 @@
 [package]
-name = "morph-js"
+name = "morpher"
 version = "0.1.0"
 edition = "2024"
 

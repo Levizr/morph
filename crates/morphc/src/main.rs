@@ -6,6 +6,7 @@ mod versions;
 use clap::{Parser, Subcommand};
 use colored::Colorize;
 use std::path::PathBuf;
+use morpher::TypeMode;
 
 #[derive(Parser)]
 #[command(
@@ -19,7 +20,7 @@ struct Cli {
     #[arg(short = 'v', long = "version")]
     version: bool,
 
-    /// Direct file morphing: morph <file> [--to cpp|rust] [--optimize]
+    /// Direct file morphing: morph <file> [--to cpp|rust] [--optimize] [--type strict|infer]
     #[arg(value_name = "FILE")]
     file: Option<PathBuf>,
 
@@ -30,6 +31,10 @@ struct Cli {
     /// Enable optimized intent-based codegen (escape analysis, native types)
     #[arg(long = "optimize")]
     optimize: bool,
+
+    /// Type resolution mode: strict (respect user annotations) or infer (analyze code, default)
+    #[arg(long = "type", value_name = "MODE", default_value = "infer")]
+    type_mode: TypeMode,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -187,7 +192,7 @@ fn main() {
         }
 
         let target = cli.to.unwrap_or_else(|| "cpp".to_string());
-        let res = commands::translate::run(file.display().to_string(), target, cli.optimize);
+        let res = commands::translate::run(file.display().to_string(), target, cli.optimize, cli.type_mode);
         if let Err(e) = res {
             eprintln!("\n    {} {}", "error:".red().bold(), e);
             for cause in e.chain().skip(1) {

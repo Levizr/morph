@@ -3,21 +3,24 @@ use oxc_span::GetSpan;
 use std::collections::HashMap;
 
 use super::analyzer::{EscapeAnalyzer, AnalysisResult, EscapeKind, WidenedType};
-use super::context::{Ctx, INDENT};
+use super::context::{Ctx, INDENT, TypeMode};
 use super::type_resolver::{param_type, resolve_type, resolve_type_annotation, ts_type_name_to_string};
 
 pub struct CppTranslator<'a> {
     source: &'a str,
     pub ctx: Ctx,
     optimize: bool,
+    type_mode: TypeMode,
     analysis: Option<crate::codegen::analyzer::AnalysisResult>,
 }
 
 impl<'a> CppTranslator<'a> {
-    pub fn new(source: &'a str, indent_level: usize, optimize: bool) -> Self {
+    pub fn new(source: &'a str, indent_level: usize, optimize: bool, type_mode: TypeMode, runtime_path: Option<String>) -> Self {
         let mut ctx = Ctx::default();
         ctx.indent_level = indent_level;
-        let mut this = Self { source, ctx, optimize, analysis: None };
+        ctx.runtime_path = runtime_path;
+        ctx.type_mode = type_mode;
+        let mut this = Self { source, ctx, optimize, type_mode, analysis: None };
         this
     }
 
@@ -35,7 +38,9 @@ impl<'a> CppTranslator<'a> {
     }
 
     pub fn translate_program(&mut self, program: &Program<'a>) -> String {
-        if self.optimize && self.analysis.is_none() {
+        // Always run analysis for type widening (array methods, toString, etc.)
+        // Escape analysis is only used when optimize=true
+        if self.analysis.is_none() {
             self.run_analysis(program);
         }
         let mut lines = Vec::new();
@@ -204,25 +209,35 @@ impl<'a> CppTranslator<'a> {
     }
 
     fn emit_legacy_variable_declarator(&mut self, d: &VariableDeclarator<'a>, name: &str, kind: &str) -> Option<String> {
-        let type_str = if let Some(_ann) = &d.init {
-            if let Some(ta) = &d.type_annotation {
-                resolve_type_annotation(Some(ta), "auto", &self.ctx.template_params, false, &self.ctx.class_names)
-            } else {
-                "auto".to_string()
-            }
-        } else if let Some(ta) = &d.type_annotation {
-            resolve_type_annotation(Some(ta), "auto", &self.ctx.template_params, false, &self.ctx.class_names)
-        } else {
-            "auto".to_string()
-        };
-        let mut cpp_type = type_str;
-        if cpp_type == "auto" {
-            if let Some(init) = &d.init {
-                if let Some(inf) = self.infer_type_from_init(init) {
-                    cpp_type = inf;
+        let mut cpp_type = match self.type_mode {
+            TypeMode::Strict => {
+                // In strict mode: use annotation if present, otherwise infer from init
+                if let Some(ta) = &d.type_annotation {
+                    resolve_type_annotation(Some(ta), "auto", &self.ctx.template_params, false, &self.ctx.class_names)
+                } else if let Some(init) = &d.init {
+                    self.infer_type_from_init(init).unwrap_or_else(|| "auto".to_string())
+                } else {
+                    "auto".to_string()
                 }
             }
-        }
+            TypeMode::Infer => {
+                // In infer mode: always infer from init, ignore user annotations
+                if let Some(init) = &d.init {
+                    self.infer_type_from_init(init).unwrap_or_else(|| "auto".to_string())
+                } else {
+                    "auto".to_string()
+                }
+            }
+        };
+        // Apply type widening from analyzer (if available)
+        let widened = self.analysis.as_ref().and_then(|a| a.widens.get(name)).cloned().unwrap_or(WidenedType::None);
+        let mut cpp_type = match widened {
+            WidenedType::ToJsNumber => "JsNumber".to_string(),
+            WidenedType::ToJsString => "JsString".to_string(),
+            WidenedType::ToJsValue => "JsValue".to_string(),
+            WidenedType::ToJsArray => "JsArray".to_string(),
+            WidenedType::None => cpp_type,
+        };
         // Intent-based: Promise<T> annotated but init is sync plain call -> use T (match JS runtime)
         if let Some(init) = &d.init {
             if let Some(stripped) = self.strip_result_for_sync_call(&cpp_type, init) {
@@ -261,13 +276,27 @@ impl<'a> CppTranslator<'a> {
         let escape_kind = analysis.escapes.get(name).cloned().unwrap_or(EscapeKind::None);
         let widened = analysis.widens.get(name).cloned().unwrap_or(WidenedType::None);
         
-        // Determine base C++ type from annotation or inference
-        let mut base_type = if let Some(ta) = &d.type_annotation {
-            resolve_type_annotation(Some(ta), "auto", &self.ctx.template_params, false, &self.ctx.class_names)
-        } else if let Some(init) = &d.init {
-            self.infer_type_from_init(init).unwrap_or_else(|| "auto".to_string())
-        } else {
-            "auto".to_string()
+        // Determine base C++ type from annotation or inference based on type_mode
+        let has_type_annotation = d.type_annotation.is_some();
+        let mut base_type = match self.type_mode {
+            TypeMode::Strict => {
+                // In strict mode: use annotation if present, otherwise infer from init
+                if let Some(ta) = &d.type_annotation {
+                    resolve_type_annotation(Some(ta), "auto", &self.ctx.template_params, false, &self.ctx.class_names)
+                } else if let Some(init) = &d.init {
+                    self.infer_type_from_init(init).unwrap_or_else(|| "auto".to_string())
+                } else {
+                    "auto".to_string()
+                }
+            }
+            TypeMode::Infer => {
+                // In infer mode: always infer from init, ignore user annotations
+                if let Some(init) = &d.init {
+                    self.infer_type_from_init(init).unwrap_or_else(|| "auto".to_string())
+                } else {
+                    "auto".to_string()
+                }
+            }
         };
         
         // Apply type widening
@@ -275,6 +304,7 @@ impl<'a> CppTranslator<'a> {
             WidenedType::ToJsNumber => "JsNumber".to_string(),
             WidenedType::ToJsString => "JsString".to_string(),
             WidenedType::ToJsValue => "JsValue".to_string(),
+            WidenedType::ToJsArray => "JsArray".to_string(),
             WidenedType::None => {
                 if base_type == "auto" {
                     if let Some(init) = &d.init {
@@ -370,6 +400,7 @@ impl<'a> CppTranslator<'a> {
                     }
                 }
                 Expression::NullLiteral(_) => Some("JsNull".to_string()),
+                Expression::Identifier(id) if id.name.as_str() == "undefined" => Some("JsUndefined".to_string()),
                 Expression::ArrayExpression(_) => Some("std::vector<JsValue>".to_string()),
                 Expression::ObjectExpression(_) => Some("JsObject".to_string()),
                 Expression::Identifier(id) => self.ctx.var_types.get(id.name.as_str()).cloned(),
@@ -385,7 +416,6 @@ impl<'a> CppTranslator<'a> {
             Expression::NumericLiteral(n) => {
                 let val = n.value;
                 if val.fract() == 0.0 {
-                    // Integer - use standard int types (not overly narrow)
                     let int_val = val as i64;
                     if int_val >= i32::MIN as i64 && int_val <= i32::MAX as i64 {
                         Some("int32_t".to_string())
@@ -397,7 +427,29 @@ impl<'a> CppTranslator<'a> {
                 }
             }
             Expression::NullLiteral(_) => Some("JsNull".to_string()),
-            Expression::ArrayExpression(_) => Some("std::vector<JsValue>".to_string()),
+            Expression::Identifier(id) if id.name.as_str() == "undefined" => Some("JsUndefined".to_string()),
+            Expression::ArrayExpression(arr) => {
+                if arr.elements.is_empty() {
+                    return Some("std::vector<JsValue>".to_string());
+                }
+                let mut elem_types = Vec::new();
+                for el in &arr.elements {
+                    if let Some(expr) = el.as_expression() {
+                        if let Some(t) = self.infer_optimized_type(expr) {
+                            elem_types.push(t);
+                        } else {
+                            elem_types.push("JsValue".to_string());
+                        }
+                    }
+                }
+                if elem_types.is_empty() {
+                    Some("std::vector<JsValue>".to_string())
+                } else if elem_types.iter().all(|t| t == &elem_types[0]) {
+                    Some(format!("std::vector<{}>", elem_types[0]))
+                } else {
+                    Some("std::vector<JsValue>".to_string())
+                }
+            }
             Expression::ObjectExpression(_) => Some("JsObject".to_string()),
             Expression::Identifier(id) => self.ctx.var_types.get(id.name.as_str()).cloned(),
             _ => None,
@@ -541,17 +593,24 @@ impl<'a> CppTranslator<'a> {
                 for decl in &d.declarations {
                     let (name, _) = self.binding_to_identifier(&decl.id);
                     if name.starts_with("/*") { continue; }
-                    let type_str = if let Some(ta) = &decl.type_annotation {
-                        resolve_type_annotation(Some(ta), "auto", &self.ctx.template_params, false, &self.ctx.class_names)
-                    } else { "auto".to_string() };
-                    let mut cpp_type = type_str;
-                    if cpp_type == "auto" {
-                        if let Some(init) = &decl.init {
-                            if let Some(inf) = self.infer_type_from_init(init) {
-                                cpp_type = inf;
+                    let cpp_type = match self.type_mode {
+                        TypeMode::Strict => {
+                            if let Some(ta) = &decl.type_annotation {
+                                resolve_type_annotation(Some(ta), "auto", &self.ctx.template_params, false, &self.ctx.class_names)
+                            } else if let Some(init) = &decl.init {
+                                self.infer_type_from_init(init).unwrap_or_else(|| "auto".to_string())
+                            } else {
+                                "auto".to_string()
                             }
                         }
-                    }
+                        TypeMode::Infer => {
+                            if let Some(init) = &decl.init {
+                                self.infer_type_from_init(init).unwrap_or_else(|| "auto".to_string())
+                            } else {
+                                "auto".to_string()
+                            }
+                        }
+                    };
                     self.ctx.need(&cpp_type);
 self.ctx.var_types.insert(name.to_string(), cpp_type.clone());
                     let final_type = if kind == "const" && matches!(cpp_type.as_str(), "JsNumber" | "JsBoolean" | "JsString" | "JsUndefined" | "JsNull") {
@@ -1004,11 +1063,17 @@ if matches!(init, Expression::NewExpression(_)) {
         for p in &params.items {
             let (name, _) = self.binding_to_identifier(&p.pattern);
             if name.starts_with("/*") { continue; }
-            let cpp_type = if let Some(ta) = &p.type_annotation {
-                resolve_type_annotation(Some(ta), "auto", &self.ctx.template_params, false, &self.ctx.class_names)
-            } else {
-                // Check FormalParameter's type_annotation field? Actually FormalParameter doesn't have it, but we check pattern type? For now auto
-                "auto".to_string()
+            let cpp_type = match self.type_mode {
+                TypeMode::Strict => {
+                    if let Some(ta) = &p.type_annotation {
+                        resolve_type_annotation(Some(ta), "auto", &self.ctx.template_params, false, &self.ctx.class_names)
+                    } else {
+                        "auto".to_string()
+                    }
+                }
+                TypeMode::Infer => {
+                    "auto".to_string()
+                }
             };
             // initializer via p.initializer? FormalParameter has no initializer, but pattern AssignmentPattern handles default?
             // Actually FormalParameter has no initializer field in oxc? Check earlier: FormalParameter has no initializer, but we can handle AssignmentPattern in pattern
@@ -1507,12 +1572,23 @@ if matches!(init, Expression::NewExpression(_)) {
 
     fn emit_binary(&mut self, b: &BinaryExpression<'a>) -> String {
         let op = b.operator.as_str();
-        let left_code = self.emit_expression(&b.left);
-        let right_code = self.emit_expression(&b.right);
+        
+        // Check if we need to convert JsValue to number for arithmetic
+        let needs_left_convert = self.is_jsarray_index(&b.left);
+        let needs_right_convert = self.is_jsarray_index(&b.right);
+        
+        let mut left = self.emit_expression(&b.left);
+        let mut right = self.emit_expression(&b.right);
+        
+        if needs_left_convert {
+            left = format!("std::get<JsNumber>({}.inner).as_int()", left);
+        }
+        if needs_right_convert {
+            right = format!("std::get<JsNumber>({}.inner).as_int()", right);
+        }
+        
         let is_left_str = matches!(&b.left, Expression::StringLiteral(_));
         let is_right_str = matches!(&b.right, Expression::StringLiteral(_));
-        let mut left = left_code.clone();
-        let mut right = right_code.clone();
         if is_left_str { left = format!("JsString({})", left); }
         if is_right_str { right = format!("JsString({})", right); }
         if op == "+" {
@@ -1523,6 +1599,18 @@ if matches!(init, Expression::NewExpression(_)) {
             return format!("(JsValue({}).is_undefined() || JsValue({}).is_null() ? JsValue({}) : JsValue({}))", left, left, right, left);
         }
         format!("{} {} {}", left, op_mapped, right)
+    }
+    
+    fn is_jsarray_index(&self, expr: &Expression<'a>) -> bool {
+        // Check if expression is a computed member access on a JsArray variable
+        if let Expression::ComputedMemberExpression(m) = expr {
+            if let Expression::Identifier(id) = &m.object {
+                if let Some(var_type) = self.ctx.var_types.get(id.name.as_str()) {
+                    return var_type == "JsArray";
+                }
+            }
+        }
+        false
     }
 
     fn emit_assignment(&mut self, a: &AssignmentExpression<'a>) -> String {

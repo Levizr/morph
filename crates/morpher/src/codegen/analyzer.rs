@@ -22,6 +22,7 @@ pub enum WidenedType {
     ToJsNumber,        // int/float -> JsNumber (handles bigint/overflow)
     ToJsString,        // string -> JsString (if .toString() called)
     ToJsValue,         // any -> JsValue (completely dynamic)
+    ToJsArray,         // array -> JsArray (if array methods like push, length used)
 }
 
 #[derive(Debug, Clone)]
@@ -359,7 +360,11 @@ impl EscapeAnalyzer {
             Expression::StaticMemberExpression(m) => {
                 self.analyze_expression(&m.object);
                 if let Expression::Identifier(id) = &m.object {
-                    self.record_usage(&id.name, UsageKind::PropertyRead);
+                    let obj_name = id.name.to_string();
+                    self.record_usage(&obj_name, UsageKind::PropertyRead);
+                    if m.property.name.as_str() == "length" {
+                        self.widens.insert(obj_name, WidenedType::ToJsArray);
+                    }
                 }
             }
             Expression::ComputedMemberExpression(m) => {
@@ -412,7 +417,21 @@ impl EscapeAnalyzer {
                 let method = m.property.name.as_str();
                 if matches!(method, "toString" | "toFixed" | "toPrecision" | "toLocaleString") {
                     self.record_usage(&obj_name, UsageKind::ToStringCall);
-                    self.widens.insert(obj_name, WidenedType::ToJsString);
+                    self.widens.insert(obj_name.clone(), WidenedType::ToJsString);
+                }
+                // Array methods that require JsArray
+                if matches!(method, "push" | "pop" | "shift" | "unshift" | "splice" | "slice" | "map" | "filter" | "forEach" | "reduce" | "find" | "indexOf" | "includes" | "join" | "reverse" | "sort" | "fill" | "copyWithin" | "flat" | "flatMap") {
+                    self.widens.insert(obj_name.clone(), WidenedType::ToJsArray);
+                }
+            }
+        }
+
+        // Also handle .length property access on arrays
+        if let Expression::StaticMemberExpression(m) = &c.callee {
+            if let Expression::Identifier(obj) = &m.object {
+                let obj_name = obj.name.to_string();
+                if m.property.name.as_str() == "length" {
+                    self.widens.insert(obj_name, WidenedType::ToJsArray);
                 }
             }
         }

@@ -1,8 +1,9 @@
 use anyhow::Result;
 use colored::Colorize;
 use std::path::Path;
+use morpher::{TranslateOptions, TypeMode};
 
-pub fn run(file: String, to: String, optimize: bool) -> Result<()> {
+pub fn run(file: String, to: String, optimize: bool, type_mode: TypeMode) -> Result<()> {
     let path = Path::new(&file);
     if !path.exists() {
         anyhow::bail!("file not found: {}", file);
@@ -29,15 +30,22 @@ pub fn run(file: String, to: String, optimize: bool) -> Result<()> {
     let pb = crate::logger::spinner(&format!("Parsing {} with Oxc...", file));
     let start = std::time::Instant::now();
     // Use morph-js translator (direct oxc -> C++/Rust, fastest, bug-free same as python for cpp)
+    let global_runtime = find_global_runtime();
+    let options = TranslateOptions {
+        optimize,
+        type_mode,
+        runtime_path: global_runtime.as_ref().map(|p| p.display().to_string()),
+        indent: 0,
+    };
     let (ext, code) = match target.as_str() {
         "rust" => {
             // For Rust target, use Rust codegen; fallback to C++ if not yet fully implemented
             // Currently morph-js Rust emitter is minimal but produces valid .rs file
-            match morph_js::translate_to_rust(&content, &file, 0) {
+            match morpher::translate_to_rust(&content, &file, 0) {
                 Ok(rust_code) => ("rs", rust_code),
                 Err(_) => {
                     // Fallback: generate C++ and save as .rs with comment (ensures file exists)
-                    match morph_js::translate(&content, &file) {
+                    match morpher::translate(&content, &file, options.clone()) {
                         Ok(cpp) => ("rs", format!("// Translated from {} (fallback C++ in Rust file)\n{}", file, cpp)),
                         Err(e) => {
                             pb.finish_and_clear();
@@ -47,7 +55,7 @@ pub fn run(file: String, to: String, optimize: bool) -> Result<()> {
                 }
             }
         }
-        _ => match morph_js::translate_to_cpp(&content, &file, 0, optimize) {
+        _ => match morpher::translate_to_cpp(&content, &file, options) {
             Ok(cpp) => ("cpp", cpp),
             Err(e) => {
                 pb.finish_and_clear();
@@ -65,7 +73,6 @@ pub fn run(file: String, to: String, optimize: bool) -> Result<()> {
     // 3) Add shim for morph::dev_log -> std::println so it runs standalone with C++23
     let mut standalone_code = code.clone();
     // Replace relative runtime includes with global absolute path if found
-    let global_runtime = find_global_runtime();
     let has_global = global_runtime.is_some();
     if let Some(runtime_path) = &global_runtime {
         let runtime_str = runtime_path.display().to_string();
