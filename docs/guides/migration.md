@@ -2,6 +2,8 @@
 
 This guide helps you migrate from the legacy Python-based `morph` CLI to the new Rust-based `morph`.
 
+> **Migration is in progress, not finished.** Direct file morphing (`morph app.ts --to cpp`) is fully owned by Rust, but GUI application builds still need the Python CLI for parts of the pipeline. See [What Still Needs the Python CLI](#what-still-needs-the-python-cli) before uninstalling anything.
+
 ## Quick Command Mapping
 
 | Python `morph` | Rust `morph` | Notes |
@@ -232,10 +234,26 @@ my-app/
 - [ ] Update CI to install the `morph` binary via `cargo install morphc`
 - [ ] Replace `morph translate` with `morph file.ts --to cpp`
 - [ ] Replace `morph init` with `morph new`
-- [ ] Remove Python from build environment
+- [ ] Remove Python from build environment (direct file morphing only — keep it for `.mx` project builds, see above)
 - [ ] Test dev mode: `morph dev`
 - [ ] Test build: `morph build --static`
 - [ ] Verify binary runs on clean machine
+
+## What Still Needs the Python CLI
+
+The `morph/` Python package is still present in the repo on purpose. The Rust CLI owns direct file morphing end to end, but the GUI application pipeline is split — removing Python today would silently break project builds (mispositioned widgets, untranslated logic, no hot reload) with no failing test to catch it.
+
+| Area | Rust status | Python still needed | Why |
+|---|---|---|---|
+| Direct file morph (`morph app.ts`) | ✅ Complete (`morpher`, `--type`/`--optimize`) | No | Covered by 21 fixtures + 4 regression tests, outputs match Node.js |
+| GUI layout engine | ❌ Missing | **Yes** — `morph/layout/engine.py` | Measure + layout pass writes real `x/y/w/h`; Rust `IRBuilder` hardcodes `0.0`, so every widget would pile at the origin |
+| JS logic inside GUI builds | ❌ Not wired | **Yes** — `morph/js/codegen.py` | `morph build` never calls `morpher`; `morph-codegen` has only a string-level `translate_js` shim and emits `premain` bodies as raw JS verbatim (won't compile) |
+| Dev hot reload | ❌ Stub | **Yes** — `morph/dev/` | Rust `dev` verifies IR and stops: no logic-TU emit, no `.so` compile, no IPC push (`dev.rs:118-119`); Python compiles `logic.<hash>.so` and `dlopen`s it live |
+| Props / events / effects | ⚠️ Partial | **Yes** | Rust drops `onChange`/`onFocus`/keys, `effect_decls`, `global_vars`, `function_declarations`; Python `jsx_walker` + `IRBuilder` handle the full surface |
+| PyPI distribution | ❌ Rust-only | **Yes** — `python-publish.yml` | `levizr-morph` releases still ship from Python; no Rust release workflow exists yet |
+| Unit / integration tests | ❌ Unported | **Yes** — `tests/unit`, `tests/integration` | 14 suites import `morph.*` directly; only the translate suite runs on the Rust binary |
+
+The rule of thumb: **file morphing → Rust; `morph build` / `morph run` / `morph dev` on `.mx` projects → keep Python installed** until the parity harness (translating GUI snippets through both translators and diffing) and the layout-engine port land. That sequence is tracked in [What Morph Is Building Right Now](../roadmap/under-construction.md).
 
 ## Rollback
 

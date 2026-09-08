@@ -2,6 +2,10 @@
 
 What's actively being built right now. These features are functional in the current dev tree but not fully hardened — expect rough edges, and help is welcome.
 
+## Rust CLI Parity (Python CLI Still Present)
+
+The Rust `morph` binary owns direct file morphing (`morph app.ts --to cpp`, `--type`/`--optimize`), but the Python CLI is deliberately still in the repo: GUI builds need its layout engine, dev hot-reload, and full JS translation (see [What Still Needs the Python CLI](../guides/migration.md#what-still-needs-the-python-cli)). The removal sequence is: wire `morpher` into `morph-codegen` in strict mode → parity harness diffing both translators → port the layout engine → delete Python. Until then, file morphing → Rust; `.mx` projects → keep Python installed.
+
 ## Keyed List Rendering
 
 `{items.map(item => <JSX/>)}` is compiled into a keyed `ListContainer` (`morph/runtime/ui/morph_list.h`) with runtime reconciliation — unchanged keys are reused, new keys create nodes, missing keys are removed. This is the newest feature: wiring lives in `node_emitter.py` / `logic_emitter.py`, and the usage guide is in [List Rendering](../elements/lists.md).
