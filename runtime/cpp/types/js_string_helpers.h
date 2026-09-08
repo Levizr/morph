@@ -45,24 +45,34 @@ inline int last_index_of(const std::string& s, const std::string& search, int fr
 }
 
 // Substring from start to end (exclusive)
-inline std::string substring(const std::string& s, int start, int end = -1) {
+inline std::string substring(const std::string& s, int start, int end) {
     if (start < 0) start = 0;
     if (start > (int)s.size()) start = s.size();
     if (end < 0 || end > (int)s.size()) end = s.size();
     if (start > end) std::swap(start, end);
     return s.substr(start, end - start);
 }
+inline std::string substring(const std::string& s, int start) {
+    if (start < 0) start = 0;
+    if (start > (int)s.size()) start = s.size();
+    return s.substr(start);
+}
 
 // Substr from start with length
-inline std::string substr(const std::string& s, int start, int len = -1) {
+inline std::string substr(const std::string& s, int start, int len) {
     if (start < 0) start = 0;
     if (start > (int)s.size()) return std::string();
     if (len < 0) len = s.size() - start;
     return s.substr(start, len);
 }
+inline std::string substr(const std::string& s, int start) {
+    if (start < 0) start = 0;
+    if (start > (int)s.size()) return std::string();
+    return s.substr(start);
+}
 
 // Slice (similar to substring but handles negative indices)
-inline std::string slice(const std::string& s, int start, int end = -1) {
+inline std::string slice(const std::string& s, int start, int end) {
     if (start < 0) start = s.size() + start;
     if (end < 0) end = s.size() + end;
     if (start < 0) start = 0;
@@ -71,6 +81,12 @@ inline std::string slice(const std::string& s, int start, int end = -1) {
     if (end > (int)s.size()) end = s.size();
     if (start > end) return std::string();
     return s.substr(start, end - start);
+}
+inline std::string slice(const std::string& s, int start) {
+    if (start < 0) start = s.size() + start;
+    if (start < 0) start = 0;
+    if (start > (int)s.size()) start = s.size();
+    return s.substr(start);
 }
 
 // Trim whitespace from both ends
@@ -254,6 +270,12 @@ inline std::string to_locale_upper(const std::string& s) {
 
 inline std::string to_locale_lower(const std::string& s) {
     return to_lower(s);
+}
+
+// Convert number to string (for native number types)
+template <typename T>
+inline std::string to_string(T n) {
+    return std::to_string(n);
 }
 
 } // namespace morph::str

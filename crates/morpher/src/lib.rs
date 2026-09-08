@@ -3,9 +3,9 @@ pub mod error;
 pub mod linter;
 pub mod parser;
 
+pub use codegen::context::TypeMode;
 pub use error::MorphJsError;
 pub use parser::{translate_str, translate_to_cpp, translate_to_rust};
-pub use codegen::context::TypeMode;
 
 /// Options controlling translation
 #[derive(Debug, Clone, Default)]
@@ -29,7 +29,11 @@ impl TranslateOptions {
 
 /// High-level translate API used by morphc and other crates.
 /// Returns generated C++ code string.
-pub fn translate(source: &str, filename: &str, options: TranslateOptions) -> Result<String, MorphJsError> {
+pub fn translate(
+    source: &str,
+    filename: &str,
+    options: TranslateOptions,
+) -> Result<String, MorphJsError> {
     parser::translate_to_cpp(source, filename, options)
 }
 
@@ -39,7 +43,11 @@ pub fn translate_default(source: &str, filename: &str) -> Result<String, MorphJs
 }
 
 /// Translate with custom indent and default options
-pub fn translate_with_indent(source: &str, filename: &str, indent: usize) -> Result<String, MorphJsError> {
+pub fn translate_with_indent(
+    source: &str,
+    filename: &str,
+    indent: usize,
+) -> Result<String, MorphJsError> {
     translate(source, filename, TranslateOptions { indent, ..Default::default() })
 }
 

@@ -46,7 +46,9 @@ impl<'a> RustTranslator<'a> {
                     | Statement::ExportNamedDeclaration(_)
             );
             if let Some(code) = self.emit_statement(stmt) {
-                if code.trim().is_empty() { continue; }
+                if code.trim().is_empty() {
+                    continue;
+                }
                 if is_decl {
                     decls.push(code);
                 } else {
@@ -86,15 +88,26 @@ impl<'a> RustTranslator<'a> {
             Statement::ClassDeclaration(c) => Some(self.emit_class(c)),
             Statement::TSInterfaceDeclaration(i) => Some(self.emit_interface(i)),
             Statement::BlockStatement(b) => Some(self.emit_block(b)),
-            Statement::ExpressionStatement(e) => Some(format!("{}{};", self.indent(), self.emit_expression(&e.expression))),
+            Statement::ExpressionStatement(e) => {
+                Some(format!("{}{};", self.indent(), self.emit_expression(&e.expression)))
+            }
             Statement::ReturnStatement(r) => Some(self.emit_return(r)),
             Statement::IfStatement(i) => Some(self.emit_if(i)),
-            Statement::WhileStatement(w) => Some(format!("{}while {} {}", self.indent(), self.emit_expression(&w.test), self.emit_statement(&w.body).unwrap_or_else(|| "{}".to_string()))),
+            Statement::WhileStatement(w) => Some(format!(
+                "{}while {} {}",
+                self.indent(),
+                self.emit_expression(&w.test),
+                self.emit_statement(&w.body).unwrap_or_else(|| "{}".to_string())
+            )),
             Statement::ForStatement(f) => Some(self.emit_for(f)),
             Statement::BreakStatement(_) => Some(format!("{}break;", self.indent())),
             Statement::ContinueStatement(_) => Some(format!("{}continue;", self.indent())),
             Statement::TryStatement(t) => Some(self.emit_try(t)),
-            Statement::ThrowStatement(t) => Some(format!("{}panic!(\"{}\");", self.indent(), self.emit_expression(&t.argument).replace('"', "\\\""))),
+            Statement::ThrowStatement(t) => Some(format!(
+                "{}panic!(\"{}\");",
+                self.indent(),
+                self.emit_expression(&t.argument).replace('"', "\\\"")
+            )),
             Statement::EmptyStatement(_) => None,
             Statement::ImportDeclaration(_) => None,
             Statement::ExportDeclaration(e) => self.emit_declaration(&e.declaration),
@@ -114,9 +127,13 @@ impl<'a> RustTranslator<'a> {
 
     fn emit_export_default(&mut self, decl: &ExportDefaultDeclarationKind<'a>) -> Option<String> {
         match decl {
-            ExportDefaultDeclarationKind::FunctionDeclaration(f) => self.emit_function_declaration(f),
+            ExportDefaultDeclarationKind::FunctionDeclaration(f) => {
+                self.emit_function_declaration(f)
+            }
             ExportDefaultDeclarationKind::ClassDeclaration(c) => Some(self.emit_class(c)),
-            _ => decl.as_expression().map(|e| format!("{}{};", self.indent(), self.emit_expression(e))),
+            _ => decl
+                .as_expression()
+                .map(|e| format!("{}{};", self.indent(), self.emit_expression(e))),
         }
     }
 
@@ -124,14 +141,25 @@ impl<'a> RustTranslator<'a> {
         let mut parts = Vec::new();
         for d in &decl.declarations {
             let (name, _) = self.binding_to_identifier(&d.id);
-            if name.starts_with("/*") { continue; }
-            let rust_type = d.type_annotation.as_ref().map(|ta| self.ts_type_to_rust(&ta.type_annotation)).unwrap_or_else(|| "auto".to_string());
+            if name.starts_with("/*") {
+                continue;
+            }
+            let rust_type = d
+                .type_annotation
+                .as_ref()
+                .map(|ta| self.ts_type_to_rust(&ta.type_annotation))
+                .unwrap_or_else(|| "auto".to_string());
             let rust_type = if rust_type == "auto" {
                 if let Some(init) = &d.init {
                     self.infer_rust_type(init).unwrap_or("auto".to_string())
-                } else { "auto".to_string() }
-            } else { rust_type };
-            let ty_str = if rust_type == "auto" { "".to_string() } else { format!(": {}", rust_type) };
+                } else {
+                    "auto".to_string()
+                }
+            } else {
+                rust_type
+            };
+            let ty_str =
+                if rust_type == "auto" { "".to_string() } else { format!(": {}", rust_type) };
             if let Some(init) = &d.init {
                 let init_code = self.emit_expression(init);
                 parts.push(format!("{}let {}{} = {};", self.indent(), name, ty_str, init_code));
@@ -197,12 +225,16 @@ impl<'a> RustTranslator<'a> {
     }
 
     fn emit_block(&mut self, block: &BlockStatement<'a>) -> String {
-        if block.body.is_empty() { return "{}".to_string(); }
+        if block.body.is_empty() {
+            return "{}".to_string();
+        }
         let mut lines = vec!["{".to_string()];
         let old = self.ctx.indent_level;
         self.ctx.indent_level = old + 1;
         for stmt in &block.body {
-            if let Some(code) = self.emit_statement(stmt) { lines.push(code); }
+            if let Some(code) = self.emit_statement(stmt) {
+                lines.push(code);
+            }
         }
         self.ctx.indent_level = old;
         lines.push(format!("{}}}", self.indent()));
@@ -228,17 +260,28 @@ impl<'a> RustTranslator<'a> {
     }
 
     fn emit_for(&mut self, f: &ForStatement<'a>) -> String {
-        let init = f.init.as_ref().map(|init| match init {
-            ForStatementInit::VariableDeclaration(d) => {
-                if let Some(first) = d.declarations.first() {
-                    let (name, _) = self.binding_to_identifier(&first.id);
-                    let init_code = first.init.as_ref().map(|e| self.emit_expression(e)).unwrap_or_else(|| "0".to_string());
-                    format!("let mut {} = {}", name, init_code)
-                } else { "".to_string() }
-            },
-            _ => self.span_text(init.span()).to_string(),
-        }).unwrap_or_default();
-        let cond = f.test.as_ref().map(|e| self.emit_expression(e)).unwrap_or_else(|| "true".to_string());
+        let init = f
+            .init
+            .as_ref()
+            .map(|init| match init {
+                ForStatementInit::VariableDeclaration(d) => {
+                    if let Some(first) = d.declarations.first() {
+                        let (name, _) = self.binding_to_identifier(&first.id);
+                        let init_code = first
+                            .init
+                            .as_ref()
+                            .map(|e| self.emit_expression(e))
+                            .unwrap_or_else(|| "0".to_string());
+                        format!("let mut {} = {}", name, init_code)
+                    } else {
+                        "".to_string()
+                    }
+                }
+                _ => self.span_text(init.span()).to_string(),
+            })
+            .unwrap_or_default();
+        let cond =
+            f.test.as_ref().map(|e| self.emit_expression(e)).unwrap_or_else(|| "true".to_string());
         let update = f.update.as_ref().map(|e| self.emit_expression(e)).unwrap_or_default();
         let body = self.emit_statement(&f.body).unwrap_or_else(|| "{}".to_string());
         // Rust for is different; we emit as `for` with `while` for now
@@ -252,7 +295,11 @@ impl<'a> RustTranslator<'a> {
     fn emit_try(&mut self, t: &TryStatement<'a>) -> String {
         let mut lines = vec![format!("{}// try", self.indent()), self.emit_block(&t.block)];
         if let Some(h) = &t.handler {
-            let param = h.param.as_ref().map(|p| self.binding_to_identifier(&p.pattern).0).unwrap_or_else(|| "e".to_string());
+            let param = h
+                .param
+                .as_ref()
+                .map(|p| self.binding_to_identifier(&p.pattern).0)
+                .unwrap_or_else(|| "e".to_string());
             lines.push(format!("{}// catch {}", self.indent(), param));
             lines.push(self.emit_block(&h.body));
         }
@@ -264,28 +311,56 @@ impl<'a> RustTranslator<'a> {
     }
 
     fn emit_function_declaration(&mut self, f: &Function<'a>) -> Option<String> {
-        let Some(id) = &f.id else { return None; };
+        let Some(id) = &f.id else {
+            return None;
+        };
         let name = id.name.to_string();
         let is_async = f.r#async;
-        let params: Vec<String> = f.params.items.iter().map(|p| {
-            let (n, _) = self.binding_to_identifier(&p.pattern);
-            let ty = p.type_annotation.as_ref().map(|ta| self.ts_type_to_rust(&ta.type_annotation)).unwrap_or_else(|| "String".to_string());
-            format!("{}: {}", n, ty)
-        }).collect();
-        let ret = f.return_type.as_ref().map(|rt| self.ts_type_to_rust(&rt.type_annotation)).unwrap_or_else(|| "()".to_string());
+        let params: Vec<String> = f
+            .params
+            .items
+            .iter()
+            .map(|p| {
+                let (n, _) = self.binding_to_identifier(&p.pattern);
+                let ty = p
+                    .type_annotation
+                    .as_ref()
+                    .map(|ta| self.ts_type_to_rust(&ta.type_annotation))
+                    .unwrap_or_else(|| "String".to_string());
+                format!("{}: {}", n, ty)
+            })
+            .collect();
+        let ret = f
+            .return_type
+            .as_ref()
+            .map(|rt| self.ts_type_to_rust(&rt.type_annotation))
+            .unwrap_or_else(|| "()".to_string());
         let ret_str = if ret == "()" { "".to_string() } else { format!(" -> {}", ret) };
         let async_str = if is_async { "async " } else { "" };
-        let body = f.body.as_ref().map(|b| self.emit_function_body(b)).unwrap_or_else(|| "{}".to_string());
-        Some(format!("{}{}fn {}({}){} {}", self.indent(), async_str, name, params.join(", "), ret_str, body))
+        let body =
+            f.body.as_ref().map(|b| self.emit_function_body(b)).unwrap_or_else(|| "{}".to_string());
+        Some(format!(
+            "{}{}fn {}({}){} {}",
+            self.indent(),
+            async_str,
+            name,
+            params.join(", "),
+            ret_str,
+            body
+        ))
     }
 
     fn emit_function_body(&mut self, body: &FunctionBody<'a>) -> String {
-        if body.statements.is_empty() { return "{}".to_string(); }
+        if body.statements.is_empty() {
+            return "{}".to_string();
+        }
         let mut lines = vec!["{".to_string()];
         let old = self.ctx.indent_level;
         self.ctx.indent_level = old + 1;
         for stmt in &body.statements {
-            if let Some(code) = self.emit_statement(stmt) { lines.push(code); }
+            if let Some(code) = self.emit_statement(stmt) {
+                lines.push(code);
+            }
         }
         self.ctx.indent_level = old;
         lines.push(format!("{}}}", self.indent()));
@@ -293,12 +368,20 @@ impl<'a> RustTranslator<'a> {
     }
 
     fn emit_class(&mut self, class: &Class<'a>) -> String {
-        let name = class.id.as_ref().map(|id| id.name.to_string()).unwrap_or_else(|| "Unnamed".to_string());
+        let name = class
+            .id
+            .as_ref()
+            .map(|id| id.name.to_string())
+            .unwrap_or_else(|| "Unnamed".to_string());
         let mut lines = vec![format!("{}struct {} {{", self.indent(), name)];
         for el in &class.body.body {
             if let ClassElement::PropertyDefinition(p) = el {
                 if let Some(key) = self.property_key_to_string(&p.key) {
-                    let ty = p.type_annotation.as_ref().map(|ta| self.ts_type_to_rust(&ta.type_annotation)).unwrap_or_else(|| "String".to_string());
+                    let ty = p
+                        .type_annotation
+                        .as_ref()
+                        .map(|ta| self.ts_type_to_rust(&ta.type_annotation))
+                        .unwrap_or_else(|| "String".to_string());
                     lines.push(format!("{}    {}: {},", self.indent(), key, ty));
                 }
             }
@@ -309,30 +392,95 @@ impl<'a> RustTranslator<'a> {
         for el in &class.body.body {
             if let ClassElement::MethodDefinition(m) = el {
                 if m.kind == MethodDefinitionKind::Constructor {
-                    let params: Vec<String> = m.value.params.items.iter().map(|p| {
-                        let (n, _) = self.binding_to_identifier(&p.pattern);
-                        let ty = p.type_annotation.as_ref().map(|ta| self.ts_type_to_rust(&ta.type_annotation)).unwrap_or_else(|| "String".to_string());
-                        format!("{}: {}", n, ty)
-                    }).collect();
-                    let body = m.value.body.as_ref().map(|b| self.emit_function_body(b)).unwrap_or_else(|| "{}".to_string());
-                    lines.push(format!("{}    pub fn new({}) -> Self {}", self.indent(), params.join(", "), body));
+                    let params: Vec<String> = m
+                        .value
+                        .params
+                        .items
+                        .iter()
+                        .map(|p| {
+                            let (n, _) = self.binding_to_identifier(&p.pattern);
+                            let ty = p
+                                .type_annotation
+                                .as_ref()
+                                .map(|ta| self.ts_type_to_rust(&ta.type_annotation))
+                                .unwrap_or_else(|| "String".to_string());
+                            format!("{}: {}", n, ty)
+                        })
+                        .collect();
+                    let body = m
+                        .value
+                        .body
+                        .as_ref()
+                        .map(|b| self.emit_function_body(b))
+                        .unwrap_or_else(|| "{}".to_string());
+                    lines.push(format!(
+                        "{}    pub fn new({}) -> Self {}",
+                        self.indent(),
+                        params.join(", "),
+                        body
+                    ));
                 } else {
-                    let method_name = self.property_key_to_string(&m.key).unwrap_or_else(|| "method".to_string());
-                    let params: Vec<String> = m.value.params.items.iter().map(|p| {
-                        let (n, _) = self.binding_to_identifier(&p.pattern);
-                        let ty = p.type_annotation.as_ref().map(|ta| self.ts_type_to_rust(&ta.type_annotation)).unwrap_or_else(|| "String".to_string());
-                        format!("{}: {}", n, ty)
-                    }).collect();
-                    let ret = m.value.return_type.as_ref().map(|rt| self.ts_type_to_rust(&rt.type_annotation)).unwrap_or_else(|| "()".to_string());
+                    let method_name =
+                        self.property_key_to_string(&m.key).unwrap_or_else(|| "method".to_string());
+                    let params: Vec<String> = m
+                        .value
+                        .params
+                        .items
+                        .iter()
+                        .map(|p| {
+                            let (n, _) = self.binding_to_identifier(&p.pattern);
+                            let ty = p
+                                .type_annotation
+                                .as_ref()
+                                .map(|ta| self.ts_type_to_rust(&ta.type_annotation))
+                                .unwrap_or_else(|| "String".to_string());
+                            format!("{}: {}", n, ty)
+                        })
+                        .collect();
+                    let ret = m
+                        .value
+                        .return_type
+                        .as_ref()
+                        .map(|rt| self.ts_type_to_rust(&rt.type_annotation))
+                        .unwrap_or_else(|| "()".to_string());
                     let ret_str = if ret == "()" { "".to_string() } else { format!(" -> {}", ret) };
-                    let body = m.value.body.as_ref().map(|b| self.emit_function_body(b)).unwrap_or_else(|| "{}".to_string());
+                    let body = m
+                        .value
+                        .body
+                        .as_ref()
+                        .map(|b| self.emit_function_body(b))
+                        .unwrap_or_else(|| "{}".to_string());
                     // Heuristic: if method uses `this`, make it &self (kept for future use)
-                    let _self_param = if body.contains("self.") || body.contains("this") { " &self, " } else { "" };
-                    let _params_str = if _self_param.is_empty() { params.join(", ") } else { format!("{} {}", _self_param.trim_end_matches(", "), params.join(", ")).trim().to_string().trim_start_matches(',').trim().to_string() };
+                    let _self_param = if body.contains("self.") || body.contains("this") {
+                        " &self, "
+                    } else {
+                        ""
+                    };
+                    let _params_str = if _self_param.is_empty() {
+                        params.join(", ")
+                    } else {
+                        format!("{} {}", _self_param.trim_end_matches(", "), params.join(", "))
+                            .trim()
+                            .to_string()
+                            .trim_start_matches(',')
+                            .trim()
+                            .to_string()
+                    };
                     // Simpler: always include &self for methods not static
                     let prefix = if m.r#static { "" } else { "&self, " };
-                    let all_params = if params.is_empty() { if m.r#static { "".to_string() } else { "&self".to_string() } } else { format!("{}{}", prefix, params.join(", ")) };
-                    lines.push(format!("{}    pub fn {}({}){} {}", self.indent(), method_name, all_params, ret_str, body));
+                    let all_params = if params.is_empty() {
+                        if m.r#static { "".to_string() } else { "&self".to_string() }
+                    } else {
+                        format!("{}{}", prefix, params.join(", "))
+                    };
+                    lines.push(format!(
+                        "{}    pub fn {}({}){} {}",
+                        self.indent(),
+                        method_name,
+                        all_params,
+                        ret_str,
+                        body
+                    ));
                 }
             }
         }
@@ -347,16 +495,30 @@ impl<'a> RustTranslator<'a> {
             match sig {
                 TSSignature::TSMethodSignature(m) => {
                     if let Some(key) = self.property_key_to_string(&m.key) {
-                        let params: Vec<String> = m.params.items.iter().map(|p| {
-                            let (n, _) = self.binding_to_identifier(&p.pattern);
-                            format!("{}: String", n)
-                        }).collect();
-                        lines.push(format!("{}    fn {}({});", self.indent(), key, params.join(", ")));
+                        let params: Vec<String> = m
+                            .params
+                            .items
+                            .iter()
+                            .map(|p| {
+                                let (n, _) = self.binding_to_identifier(&p.pattern);
+                                format!("{}: String", n)
+                            })
+                            .collect();
+                        lines.push(format!(
+                            "{}    fn {}({});",
+                            self.indent(),
+                            key,
+                            params.join(", ")
+                        ));
                     }
                 }
                 TSSignature::TSPropertySignature(p) => {
                     if let Some(key) = self.property_key_to_string(&p.key) {
-                        lines.push(format!("{}    fn get_{}(&self) -> String;", self.indent(), key));
+                        lines.push(format!(
+                            "{}    fn get_{}(&self) -> String;",
+                            self.indent(),
+                            key
+                        ));
                     }
                 }
                 _ => {}
@@ -377,7 +539,9 @@ impl<'a> RustTranslator<'a> {
     fn emit_expression(&mut self, expr: &Expression<'a>) -> String {
         match expr {
             Expression::Identifier(id) => id.name.to_string(),
-            Expression::NumericLiteral(n) => n.raw.map(|r| r.to_string()).unwrap_or_else(|| n.value.to_string()),
+            Expression::NumericLiteral(n) => {
+                n.raw.map(|r| r.to_string()).unwrap_or_else(|| n.value.to_string())
+            }
             Expression::StringLiteral(s) => format!("\"{}\"", s.value.escape_default()),
             Expression::BooleanLiteral(b) => b.value.to_string(),
             Expression::NullLiteral(_) => "None".to_string(),
@@ -395,18 +559,42 @@ impl<'a> RustTranslator<'a> {
             }
             Expression::CallExpression(c) => {
                 let callee = self.emit_expression(&c.callee);
-                let args: Vec<String> = c.arguments.iter().filter_map(|a| a.as_expression().map(|e| self.emit_expression(e))).collect();
+                let args: Vec<String> = c
+                    .arguments
+                    .iter()
+                    .filter_map(|a| a.as_expression().map(|e| self.emit_expression(e)))
+                    .collect();
                 if callee == "console.log" || callee.ends_with(".log") {
                     return format!("println!({})", args.join(", "));
                 }
                 format!("{}({})", callee, args.join(", "))
             }
-            Expression::StaticMemberExpression(m) => format!("{}.{}", self.emit_expression(&m.object), m.property.name),
-            Expression::ComputedMemberExpression(m) => format!("{}[{}]", self.emit_expression(&m.object), self.emit_expression(&m.expression)),
-            Expression::BinaryExpression(b) => format!("{} {} {}", self.emit_expression(&b.left), b.operator.as_str(), self.emit_expression(&b.right)),
-            Expression::AssignmentExpression(a) => format!("{} {} {}", self.span_text(a.left.span()).to_string(), a.operator.as_str(), self.emit_expression(&a.right)),
+            Expression::StaticMemberExpression(m) => {
+                format!("{}.{}", self.emit_expression(&m.object), m.property.name)
+            }
+            Expression::ComputedMemberExpression(m) => format!(
+                "{}[{}]",
+                self.emit_expression(&m.object),
+                self.emit_expression(&m.expression)
+            ),
+            Expression::BinaryExpression(b) => format!(
+                "{} {} {}",
+                self.emit_expression(&b.left),
+                b.operator.as_str(),
+                self.emit_expression(&b.right)
+            ),
+            Expression::AssignmentExpression(a) => format!(
+                "{} {} {}",
+                self.span_text(a.left.span()).to_string(),
+                a.operator.as_str(),
+                self.emit_expression(&a.right)
+            ),
             Expression::ArrayExpression(arr) => {
-                let elems: Vec<String> = arr.elements.iter().filter_map(|e| e.as_expression().map(|ex| self.emit_expression(ex))).collect();
+                let elems: Vec<String> = arr
+                    .elements
+                    .iter()
+                    .filter_map(|e| e.as_expression().map(|ex| self.emit_expression(ex)))
+                    .collect();
                 format!("vec![{}]", elems.join(", "))
             }
             Expression::ObjectExpression(obj) => {
@@ -414,7 +602,11 @@ impl<'a> RustTranslator<'a> {
                 for prop in &obj.properties {
                     if let ObjectPropertyKind::ObjectProperty(p) = prop {
                         if let Some(k) = self.property_key_to_string(&p.key) {
-                            pairs.push(format!("(\"{}\".to_string(), {})", k, self.emit_expression(&p.value)));
+                            pairs.push(format!(
+                                "(\"{}\".to_string(), {})",
+                                k,
+                                self.emit_expression(&p.value)
+                            ));
                         }
                     }
                 }

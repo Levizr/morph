@@ -16,3 +16,6 @@ reqwest = { workspace = true }
 tar = { workspace = true }
 flate2 = { workspace = true }
 walkdir = { workspace = true }
+
+[lints]
+workspace = true

@@ -184,6 +184,7 @@ struct JsValue {
         if (is_array()) return std::get<JsArray>(inner).length();
         return 0;
     }
+    size_t size() const { return length(); }
 
     // ── String method forwarding (fast-path: single branch, no string dispatch) ──
 

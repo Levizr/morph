@@ -91,7 +91,7 @@
           "morph dist output",
           "morph project layout"
         ],
-"lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-05",
         "publishedAt": "2026-09-05",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -495,7 +495,7 @@
           "morph js runtime",
           "morph translator coverage"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-08",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -571,7 +571,7 @@
           "JsArray",
           "JsObject value"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-08",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -582,7 +582,7 @@
         "file": "javascript/native-types",
         "status": "production",
         "author": "PIYUSH",
-        "description": "How to use real C++ primitive types (int, float, double) directly in Morph logic for zero overhead, and what JS methods you lose when you go native.",
+        "description": "How to use real C++ primitive types (int, float, double) directly in Morph logic for zero overhead, how JS methods lower to morph::str helpers on natives, and how --type infer vs strict picks the type.",
         "keywords": [
           "morph native c++ types",
           "morph int double",
@@ -590,8 +590,27 @@
           "morph zero overhead types",
           "morph native performance"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-08",
         "publishedAt": "2026-08-21",
+        "priority": 0.8,
+        "changefreq": "weekly"
+      },
+      {
+        "title": "How JavaScript Comparisons Work in Morph",
+        "slug": "javascript/js-comparisons",
+        "file": "javascript/js-comparisons",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "How Morph compiles ==, ===, <, truthiness, and && / || to native C++ that behaves like JavaScript: intent analysis plus generated morph::js_cmp helpers with zero runtime overhead.",
+        "keywords": [
+          "morph js equality",
+          "morph loose equality",
+          "morph truthiness",
+          "morph comparison coercion",
+          "morph js_cmp helpers"
+        ],
+        "lastUpdated": "2026-09-08",
+        "publishedAt": "2026-09-08",
         "priority": 0.8,
         "changefreq": "weekly"
       }
@@ -671,7 +690,7 @@
           "morph --optimize",
           "morph native types"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-08",
         "publishedAt": "2026-09-05",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -857,7 +876,7 @@
           "morph check command",
           "morph command reference"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-08",
         "publishedAt": "2026-08-19",
         "priority": 0.8,
         "changefreq": "weekly"

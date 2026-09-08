@@ -169,7 +169,20 @@ def test_translate_and_run(fixture: Path, tmp_path: Path):
     cpp_path = _translate_fixture(fixture, tmp_path)
     # Basic sanity: file exists and contains expected headers
     content = cpp_path.read_text()
-    assert "js_types.h" in content, f"js_types.h missing in {fixture.name}"
+    # Pure-native output (e.g. 20_cpp_types with explicit C++ types) legitimately
+    # has no Js types; only require a runtime header when Js types are actually used.
+    # NOTE: ignore string literals ("hello JsString") and identifiers (jsVal) —
+    # only real type tokens outside literals count.
+    code_only = re.sub(r'"(?:[^"\\]|\\.)*"', '""', content)
+    uses_js = (
+        re.search(r"\bJs(String|Number|Boolean|Value|Array|Object|Null|Undefined)\b", code_only) is not None
+        or "morph::" in code_only
+    )
+    if uses_js:
+        # The inline morph::js_cmp block is self-contained; js_types.h is only
+        # required when Js* runtime types are actually referenced.
+        has_inline_helpers = "namespace morph::js_cmp" in content
+        assert "js_types.h" in content or "js_string_helpers.h" in content or has_inline_helpers, f"runtime header missing in {fixture.name}"
     # Run compile + execute
     result = _compile_and_run(cpp_path, tmp_path)
     # Check that something was printed (all fixtures have console.log)

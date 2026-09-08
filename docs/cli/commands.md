@@ -11,12 +11,15 @@ morph app.ts              # → app.cpp (default target: C++)
 morph app.ts --to cpp     # → app.cpp
 morph app.ts --to rust    # → app.rs (experimental)
 morph app.ts --to cpp --optimize  # intent-based codegen with escape analysis
+morph app.ts --to cpp --type strict    # respect TS annotations (default: --type infer)
+morph app.ts --to cpp --type infer --optimize  # infer natives + escape analysis
 ```
 
 - Only `.ts` / `.js` files allowed (`.tsx`/`.jsx`/`.mx` rejected — use `morph build` for projects)
 - Output: `<basename>.cpp` or `<basename>.rs` with trailing newline
-- Standalone: includes minimal shim (`morph::str`, `morph::dev_log`)
-- Top-level statements wrapped in `int main()`
+- `--type infer` (default) ignores annotations and picks the cheapest native type from usage; `--type strict` keeps `number`/`string`/`boolean`/`any` as `Js*` wrappers (see [Native C++ Types](../javascript/native-types.md#how---type-picks-native-vs-wrapper))
+- Standalone: includes minimal shim (`morph::str`, `morph::dev_log`); runtime headers use absolute global paths so the file compiles from any directory
+- Top-level statements wrapped in `int main()` (async entry when top-level `await` is present); side-effectful `static auto x = f()` initializers move into `main` to preserve execution order
 
 ## Project Commands
 

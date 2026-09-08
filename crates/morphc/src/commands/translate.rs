@@ -74,10 +74,9 @@ pub fn run(file: String, to: String, optimize: bool, type_mode: TypeMode) -> Res
     let mut standalone_code = code.clone();
     // Replace relative runtime includes with global absolute path if found
     let has_global = global_runtime.is_some();
-    if let Some(runtime_path) = &global_runtime {
-        let runtime_str = runtime_path.display().to_string();
-        // Use relative paths for includes (generated code already uses relative paths)
-        // Only replace if somehow absolute paths were generated
+    if global_runtime.is_some() {
+        // Includes are already absolute (runtime_path is threaded into codegen).
+        // Only replace if somehow absolute paths were generated.
     } else {
         // No global runtime found — tell user
         crate::logger::log_warn("No global runtime found in ~/.morph/cache/runtimes/cpp — generated file will be self-contained");
@@ -392,6 +391,147 @@ fn should_wrap_in_main(code: &str) -> bool {
     false
 }
 
+/// Parse `static auto NAME = INIT;` single-line file-scope declaration with a call
+/// initializer (potential side effects, e.g. `static auto p4 = voidPromise();`).
+/// Returns (name, rhs_with_semicolon) on match.
+fn parse_auto_static_call(trimmed: &str) -> Option<(String, String)> {
+    let t = trimmed.trim();
+    if !t.starts_with("static ") || !t.contains('=') || !t.ends_with(';') {
+        return None;
+    }
+    let bytes = t.as_bytes();
+    let mut eq_pos: Option<usize> = None;
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'=' {
+            let before_ok = i == 0 || !matches!(bytes[i - 1], b'=' | b'!' | b'<' | b'>');
+            let after_ok = i + 1 >= bytes.len() || bytes[i + 1] != b'=';
+            // Skip `=>` (arrow)
+            if before_ok && after_ok && !(i + 1 < bytes.len() && bytes[i + 1] == b'>') {
+                eq_pos = Some(i);
+                break;
+            }
+        }
+        i += 1;
+    }
+    let eq = eq_pos?;
+    let left = t[..eq].trim();
+    let right = t[eq + 1..].trim();
+    let tokens: Vec<&str> = left.split_whitespace().collect();
+    if tokens.len() != 3 || tokens[0] != "static" || tokens[1] != "auto" {
+        return None;
+    }
+    let name = tokens[2].to_string();
+    if name.is_empty() || !name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        return None;
+    }
+    // Only call initializers can have ordering side effects worth moving
+    if !right.contains('(') {
+        return None;
+    }
+    Some((name, right.to_string()))
+}
+
+/// Word-boundary identifier search.
+fn contains_ident(haystack: &str, needle: &str) -> bool {
+    let hb = haystack.as_bytes();
+    let nb = needle.as_bytes();
+    if nb.is_empty() || hb.len() < nb.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i + nb.len() <= hb.len() {
+        if &hb[i..i + nb.len()] == nb {
+            let before_ok = i == 0 || !(hb[i - 1].is_ascii_alphanumeric() || hb[i - 1] == b'_');
+            let after_ok = i + nb.len() >= hb.len()
+                || !(hb[i + nb.len()].is_ascii_alphanumeric() || hb[i + nb.len()] == b'_');
+            if before_ok && after_ok {
+                return true;
+            }
+        }
+        i += 1;
+    }
+    false
+}
+
+/// For `static auto x = f();` file-scope decls, decide which are safe to move
+/// into main as locals (preserving JS top-level execution order).
+/// Safe iff `name` is never referenced outside movable top-level statements
+/// (i.e. not inside any function/class body or other file-scope declarations).
+/// Returns map line_idx -> name for safe-to-move decls.
+fn movable_auto_statics(lines: &[&str]) -> std::collections::HashMap<usize, String> {
+    // Depth at each line start
+    let mut depths = Vec::with_capacity(lines.len());
+    let mut d: i32 = 0;
+    for l in lines.iter() {
+        depths.push(d);
+        d += l.matches('{').count() as i32 - l.matches('}').count() as i32;
+        if d < 0 {
+            d = 0;
+        }
+    }
+    // Candidates at depth 0
+    let mut cands: Vec<(usize, String)> = Vec::new();
+    for (idx, l) in lines.iter().enumerate() {
+        if depths[idx] != 0 {
+            continue;
+        }
+        if let Some((name, _)) = parse_auto_static_call(l.trim()) {
+            cands.push((idx, name));
+        }
+    }
+    if cands.is_empty() {
+        return Default::default();
+    }
+    let cand_line: std::collections::HashMap<usize, usize> =
+        cands.iter().enumerate().map(|(k, (i, _))| (*i, k)).collect();
+    let mut safe = vec![true; cands.len()];
+    // Fixpoint: a candidate moves only if all its references are in moved lines
+    loop {
+        let mut changed = false;
+        for (k, (ci, name)) in cands.iter().enumerate() {
+            if !safe[k] {
+                continue;
+            }
+            let mut ok = true;
+            for (j, l) in lines.iter().enumerate() {
+                if j == *ci {
+                    continue;
+                }
+                let moves = if depths[j] != 0 {
+                    false
+                } else {
+                    let tj = l.trim();
+                    if is_top_level_executable(tj) {
+                        true
+                    } else if let Some(k2) = cand_line.get(&j) {
+                        safe[*k2]
+                    } else {
+                        false
+                    }
+                };
+                if !moves && contains_ident(l, name) {
+                    ok = false;
+                    break;
+                }
+            }
+            if !ok {
+                safe[k] = false;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    cands
+        .into_iter()
+        .enumerate()
+        .filter(|(k, _)| safe[*k])
+        .map(|(_, (i, n))| (i, n))
+        .collect()
+}
+
 fn wrap_top_level_in_main(code: &str) -> String {
     // Extract top-level executable statements (and their blocks) and put them in main
     // Handles both cases: file has no main, or file already has a main (then inject into existing main)
@@ -516,12 +656,25 @@ fn wrap_top_level_in_main(code: &str) -> String {
         let mut brace_depth: i32 = 0;
         let mut i = 0;
         let lines: Vec<&str> = code.lines().collect();
+        // `static auto x = f();` decls with side-effectful inits must move into
+        // main as locals to preserve JS execution order — but only when `x` is
+        // never referenced outside movable top-level statements (else other
+        // functions would break).
+        let movable = movable_auto_statics(&lines);
         while i < lines.len() {
             let line = lines[i];
             let trimmed = line.trim();
             let open = line.matches('{').count() as i32;
             let close = line.matches('}').count() as i32;
             let is_file_scope = brace_depth == 0;
+            if is_file_scope && movable.contains_key(&i) {
+                // Safe to move: drop `static`, keep `auto x = init;` order in main
+                let local = trimmed.strip_prefix("static ").unwrap_or(trimmed);
+                main_body.push(format!("    {}", local));
+                brace_depth += open - close;
+                i += 1;
+                continue;
+            }
             if is_file_scope && is_top_level_executable(trimmed) {
                 if trimmed.ends_with('{') || trimmed.starts_with("for ") || trimmed.starts_with("while ") || trimmed.starts_with("if ") || trimmed.starts_with("try ") {
                     // Block

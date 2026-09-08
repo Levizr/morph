@@ -2,6 +2,8 @@
 
 Morph's C++ runtime provides JavaScript-compatible types that handle the dynamic nature of JSX expressions.
 
+When you get a wrapper vs a native (`std::string`, `int64_t`, `std::vector<T>`) is the compiler's choice, not yours: under the default `--type infer` the analyzer picks natives wherever the usage allows and only reaches for these wrappers for genuinely dynamic values; `--type strict` keeps your annotations verbatim. See [Native C++ Types](./native-types.md#how---type-picks-native-vs-wrapper).
+
 ## JsValue
 
 The universal value type. Every expression in JSX resolves to a `JsValue` which can hold:
@@ -30,11 +32,11 @@ typeof(true)       → "boolean"
 
 ### Truthiness
 
-Same rules as JavaScript: `0`, `""`, `null`, `undefined`, `false` are falsy. Everything else is truthy. Arrays and objects are truthy (arrays are truthy even when empty).
+Same rules as JavaScript, with one exception: `0`, `""`, `null`, `undefined`, `false` are falsy and everything else is truthy — except an **empty array is falsy** in Morph (JavaScript treats it as truthy). See [How JavaScript Comparisons Work in Morph](./js-comparisons.md) for the full truthiness table.
 
 ### Equality
 
-`==` and `!=` follow JavaScript coercion rules. `===` and `!==` check type + value.
+`==` and `!=` follow JavaScript coercion rules, `===` and `!==` check type + value — for `Js*` wrappers and native types alike. The translator generates `morph::js_cmp` helpers wherever plain C++ would answer differently. See [How JavaScript Comparisons Work in Morph](./js-comparisons.md).
 
 ## JsNumber
 
@@ -89,6 +91,10 @@ Object backed by `shared_ptr<map<string, JsValue>>`:
 ## JsBoolean
 
 Wrapper around `bool` with truthiness semantics.
+
+## Method Forwarding
+
+`JsValue` forwards the common string methods (`toUpperCase`, `toLowerCase`, `trim`, `charAt`, `substring`, `slice`, `replace`, `split`, `toString`, …), so `obj["name"].toUpperCase()` and `arr[0].toString()` work without unwrapping. Native `std::string` values get the same surface through `morph::str::*` helpers instead — see [JS Methods on Natives](./native-types.md#js-methods-on-natives).
 
 ## Formatting
 

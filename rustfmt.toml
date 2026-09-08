@@ -1,0 +1,15 @@
+edition = "2024"
+max_width = 100
+indent_style = "Block"
+tab_spaces = 4
+hard_tabs = false
+newline_style = "Unix"
+use_small_heuristics = "Max"
+fn_params_layout = "Tall"
+brace_style = "SameLineWhere"
+control_brace_style = "AlwaysSameLine"
+struct_lit_style = "PreferVertical"
+enum_discriminant_separator = "Comma"
+group_imports = "StdExternalCrate"
+imports_granularity = "Module"
+normalize_doc_attributes = true

@@ -28,6 +28,7 @@ pub enum StringMethod {
     Includes,
     LocaleCompare,
     Normalize,
+    ToString,
     ToLocaleUpperCase,
     ToLocaleLowerCase,
 }
@@ -62,6 +63,7 @@ impl StringMethod {
             "normalize" => Some(Self::Normalize),
             "toLocaleUpperCase" => Some(Self::ToLocaleUpperCase),
             "toLocaleLowerCase" => Some(Self::ToLocaleLowerCase),
+            "toString" => Some(Self::ToString),
             _ => None,
         }
     }
@@ -178,6 +180,7 @@ impl StringMethod {
             Self::Normalize => format!("morph::str::normalize({})", receiver),
             Self::ToLocaleUpperCase => format!("morph::str::to_locale_upper({})", receiver),
             Self::ToLocaleLowerCase => format!("morph::str::to_locale_lower({})", receiver),
+            Self::ToString => format!("morph::str::to_string({})", receiver),
         }
     }
 }
@@ -196,7 +199,7 @@ impl StringMethodHandler {
         ctx: &mut Ctx,
         receiver: &str,
         method: &str,
-        args: &[String],  // Pre-emitted argument strings
+        args: &[String], // Pre-emitted argument strings
         is_jsstring: bool,
     ) -> String {
         // For JsString, use the existing JsString methods
@@ -208,7 +211,9 @@ impl StringMethodHandler {
         if let Some(sm) = StringMethod::from_js_name(method) {
             // Add the helper header
             ctx.needed.insert("\"../../runtime/cpp/types/js_string_helpers.h\"".to_string());
-            
+            // Also need js_types.h for JsValue and other types
+            ctx.needed.insert("\"../../runtime/cpp/types/js_types.h\"".to_string());
+
             sm.emit_cpp(receiver, args)
         } else {
             // Unknown method, fallback to standard call
@@ -235,11 +240,7 @@ impl StringMethodTracker {
     }
 
     pub fn should_inline(&self, method: &str) -> bool {
-        if let Some((count, _)) = self.usage.get(method) {
-            *count <= 1
-        } else {
-            true
-        }
+        if let Some((count, _)) = self.usage.get(method) { *count <= 1 } else { true }
     }
 
     pub fn get_receiver_type(&self, method: &str) -> Option<&str> {

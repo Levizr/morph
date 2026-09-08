@@ -1,0 +1,97 @@
+# ── Morph C++ Code Style ──
+BasedOnStyle: LLVM
+Language: Cpp
+Standard: Cpp20
+
+# ── Indentation ──
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ContinuationIndentWidth: 4
+NamespaceIndentation: Inner
+IndentCaseLabels: false
+IndentPPDirectives: None
+PPIndentWidth: 4
+
+# ── Line width ──
+ColumnLimit: 100
+
+# ── Braces ──
+BreakBeforeBraces: Allman
+AllowShortBlocksOnASingleLine: Empty
+AllowShortCaseLabelsOnSingleLine: false
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnSingleLine: Never
+AllowShortLoopsOnSingleLine: false
+AllowShortLambdasOnASingleLine: Inline
+AlwaysBreakTemplateDeclarations: Yes
+
+# ── Alignment ──
+AlignAfterOpenBracket: Align
+AlignConsecutiveAssignments: false
+AlignConsecutiveDeclarations: false
+AlignEscapedNewlines: Right
+AlignOperands: Align
+AlignTrailingComments: true
+DerivePointerAlignment: false
+PointerAlignment: Left
+ReferenceAlignment: Left
+
+# ── Arguments ──
+BinPackArguments: false
+BinPackParameters: false
+AllowAllArgumentsOnNextLine: false
+
+# ── Constructor initializers ──
+BreakConstructorInitializers: BeforeColon
+ConstructorInitializerAllOnOneLineOrOnePerLine: true
+ConstructorInitializerIndentWidth: 4
+
+# ── Spacing ──
+SpaceAfterCStyleCast: true
+SpaceAfterLogicalNot: false
+SpaceAfterTemplateKeyword: true
+SpaceBeforeAssignmentOperators: true
+SpaceBeforeCpp11BracedList: true
+SpaceBeforeCtorInitializerColon: true
+SpaceBeforeInheritanceColon: true
+SpaceBeforeParens: ControlStatements
+SpaceBeforeRangeBasedForLoopColon: true
+SpaceInEmptyBlock: false
+SpaceInEmptyParentheses: false
+SpacesBeforeTrailingComments: 1
+SpacesInAngles: false
+SpacesInCStyleCastParentheses: false
+SpacesInConditionalStatement: false
+SpacesInContainerLiterals: true
+SpacesInParentheses: false
+SpacesInSquareBrackets: false
+
+# ── Breaking ──
+BreakBeforeBinaryOperators: None
+BreakBeforeTernaryOperators: true
+BreakStringLiterals: true
+BreakTemplateDeclarations: Yes
+PackConstructorInitializers: Never
+
+# ── Includes ──
+SortIncludes: true
+IncludeBlocks: Preserve
+IncludeCategories:
+  # C system headers
+  - Regex: '^<c.*>'
+    Priority: 1
+  # C++ standard library
+  - Regex: '^<.*>'
+    Priority: 2
+  # Project headers
+  - Regex: '^".*"'
+    Priority: 3
+
+# ── Misc ──
+CompactNamespaces: false
+Cpp11BracedListStyle: true
+FixNamespaceComments: true
+MaxEmptyLinesToKeep: 2
+ReflowComments: true
+SortUsingDeclarations: true

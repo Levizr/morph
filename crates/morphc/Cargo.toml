@@ -36,3 +36,6 @@ notify = { workspace = true }
 indicatif = { workspace = true }
 console = { workspace = true }
 strsim = { workspace = true }
+
+[lints]
+workspace = true

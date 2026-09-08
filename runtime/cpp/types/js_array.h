@@ -26,6 +26,7 @@ struct JsArray {
     // instantiate vector<JsValue> members, which need a complete element
     // type (clang rejects them from this point).
     size_t length() const;
+    size_t size() const { return length(); }
     bool empty() const;
 
     // ── JS Array methods ──

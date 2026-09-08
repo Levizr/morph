@@ -17,6 +17,7 @@ struct JsString {
     // ── Accessors ──
 
     size_t length() const { return value.length(); }
+    size_t size() const { return value.size(); }
     bool empty() const { return value.empty(); }
 
     // ── JS String methods ──

@@ -48,3 +48,37 @@ lto = true
 codegen-units = 1
 strip = true
 panic = "abort"
+
+# ── Workspace lints ──
+[workspace.lints.rust]
+unreachable_pub = "warn"
+unused_import_braces = "warn"
+unused_lifetimes = "warn"
+unused_qualifications = "warn"
+variant_size_differences = "warn"
+redundant_imports = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+# Allow lints that conflict with our code style
+too_many_arguments = "allow"
+large_enum_variant = "allow"
+enum_variant_names = "allow"
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+missing_transmute_doc = "allow"
+missing_safety_doc = "allow"
+wildcard_imports = "allow"
+struct_excessive_bools = "allow"
+cast_possible_truncation = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+doc_markdown = "allow"
+similar_names = "allow"
+suboptimal_flops = "allow"
+implicit_hash_new = "allow"

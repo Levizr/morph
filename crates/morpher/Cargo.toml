@@ -17,3 +17,6 @@ oxc_diagnostics = { workspace = true }
 oxc_syntax = { workspace = true }
 strsim = { workspace = true }
 morph-parser = { path = "../morph-parser" }
+
+[lints]
+workspace = true

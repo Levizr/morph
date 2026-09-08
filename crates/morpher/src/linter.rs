@@ -12,27 +12,42 @@ pub use morph_parser::LintError as TsLintError;
 fn build_line_offsets(source: &str) -> Vec<usize> {
     let mut offs = vec![0];
     for (i, ch) in source.char_indices() {
-        if ch == '\n' { offs.push(i+1); }
+        if ch == '\n' {
+            offs.push(i + 1);
+        }
     }
     offs
 }
 fn offset_to_line_col(offsets: &[usize], offset: u32) -> (usize, usize) {
     let off = offset as usize;
-    let line = match offsets.binary_search(&off) { Ok(idx) => idx+1, Err(idx) => idx };
+    let line = match offsets.binary_search(&off) {
+        Ok(idx) => idx + 1,
+        Err(idx) => idx,
+    };
     let start = offsets[line.saturating_sub(1)];
-    (line, off.saturating_sub(start)+1)
+    (line, off.saturating_sub(start) + 1)
 }
 
 #[derive(Clone, Copy, PartialEq)]
-pub enum Strictness { Strict, Permissive } // Strict = .ts , Permissive = .js
+pub enum Strictness {
+    Strict,
+    Permissive,
+} // Strict = .ts , Permissive = .js
 
 pub fn check_str(content: &str, file_path: &str) -> Vec<LintError> {
-    let is_js = file_path.ends_with(".js") || file_path.ends_with(".jsx") || file_path.ends_with(".mjs") || file_path.ends_with(".cjs");
+    let is_js = file_path.ends_with(".js")
+        || file_path.ends_with(".jsx")
+        || file_path.ends_with(".mjs")
+        || file_path.ends_with(".cjs");
     let strict = if is_js { Strictness::Permissive } else { Strictness::Strict };
     check_with_strictness(content, file_path, strict)
 }
 
-pub fn check_with_strictness(content: &str, file_path: &str, strictness: Strictness) -> Vec<LintError> {
+pub fn check_with_strictness(
+    content: &str,
+    file_path: &str,
+    strictness: Strictness,
+) -> Vec<LintError> {
     let offsets = build_line_offsets(content);
     let allocator = Allocator::default();
     let source_type = if file_path.ends_with(".tsx") || file_path.ends_with(".ts") {
@@ -44,15 +59,16 @@ pub fn check_with_strictness(content: &str, file_path: &str, strictness: Strictn
     let mut out = Vec::new();
     // Parse errors first — user friendly
     for diag in &ret.diagnostics {
-        let span = diag.labels.first().map(|l| l.span()).unwrap_or(Span::new(0,0));
-        let (line,col)= offset_to_line_col(&offsets, span.start);
+        let span = diag.labels.first().map(|l| l.span()).unwrap_or(Span::new(0, 0));
+        let (line, col) = offset_to_line_col(&offsets, span.start);
         out.push(LintError {
             severity: "error".into(),
             code: "parse-error".into(),
             message: diag.message.to_string(),
             suggestion: diag.help.as_ref().map(|h| h.to_string()),
             file_path: file_path.into(),
-            line, col,
+            line,
+            col,
         });
     }
     if ret.panicked {
@@ -62,11 +78,21 @@ pub fn check_with_strictness(content: &str, file_path: &str, strictness: Strictn
             message: "File has a syntax error and could not be read".into(),
             suggestion: Some("Check for missing `}` or `)` or an unfinished line".into()),
             file_path: file_path.into(),
-            line: 1, col: 1
+            line: 1,
+            col: 1,
         });
         return out;
     }
-    let mut l = Linter { source: content, file_path, offsets, strictness, errors: Vec::new(), declared: HashSet::new(), scope_stack: vec![HashSet::new()], in_strict: strictness == Strictness::Strict };
+    let mut l = Linter {
+        source: content,
+        file_path,
+        offsets,
+        strictness,
+        errors: Vec::new(),
+        declared: HashSet::new(),
+        scope_stack: vec![HashSet::new()],
+        in_strict: strictness == Strictness::Strict,
+    };
     l.visit_program(&ret.program);
     // Post-check: if no export and it's a .ts file being translated, warn
     out.extend(l.errors);
@@ -85,18 +111,41 @@ struct Linter<'a> {
 }
 
 impl<'a> Linter<'a> {
-    fn line_col(&self, span: Span) -> (usize, usize) { offset_to_line_col(&self.offsets, span.start) }
-    fn push(&mut self, span: Span, code: &str, severity: &str, message: String, suggestion: Option<String>) {
-        let (line,col)= self.line_col(span);
-        self.errors.push(LintError{ severity: severity.into(), code: code.into(), message, suggestion, file_path: self.file_path.into(), line, col });
+    fn line_col(&self, span: Span) -> (usize, usize) {
+        offset_to_line_col(&self.offsets, span.start)
+    }
+    fn push(
+        &mut self,
+        span: Span,
+        code: &str,
+        severity: &str,
+        message: String,
+        suggestion: Option<String>,
+    ) {
+        let (line, col) = self.line_col(span);
+        self.errors.push(LintError {
+            severity: severity.into(),
+            code: code.into(),
+            message,
+            suggestion,
+            file_path: self.file_path.into(),
+            line,
+            col,
+        });
     }
     fn is_declared(&self, name: &str) -> bool {
         self.scope_stack.iter().rev().any(|s| s.contains(name)) || self.declared.contains(name)
     }
-    fn push_scope(&mut self){ self.scope_stack.push(HashSet::new()); }
-    fn pop_scope(&mut self){ self.scope_stack.pop(); }
-    fn declare(&mut self, name: String){
-        if let Some(top)= self.scope_stack.last_mut(){ top.insert(name.clone()); }
+    fn push_scope(&mut self) {
+        self.scope_stack.push(HashSet::new());
+    }
+    fn pop_scope(&mut self) {
+        self.scope_stack.pop();
+    }
+    fn declare(&mut self, name: String) {
+        if let Some(top) = self.scope_stack.last_mut() {
+            top.insert(name.clone());
+        }
         self.declared.insert(name);
     }
 
@@ -136,25 +185,37 @@ impl<'a> Linter<'a> {
         }
     }
 
-    fn check_add(&mut self, left: &Expression<'a>, right: &Expression<'a>, span: Span, op: &str){
-        if op != "+" { return; }
+    fn check_add(&mut self, left: &Expression<'a>, right: &Expression<'a>, span: Span, op: &str) {
+        if op != "+" {
+            return;
+        }
         // Only lint `+` — other ops are always numeric in user's mental model
         let lt = self.type_str_of_expr(left);
         let rt = self.type_str_of_expr(right);
         // If we can see that one side is string literal / template and the other is number/boolean, it's the bug
-        let left_is_string = lt.as_deref() == Some("string") || matches!(left, Expression::StringLiteral(_) | Expression::TemplateLiteral(_));
-        let right_is_string = rt.as_deref() == Some("string") || matches!(right, Expression::StringLiteral(_) | Expression::TemplateLiteral(_));
-        let left_is_number = lt.as_deref() == Some("number") || matches!(left, Expression::NumericLiteral(_));
-        let right_is_number = rt.as_deref() == Some("number") || matches!(right, Expression::NumericLiteral(_));
-        let left_is_bool = lt.as_deref() == Some("boolean") || matches!(left, Expression::BooleanLiteral(_));
-        let right_is_bool = rt.as_deref() == Some("boolean") || matches!(right, Expression::BooleanLiteral(_));
+        let left_is_string = lt.as_deref() == Some("string")
+            || matches!(left, Expression::StringLiteral(_) | Expression::TemplateLiteral(_));
+        let right_is_string = rt.as_deref() == Some("string")
+            || matches!(right, Expression::StringLiteral(_) | Expression::TemplateLiteral(_));
+        let left_is_number =
+            lt.as_deref() == Some("number") || matches!(left, Expression::NumericLiteral(_));
+        let right_is_number =
+            rt.as_deref() == Some("number") || matches!(right, Expression::NumericLiteral(_));
+        let left_is_bool =
+            lt.as_deref() == Some("boolean") || matches!(left, Expression::BooleanLiteral(_));
+        let right_is_bool =
+            rt.as_deref() == Some("boolean") || matches!(right, Expression::BooleanLiteral(_));
 
         // Also check Identifier that is a number literal via `let x = 2` — we don't have type info, so also check the source text for numeric vs quoted
         // Fallback: look at the raw source slice for the expression span to see if it looks like a number or string
         // This helps when type_str is None for identifiers
         let left_src = left.span().source_text(self.source).trim();
         let right_src = right.span().source_text(self.source).trim();
-        let looks_like_string = |s: &str| (s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')) || s.starts_with('`');
+        let looks_like_string = |s: &str| {
+            (s.starts_with('"') && s.ends_with('"'))
+                || (s.starts_with('\'') && s.ends_with('\''))
+                || s.starts_with('`')
+        };
         let looks_like_number = |s: &str| s.parse::<f64>().is_ok();
 
         let left_looks_str = left_is_string || looks_like_string(left_src);
@@ -175,7 +236,9 @@ impl<'a> Linter<'a> {
         // So: number + number => OK
         //      string + string => ERROR in strict (suggest template), OK in permissive
         //      string + number / number + string / string + boolean etc => ERROR in strict
-        let is_number_plus_number = (left_looks_num || left_looks_bool) && (right_looks_num || right_looks_bool) && !has_string;
+        let is_number_plus_number = (left_looks_num || left_looks_bool)
+            && (right_looks_num || right_looks_bool)
+            && !has_string;
         // If we couldn't determine, be conservative: if has_string is true and not both_strings, it's likely a bug
         // Also if both_strings, it's also a bug in strict (should use template)
         let should_error = if self.strictness == Strictness::Strict {
@@ -189,31 +252,72 @@ impl<'a> Linter<'a> {
         // However, for strict we also want to allow `+` for numbers only; so has_string => error
         if should_error {
             // But don't double-report for `+` where both are numbers — that's fine
-            if is_number_plus_number { return; }
+            if is_number_plus_number {
+                return;
+            }
             // Don't error if both are unknown and no string look (conservative)
-            if !has_string { return; }
+            if !has_string {
+                return;
+            }
 
             // Build user-friendly message
-            let left_desc = if left_looks_str { "a string" } else if left_looks_num { "a number" } else { "a value" };
-            let right_desc = if right_looks_str { "a string" } else if right_looks_num { "a number" } else { "a value" };
+            let left_desc = if left_looks_str {
+                "a string"
+            } else if left_looks_num {
+                "a number"
+            } else {
+                "a value"
+            };
+            let right_desc = if right_looks_str {
+                "a string"
+            } else if right_looks_num {
+                "a number"
+            } else {
+                "a value"
+            };
             let left_code = left_src.chars().take(20).collect::<String>();
             let right_code = right_src.chars().take(20).collect::<String>();
             let message = if both_strings {
-                format!("You can't join two strings with `+` in TypeScript — it will do pointer math in C++")
+                format!(
+                    "You can't join two strings with `+` in TypeScript — it will do pointer math in C++"
+                )
             } else {
-                format!("You can't add {} and {} with `+` — one is a string and the other is a number", left_desc, right_desc)
+                format!(
+                    "You can't add {} and {} with `+` — one is a string and the other is a number",
+                    left_desc, right_desc
+                )
             };
             let suggestion = if both_strings {
-                format!("Use a template string instead: `` `${{left}}${{right}}` `` or `String({}) + String({})` → in your code: \"`{}`\" + \"`{}`\" should be `` `${{{}}}${{{}}}` ``", left_code, right_code, left_code, right_code, left_code, right_code)
+                format!(
+                    "Use a template string instead: `` `${{left}}${{right}}` `` or `String({}) + String({})` → in your code: \"`{}`\" + \"`{}`\" should be `` `${{{}}}${{{}}}` ``",
+                    left_code, right_code, left_code, right_code, left_code, right_code
+                )
             } else {
-                format!("Use a template string to be clear: `` `This ${{}}:` `` or convert the number first: `String({}) + \"{}\"`. In your code `{}` + `{}` → write `` `${{{}}}` + \"{}\" `` or `String({}) + \"{}\" `", left_code, right_code, left_code, right_code, left_code, right_code, left_code, right_code)
+                format!(
+                    "Use a template string to be clear: `` `This ${{}}:` `` or convert the number first: `String({}) + \"{}\"`. In your code `{}` + `{}` → write `` `${{{}}}` + \"{}\" `` or `String({}) + \"{}\" `",
+                    left_code,
+                    right_code,
+                    left_code,
+                    right_code,
+                    left_code,
+                    right_code,
+                    left_code,
+                    right_code
+                )
             };
             // More precise suggestion for the user's example: `"This 2 + 5 = " + add(2,5)` where left is string and right is call returning int
             // We can give a specific example: `"This 2 + 5 = " + add(2,5)` => ` `This 2 + 5 = ${add(2,5)}` `
-            let final_suggestion = if left_looks_str && (right_src.contains('(') || right_looks_num) {
-                format!("Change `\"{}\" + {}` to `` `{}` + \"${{ {} }}\" `` or `` `${{ {} }}` ``. Example: `\"This 2 + 5 = \" + add(2,5)` → `` `This 2 + 5 = ${{add(2,5)}}` ``", left_code, right_code, left_code, right_code, right_code)
+            let final_suggestion = if left_looks_str && (right_src.contains('(') || right_looks_num)
+            {
+                format!(
+                    "Change `\"{}\" + {}` to `` `{}` + \"${{ {} }}\" `` or `` `${{ {} }}` ``. Example: `\"This 2 + 5 = \" + add(2,5)` → `` `This 2 + 5 = ${{add(2,5)}}` ``",
+                    left_code, right_code, left_code, right_code, right_code
+                )
             } else if right_looks_str && left_looks_num {
-                format!("Change `{} + \"{}\"` to `` `${{ {} }} {}` `` or `String({}) + \"{}\" `", left_code, right_code, left_code, right_code, left_code, right_code)
+                format!(
+                    "Change `{} + \"{}\"` to `` `${{ {} }} {}` `` or `String({}) + \"{}\" `",
+                    left_code, right_code, left_code, right_code, left_code, right_code
+                )
             } else {
                 suggestion
             };
@@ -234,7 +338,7 @@ impl<'a> Linter<'a> {
                 self.visit_variable_declaration(decl);
             }
             Statement::FunctionDeclaration(f) => {
-                if let Some(id)= &f.id {
+                if let Some(id) = &f.id {
                     self.declare(id.name.to_string());
                     // Must have return type in strict
                     if self.in_strict && f.return_type.is_none() {
@@ -253,90 +357,199 @@ impl<'a> Linter<'a> {
                     }
                     // Check param types
                     for p in &f.params.items {
-                        let (n,_) = Self::binding_name(&p.pattern);
-                        if let Some(name)= n.clone() { self.declare(name); }
+                        let (n, _) = Self::binding_name(&p.pattern);
+                        if let Some(name) = n.clone() {
+                            self.declare(name);
+                        }
                         if self.in_strict && p.type_annotation.is_none() {
                             let param_src = p.span.source_text(self.source);
                             if !param_src.contains(':') {
-                                self.push(p.span, "ts-require-param-type", "error",
-                                    format!("Parameter `{}` needs a type.", n.clone().unwrap_or("param".into())),
-                                    Some(format!("Write it like `{}: number` or `{}: string`", n.clone().unwrap_or("x".into()), n.unwrap_or("x".into()))));
+                                self.push(
+                                    p.span,
+                                    "ts-require-param-type",
+                                    "error",
+                                    format!(
+                                        "Parameter `{}` needs a type.",
+                                        n.clone().unwrap_or("param".into())
+                                    ),
+                                    Some(format!(
+                                        "Write it like `{}: number` or `{}: string`",
+                                        n.clone().unwrap_or("x".into()),
+                                        n.unwrap_or("x".into())
+                                    )),
+                                );
                             }
                         }
                     }
                 }
                 self.push_scope();
-                if let Some(body)=&f.body { for s in &body.statements { self.visit_statement(s); } }
-                self.pop_scope();
-            }
-            Statement::BlockStatement(b) => { self.push_scope(); for s in &b.body { self.visit_statement(s); } self.pop_scope(); }
-            Statement::ExpressionStatement(es) => self.visit_expression(&es.expression),
-            Statement::ReturnStatement(r) => if let Some(e)=&r.argument { self.visit_expression(e); },
-            Statement::IfStatement(i) => { self.visit_expression(&i.test); self.visit_statement(&i.consequent); if let Some(alt)=&i.alternate { self.visit_statement(alt); } },
-            Statement::WhileStatement(w) => { self.visit_expression(&w.test); self.visit_statement(&w.body); },
-            Statement::DoWhileStatement(d) => { self.visit_statement(&d.body); self.visit_expression(&d.test); },
-            Statement::ForStatement(f) => {
-                self.push_scope();
-                if let Some(init)=&f.init {
-                    match init {
-                        ForStatementInit::VariableDeclaration(v) => self.visit_variable_declaration(v),
-                        _ => if let Some(e)=init.as_expression(){ self.visit_expression(e); }
+                if let Some(body) = &f.body {
+                    for s in &body.statements {
+                        self.visit_statement(s);
                     }
                 }
-                if let Some(t)=&f.test { self.visit_expression(t); }
-                if let Some(u)=&f.update { self.visit_expression(u); }
+                self.pop_scope();
+            }
+            Statement::BlockStatement(b) => {
+                self.push_scope();
+                for s in &b.body {
+                    self.visit_statement(s);
+                }
+                self.pop_scope();
+            }
+            Statement::ExpressionStatement(es) => self.visit_expression(&es.expression),
+            Statement::ReturnStatement(r) => {
+                if let Some(e) = &r.argument {
+                    self.visit_expression(e);
+                }
+            }
+            Statement::IfStatement(i) => {
+                self.visit_expression(&i.test);
+                self.visit_statement(&i.consequent);
+                if let Some(alt) = &i.alternate {
+                    self.visit_statement(alt);
+                }
+            }
+            Statement::WhileStatement(w) => {
+                self.visit_expression(&w.test);
+                self.visit_statement(&w.body);
+            }
+            Statement::DoWhileStatement(d) => {
+                self.visit_statement(&d.body);
+                self.visit_expression(&d.test);
+            }
+            Statement::ForStatement(f) => {
+                self.push_scope();
+                if let Some(init) = &f.init {
+                    match init {
+                        ForStatementInit::VariableDeclaration(v) => {
+                            self.visit_variable_declaration(v)
+                        }
+                        _ => {
+                            if let Some(e) = init.as_expression() {
+                                self.visit_expression(e);
+                            }
+                        }
+                    }
+                }
+                if let Some(t) = &f.test {
+                    self.visit_expression(t);
+                }
+                if let Some(u) = &f.update {
+                    self.visit_expression(u);
+                }
                 self.visit_statement(&f.body);
                 self.pop_scope();
             }
-            Statement::ForInStatement(f) => { self.visit_expression(&f.right); self.push_scope(); self.visit_statement(&f.body); self.pop_scope(); }
-            Statement::ForOfStatement(f) => { self.visit_expression(&f.right); self.push_scope(); self.visit_statement(&f.body); self.pop_scope(); }
-            Statement::SwitchStatement(s) => { self.visit_expression(&s.discriminant); for c in &s.cases { if let Some(t)=&c.test { self.visit_expression(t); } for st in &c.consequent { self.visit_statement(st); } } }
+            Statement::ForInStatement(f) => {
+                self.visit_expression(&f.right);
+                self.push_scope();
+                self.visit_statement(&f.body);
+                self.pop_scope();
+            }
+            Statement::ForOfStatement(f) => {
+                self.visit_expression(&f.right);
+                self.push_scope();
+                self.visit_statement(&f.body);
+                self.pop_scope();
+            }
+            Statement::SwitchStatement(s) => {
+                self.visit_expression(&s.discriminant);
+                for c in &s.cases {
+                    if let Some(t) = &c.test {
+                        self.visit_expression(t);
+                    }
+                    for st in &c.consequent {
+                        self.visit_statement(st);
+                    }
+                }
+            }
             Statement::TryStatement(t) => {
                 self.push_scope();
-                for st in &t.block.body { self.visit_statement(st); }
+                for st in &t.block.body {
+                    self.visit_statement(st);
+                }
                 self.pop_scope();
-                if let Some(h)=&t.handler {
+                if let Some(h) = &t.handler {
                     self.push_scope();
-                    for st in &h.body.body { self.visit_statement(st); }
+                    for st in &h.body.body {
+                        self.visit_statement(st);
+                    }
                     self.pop_scope();
                 }
-                if let Some(finalizer)=&t.finalizer {
+                if let Some(finalizer) = &t.finalizer {
                     self.push_scope();
-                    for st in &finalizer.body { self.visit_statement(st); }
+                    for st in &finalizer.body {
+                        self.visit_statement(st);
+                    }
                     self.pop_scope();
                 }
             }
             Statement::ThrowStatement(t) => self.visit_expression(&t.argument),
             Statement::ClassDeclaration(c) => {
-                if let Some(id)=&c.id { self.declare(id.name.to_string()); }
+                if let Some(id) = &c.id {
+                    self.declare(id.name.to_string());
+                }
                 self.push_scope();
                 for el in &c.body.body {
                     match el {
                         ClassElement::MethodDefinition(m) => {
                             self.push_scope();
-                            for p in &m.value.params.items { if let Some((n,_))=Self::binding_name_opt(&p.pattern) { self.declare(n); } }
-                            if let Some(b)=&m.value.body { for s in &b.statements { self.visit_statement(s); } }
+                            for p in &m.value.params.items {
+                                if let Some((n, _)) = Self::binding_name_opt(&p.pattern) {
+                                    self.declare(n);
+                                }
+                            }
+                            if let Some(b) = &m.value.body {
+                                for s in &b.statements {
+                                    self.visit_statement(s);
+                                }
+                            }
                             self.pop_scope();
                         }
-                        ClassElement::PropertyDefinition(p) => if let Some(v)=&p.value { self.visit_expression(v); },
+                        ClassElement::PropertyDefinition(p) => {
+                            if let Some(v) = &p.value {
+                                self.visit_expression(v);
+                            }
+                        }
                         _ => {}
                     }
                 }
                 self.pop_scope();
             }
-            Statement::TSInterfaceDeclaration(_) => {},
+            Statement::TSInterfaceDeclaration(_) => {}
             Statement::TSTypeAliasDeclaration(t) => {
                 if t.type_annotation.span().source_text(self.source).trim() == "any" {
-                    self.push(t.span, "ts-no-any", "error", "Don't use `any` for a type alias.".into(), Some("Use `unknown` or a specific type.".into()));
+                    self.push(
+                        t.span,
+                        "ts-no-any",
+                        "error",
+                        "Don't use `any` for a type alias.".into(),
+                        Some("Use `unknown` or a specific type.".into()),
+                    );
                 }
             }
             Statement::TSEnumDeclaration(e) => {
-                for m in &e.body.members { if let Some(init)=&m.initializer { self.visit_expression(init); } }
+                for m in &e.body.members {
+                    if let Some(init) = &m.initializer {
+                        self.visit_expression(init);
+                    }
+                }
             }
-            Statement::BreakStatement(_) | Statement::ContinueStatement(_) | Statement::EmptyStatement(_) | Statement::DebuggerStatement(_) => {},
+            Statement::BreakStatement(_)
+            | Statement::ContinueStatement(_)
+            | Statement::EmptyStatement(_)
+            | Statement::DebuggerStatement(_) => {}
             Statement::LabeledStatement(l) => self.visit_statement(&l.body),
-            Statement::WithStatement(w) => { self.visit_expression(&w.object); self.visit_statement(&w.body); }
-            Statement::ImportDeclaration(_) | Statement::ExportNamedDeclaration(_) | Statement::ExportDefaultDeclaration(_) | Statement::ExportAllDeclaration(_) | Statement::ExportDeclaration(_) => {},
+            Statement::WithStatement(w) => {
+                self.visit_expression(&w.object);
+                self.visit_statement(&w.body);
+            }
+            Statement::ImportDeclaration(_)
+            | Statement::ExportNamedDeclaration(_)
+            | Statement::ExportDefaultDeclaration(_)
+            | Statement::ExportAllDeclaration(_)
+            | Statement::ExportDeclaration(_) => {}
             _ => {}
         }
     }
@@ -349,32 +562,52 @@ impl<'a> Linter<'a> {
         }
         for d in &decl.declarations {
             let (name, _) = Self::binding_name(&d.id);
-            if let Some(n)= &name { self.declare(n.clone()); }
+            if let Some(n) = &name {
+                self.declare(n.clone());
+            }
             if self.in_strict && d.type_annotation.is_none() {
                 let inferred = d.init.as_ref().and_then(|e| self.type_str_of_expr(e));
-                let init_src = d.init.as_ref().map(|e| e.span().source_text(self.source).chars().take(20).collect::<String>()).unwrap_or_default();
-                let msg = if let Some(n)= &name {
+                let init_src = d
+                    .init
+                    .as_ref()
+                    .map(|e| e.span().source_text(self.source).chars().take(20).collect::<String>())
+                    .unwrap_or_default();
+                let msg = if let Some(n) = &name {
                     format!("`{n}` needs a type. In TypeScript every variable must say what it is.")
                 } else {
                     "This variable needs a type.".into()
                 };
-                let sugg = if let Some(t)= inferred {
-                    format!("Add a type like `: {t}` — example: `let {}: {} = {}`", name.clone().unwrap_or("x".into()), t, init_src)
-                } else if let Some(n)= &name {
-                    format!("Add a type — is `{n}` a string, a number, or something else? Example: `let {n}: number = 1` or `let {n}: string = \"hello\"`")
+                let sugg = if let Some(t) = inferred {
+                    format!(
+                        "Add a type like `: {t}` — example: `let {}: {} = {}`",
+                        name.clone().unwrap_or("x".into()),
+                        t,
+                        init_src
+                    )
+                } else if let Some(n) = &name {
+                    format!(
+                        "Add a type — is `{n}` a string, a number, or something else? Example: `let {n}: number = 1` or `let {n}: string = \"hello\"`"
+                    )
                 } else {
                     "Add a type like `: number` or `: string`".into()
                 };
                 self.push(d.span, "ts-require-type", "error", msg, Some(sugg));
             }
-            if let Some(init)= &d.init {
+            if let Some(init) = &d.init {
                 self.visit_expression(init);
             }
-            if let Some(ta)= &d.type_annotation {
+            if let Some(ta) = &d.type_annotation {
                 if ta.type_annotation.span().source_text(self.source).trim() == "any" {
-                    self.push(ta.span, "ts-no-any", "error",
+                    self.push(
+                        ta.span,
+                        "ts-no-any",
+                        "error",
                         "Don't use `any` — it hides mistakes that will crash in C++.".into(),
-                        Some("Use a real type like `number`, `string`, or `unknown` and check it.".into()));
+                        Some(
+                            "Use a real type like `number`, `string`, or `unknown` and check it."
+                                .into(),
+                        ),
+                    );
                 }
             }
         }
@@ -387,22 +620,36 @@ impl<'a> Linter<'a> {
                 self.visit_expression(&b.left);
                 self.visit_expression(&b.right);
                 // Also check == vs === in strict
-                if b.operator == BinaryOperator::Equality || b.operator == BinaryOperator::Inequality {
+                if b.operator == BinaryOperator::Equality
+                    || b.operator == BinaryOperator::Inequality
+                {
                     self.push(b.span, "ts-strict-equality", "error",
                         "Use `===` and `!==` instead of `==` and `!=` — they don't do the same thing.".into(),
                         Some("Change `a == b` to `a === b` and `a != b` to `a !== b`".into()));
                 }
             }
-            Expression::LogicalExpression(l) => { self.visit_expression(&l.left); self.visit_expression(&l.right); }
+            Expression::LogicalExpression(l) => {
+                self.visit_expression(&l.left);
+                self.visit_expression(&l.right);
+            }
             Expression::UnaryExpression(u) => self.visit_expression(&u.argument),
-            Expression::UpdateExpression(u) => { let _ = &u.argument; }
+            Expression::UpdateExpression(u) => {
+                let _ = &u.argument;
+            }
             Expression::AssignmentExpression(a) => {
                 // Check if assigning to undeclared variable
                 if let AssignmentTarget::AssignmentTargetIdentifier(id) = &a.left {
                     if !self.is_declared(id.name.as_str()) {
-                        self.push(a.span, "ts-undeclared", "error",
-                            format!("`{}` hasn't been declared. Did you forget `let` or `const`?", id.name),
-                            Some(format!("Write `let {} = ...` before using it", id.name)));
+                        self.push(
+                            a.span,
+                            "ts-undeclared",
+                            "error",
+                            format!(
+                                "`{}` hasn't been declared. Did you forget `let` or `const`?",
+                                id.name
+                            ),
+                            Some(format!("Write `let {} = ...` before using it", id.name)),
+                        );
                     }
                 }
                 self.visit_expression(&a.right);
@@ -412,7 +659,23 @@ impl<'a> Linter<'a> {
                 if let Expression::Identifier(id) = &c.callee {
                     if !self.is_declared(id.name.as_str()) {
                         // Allow globals like console, fetch, etc.
-                        let allowed = ["console","fetch","setTimeout","setInterval","clearTimeout","clearInterval","Math","Number","String","Boolean","Array","Object","JSON","Promise","setTimeout"];
+                        let allowed = [
+                            "console",
+                            "fetch",
+                            "setTimeout",
+                            "setInterval",
+                            "clearTimeout",
+                            "clearInterval",
+                            "Math",
+                            "Number",
+                            "String",
+                            "Boolean",
+                            "Array",
+                            "Object",
+                            "JSON",
+                            "Promise",
+                            "setTimeout",
+                        ];
                         if !allowed.contains(&id.name.as_str()) {
                             self.push(c.span, "ts-undefined-function", "error",
                                 format!("Function `{}` doesn't exist — are you missing an import or did you misspell it?", id.name),
@@ -420,51 +683,134 @@ impl<'a> Linter<'a> {
                         }
                     }
                 }
-                for arg in &c.arguments { if let Some(e)= arg.as_expression() { self.visit_expression(e); } }
+                for arg in &c.arguments {
+                    if let Some(e) = arg.as_expression() {
+                        self.visit_expression(e);
+                    }
+                }
                 self.visit_expression(&c.callee);
             }
             Expression::StaticMemberExpression(s) => self.visit_expression(&s.object),
-            Expression::ComputedMemberExpression(c) => { self.visit_expression(&c.object); self.visit_expression(&c.expression); }
+            Expression::ComputedMemberExpression(c) => {
+                self.visit_expression(&c.object);
+                self.visit_expression(&c.expression);
+            }
             Expression::PrivateFieldExpression(p) => self.visit_expression(&p.object),
-            Expression::ConditionalExpression(c) => { self.visit_expression(&c.test); self.visit_expression(&c.consequent); self.visit_expression(&c.alternate); }
-            Expression::ArrayExpression(a) => for el in &a.elements { if let Some(e)= el.as_expression() { self.visit_expression(e); } },
-            Expression::ObjectExpression(o) => for p in &o.properties { if let ObjectPropertyKind::ObjectProperty(prop)= p { self.visit_expression(&prop.value); } },
-            Expression::TemplateLiteral(t) => for e in &t.expressions { self.visit_expression(e); },
-            Expression::TaggedTemplateExpression(t) => { self.visit_expression(&t.tag); for e in &t.quasi.expressions { self.visit_expression(e); } },
-            Expression::SequenceExpression(s) => for e in &s.expressions { self.visit_expression(e); },
+            Expression::ConditionalExpression(c) => {
+                self.visit_expression(&c.test);
+                self.visit_expression(&c.consequent);
+                self.visit_expression(&c.alternate);
+            }
+            Expression::ArrayExpression(a) => {
+                for el in &a.elements {
+                    if let Some(e) = el.as_expression() {
+                        self.visit_expression(e);
+                    }
+                }
+            }
+            Expression::ObjectExpression(o) => {
+                for p in &o.properties {
+                    if let ObjectPropertyKind::ObjectProperty(prop) = p {
+                        self.visit_expression(&prop.value);
+                    }
+                }
+            }
+            Expression::TemplateLiteral(t) => {
+                for e in &t.expressions {
+                    self.visit_expression(e);
+                }
+            }
+            Expression::TaggedTemplateExpression(t) => {
+                self.visit_expression(&t.tag);
+                for e in &t.quasi.expressions {
+                    self.visit_expression(e);
+                }
+            }
+            Expression::SequenceExpression(s) => {
+                for e in &s.expressions {
+                    self.visit_expression(e);
+                }
+            }
             Expression::ParenthesizedExpression(p) => self.visit_expression(&p.expression),
             Expression::AwaitExpression(a) => self.visit_expression(&a.argument),
-            Expression::YieldExpression(y) => if let Some(a)=&y.argument { self.visit_expression(a); },
+            Expression::YieldExpression(y) => {
+                if let Some(a) = &y.argument {
+                    self.visit_expression(a);
+                }
+            }
             Expression::ChainExpression(c) => match &c.expression {
                 ChainElement::CallExpression(call) => {
                     self.visit_expression(&call.callee);
-                    for arg in &call.arguments { if let Some(e)= arg.as_expression() { self.visit_expression(e); } }
-                },
+                    for arg in &call.arguments {
+                        if let Some(e) = arg.as_expression() {
+                            self.visit_expression(e);
+                        }
+                    }
+                }
                 ChainElement::StaticMemberExpression(s) => self.visit_expression(&s.object),
-                ChainElement::ComputedMemberExpression(comp) => { self.visit_expression(&comp.object); self.visit_expression(&comp.expression); },
+                ChainElement::ComputedMemberExpression(comp) => {
+                    self.visit_expression(&comp.object);
+                    self.visit_expression(&comp.expression);
+                }
                 ChainElement::PrivateFieldExpression(p) => self.visit_expression(&p.object),
                 _ => {}
             },
             Expression::ArrowFunctionExpression(f) => {
                 self.push_scope();
-                for p in &f.params.items { if let Some((n,_))=Self::binding_name_opt(&p.pattern) { self.declare(n); } }
+                for p in &f.params.items {
+                    if let Some((n, _)) = Self::binding_name_opt(&p.pattern) {
+                        self.declare(n);
+                    }
+                }
                 match &f.body {
-                    ArrowFunctionBody::FunctionBody(b) => for s in &b.statements { self.visit_statement(s); },
-                    _ => if let Some(e)=f.body.as_expression() { self.visit_expression(e); },
+                    ArrowFunctionBody::FunctionBody(b) => {
+                        for s in &b.statements {
+                            self.visit_statement(s);
+                        }
+                    }
+                    _ => {
+                        if let Some(e) = f.body.as_expression() {
+                            self.visit_expression(e);
+                        }
+                    }
                 }
                 self.pop_scope();
             }
             Expression::FunctionExpression(f) => {
                 self.push_scope();
-                for p in &f.params.items { if let Some((n,_))=Self::binding_name_opt(&p.pattern) { self.declare(n); } }
-                if let Some(b)=&f.body { for s in &b.statements { self.visit_statement(s); } }
+                for p in &f.params.items {
+                    if let Some((n, _)) = Self::binding_name_opt(&p.pattern) {
+                        self.declare(n);
+                    }
+                }
+                if let Some(b) = &f.body {
+                    for s in &b.statements {
+                        self.visit_statement(s);
+                    }
+                }
                 self.pop_scope();
             }
             Expression::Identifier(id) => {
                 // Use of undeclared variable
                 if !self.is_declared(id.name.as_str()) {
                     // Allow console, Math, etc.
-                    let allowed = ["console","Math","Number","String","Boolean","Array","Object","JSON","Promise","undefined","null","true","false","NaN","Infinity"];
+                    let allowed = [
+                        "console",
+                        "Math",
+                        "Number",
+                        "String",
+                        "Boolean",
+                        "Array",
+                        "Object",
+                        "JSON",
+                        "Promise",
+                        "undefined",
+                        "null",
+                        "true",
+                        "false",
+                        "NaN",
+                        "Infinity",
+                    ];
                     if !allowed.contains(&id.name.as_str()) {
                         // Only warn if it's likely a real variable, not a property
                         // For now, don't error on bare identifiers that could be globals — just check if it's in a call like `add(2,5)` where add is not declared
@@ -472,20 +818,33 @@ impl<'a> Linter<'a> {
                     }
                 }
             }
-            Expression::Super(_) | Expression::ThisExpression(_) | Expression::NullLiteral(_) | Expression::BooleanLiteral(_) | Expression::NumericLiteral(_) | Expression::StringLiteral(_) | Expression::BigIntLiteral(_) | Expression::RegExpLiteral(_) | Expression::JSXElement(_) | Expression::JSXFragment(_) => {},
-            _ => {},
+            Expression::Super(_)
+            | Expression::ThisExpression(_)
+            | Expression::NullLiteral(_)
+            | Expression::BooleanLiteral(_)
+            | Expression::NumericLiteral(_)
+            | Expression::StringLiteral(_)
+            | Expression::BigIntLiteral(_)
+            | Expression::RegExpLiteral(_)
+            | Expression::JSXElement(_)
+            | Expression::JSXFragment(_) => {}
+            _ => {}
         }
     }
 
     fn binding_name(pat: &BindingPattern<'a>) -> (Option<String>, Option<String>) {
-        Self::binding_name_opt(pat).map(|(a, b)| (Some(a), b)).unwrap_or((None,None))
+        Self::binding_name_opt(pat).map(|(a, b)| (Some(a), b)).unwrap_or((None, None))
     }
     fn binding_name_opt(pat: &BindingPattern<'a>) -> Option<(String, Option<String>)> {
         match pat {
             BindingPattern::BindingIdentifier(id) => Some((id.name.to_string(), None)),
             BindingPattern::AssignmentPattern(a) => Self::binding_name_opt(&a.left),
-            BindingPattern::ArrayPattern(ap) => ap.elements.iter().find_map(|e| e.as_ref().and_then(|p| Self::binding_name_opt(p))),
-            BindingPattern::ObjectPattern(op) => op.properties.iter().find_map(|prop| Self::binding_name_opt(&prop.value)),
+            BindingPattern::ArrayPattern(ap) => {
+                ap.elements.iter().find_map(|e| e.as_ref().and_then(|p| Self::binding_name_opt(p)))
+            }
+            BindingPattern::ObjectPattern(op) => {
+                op.properties.iter().find_map(|prop| Self::binding_name_opt(&prop.value))
+            }
         }
     }
 }

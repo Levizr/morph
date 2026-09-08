@@ -81,11 +81,9 @@ fn is_plain_cpp_type(name: &str) -> bool {
 pub fn ts_type_name_to_string(name: &TSTypeName) -> String {
     match name {
         TSTypeName::IdentifierReference(id) => id.name.to_string(),
-        TSTypeName::QualifiedName(q) => format!(
-            "{}.{}",
-            ts_type_name_to_string(&q.left),
-            q.right.name
-        ),
+        TSTypeName::QualifiedName(q) => {
+            format!("{}.{}", ts_type_name_to_string(&q.left), q.right.name)
+        }
         TSTypeName::ThisExpression(_) => "this".to_string(),
     }
 }
@@ -163,7 +161,8 @@ pub fn resolve_type<'a>(
             raw.to_string()
         }
         TSType::TSArrayType(arr) => {
-            let elem = resolve_type(Some(&arr.element_type), "auto", template_params, true, class_names);
+            let elem =
+                resolve_type(Some(&arr.element_type), "auto", template_params, true, class_names);
             if elem.starts_with("Js") || !is_plain_cpp_type(&elem) {
                 return "JsArray".to_string();
             }
@@ -193,7 +192,9 @@ pub fn resolve_type<'a>(
                 .map(|ta| {
                     ta.params
                         .iter()
-                        .map(|p| resolve_type(Some(p), "auto", template_params, wrap_shared, class_names))
+                        .map(|p| {
+                            resolve_type(Some(p), "auto", template_params, wrap_shared, class_names)
+                        })
                         .collect()
                 })
                 .unwrap_or_default();
@@ -227,7 +228,11 @@ pub fn resolve_type<'a>(
             }
             // Generic handling
             // Handle std_vector, std_optional etc. from placeholder (std:: -> std_)
-            if name == "std_vector" || name == "StdVector" || name == "__StdVector__" || name == "std__vector" {
+            if name == "std_vector"
+                || name == "StdVector"
+                || name == "__StdVector__"
+                || name == "std__vector"
+            {
                 let elem = type_args.first().cloned().unwrap_or_else(|| "auto".to_string());
                 return format!("std::vector<{}>", elem);
             }
@@ -244,7 +249,10 @@ pub fn resolve_type<'a>(
                 let elem_resolved = if elem == "auto" { "auto".to_string() } else { elem };
                 // replicate Python: check if elem is Js or not plain
                 let check = resolve_type(
-                    r.type_arguments.as_ref().and_then(|ta| ta.params.first()).map(|p| p as &TSType),
+                    r.type_arguments
+                        .as_ref()
+                        .and_then(|ta| ta.params.first())
+                        .map(|p| p as &TSType),
                     "auto",
                     template_params,
                     true,
@@ -271,11 +279,7 @@ pub fn resolve_type<'a>(
                 return "auto".to_string();
             }
             // Generic fallback: keep name
-            if type_args.is_empty() {
-                name
-            } else {
-                format!("{}<{}>", name, type_args.join(", "))
-            }
+            if type_args.is_empty() { name } else { format!("{}<{}>", name, type_args.join(", ")) }
         }
         TSType::TSUnionType(u) => {
             // Python returns "auto" for union
@@ -288,7 +292,13 @@ pub fn resolve_type<'a>(
         TSType::TSIntersectionType(_) => "auto".to_string(),
         TSType::TSTupleType(_) => "JsArray".to_string(),
         TSType::TSTypeLiteral(_) => "JsObject".to_string(),
-        TSType::TSParenthesizedType(p) => resolve_type(Some(&p.type_annotation), context_hint, template_params, wrap_shared, class_names),
+        TSType::TSParenthesizedType(p) => resolve_type(
+            Some(&p.type_annotation),
+            context_hint,
+            template_params,
+            wrap_shared,
+            class_names,
+        ),
         _ => {
             // For any other complex type, fallback to auto
             "auto".to_string()
@@ -303,13 +313,15 @@ pub fn resolve_type_annotation<'a>(
     wrap_shared: bool,
     class_names: &HashSet<String>,
 ) -> String {
-    ann.map(|a| resolve_type(Some(&a.type_annotation), hint, template_params, wrap_shared, class_names))
-        .unwrap_or_else(|| hint.to_string())
+    ann.map(|a| {
+        resolve_type(Some(&a.type_annotation), hint, template_params, wrap_shared, class_names)
+    })
+    .unwrap_or_else(|| hint.to_string())
 }
 
 pub fn headers_for(cpp_type: &str) -> Vec<&'static str> {
     // Mirrors _TYPE_TO_HEADER in python
-    const MAP: &[(&str, &str)] = &[ 
+    const MAP: &[(&str, &str)] = &[
         ("std::string", "<string>"),
         ("std::string_view", "<string_view>"),
         ("std::vector", "<vector>"),
@@ -341,15 +353,9 @@ pub fn headers_for(cpp_type: &str) -> Vec<&'static str> {
 }
 
 pub fn is_string_type(cpp_type: &str) -> bool {
-    let base = cpp_type
-        .trim_start_matches("const ")
-        .trim_end_matches('&')
-        .trim()
-        .to_string();
-    matches!(
-        base.as_str(),
-        "JsString" | "std::string" | "std::string_view" | "const char*"
-    ) || base == "std::string"
+    let base = cpp_type.trim_start_matches("const ").trim_end_matches('&').trim().to_string();
+    matches!(base.as_str(), "JsString" | "std::string" | "std::string_view" | "const char*")
+        || base == "std::string"
 }
 
 pub fn param_type(cpp_type: &str) -> String {

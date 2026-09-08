@@ -2,12 +2,16 @@ use oxc_allocator::Allocator;
 use oxc_parser::Parser;
 use oxc_span::SourceType;
 
+use crate::TranslateOptions;
 use crate::codegen::cpp::CppTranslator;
 use crate::codegen::rust::RustTranslator;
 use crate::error::MorphJsError;
-use crate::TranslateOptions;
 
-pub fn translate_to_cpp(source: &str, filename: &str, options: TranslateOptions) -> Result<String, MorphJsError> {
+pub fn translate_to_cpp(
+    source: &str,
+    filename: &str,
+    options: TranslateOptions,
+) -> Result<String, MorphJsError> {
     // Fast path: parse with oxc bump allocator
     let allocator = Allocator::default();
     // Determine source type: treat .ts/.tsx as typescript, .js as js but still allow types
@@ -32,7 +36,13 @@ pub fn translate_to_cpp(source: &str, filename: &str, options: TranslateOptions)
             let alloc2 = Allocator::default();
             let ret2 = Parser::new(&alloc2, &normalized, source_type).parse();
             if !ret2.panicked && ret2.diagnostics.is_empty() {
-                let mut translator = CppTranslator::new(&normalized, options.indent, options.optimize, options.type_mode, options.runtime_path);
+                let mut translator = CppTranslator::new(
+                    &normalized,
+                    options.indent,
+                    options.optimize,
+                    options.type_mode,
+                    options.runtime_path,
+                );
                 let code = translator.translate_program(&ret2.program);
                 return Ok(code);
             }
@@ -47,7 +57,13 @@ pub fn translate_to_cpp(source: &str, filename: &str, options: TranslateOptions)
             let alloc2 = Allocator::default();
             let ret2 = Parser::new(&alloc2, &normalized, source_type).parse();
             if !ret2.panicked && ret2.diagnostics.is_empty() {
-                let mut translator = CppTranslator::new(&normalized, options.indent, options.optimize, options.type_mode, options.runtime_path);
+                let mut translator = CppTranslator::new(
+                    &normalized,
+                    options.indent,
+                    options.optimize,
+                    options.type_mode,
+                    options.runtime_path,
+                );
                 let code = translator.translate_program(&ret2.program);
                 return Ok(code);
             }
@@ -59,7 +75,13 @@ pub fn translate_to_cpp(source: &str, filename: &str, options: TranslateOptions)
         )));
     }
 
-    let mut translator = CppTranslator::new(source, options.indent, options.optimize, options.type_mode, options.runtime_path);
+    let mut translator = CppTranslator::new(
+        source,
+        options.indent,
+        options.optimize,
+        options.type_mode,
+        options.runtime_path,
+    );
     let code = translator.translate_program(&ret.program);
     Ok(code)
 }
@@ -82,7 +104,11 @@ fn normalize_cpp_types(source: &str) -> String {
     s
 }
 
-pub fn translate_to_rust(source: &str, filename: &str, indent_level: usize) -> Result<String, MorphJsError> {
+pub fn translate_to_rust(
+    source: &str,
+    filename: &str,
+    indent_level: usize,
+) -> Result<String, MorphJsError> {
     let allocator = Allocator::default();
     let source_type = if filename.ends_with(".tsx") || filename.ends_with(".ts") {
         SourceType::from_path(filename).unwrap_or_default().with_typescript(true)
@@ -115,7 +141,11 @@ pub fn translate_to_rust(source: &str, filename: &str, indent_level: usize) -> R
                 return Ok(translator.translate_program(&ret2.program));
             }
         }
-        return Err(MorphJsError::Parse(format!("parse errors in {}: {}", filename, msgs.join("; "))));
+        return Err(MorphJsError::Parse(format!(
+            "parse errors in {}: {}",
+            filename,
+            msgs.join("; ")
+        )));
     }
     let mut translator = RustTranslator::new(source, indent_level);
     Ok(translator.translate_program(&ret.program))

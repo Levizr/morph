@@ -10,7 +10,7 @@ When you write:
 const [count, setCount] = morphState(0)
 ```
 
-Morph's TS→C++ translator (the `morph-js` crate) converts this to equivalent C++ using Oxc. The translated code uses Morph's native runtime types (`JsValue`, `JsString`, `Signal<T>`, etc.) and runs directly in the compiled binary.
+Morph's TS→C++ translator (the `morpher` crate) converts this to equivalent C++ using Oxc. The translated code uses Morph's native runtime types (`JsValue`, `JsString`, `Signal<T>`, etc.) and runs directly in the compiled binary.
 
 In **dev mode**, the translated logic is compiled to a shared library (`logic.<hash>.so`) loaded via `dlopen`. Hot reload re-wires signals and effects in place without restarting the window.
 
@@ -61,12 +61,14 @@ Binary (`+`, `-`, `*`, `/`, `===`, `!==`, `==`, `!=`, `<`, `>`, etc.), unary (`!
 
 ### JS Runtime Semantics
 
-- Truthiness (same rules as JS)
-- `==` / `!=` with JS coercion rules
+- Truthiness (same rules as JS, except empty arrays are falsy)
+- `==` / `!=` with JS coercion rules, `===` / `!==`, relational operators — on native and `Js*` types alike (see [How JavaScript Comparisons Work in Morph](./js-comparisons.md))
 - String concatenation (`"" + x`)
 - Array `push`/`pop`/index access
 - Object `has`/`keys`/index access
-- String methods: `trim`, `toUpperCase`, `toLowerCase`, `indexOf`, `substring`, `slice`, `replace`, `charAt`
+- String methods on both `JsString` and native `std::string`: `trim`, `toUpperCase`, `toLowerCase`, `indexOf`, `substring`, `slice`, `replace`, `charAt`, plus `split`, `startsWith`, `endsWith`, `includes`, `repeat`, `padStart`, `padEnd` — natives lower to `morph::str::*` helpers, chains nest (see [Native C++ Types](./native-types.md#js-methods-on-natives))
+- Number `.toString()` on native `int`/`double` (lowers to `morph::str::to_string`)
+- `Array.push` on both `JsArray` (`.push`) and `std::vector` (`.push_back`), `.length` on vectors, arrays, and strings alike (`.size()` where native)
 - Console output: `console.log` / `console.warn` / `console.error` / `console.info` print natively (visible in the DevTools **Logs** tab)
 
 ## What's Not Supported Yet
@@ -78,7 +80,7 @@ Binary (`+`, `-`, `*`, `/`, `===`, `!==`, `==`, `!=`, `<`, `>`, etc.), unary (`!
 - Generics beyond basic usage
 - `async`/`await` in non-event-handler contexts
 - The `typeof` operator (compare against `undefined`/`null` instead)
-- JS-only string/array methods the native types don't implement — `.split()`, `.includes()`, `.startsWith()`, `.map()`, `.filter()`, `.join()`, etc.
+- JS-only methods the natives don't implement yet — `.map()`, `.filter()`, `.join()`, `.toFixed()`, `.toPrecision()`, etc. (`.split()`, `.includes()`, `.startsWith()` already lower to `morph::str::*` helpers)
 
 The linter (`morph check`) rejects unsupported operators and methods with a clear error before building.
 
@@ -89,4 +91,16 @@ The linter (`morph check`) rejects unsupported operators and methods with a clea
 | **Legacy** | `morph file.ts` | `auto` inference, `Js*` types everywhere, no escape analysis |
 | **Optimized** | `morph file.ts --optimize` | Intent-based: escape analysis → stack/`unique_ptr`/`shared_ptr`, native types (`int32_t`, `std::string`, `std::vector`), type widening only when needed |
 
-See [Intent-Based Codegen](../guides/intent-based-codegen.md) for the full memory management strategy.
+Orthogonal to both modes, `--type` controls annotations:
+
+| Flag | Behavior |
+|---|---|
+| `--type infer` (default) | Ignore annotations, infer the cheapest native type from initializer and usage |
+| `--type strict` | Respect annotations (`number` stays `JsNumber`); unannotated variables are still inferred |
+
+```bash
+morph app.ts --to cpp --type infer --optimize   # native types + escape analysis
+morph app.ts --to cpp --type strict             # annotations exactly as written
+```
+
+See [Intent-Based Codegen](../guides/intent-based-codegen.md) for the full memory management strategy, and [Native C++ Types](./native-types.md#how---type-picks-native-vs-wrapper) for how the two flags interact.

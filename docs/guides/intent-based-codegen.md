@@ -104,19 +104,41 @@ x = await fetchBigNumber();  // Could overflow int64, or be string
 
 The analyzer widens the type based on **usage**, not just annotation:
 
-| Annotation | Only Arithmetic | Assigned from Dynamic | `.toString()` Called |
+| Annotation | Only Arithmetic | Assigned from Dynamic | String/Number Method Called |
 |---|---|---|---|
-| `int` / `int32` / `int64` | `int32_t` / `int64_t` | `JsNumber` | `std::to_string(x)` |
-| `float` / `double` | `float` / `double` | `JsNumber` | `std::to_string(x)` |
-| `string` | `std::string` | `JsString` | `s` (native) |
+| `int` / `int32` / `int64` | `int32_t` / `int64_t` | `JsNumber` | native + `morph::str::*` helper (`to_string`, `charAt`, …) |
+| `float` / `double` | `float` / `double` | `JsNumber` | native + `morph::str::*` helper |
+| `string` | `std::string` | `JsString` | `s` stays native, calls nest: `to_lower(to_upper(s))` |
 | `number` | `JsNumber` | `JsNumber` | `x.as_string()` |
+| `T[]` with `.push()` / `.length` | `std::vector<T>` | `JsArray` | method decides: `push_back` vs `push`, `.size()` for both |
 
 ### Widening Rules
 
 - **Arithmetic only** → keep native (`int64_t`, `double`)
 - **Dynamic assign** (`await`, `fetch`, `JSON.parse`, widened var) → `JsNumber`
-- **`.toString()` / `.toFixed()` / `.toPrecision()`** on native → emit `std::to_string()`
+- **String/number methods on native** → keep native, rewrite the call to a `morph::str::*` helper (`runtime/cpp/types/js_string_helpers.h`); chains nest so no intermediate boxes
+- **Array methods (`.push()`, `.length`, iteration)** → `JsArray` when the usage needs JS semantics, else homogeneous `std::vector<T>` inferred from the elements (recursively, so `[[1,2]]` is `vector<vector<int32_t>>`)
 - **Property access on unknown** → `JsValue`
+- **`--type infer` (default) skips widening entirely** — natives are kept and helpers do the work; `--type strict` applies the table above
+
+## JS Comparison Semantics: Native Types, JavaScript Answers
+
+Native types are fast but answer comparisons differently than JavaScript (`"" == 0` is a compile error in C++, `true` in JS). So the analyzer records a `ComparisonSignature` for every comparison and truthiness test, and the emitter generates a `morph::js_cmp` helper block with exactly the sections that file uses:
+
+```ts
+let label: string = "";
+let count: number = 0;
+console.log(label == count);   // true — both are falsy
+```
+
+```cpp
+std::println("{}", morph::js_cmp::loose_eq(label, count));
+```
+
+- Same-class pairs keep direct operators (`int64_t == int64_t` already matches JS).
+- `===` across different types folds to `false` at compile time.
+- The block is emitted inline in the translation unit — no extra header file, no unused helpers.
+- Full coercion tables: [How JavaScript Comparisons Work in Morph](../javascript/js-comparisons.md).
 
 ## Intent Mapping: TS Pattern → C++ Strategy
 
@@ -217,15 +239,63 @@ let x: int = 42;
 console.log(x.toString());
 ```
 
-**Detection**: `.toString()` / `.toFixed()` / `.toPrecision()` on native
-**Translation**: Emit `std::to_string(x)` or `std::format`
+**Detection**: `.toString()` on native
+**Translation**: Emit `morph::str::to_string(x)`
 
 ```cpp
 int64_t x = 42;
-std::println("{}", std::to_string(x));
+std::println("{}", morph::str::to_string(x));
 ```
 
-### 6. Global/Static Storage
+(`.toFixed()` / `.toPrecision()` are still unimplemented — on natives and wrappers alike.)
+
+### 6. Chained String Calls Stay Native
+
+```ts
+let s: string = "hello world";
+console.log(s.toUpperCase().toLowerCase());
+console.log(n.toString().charAt(0).toUpperCase() + n.toString().slice(1));
+```
+
+**Detection**: a method call whose receiver is itself a method call (`CallExpression` as `StaticMemberExpression` object), plus computed receivers like `arr[0]` or `split(t, ",")[1]` — resolved recursively to the base variable's domain
+**Translation**: nest the helpers so every step stays `std::string`:
+
+```cpp
+std::println("{}", morph::str::to_lower(morph::str::to_upper(s)));
+std::println("{}", morph::str::to_upper(morph::str::char_at(morph::str::to_string(n), 0)) + morph::str::slice(morph::str::to_string(n), 1));
+```
+
+`JsString` / `JsValue` receivers keep their direct methods (`obj["name"].toUpperCase()` works because `JsValue` forwards them) — only native receivers go through helpers.
+
+### 7. `new Promise<T>` Infers `morph::Result<T>`
+
+```ts
+let p2: Promise<number> = new Promise<number>((resolve) => { resolve(42); });
+```
+
+**Detection**: `NewExpression` with callee `Promise` (type argument read the same way `emit_new` reads it)
+**Translation**: the variable infers `morph::Result<JsNumber>` even in `--type infer`, so the later `p2 = morph::Result<JsNumber>::resolved(42)` assignment type-checks; `Promise<void>` infers `morph::Task`.
+
+### 8. Top-Level Execution Order
+
+```ts
+let p4: Promise<void> = voidPromise();  // logs "void" as a side effect
+console.log(p1);
+```
+
+**Detection**: file-scope `static auto x = f();` with a call initializer, where `x` is never referenced inside any function/class body (fixpoint check over word-boundary references)
+**Translation**: the declaration moves into `main()` as a local, in source order — `auto p4 = voidPromise();` runs exactly where JS would run it. Variables used by other functions stay at file scope (previous behavior).
+
+### 9. Global Runtime Includes
+
+```cpp
+#include "/home/user/.morph/cache/runtimes/cpp/v0.1.0/types/js_types.h"
+```
+
+**Detection**: every `../../runtime/cpp/...` header collected during emission
+**Translation**: rewritten to the absolute runtime path (`TranslateOptions.runtime_path`, auto-detected from the global cache or local `runtime/cpp`) so the file compiles from any directory. `js_value_format.h` (vector/optional formatters) is pulled in automatically when `std::vector` meets `println`/`format`, so `console.log([1,2,3])` prints `[ 1, 2, 3 ]` exactly like Node.
+
+### 10. Global/Static Storage
 
 ```ts
 const USERS: User[] = [];
@@ -240,7 +310,7 @@ std::vector<std::unique_ptr<User>> USERS;
 void register(std::unique_ptr<User> u) { USERS.push_back(std::move(u)); }
 ```
 
-### 7. Fire-and-Forget Async Call
+### 11. Fire-and-Forget Async Call
 
 ```ts
 fetch("/analytics", { method: "POST", body: data });
@@ -295,6 +365,10 @@ No blanket `js_types.h` unless a `Js*` type is actually emitted.
 # Direct file morph with optimization
 morph app.ts --to cpp --optimize
 
+# Type mode is orthogonal: infer (default) or strict annotations
+morph app.ts --to cpp --type infer --optimize
+morph app.ts --to cpp --type strict
+
 # In a project (add to morph.config.json build flags)
 # Not yet exposed — currently only for direct file morph
 ```
@@ -303,24 +377,32 @@ morph app.ts --to cpp --optimize
 
 | Feature | Status |
 |---|---|
-| Escape analysis (None/Return/Global/Closure/MultipleRefs/AsyncBoundary) | ✅ Built & integrated (`crates/morph-js/src/codegen/analyzer.rs`) |
-| Type widening (ToJsNumber/ToJsString/ToJsValue) | ✅ |
-| Native type emission (`int32_t`, `std::string`, `std::vector`) | ✅ |
+| Escape analysis (None/Return/Global/Closure/MultipleRefs/AsyncBoundary) | ✅ Built & integrated (`crates/morpher/src/codegen/analyzer.rs`) |
+| Type widening (ToJsNumber/ToJsString/ToJsValue/ToJsArray) + chaining detection | ✅ |
+| `--type infer` (default) / `--type strict` | ✅ (`TypeMode` in `context.rs`, `--type` CLI flag) |
+| Native string methods via `morph::str::*` helpers, chains nest | ✅ (`string_methods.rs` + `js_string_helpers.h`) |
+| JS comparison helpers (`morph::js_cmp`, only what's used) | ✅ |
+| Native type emission (`int32_t`, `std::string`, `std::vector`, recursive literals) | ✅ |
 | Smart pointer selection (`unique_ptr`/`shared_ptr`/`stack`) | ✅ |
-| `Promise<T>` → `morph::Result<T>`, `Promise<void>` → `morph::Task` | ✅ |
+| `Promise<T>` → `morph::Result<T>`, `Promise<void>` → `morph::Task`, `new Promise<T>` inference | ✅ |
 | Sync `Result<T>` strip to `T` when no `co_await` | ✅ |
-| Top-level `await` → async main wrapper | ✅ |
-| All 24 translate tests passing | ✅ |
+| Top-level `await` → async main wrapper; side-effectful `static auto` moved into `main` order-safely | ✅ |
+| Global absolute runtime includes; auto `js_value_format.h` for printed vectors | ✅ |
+| All 20 translate fixtures + 4 regression tests passing (outputs match Node.js) | ✅ |
 
 ## Implementation Files
 
 | File | Role |
 |---|---|
-| `crates/morph-js/src/codegen/analyzer.rs` | `EscapeAnalyzer`, `EscapeKind`, `WidenedType`, `UsageKind`, `AnalysisResult` |
-| `crates/morph-js/src/codegen/cpp.rs` | `emit_optimized_variable_declarator`, `infer_optimized_type`, `strip_result_for_sync_call`, `emit_new` (Promise→Result) |
-| `crates/morph-js/src/codegen/type_resolver.rs` | Native type maps, `Promise`→`Result`, denormalization |
-| `crates/morph-js/src/codegen/context.rs` | `Ctx` with `var_types`, `async_fns`, `escape_hints` |
-| `crates/morphc/src/commands/translate.rs` | `--optimize` flag, `wrap_top_level_in_main` |
+| `crates/morpher/src/codegen/analyzer.rs` | `EscapeAnalyzer`, `EscapeKind`, `WidenedType` (+`ToJsArray`), `UsageKind`, chaining detection, `AnalysisResult` |
+| `crates/morpher/src/codegen/js_comparison.rs` | `OperandClass`, `ComparisonSignature`, `morph::js_cmp` header builder |
+| `crates/morpher/src/codegen/string_methods.rs` | `StringMethod`, `StringMethodHandler` — JS→`morph::str::*` mapping |
+| `crates/morpher/src/codegen/cpp.rs` | `emit_optimized_variable_declarator`, `infer_optimized_type`, `strip_result_for_sync_call`, `emit_new` (Promise→Result), `str_helper_decision`, recursive vector literals |
+| `crates/morpher/src/codegen/type_resolver.rs` | Native type maps, `Promise`→`Result`, denormalization |
+| `crates/morpher/src/codegen/context.rs` | `Ctx` with `var_types`, `async_fns`, `escape_hints`, `TypeMode`, `runtime_path` |
+| `crates/morpher/src/lib.rs` | `TranslateOptions { optimize, type_mode, runtime_path, indent }` |
+| `crates/morphc/src/commands/translate.rs` | `--optimize` / `--type` flags, `wrap_top_level_in_main`, safe `static auto` move |
+| `runtime/cpp/types/js_string_helpers.h` | `namespace morph::str` — native string method equivalents |
 
 ## Future Work
 
@@ -334,3 +416,4 @@ morph app.ts --to cpp --optimize
 - [Architecture Overview](../concepts/architecture.md) — full pipeline
 - [JavaScript Overview](../javascript/overview.md) — TS surface
 - [Native Types](../javascript/native-types.md) — `int`/`float`/`std_string` annotations
+- [JS Comparisons](../javascript/js-comparisons.md) — coercion tables and helper design
