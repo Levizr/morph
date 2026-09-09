@@ -2,7 +2,7 @@
 
 **Part of:** [Questions & Answers](index.md) · [The Story of Morph](../story/index.md)
 
-Not yet — and honestly, this is one of the biggest open questions.
+Not now — but the plan is **full Node.js-level support**, and when that lands the answer flips to yes: any npm package that works with Node works with Morph, installed the normal way. The full thinking is written up here: [Full Node.js Support](../future/nodejs-support.md). Honestly, this is one of the biggest open questions, and that page is where the current answer lives.
 
 Morph has its own import model and no Node runtime. Most npm packages won't work as-is, because:
 
@@ -50,6 +50,10 @@ So a registry of native modules needs real answers, not vibes. Things we're cons
 
 **If you have ideas for solving this, we genuinely want to hear them** — [suggestions.morph@levizr.com](mailto:suggestions.morph@levizr.com). It's a hard problem, and good answers will make Morph's ecosystem safe in a way npm never was.
 
-## And maybe npm itself, someday
+## The real answer: full Node.js support
 
-And there's another path: if full Node.js support ever lands in Morph, you'd be able to **use npm packages via npm** — the whole ecosystem, the normal way. That's a much bigger project (a Node-compatible runtime is a big deal), but it's on the table. The [Package Build Bridge](../future/packages.md) page tracks how packages get resolved and compiled either way.
+The other path — and the one we're thinking hardest about — is going all the way: **Node.js-level support in Morph**. Not a curated subset, not a compatibility shim: the modules you already know (`morph/fs`, `morph/path`, `morph/http` — with the `node:*` spellings working as aliases), imported the way Node does it, with npm packages resolving the normal way. If it works with Node, it works with Morph — compiled to native C++ instead of interpreted.
+
+That includes entire servers: `http.createServer(...)` in your source, a native binary out of `morph build`, no Node process shipped.
+
+This is a big project and it's still in the thinking stage — the why, the what-it-looks-like, and the how are all written up in [Full Node.js Support](../future/nodejs-support.md). Until then, everything above (the build bridge, the registry idea, "write the 20 lines yourself") is the interim story. The [Package Build Bridge](../future/packages.md) page tracks how packages get resolved and compiled either way.

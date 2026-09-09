@@ -997,7 +997,7 @@
           "morph feature priorities",
           "whats next in morph"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-09",
         "publishedAt": "2026-08-20",
         "priority": 0.7,
         "changefreq": "weekly"
@@ -1206,6 +1206,25 @@
         ],
         "lastUpdated": "2026-09-05",
         "publishedAt": "2026-08-20",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Full Node.js Support in Morph (Planned)",
+        "slug": "future/nodejs-support",
+        "file": "future/nodejs-support",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "Full Node.js-level support planned for Morph: morph/* imports with node:* aliases, npm packages that work with Node, and entire servers compiled to native C++.",
+        "keywords": [
+          "morph nodejs support",
+          "morph/fs morph/http",
+          "morph node:fs node:http",
+          "morph npm packages",
+          "morph server native"
+        ],
+        "lastUpdated": "2026-09-09",
+        "publishedAt": "2026-09-09",
         "priority": 0.5,
         "changefreq": "monthly"
       },
@@ -1765,7 +1784,7 @@
           "morph cm++ modules",
           "morph package security"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-09",
         "publishedAt": "2026-08-20",
         "priority": 0.7,
         "changefreq": "yearly"

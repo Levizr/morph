@@ -17,6 +17,7 @@ Everything on Morph's roadmap, documented in detail. Each feature page covers wh
 | Text input (caret, focus, selection) | [Text Input](text-input.md) | High | — |
 | `box-shadow`, `outline`, margin collapse | [More CSS](more-css.md) | Low | CSS Cascade |
 | Package JS→C++ build bridge | [Packages](packages.md) | Medium | — |
+| Full Node.js support (`morph/*` imports with `node:*` aliases, npm packages, servers as native binaries) | [Node.js Support](nodejs-support.md) | Medium | JS Coverage |
 | Windows / macOS support | [Platforms](platform.md) | Medium | — |
 | OS accessibility reader (screen readers, focus, keyboard nav) | [Accessibility](accessibility.md) | Medium | Platforms |
 | WebView — embed HTML via the OS webview (Tauri-style hybrid apps) | [WebView](webview.md) | Medium | — |
