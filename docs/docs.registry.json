@@ -690,7 +690,7 @@
           "morph --optimize",
           "morph native types"
         ],
-        "lastUpdated": "2026-09-08",
+        "lastUpdated": "2026-09-09",
         "publishedAt": "2026-09-05",
         "priority": 0.8,
         "changefreq": "weekly"

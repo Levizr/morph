@@ -2,6 +2,16 @@
 
 Morph's `--optimize` flag enables **intent-based codegen with compile-time escape analysis** — generating minimal, optimal C++ that matches what a human expert would write, without a garbage collector.
 
+## The Core Idea: Intent, Not Syntax
+
+Most translators map syntax to syntax: `let x = 5` becomes `JsValue x = 5` because *it might be anything*. Morpher instead asks three questions about every variable and lets the answers pick the C++:
+
+1. **Declared intent** — what did the programmer write? (`let x: int`, `const s: string`)
+2. **Observed intent** — what does the code actually do with it? (arithmetic only? passed to `fetch`? captured by a closure? `_` recorded as `UsageKind` per use)
+3. **Lifetime intent** — who owns it and how long does it live? (stack-local? returned? shared across an `await`? — recorded as `EscapeKind`)
+
+Declared intent and observed intent are reconciled by **widening** (usage wins over annotation when they disagree), and lifetime intent picks the **storage** (stack, `unique_ptr`, or `shared_ptr`). When all three agree the value is a plain local integer, you get `int32_t x = 5;` — zero overhead, freed automatically. Nothing is boxed "just in case."
+
 ## The Problem
 
 Traditional JS→C++ translators emit `JsValue` (a `std::variant`) for everything, heap-allocate all objects, and use `shared_ptr` everywhere. This works but adds massive overhead:
@@ -42,6 +52,35 @@ TypeScript Source
 │  - Feature flags │
 └──────────────────┘
 ```
+
+## The Pipeline in Full
+
+One function runs the whole analysis — `EscapeAnalyzer::analyze_program` (`crates/morpher/src/codegen/analyzer.rs:116`) — in six phases, single pass plus fixpoints. No separate borrow checker, no IR round-trips; the Oxc AST is walked directly:
+
+1. **`collect_signatures`** — every top-level function is recorded (`FunctionSignature`: name, async?, params, return type) and every file-scope variable is pre-marked `EscapeKind::Global`. Async functions and async arrow/function expressions assigned to variables join the `async_functions` set.
+2. **`analyze_statement` (recursive walk)** — each statement is visited: declarations create a `VarInfo`; `return x` marks `Return`; `await x` marks `AsyncBoundary`; `x = y` (identifier to identifier) marks **both** sides `MultipleRefs`; method calls and `.length` accesses record widening (`ToJsString` / `ToJsArray`); every comparison and every truthiness test (`if`/`while`/`for` conditions, `&&`/`||`, `!`, ternaries) records a `ComparisonSignature` for the `js_cmp` emitter.
+3. **`detect_chaining`** — a second walk finds `s.toUpperCase().toLowerCase()` shapes (a member access whose object is itself a call) so chained receivers resolve to the base variable's domain instead of degrading to boxed calls.
+4. **`resolve_cross_function_escapes`** — fixpoint over function signatures: parameters of async functions that are awaited or co-returned inside get `AsyncBoundary`, since the coroutine frame will own them.
+5. **`resolve_identifier_init_classes`** — fixpoint over `let alias = target` chains (forward references included): an alias inherits its target's operand class, so `let b = a; b + 1` stays arithmetic instead of falling back to `JsValue`.
+6. **`AnalysisResult`** — the three maps (`escapes`, `widens`, `var_infos`) plus `async_functions` and `comparison_signatures` are handed to the emitter, which makes every declaration decision from them (`emit_optimized_variable_declarator`, `crates/morpher/src/codegen/cpp.rs:390`).
+
+### What the Analyzer Records for Every Variable
+
+```rust
+pub struct VarInfo {
+    pub name: String,
+    pub annotated_type: Option<String>,  // declared intent: `: int`, `: string`, ...
+    pub escape_kind: EscapeKind,         // lifetime intent (max wins, see below)
+    pub widened_type: WidenedType,       // observed intent: None/ToJsNumber/ToJsString/ToJsValue/ToJsArray
+    pub is_mutable: bool,                // let vs const
+    pub usages: Vec<UsageKind>,          // every observed use (28 kinds: ArithmeticOp,
+                                         // MethodCall, Awaited, Iterated, Spread, ...)
+    pub init_operand_class: OperandClass, // what the initializer's C++ value is
+                                         // (Integer/Float/Text/Boolean/JsValue/...)
+}
+```
+
+`mark_escape` never downgrades: `escapes.insert(name, EscapeKind::max(current, kind))` (`analyzer.rs:1178`), with priority `AsyncBoundary > ClosureCapture > MultipleRefs > Global > Return > None` (`analyzer.rs:1232`). A variable that is both returned *and* captured gets `shared_ptr` — the stricter need always wins.
 
 ## Escape Analysis: The Decision Tree
 
@@ -95,6 +134,65 @@ Higher priority wins when a variable has multiple escape reasons.
 
 **`shared_ptr` only where semantically required** — never "just in case."
 
+## Memory Management in Detail (No GC)
+
+There is no garbage collector in emitted code — not a tracing one, not a reference-count-everything one. Memory is managed by a compile-time ownership decision per variable, executed by C++ RAII (destructors run deterministically at scope exit). This section is the full story: the three storages, what each costs, why sharing still needs `shared_ptr`, and where the `Js*` wrappers fit.
+
+### The three storages
+
+Every declaration lands in exactly one bucket (`cpp.rs:453`):
+
+| Storage | When | Allocation | Cleanup | Cost |
+|---|---|---|---|---|
+| **Stack value** (`int32_t x = 5;`) | `EscapeKind::None` — provably local | None (register/stack slot) | Automatic at scope exit | **Zero** |
+| **`unique_ptr<T>` + `std::move`** | `Return` / `Global` — single owner moves out | One heap allocation (`make_unique`) | Freed when the owner dies | One allocation, no counting |
+| **`shared_ptr<T>`** (`make_shared`) | `ClosureCapture` / `MultipleRefs` / `AsyncBoundary` — genuinely shared | One heap allocation (`make_shared` merges object + control block) | Freed when the last owner dies | Atomic refcount inc/dec per copy |
+
+`const` on a `Js*` scalar folds to `const JsNumber` etc., and file-scope declarations get a `static` prefix (`cpp.rs:513`) so they live for the program's duration instead of per-call.
+
+### Why no collector at all
+
+A GC exists to answer "is this still reachable?" at runtime. Morpher answers it at compile time instead: the escape walk proves, per variable, whether the value can outlive its scope and whether it has one owner or many. When the proof says "local integer, never leaves," there is nothing left for a collector to do — generating a traced or counted box around it would be pure overhead (allocation + write barriers + collection pauses) protecting against a situation the analyzer already ruled out.
+
+The honest corollary: the proof is conservative. Anything the analyzer can't see through ( genuinely dynamic values — `fetch`, `JSON.parse`, unannotated cross-module data) widens to a `Js*` wrapper, and those wrappers *do* share internally (next section). Safety is never sacrificed for speed; speed comes only from cases proven safe.
+
+### Why `shared_ptr` is still needed (and what it costs)
+
+Three JS semantics genuinely require shared ownership — there is no cheaper correct answer:
+
+- **Aliasing** (`let b = a; b.x = 2` must be visible through `a`). The analyzer marks both sides `MultipleRefs` (`analyzer.rs:788`), and both names share one `shared_ptr` — one object, two owners, exactly like the JS heap.
+- **Closures** (`return () => ++count`). The lambda outlives the stack frame that created `count`, so the counter moves to the heap and both the (dead) frame's successor and the lambda hold a `shared_ptr` (`ClosureCapture`).
+- **Coroutines** (anything live across `await`/`co_return`). A suspended coroutine's frame survives the caller's return, so locals it keeps must be heap-owned (`AsyncBoundary`).
+
+The cost is real and worth naming: each `shared_ptr` copy is an atomic increment, each destroy an atomic decrement, plus the control block allocation (which `make_shared` fuses with the object into one allocation — the emitter always uses `make_shared`, never bare `new`). Atomics are cheap next to a heap allocation but not free next to a stack slot — which is precisely why they're emitted only for the three cases above.
+
+### Where the `Js*` wrappers fit
+
+When widening fires, the variable becomes a `Js*` type — and those are *not* bare values:
+
+- **`JsValue`** is a `std::variant` of 8 alternatives (`JsUndefined`, `JsNull`, `JsBoolean`, `JsNumber`, `JsString`, `JsArray`, `JsObject`, `JsFunction` — `runtime/cpp/types/js_value.h:32`). It costs `sizeof(largest alternative)` per value plus a tag check (dispatch) on every operation. Correct for anything, free for nothing.
+- **`JsArray` / `JsObject` share internally**: `elements` is a `shared_ptr<vector<JsValue>>` ("shared_ptr for JS-like reference semantics (no deep copy on assignment)" — `js_array.h:11`), and properties likewise. Assigning one `JsArray` to another copies the pointer, not the data — JS aliasing semantics preserved, at one atomic count per copy.
+
+So the performance story is really a *widening-avoidance* story: every variable that stays native skips the variant size, the dispatch, and the refcounting. `--type infer` exists to maximize exactly that set.
+
+### Coroutine memory: `Task`, `Result<T>`, and the sync strip
+
+Async functions become coroutines returning `morph::Task` (no value) or `morph::Result<T>` (a value) — the coroutine *frame* (locals, suspend state) is heap-allocated by the C++ runtime and freed when the coroutine completes. That's why `AsyncBoundary` forces `shared_ptr`: a value the frame keeps must outlive the caller that created it.
+
+Two refinements keep this cheap:
+
+- **`new Promise<T>` infers `morph::Result<T>`** from the type argument at the declaration (`infer_optimized_type`, `cpp.rs:646`), so `let p: Promise<number> = new Promise<number>(...)` never touches `JsValue`.
+- **Sync strip**: if a variable's initializer is a plain synchronous call but its declared type is `Result<T>`, the emitter strips it to `T` (`strip_result_for_sync_call`, `cpp.rs:1337`) — no coroutine frame, no wrapper, just the value.
+
+### Strings and vectors: native storage, JS behavior
+
+- **Strings** live in `std::string` (small-string optimization: short strings never touch the heap) while JS methods are served by `morph::str::*` helpers that take and return `std::string` — chains nest (`to_lower(to_upper(s))`), so no intermediate `JsString` box is ever allocated. Only genuinely dynamic strings become heap-owning `JsString`.
+- **Vectors** are inferred recursively from literals: `[1,2,3]` → `std::vector<int32_t>`, `[[1,2]]` → `std::vector<std::vector<int32_t>>`, mixed or empty → `std::vector<JsValue>` fallback (`infer_optimized_type`, `cpp.rs:678`). Homogeneous data gets contiguous native storage and cache-friendly iteration; only heterogeneous data pays for the variant per element.
+
+### Who frees file-scope and global state?
+
+File-scope variables start as `EscapeKind::Global` and emit as `static` (`unique_ptr` for objects). They live until program exit — matching JS module-scope semantics, where top-level bindings never die. Side-effectful initializers (`static auto x = f();`) are additionally moved into `main()` in source order so they run exactly when JS would run them (edge case 8 above) — lifetime and *execution order* are both preserved.
+
 ## Type Widening: Static Annotation = Intent, Usage = Reality
 
 ```ts
@@ -120,6 +218,28 @@ The analyzer widens the type based on **usage**, not just annotation:
 - **Array methods (`.push()`, `.length`, iteration)** → `JsArray` when the usage needs JS semantics, else homogeneous `std::vector<T>` inferred from the elements (recursively, so `[[1,2]]` is `vector<vector<int32_t>>`)
 - **Property access on unknown** → `JsValue`
 - **`--type infer` (default) skips widening entirely** — natives are kept and helpers do the work; `--type strict` applies the table above
+
+### Strict vs Infer: Who Decides the Type?
+
+The two modes differ in exactly one place — the `base_type` computation at the top of `emit_optimized_variable_declarator` (`cpp.rs:401`):
+
+```
+--type strict                          --type infer (default)
+    │                                          │
+    ▼                                          ▼
+Has annotation? ──yes──► use it        Always infer from the
+    │                      │           initializer, ignore the
+    no                     │           annotation entirely
+    │                      │
+    ▼                      ▼
+infer from init ◄──┴──► (same inference)
+    │                      │
+    ▼                      ▼
+Apply widening table       Skip widening (natives stay native,
+above                      helpers serve the methods)
+```
+
+Consequences: in strict mode `let x: number = 5` is `JsNumber` (you asked for the general type, you get it); in infer mode it's `int32_t` (the initializer is all the evidence there is). Parameters follow the same split — strict classifies them from their annotations, infer treats them as `JsValue` until use proves otherwise (`analyzer.rs:481`). Widening from *dynamic sources* (`await`, `fetch`, `JSON.parse`) still fires in both modes: reality beats declarations everywhere.
 
 ## JS Comparison Semantics: Native Types, JavaScript Answers
 
