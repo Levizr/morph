@@ -1,10 +1,10 @@
 [
   {
-    "category": "Dev",
+    "category": "Architecture",
     "items": [
       {
         "title": "Dev Docs: How Morph Works",
-        "slug": "overview",
+        "slug": "architecture/overview",
         "file": "dev/overview",
         "status": "production",
         "author": "PIYUSH",
@@ -21,26 +21,8 @@
         "changefreq": "monthly"
       },
       {
-        "title": "Contributing: Setup, Workflow, Conventions",
-        "slug": "contributing",
-        "file": "dev/contributing",
-        "status": "production",
-        "author": "PIYUSH",
-        "description": "How to contribute to Morph: toolchain setup, highest-impact areas, code conventions, and the PR workflow.",
-        "keywords": [
-          "morph contributing",
-          "morph contributor setup",
-          "morph PR workflow",
-          "morph code conventions"
-        ],
-        "lastUpdated": "2026-09-09",
-        "publishedAt": "2026-09-09",
-        "priority": 0.7,
-        "changefreq": "monthly"
-      },
-      {
         "title": "Repo Map",
-        "slug": "repo-map",
+        "slug": "architecture/repo-map",
         "file": "dev/repo-map",
         "status": "production",
         "author": "PIYUSH",
@@ -57,26 +39,8 @@
         "changefreq": "monthly"
       },
       {
-        "title": "Morpher Internals",
-        "slug": "morpher-internals",
-        "file": "dev/morpher-internals",
-        "status": "production",
-        "author": "PIYUSH",
-        "description": "Contributor's cutting guide to the morpher TS-to-C++ translator: source layout, per-declaration decision flow, and where each kind of change goes.",
-        "keywords": [
-          "morpher internals",
-          "morph translator source",
-          "morph escape analysis code",
-          "extend morph translator"
-        ],
-        "lastUpdated": "2026-09-09",
-        "publishedAt": "2026-09-09",
-        "priority": 0.7,
-        "changefreq": "monthly"
-      },
-      {
         "title": "GUI Pipeline: Python vs Rust",
-        "slug": "gui-pipeline",
+        "slug": "architecture/gui-pipeline",
         "file": "dev/gui-pipeline",
         "status": "production",
         "author": "PIYUSH",
@@ -91,10 +55,38 @@
         "publishedAt": "2026-09-09",
         "priority": 0.7,
         "changefreq": "monthly"
-      },
+      }
+    ]
+  },
+  {
+    "category": "Morpher",
+    "items": [
+      {
+        "title": "Morpher Internals",
+        "slug": "morpher/internals",
+        "file": "dev/morpher-internals",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Contributor's cutting guide to the morpher TS-to-C++ translator: source layout, per-declaration decision flow, and where each kind of change goes.",
+        "keywords": [
+          "morpher internals",
+          "morph translator source",
+          "morph escape analysis code",
+          "extend morph translator"
+        ],
+        "lastUpdated": "2026-09-09",
+        "publishedAt": "2026-09-09",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      }
+    ]
+  },
+  {
+    "category": "Runtime",
+    "items": [
       {
         "title": "Runtime Layout",
-        "slug": "runtime-layout",
+        "slug": "runtime/layout",
         "file": "dev/runtime-layout",
         "status": "production",
         "author": "PIYUSH",
@@ -109,10 +101,33 @@
         "publishedAt": "2026-09-09",
         "priority": 0.6,
         "changefreq": "monthly"
+      }
+    ]
+  },
+  {
+    "category": "Contributing",
+    "items": [
+      {
+        "title": "Contributing: Setup, Workflow, Conventions",
+        "slug": "contributing/overview",
+        "file": "dev/contributing",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "How to contribute to Morph: toolchain setup, highest-impact areas, code conventions, and the PR workflow.",
+        "keywords": [
+          "morph contributing",
+          "morph contributor setup",
+          "morph PR workflow",
+          "morph code conventions"
+        ],
+        "lastUpdated": "2026-09-09",
+        "publishedAt": "2026-09-09",
+        "priority": 0.7,
+        "changefreq": "monthly"
       },
       {
         "title": "Docs System",
-        "slug": "docs-system",
+        "slug": "contributing/docs-system",
         "file": "dev/docs-system",
         "status": "production",
         "author": "PIYUSH",

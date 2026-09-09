@@ -32,7 +32,7 @@ The site fetches from GitHub `main` — there is no build-time copy. Pushing to 
 ## Adding a page
 
 1. Write the `.md` in `docs/` (user) or `docs/dev/` (internals).
-2. Register it in the matching registry file: `slug` is the URL path, `file` is the repo path (for dev docs: slug `foo`, file `dev/foo`). Bump `lastUpdated` on any page you touch.
+2. Register it in the matching registry file: `slug` is the URL path, `file` is the repo path — they don't have to match. Slugs carry the topic roots (`architecture/foo`, `morpher/foo`), files stay flat (`dev/foo`). Bump `lastUpdated` on any page you touch.
 3. Link rules: `other-page.md` → same track; `../guides/x.md` from a dev page → `/docs/guides/x` automatically; `../../CONTRIBUTING.md` (escaping the docs root) → GitHub blob link automatically.
 4. Validate the registry is still JSON (`python3 -c "import json; json.load(open('docs/dev.registry.json'))"`), then push — the site picks it up.
 
