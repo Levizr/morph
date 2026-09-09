@@ -1,0 +1,133 @@
+[
+  {
+    "category": "Dev",
+    "items": [
+      {
+        "title": "Dev Docs: How Morph Works",
+        "slug": "overview",
+        "file": "dev/overview",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Contributor and internals documentation for Morph: the two pipelines, where to start by goal, and ground rules for dev docs.",
+        "keywords": [
+          "morph contributor docs",
+          "morph internals",
+          "morph dev docs",
+          "how morph works"
+        ],
+        "lastUpdated": "2026-09-09",
+        "publishedAt": "2026-09-09",
+        "priority": 0.8,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Contributing: Setup, Workflow, Conventions",
+        "slug": "contributing",
+        "file": "dev/contributing",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "How to contribute to Morph: toolchain setup, highest-impact areas, code conventions, and the PR workflow.",
+        "keywords": [
+          "morph contributing",
+          "morph contributor setup",
+          "morph PR workflow",
+          "morph code conventions"
+        ],
+        "lastUpdated": "2026-09-09",
+        "publishedAt": "2026-09-09",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Repo Map",
+        "slug": "repo-map",
+        "file": "dev/repo-map",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Where everything lives in the Morph repo: Rust crates, Python CLI modules, C++ runtime, tests, and docs tracks.",
+        "keywords": [
+          "morph repo structure",
+          "morph crates",
+          "morph codebase map",
+          "morph source layout"
+        ],
+        "lastUpdated": "2026-09-09",
+        "publishedAt": "2026-09-09",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Morpher Internals",
+        "slug": "morpher-internals",
+        "file": "dev/morpher-internals",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Contributor's cutting guide to the morpher TS-to-C++ translator: source layout, per-declaration decision flow, and where each kind of change goes.",
+        "keywords": [
+          "morpher internals",
+          "morph translator source",
+          "morph escape analysis code",
+          "extend morph translator"
+        ],
+        "lastUpdated": "2026-09-09",
+        "publishedAt": "2026-09-09",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "GUI Pipeline: Python vs Rust",
+        "slug": "gui-pipeline",
+        "file": "dev/gui-pipeline",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Who owns each stage of morph build, dev, and run: Python CLI vs Rust, current parity gaps, and the exact Python removal sequence.",
+        "keywords": [
+          "morph gui pipeline",
+          "morph python vs rust",
+          "morph build internals",
+          "morph parity harness"
+        ],
+        "lastUpdated": "2026-09-09",
+        "publishedAt": "2026-09-09",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Runtime Layout",
+        "slug": "runtime-layout",
+        "file": "dev/runtime-layout",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "How runtime/cpp is organized, runtime conventions including the C++17 rule, and where new helpers, types, and modules go.",
+        "keywords": [
+          "morph runtime layout",
+          "morph cpp runtime",
+          "morph runtime headers",
+          "add morph runtime helper"
+        ],
+        "lastUpdated": "2026-09-09",
+        "publishedAt": "2026-09-09",
+        "priority": 0.6,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Docs System",
+        "slug": "docs-system",
+        "file": "dev/docs-system",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "How Morph documentation flows from the repo to morph.levizr.com on both tracks, and how to add or fix a page.",
+        "keywords": [
+          "morph docs system",
+          "morph docs registry",
+          "write morph docs",
+          "morph.levizr.com docs"
+        ],
+        "lastUpdated": "2026-09-09",
+        "publishedAt": "2026-09-09",
+        "priority": 0.6,
+        "changefreq": "monthly"
+      }
+    ]
+  }
+]
