@@ -29,7 +29,7 @@ struct Cli {
     to: Option<String>,
 
     /// Type resolution mode: strict (respect user annotations) or infer (analyze code, default)
-    #[arg(long = "type", value_name = "MODE", default_value = "infer")]
+    #[arg(long = "types", value_name = "MODE", alias = "type", default_value = "infer")]
     type_mode: TypeMode,
 
     #[command(subcommand)]
@@ -82,6 +82,9 @@ enum Commands {
         upx: Option<bool>,
         #[arg(long = "no-upx")]
         no_upx: bool,
+        /// Type resolution mode for translated logic: strict or infer (default, from morph.config.json)
+        #[arg(long = "types", value_name = "MODE")]
+        type_mode: Option<String>,
     },
     /// Build and run production binary
     Run {
@@ -92,6 +95,9 @@ enum Commands {
         output: Option<String>,
         #[arg(long)]
         static_: bool,
+        /// Type resolution mode for translated logic: strict or infer (default, from morph.config.json)
+        #[arg(long = "types", value_name = "MODE")]
+        type_mode: Option<String>,
     },
     /// Lint source files (.ts/.tsx/.mx) for framework rules
     Check {
@@ -210,11 +216,11 @@ fn main() {
             commands::update::run(runtime, self_update)
         }
         Some(Commands::Dev { entry }) => commands::dev::run(entry),
-        Some(Commands::Build { entry, output, static_, upx, no_upx }) => {
-            commands::build::run(entry, output, static_, upx, no_upx, false).map(|_| ())
+        Some(Commands::Build { entry, output, static_, upx, no_upx, type_mode }) => {
+            commands::build::run(entry, output, static_, upx, no_upx, false, type_mode).map(|_| ())
         }
-        Some(Commands::Run { binary, entry, output, static_ }) => {
-            commands::run::run(binary, entry, output, static_)
+        Some(Commands::Run { binary, entry, output, static_, type_mode }) => {
+            commands::run::run(binary, entry, output, static_, type_mode)
         }
         Some(Commands::Check { path, entry, migrate }) => commands::check::run(path, entry, migrate),
         Some(Commands::Doctor { verbose, yes }) => commands::doctor::run(verbose, yes),

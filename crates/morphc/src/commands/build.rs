@@ -9,6 +9,7 @@ pub fn run(
     upx: Option<bool>,
     no_upx: bool,
     suppress_banner: bool,
+    type_mode: Option<String>,
 ) -> Result<PathBuf> {
     let cwd = std::env::current_dir()?;
     let config_path = cwd.join("morph.config.json");
@@ -20,6 +21,8 @@ pub fn run(
     let config = morph_config::MorphConfig::from_file(&config_path)?;
     let entry = entry.unwrap_or(config.entry.clone());
     let output_raw = output.unwrap_or(config.output.clone());
+    let type_mode = type_mode.unwrap_or(config.type_mode.clone());
+    let type_mode: morpher::TypeMode = type_mode.parse().map_err(|e: String| anyhow::anyhow!(e))?;
     // Clean app name for binary (spaces/special → _)
     let clean_name = morph_config::clean_app_name(&config.name);
 
@@ -38,6 +41,7 @@ pub fn run(
     crate::logger::log_step("Configuration");
     crate::logger::log_key("Entry", &entry);
     crate::logger::log_key("Output", &output_raw);
+    crate::logger::log_key("Types", &type_mode.to_string());
     crate::logger::log_key("Binary", &clean_name);
     crate::logger::log_key(
         "Runtime",

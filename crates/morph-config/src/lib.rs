@@ -100,6 +100,8 @@ pub struct MorphConfig {
     pub window: WindowConfig,
     #[serde(default = "default_renderer")]
     pub renderer: String,
+    #[serde(rename = "types", default = "default_type_mode")]
+    pub type_mode: String,
     #[serde(default)]
     pub dependencies: std::collections::HashMap<String, String>,
     #[serde(default)]
@@ -119,6 +121,7 @@ pub struct MorphConfig {
 fn default_name() -> String { "my-app".to_string() }
 fn default_entry() -> String { "src/App.mx".to_string() }
 fn default_output() -> String { ".morph/output".to_string() }
+fn default_type_mode() -> String { "infer".to_string() }
 
 pub fn clean_app_name(name: &str) -> String {
     let mut out = String::with_capacity(name.len());
@@ -189,6 +192,7 @@ impl Default for MorphConfig {
             output: default_output(),
             window: WindowConfig::default(),
             renderer: default_renderer(),
+            type_mode: default_type_mode(),
             dependencies: Default::default(),
             cpp_sources: Default::default(),
             native: NativeConfig::default(),
@@ -291,6 +295,7 @@ mod tests {
         assert_eq!(cfg.name, "test-app");
         assert_eq!(cfg.entry, "src/App.mx");
         assert_eq!(cfg.runtime.runtime_type, "cpp");
+        assert_eq!(cfg.type_mode, "infer");
     }
 
     #[test]
@@ -304,5 +309,14 @@ mod tests {
         let cfg = MorphConfig::from_str(json).unwrap();
         assert_eq!(cfg.runtime.version, "0.2.0");
         assert_eq!(cfg.window.width, 1024);
+    }
+
+    #[test]
+    fn parse_types_mode() {
+        let cfg = MorphConfig::from_str(r#"{"types":"strict"}"#).unwrap();
+        assert_eq!(cfg.type_mode, "strict");
+        let roundtrip: MorphConfig =
+            serde_json::from_str(&serde_json::to_string(&cfg).unwrap()).unwrap();
+        assert_eq!(roundtrip.type_mode, "strict");
     }
 }

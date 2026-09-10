@@ -64,6 +64,7 @@ class MorphConfig:
     output:       str          = ".morph/"
     window:       WindowConfig = field(default_factory=WindowConfig)
     renderer:     str          = "flash"           # "flash" (default) | "forge"
+    types:        str          = "infer"           # type mode: "infer" (default) | "strict"
     dependencies: dict         = field(default_factory=dict)
     cpp_sources:  list         = field(default_factory=list)
     native:       NativeConfig = field(default_factory=NativeConfig)
@@ -87,6 +88,7 @@ class MorphConfig:
                 title=win.get("title", "Morph App"),
             ),
             renderer=d.get("renderer", "flash"),
+            types=d.get("types", d.get("type", "infer")),
             dependencies=d.get("dependencies", {}),
             cpp_sources=d.get("cpp_sources", []),
             native=NativeConfig(
@@ -123,6 +125,7 @@ class MorphConfig:
                 "title":  self.window.title,
             },
             "renderer":     self.renderer,
+            "types":        self.types,
             "dependencies": self.dependencies,
             "cpp_sources":  self.cpp_sources,
             "native":       {

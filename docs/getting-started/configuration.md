@@ -15,6 +15,7 @@ All project settings live in `morph.config.json` at the project root.
     "title": "Morph App"
   },
   "renderer": "flash",
+  "types": "infer",
   "runtime": {
     "type": "cpp",
     "version": "0.1.0"
@@ -53,6 +54,7 @@ All project settings live in `morph.config.json` at the project root.
 | `output` | string | `".morph/output"` | Directory for build artifacts. |
 | `window` | object | (see below) | Native window settings. |
 | `renderer` | string | `"flash"` | Renderer backend: `"flash"` (default, lightweight) or `"forge"` (retained surfaces, beta). |
+| `types` | string | `"infer"` | Type mode for translated logic, same as `morph --types`: `"infer"` (default, analyze code) or `"strict"` (respect annotations). CLI `--types` overrides it. |
 | `runtime` | object | (see below) | Runtime type and version to download/use. |
 | `dependencies` | object | `{}` | Package dependencies (reserved for future package manager). |
 | `cpp_sources` | array | `[]` | C++ source files to include in the build. |
