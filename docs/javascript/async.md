@@ -133,12 +133,17 @@ This compiles to:
 
 ```cpp
 int main() {
-  morph::run_async([]() -> morph::Task {
+    morph::Task _main_task = [&]() -> morph::Task {
+{
     auto data = co_await morph::net::fetch("https://api.example.com/config");
-    std::println("Loaded config: {}", data);
-    co_return;
-  });
-  while (!morph::is_done()) morph::process_tasks();
+    std::println("{} {}", "Loaded config:", data);
+co_return;
+}
+    }();
+    while (!_main_task.done()) {
+        morph::process_tasks();
+    }
+    return 0;
 }
 ```
 

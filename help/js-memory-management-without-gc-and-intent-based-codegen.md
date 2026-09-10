@@ -1,5 +1,7 @@
 # Intent-Based Codegen & Memory Management Without GC
 
+> **Historical plan — read critically.** This document designed the work and is kept as its record. Several code shapes below (`Task<Ret>`, `http_get`, `run_async`, `spawn_detached`, `when_all`, `virtual` class methods, `struct {…}` literals, `make_shared<User>` for object literals, `vector<unique_ptr<…>>` containers) were never emitted as shown, and the `--optimize` flag, `morph-js` crate path, and 24/24 counts predate the current tree. The live, verified description is [Intent-Based Codegen & Memory Management](../../docs/guides/intent-based-codegen.md) — this file's strategy and decision tree still stand, its example outputs do not.
+
 ## Overview
 
 This document outlines the strategy for translating JavaScript/TypeScript to optimized C++ using **intent-based codegen** with **compile-time escape analysis** — eliminating the need for a garbage collector while preserving JS reference semantics.

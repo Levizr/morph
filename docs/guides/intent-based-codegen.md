@@ -55,14 +55,15 @@ TypeScript Source
 
 ## The Pipeline in Full
 
-One function runs the whole analysis — `EscapeAnalyzer::analyze_program` (`crates/morpher/src/codegen/analyzer.rs`) — in six phases, single pass plus fixpoints. No separate borrow checker, no IR round-trips; the Oxc AST is walked directly:
+One function runs the whole analysis — `EscapeAnalyzer::analyze_program` (`crates/morpher/src/codegen/analyzer.rs`) — in seven phases, single pass plus fixpoints. No separate borrow checker, no IR round-trips; the Oxc AST is walked directly:
 
 1. **`collect_signatures`** — every top-level function is recorded (`FunctionSignature`: name, async?, params, return type) and every file-scope variable is pre-marked `EscapeKind::Global`. Async functions and async arrow/function expressions assigned to variables join the `async_functions` set.
-2. **`analyze_statement` (recursive walk)** — each statement is visited: declarations create a `VarInfo`; `return x` marks `Return`; `await x` marks `AsyncBoundary`; `x = y` (identifier to identifier) marks **both** sides `MultipleRefs`; unknown method calls record widening (`ToJsString` / `ToJsArray`) while known `morph::str` methods and `.length` reads stay native; every comparison and every truthiness test (`if`/`while`/`for` conditions, `&&`/`||`, `!`, ternaries) records a `ComparisonSignature` for the `js_cmp` emitter; assignments fold observed integer ranges for `int32_t` proofs.
+2. **`analyze_statement` (recursive walk)** — each statement is visited: declarations create a `VarInfo`; `return x` marks `Return`; `await x` marks `AsyncBoundary`; `x = y` (identifier to identifier) marks **both** sides `MultipleRefs`; listed string methods keep natives native via helpers while listed non-string methods widen to `JsString`, array methods widen non-text receivers to `JsArray`, and any other method call records usage without widening; `.length` reads stay native; every comparison and every truthiness test (`if`/`while`/`for` conditions, `&&`/`||`, `!`, ternaries) records a `ComparisonSignature` for the `js_cmp` emitter; assignments fold observed integer ranges for `int32_t` proofs.
 3. **`detect_chaining`** — a second walk finds `s.toUpperCase().toLowerCase()` shapes (a member access whose object is itself a call) so chained receivers resolve to the base variable's domain instead of degrading to boxed calls.
 4. **`resolve_cross_function_escapes`** — fixpoint over function signatures: parameters of async functions that are awaited or co-returned inside get `AsyncBoundary`, since the coroutine frame will own them.
 5. **`resolve_identifier_init_classes`** — fixpoint over `let alias = target` chains (forward references included): an alias inherits its target's operand class, so `let b = a; b + 1` stays arithmetic instead of falling back to `JsValue`.
-6. **`AnalysisResult`** — the maps (`escapes`, `widens`, `var_infos`) plus `async_functions`, `comparison_signatures`, `closure_captures`, `narrow_splits` (with per-variable definition/use sites for liveness), and `last_read_spans` (last read offset per variable per function, driving moves) are handed to the emitter, which makes every declaration decision from them (`emit_typed_variable_declarator` in `crates/morpher/src/codegen/cpp.rs`).
+6. **Last-read spans** — one span map per function (top level keyed `""`, each function under its own name, arrows and methods inheriting the enclosing scope): the last read offset of every variable, computed once with an exhaustive AST walk and handed to the emitter for moves.
+7. **`AnalysisResult`** — the maps (`escapes`, `widens`, `var_infos`) plus `async_functions`, `comparison_signatures`, `closure_captures`, `narrow_splits` (with per-variable definition/use sites for liveness), and `last_read_spans` (last read offset per variable per function, driving moves) are handed to the emitter, which makes every declaration decision from them (`emit_typed_variable_declarator` in `crates/morpher/src/codegen/cpp.rs`).
 
 ### What the Analyzer Records for Every Variable
 
@@ -73,12 +74,31 @@ pub struct VarInfo {
     pub escape_kind: EscapeKind,         // lifetime intent (max wins, see below)
     pub widened_type: WidenedType,       // observed intent: None/ToJsNumber/ToJsString/ToJsValue/ToJsArray
     pub is_mutable: bool,                // let vs const
-    pub usages: Vec<UsageKind>,          // every observed use (28 kinds: ArithmeticOp,
+    pub usages: Vec<UsageKind>,          // every observed use (24 kinds: ArithmeticOp,
                                          // MethodCall, Awaited, Iterated, Spread, ...)
     pub init_operand_class: OperandClass, // what the initializer's C++ value is
                                          // (Integer/Float/Text/Boolean/JsValue/...)
     pub int_range: Option<(i64, i64)>,   // proven min/max over literal assigns
     pub int_range_exact: bool,           // false once anything dynamic touches it
+    pub def_sites: Vec<DefSite>,         // every definition: statement index, region, value class, literal
+    pub use_sites: Vec<StmtSite>,        // every read: statement index plus region
+    pub has_loop_use: bool,              // any definition or read under a loop
+    pub decl_func_depth: usize,          // function nesting of the declaration
+}
+```
+
+```rust
+pub struct StmtSite {
+    pub index: usize,         // statement order in the analysis walk
+    pub branch_depth: usize,  // nesting inside branches
+    pub func_depth: usize,    // function nesting
+}
+
+pub struct DefSite {
+    pub site: StmtSite,
+    pub value_class: OperandClass, // Integer, Float, Text, JsValue, ...
+    pub int_literal: Option<i64>,  // proven literal, when the value is one
+    pub span_start: Option<u32>,   // source offset, keys narrowing splits
 }
 ```
 
@@ -101,19 +121,22 @@ Does it escape the function?
         ├─► Returned (single owner moves out)
         │   → `unique_ptr` for class instances and vectors;
         │     scalars and `Js*` values copy out on the stack
-        │   User createUser() { auto u = make_unique<User>(); return std::move(u); }
+        │   std::unique_ptr<User> createUser() { std::unique_ptr<User> u = std::make_unique<User>(); return u; }
         │
         ├─► Stored in global/container (ownership transferred)
-        │   → same rule: heap only for class/vector, stack otherwise
-        │   global.push_back(std::move(u));
+        │   → file scope emits `static`; containers hold plain values and
+        │     `push` moves its argument at its last read
+        │   static JsArray SEEN = JsArray{}; SEEN.push(tag);
         │
         ├─► Captured by closure (shared ownership)
         │   → shared_ptr (use sites dereference scalars: `(*count)`)
-        │   auto c = make_shared<int>(0); return [c](){ return ++(*c); };
+        │   auto count = std::make_shared<int64_t>(0); return [&, count](){ return (*count); };
         │
         ├─► Multiple simultaneous references (shared mutable)
-        │   → shared_ptr
-        │   let a = {x:1}; let b = a; b.x = 2; // both see change
+        │   → shared_ptr — but only for heap-needy types (classes, vectors).
+        │     Value types copy soundly: `JsObject` / `JsArray` share storage
+        │     internally, so a plain copy still aliases.
+        │   let a = {x:1}; let b = a; b.x = 2; // both see change via JsObject
         │
         └─► Crosses async boundary (await/co_return)
             → shared_ptr (coroutine frame may outlive caller)
@@ -132,8 +155,9 @@ Higher priority wins when a variable has multiple escape reasons.
 | EscapeKind | C++ Type | Reason |
 |---|---|---|
 | `None` | `T` (stack) | Zero overhead, auto cleanup |
-| `Return` / `Global` | `std::unique_ptr<T>` + `std::move` for class/vector; stack copy for scalars and `Js*` | Heap only pays off where copies are deep or move-only |
-| `ClosureCapture` / `MultipleRefs` / `AsyncBoundary` | `std::shared_ptr<T>` | Shared ownership required; scalar use sites dereference (`(*x)`) |
+| `Return` / `Global` | `std::unique_ptr<T>` + implicit move for class/vector; stack copy for scalars and `Js*` | Heap only pays off where copies are deep or move-only |
+| `ClosureCapture` / `AsyncBoundary` | `std::shared_ptr<T>` | Shared ownership required; scalar use sites dereference (`(*x)`) |
+| `MultipleRefs` | `std::shared_ptr<T>` for class/vector; plain copy for value types (`JsObject`/`JsArray` share storage internally) | Heap only where a copy would break aliasing |
 
 **`shared_ptr` only where semantically required** — never "just in case."
 
@@ -149,7 +173,7 @@ Every declaration lands in exactly one bucket:
 |---|---|---|---|---|
 | **Stack value** (`int32_t x = 5;`) | `EscapeKind::None` — provably local | None (register/stack slot) | Automatic at scope exit | **Zero** |
 | **`unique_ptr<T>` + `std::move`** | `Return` / `Global` — single owner moves out | One heap allocation (`make_unique`) | Freed when the owner dies | One allocation, no counting |
-| **`shared_ptr<T>`** (`make_shared`) | `ClosureCapture` / `MultipleRefs` / `AsyncBoundary` — genuinely shared | One heap allocation (`make_shared` merges object + control block) | Freed when the last owner dies | Atomic refcount inc/dec per copy |
+| **`shared_ptr<T>`** (`make_shared`) | `ClosureCapture` / `AsyncBoundary` — genuinely shared; `MultipleRefs` only for class/vector (value types copy) | One heap allocation (`make_shared` merges object + control block) | Freed when the last owner dies | Atomic refcount inc/dec per copy |
 
 `const` on a `Js*` scalar folds to `const JsNumber` etc., and file-scope declarations get a `static` prefix so they live for the program's duration instead of per-call.
 
@@ -163,7 +187,7 @@ The honest corollary: the proof is conservative. Anything the analyzer can't see
 
 Three JS semantics genuinely require shared ownership — there is no cheaper correct answer:
 
-- **Aliasing** (`let b = a; b.x = 2` must be visible through `a`). The analyzer marks both sides `MultipleRefs`, and both names share one `shared_ptr` — one object, two owners, exactly like the JS heap.
+- **Aliasing** (`let b = a; b.x = 2` must be visible through `a`). The analyzer marks both sides `MultipleRefs`. For classes and vectors both names share one `shared_ptr` — one object, two owners, exactly like the JS heap. For `JsObject` / `JsArray` a plain copy already aliases (storage is shared internally), so no outer wrapper is added.
 - **Closures** (`return () => ++count`). The lambda outlives the stack frame that created `count`, so the counter moves to the heap and both the (dead) frame's successor and the lambda hold a `shared_ptr` (`ClosureCapture`).
 - **Coroutines** (anything live across `await`/`co_return`). A suspended coroutine's frame survives the caller's return, so locals it keeps must be heap-owned (`AsyncBoundary`).
 
@@ -187,7 +211,7 @@ Two refinements keep this cheap:
 - **`new Promise<T>` infers `morph::Result<T>`** from the type argument at the declaration, so `let p: Promise<number> = new Promise<number>(...)` never touches `JsValue`.
 - **Sync strip**: if a variable's initializer is a plain synchronous call but its declared type is `Result<T>`, the emitter strips it to `T` (`strip_result_for_sync_call`) — no coroutine frame, no wrapper, just the value.
 
-Frames are reclaimed, not leaked: both `Task` and `Result<T>` destroy a completed frame on destruction (and release a completed frame on move-assignment), mirroring each other. Verified by allocation counting — 1000 `Result` lifecycles allocate and free 1000 frames. The one exception is a *suspending* coroutine nobody owns: a fire-and-forget call that actually suspends (e.g. an un-awaited network fetch) has no owner to destroy its frame, so it leaks until a detached-spawn primitive exists to own it.
+Frames are reclaimed, not leaked: both `Task` and `Result<T>` destroy a completed frame on destruction (and release a completed frame on move-assignment), mirroring each other. Verified by allocation counting — 1000 `Result` lifecycles allocate and free 1000 frames. Fire-and-forget `fetch` is covered too: the network thread destroys the frame on completion when nobody awaits it (`net.cpp`, `await_suspend`). The remaining exception is a discarded *user* coroutine that suspends on anything else — with no owner and no detach primitive, that frame leaks.
 
 ### Strings and vectors: native storage, JS behavior
 
@@ -220,7 +244,7 @@ The analyzer widens the type based on **usage**, not just annotation. Widening a
 - **Arithmetic only** → keep native (`int32_t` when every assigned literal fits, else `int64_t`; `double` stays `double`)
 - **Dynamic assign** (`parseInt`, widened vars, `x = await …` reassignments) → `JsNumber`
 - **`await` declarations deduce** (`auto x = co_await …`) — the coroutine type is known, so no boxing
-- **String/number methods on native** → keep native, rewrite the call to a `morph::str::*` helper (`runtime/cpp/types/js_string_helpers.h`); chains nest so no intermediate boxes. Only *unknown* methods widen to `JsString`
+- **String/number methods on native** → keep native, rewrite the call to a `morph::str::*` helper (`runtime/cpp/types/js_string_helpers.h`); chains nest so no intermediate boxes. Listed-but-not-string methods (`toFixed`, `toLocaleString`, …) widen the receiver to `JsString` instead — and those calls are currently unimplemented (see edge 5). Array methods widen non-text receivers to `JsArray`. Any other method call records usage without widening.
 - **`.length` reads never widen** — the emitter lowers them to `.size()` for vectors, strings, arrays, and `JsValue` alike; only an actual `.length()` *call* on a non-string widens
 - **Array methods (`.push()`, `.map()`, …)** → `JsArray`, except on proven strings (`slice`/`indexOf`/`includes` exist on both)
 - **Property access on unknown** → `JsValue`
@@ -279,7 +303,7 @@ Apply widening table       Apply widening table
 above                      above
 ```
 
-Consequences: in strict mode `let x: number = 5` is `JsNumber` (you asked for the general type, you get it); in infer mode it's `int32_t` (the initializer is all the evidence there is). Parameters follow the same split — strict classifies them from their annotations, infer treats them as `JsValue` until use proves otherwise. Widening from *dynamic sources* still fires in both modes: reality beats declarations everywhere, unless a trusted annotation claims the range.
+Consequences: in strict mode `let x: number = 5` is `JsNumber` (you asked for the general type, you get it); in infer mode it's `int32_t` (the initializer is all the evidence there is). Parameters follow the same split — strict classifies them from their annotations, infer leaves them as `auto`, deduced from the argument at each call site. Widening from *dynamic sources* still fires in both modes: reality beats declarations everywhere, unless a trusted annotation claims the range.
 
 ## JS Comparison Semantics: Native Types, JavaScript Answers
 
@@ -296,7 +320,7 @@ std::println("{}", morph::js_cmp::loose_eq(label, count));
 ```
 
 - Same-class pairs keep direct operators (`int64_t == int64_t` already matches JS).
-- `===` across different types folds to `false` at compile time.
+- Cross-type `===` is decided inside the helper (a `constexpr` false for mismatched types); the emitter always calls `morph::js_cmp::strict_eq` and never folds at the call site.
 - The block is emitted inline in the translation unit — no extra header file, no unused helpers.
 - Full coercion tables: [How JavaScript Comparisons Work in Morph](../javascript/js-comparisons.md).
 
@@ -309,75 +333,89 @@ std::println("{}", morph::js_cmp::loose_eq(label, count));
 | `let x = 3000000000` | Native integer, big | `int64_t x = 3000000000;` |
 | `let x: int = await f()` | Native integer, unknown future | `int x = (…).as_int();` (trusted) |
 | `let s = "hello"` | String value | `std::string s = "hello";` |
-| `let a = [1,2,3]` + `for (x of a)` | Iterable sequence | `std::vector<int> a = {1,2,3};` |
-| `let o = {a:1}` + `o.a` | Struct-like | `struct { int a; } o{1};` or `std::map` |
-| `async function f() { await g() }` | Coroutine | `Task<Ret> f() { co_await g(); }` |
-| `let r = await fetch()` | Async I/O | `auto r = co_await http_get(url);` |
-| `fetch()` without await | Fire-and-forget | `morph::spawn_detached(http_post(url, data));` |
-| `class C { method() {} }` | Polymorphic object | `class C { virtual void method(); }` + `shared_ptr<C>` |
+| `let a = [1,2,3]` + `for (x of a)` | Iterable sequence | `std::vector<int32_t> a = {1,2,3};` |
+| `let o = {a:1}` + `o.a` | Map-backed dynamic object | `JsObject o = JsObject{{"a", 1}};` then `o["a"]` (no anonymous structs are emitted) |
+| `async function f() { await g() }` | Coroutine | `morph::Task f() { co_await g(); }` (`morph::Result<T>` when it returns a value) |
+| `let r = await fetch()` | Async I/O | `auto r = co_await morph::net::fetch(url);` |
+| `fetch()` without await | Discarded call (no detach primitive) | `morph::net::fetch(url, data);` — the network thread reclaims the frame |
+| `class C { method() {} }` | Object with methods | `class C { void method(); }` + `shared_ptr<C>` at `new` sites (methods are never `virtual`) |
 | `interface I { x: number }` | Abstract contract | `class I { virtual int getX() = 0; }` |
-| `Promise.all([...])` | Parallel wait | `when_all(vec_of_tasks)` |
-| Top-level `await` | Program entry | `int main() { run_async([]{ ... }); }` |
+| `Promise.all([...])` | Parallel wait | Not implemented — passed through as `Promise.all(...)` and rejected by the C++ compiler |
+| Top-level `await` | Program entry | `int main()` running the `main` coroutine to completion via a `process_tasks()` pump |
 
 ## Edge Cases Handled
 
 ### 1. Shared Mutable Reference
 
 ```ts
-let user = { name: "Alice" };
-let admin = user;
+const user = { name: "Alice" };
+const admin = user;
 admin.name = "Bob";
 console.log(user.name); // "Bob"
 ```
 
 **Detection**: Variable assigned to another + mutation through either
-**Translation**: `shared_ptr<User>` for both
+**Translation**: plain `JsObject` copies — no `shared_ptr` wrapper, because `JsObject` shares its property storage internally:
 
 ```cpp
-auto user = std::make_shared<User>();
-user->name = "Alice";
-auto admin = user;  // shared_ptr copy, refcount=2
-admin->name = "Bob";
-std::println("{}", user->name); // "Bob"
+JsObject user = JsObject{{"name", "Alice"}};
+JsObject admin = user;  // shares storage internally, refcount=2
+(admin["name"] = "Bob");
+std::println("{}", user["name"]); // "Bob"
 ```
+
+(Declared classes are the case that truly heap-shares: `new C()` gives `shared_ptr<C>`, and an alias copies the handle.)
 
 ### 2. Closure Capture
 
 ```ts
 function makeCounter() {
     let count = 0;
-    return () => ++count;
+    return () => {
+        count = count + 1;
+        return count;
+    };
 }
 ```
 
 **Detection**: Variable used in nested function after parent returns
-**Translation**: `shared_ptr<int>` captured by lambda
+**Translation**: `shared_ptr<int>` captured by value into the lambda
 
 ```cpp
 auto makeCounter() {
-    auto count = std::make_shared<int>(0);
-    return [count]() mutable { return ++(*count); };
+    auto count = std::make_shared<int64_t>(0);
+    auto bump = [&, count]() -> JsNumber { ((*count) = (*count) + 1); return (*count); };
+    return bump;
 }
 ```
+
+File-scope lambdas stay `[]` (namespace scope forbids captures); parameters shadowing an outer name are never captured.
 
 ### 3. Async Boundary Crossing
 
 ```ts
-async function fetchUser() {
-    let user = await fetch("/user");  // user escapes to coroutine frame
-    return user;
+class Cache {
+    warm: boolean = false;
+}
+async function main(): Promise<void> {
+    const cache = new Cache();
+    cache.warm = true;
+    await tick();            // suspension: the frame must keep `cache`
+    console.log(cache.warm); // true
 }
 ```
 
-**Detection**: Variable live across `await` / `co_return`
-**Translation**: `shared_ptr` (coroutine frame owns it)
+**Detection**: A heap-owned local (`shared_ptr` here) is still in use after an `await` suspension point
+**Translation**: the coroutine frame keeps the shared handle, so the value outlives the suspension:
 
 ```cpp
-Task<User> fetchUser() {
-    auto user = co_await http_get("/user"); // shared_ptr<User>
-    co_return user;
-}
+std::shared_ptr<Cache> cache = std::make_shared<Cache>();
+(cache->warm = true);
+co_await tick();
+std::println("{}", cache->warm);
 ```
+
+Async value-returning functions themselves return `morph::Result<T>` (`Promise<void>` gives `morph::Task`); `await` on a call deduces `auto` with no boxing. Two shapes do *not* work yet: returning a class instance out of an async function (the `unique_ptr`→`Result<T>` conversion has no bridge), and member access on an awaited-and-unwrapped class value.
 
 ### 4. Type Widening from Dynamic Source
 
@@ -462,30 +500,43 @@ console.log(p1);
 ### 10. Global/Static Storage
 
 ```ts
-const USERS: User[] = [];
-function register(u: User) { USERS.push(u); }
+const SEEN: string[] = [];
+function note(tag: string): void {
+    SEEN.push(tag);
+}
 ```
 
-**Detection**: Variable assigned to global/module-level container
-**Translation**: Container owns `unique_ptr`, move into it
+**Detection**: File-scope container mutated from a function
+**Translation**: file scope emits `static`; the container holds plain values and `push` moves its argument at its last read:
 
 ```cpp
-std::vector<std::unique_ptr<User>> USERS;
-void register(std::unique_ptr<User> u) { USERS.push_back(std::move(u)); }
+static JsArray SEEN = JsArray{};
+void note(auto tag)
+{
+    SEEN.push(tag);
+}
 ```
+
+Limits, stated plainly: there are no `vector<unique_ptr<T>>` element containers and no `unique_ptr` parameters (params are `auto`/bare), an empty-array annotation is ignored in infer mode (hence `JsArray` above, not `vector<string>`), and TS identifiers colliding with C++ keywords (e.g. a function named `register`) are not sanitized — that input is rejected by the C++ compiler. Class instances pushed into `JsArray` containers do not convert today.
 
 ### 11. Fire-and-Forget Async Call
 
 ```ts
-fetch("/analytics", { method: "POST", body: data });
+fetch("https://example.com/ping");
 ```
 
-**Detection**: `await` not used on promise-returning call
-**Translation**: Spawn detached task, no coroutine wrapper
+**Detection**: `await` not used on a promise-returning call
+**Translation**: the call is emitted bare and its result discarded — there is no detach primitive (`morph::net::fetch` takes only a URL; an options object has no overload):
 
 ```cpp
-morph::spawn_detached(http_post("/analytics", data));
+morph::net::fetch("https://example.com/ping");
 ```
+
+```cpp
+morph::net::fetch("https://example.com/ping");
+```
+
+The eager part of the call still runs. But a call that actually suspends has no owner for its coroutine frame, so it leaks; fire-and-forget of suspending work stays unsupported until a detached-spawn primitive exists.
 
 ## Template Bloat Elimination
 
@@ -495,7 +546,7 @@ morph::spawn_detached(http_post("/analytics", data));
 | `console.log("Hi", x)` | `<format>` + `std::format` | `<print>` + `std::println("Hi {}", x)` ✗ |
 | `console.log(x)` | `<format>` + `std::format` | `<print>` + `std::println("{}", x)` ✗ |
 
-**Rule**: `<format>` (costs ~1.5s/TU) only for `${}` template vars. `console.log` uses `std::println` directly.
+**Rule**: `<format>` (whose instantiation dominates compile time — see Measurements below) only for `${}` template vars with two or more parts. `console.log` uses `std::println` directly, including the single-argument template case.
 
 ## Header Minimization
 
@@ -510,7 +561,7 @@ needs_http      → #include "net.h"
 needs_format    → #include <format>  // ONLY for template literals
 ```
 
-No blanket `js_types.h` unless a `Js*` type is actually emitted.
+No blanket `js_types.h` unless a `Js*` type is actually emitted — with one exception: pulling in the string helpers alone also pulls `js_types.h`, since the helpers share its basic types.
 
 ## Performance Targets
 
@@ -583,7 +634,7 @@ morph app.ts --to cpp --type strict
 | `crates/morpher/src/codegen/string_methods.rs` | `StringMethod`, `StringMethodHandler` — JS→`morph::str::*` mapping |
 | `crates/morpher/src/codegen/cpp.rs` | `emit_typed_variable_declarator`, `select_integer_type`, trusted annotations, `strip_result_for_sync_call`, `emit_new` (Promise→Result), `str_helper_decision`, recursive vector literals |
 | `crates/morpher/src/codegen/type_resolver.rs` | Native type maps, `Promise`→`Result`, denormalization |
-| `crates/morpher/src/codegen/context.rs` | `Ctx` with `var_types`, `async_fns`, `escape_hints`, `TypeMode`, `runtime_path` |
+| `crates/morpher/src/codegen/context.rs` | `Ctx` with `var_types`, `async_fns`, `TypeMode`, `runtime_path` |
 | `crates/morpher/src/lib.rs` | `TranslateOptions { type_mode, runtime_path, indent }` |
 | `crates/morphc/src/commands/translate.rs` | `--type` flag, `wrap_top_level_in_main`, safe `static auto` move |
 | `runtime/cpp/types/js_string_helpers.h` | `namespace morph::str` — native string method equivalents |
