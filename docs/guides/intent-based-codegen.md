@@ -521,6 +521,15 @@ No blanket `js_types.h` unless a `Js*` type is actually emitted.
 | String concat | `JsString` heap | `std::string` SSO |
 | Vector push | `JsArray` refcount | `std::vector` native |
 
+Measured September 2026 (`g++-14 -std=c++23 -O2`, this repo's runtime):
+
+| File | Binary | Compile |
+|---|---|---|
+| `07_operators.ts` (small logic) | 188 KB (163 KB stripped) | 22 s |
+| `11_complex.ts` (105 lines, heaviest fixture) | 220 KB | 20 s |
+
+Binary size lands near target; the remaining ~60 KB over it is `JsValue`'s variant alternatives and coroutine frames, which shrink as more values stay native. Compile time does **not** meet target, and the cause is identified, not structural: preprocessing is 0.4 s, but instantiating the standard `<print>`/`<format>` machinery costs ~20 s on GCC 14 (compiling the same file with `<print>` removed takes 2.4 s). That cost is fixed per translation unit — it barely moves between the small and the heavy fixture — and it is paid once no matter how optimal the emitted code is. Reducing it means either a lighter print path or precompiled headers, both tracked separately from codegen quality.
+
 ## Usage
 
 ```bash
@@ -553,7 +562,12 @@ morph app.ts --to cpp --type strict
 | Sync `Result<T>` strip to `T` when no `co_await` | ✅ |
 | Top-level `await` → async main wrapper; side-effectful `static auto` moved into `main` order-safely | ✅ |
 | Global absolute runtime includes; auto `js_value_format.h` for printed vectors | ✅ |
-| All 28 translate fixtures passing (outputs match Node.js) | ✅ |
+| All 29 translate fixtures passing (outputs match Node.js) | ✅ |
+| Returned class instances move out as `unique_ptr` (`make_unique`, implicit move on return); shared factory results wrap once in `shared_ptr` | ✅ |
+| Escaping lambdas capture shared state by value (`[&, count]` with deref'd body) | ✅ |
+| Last-use moves at call args, assignment sources, and returns (span-anchored scans; plain writes never veto) | ✅ |
+| Aliased value types (strings, `Js*`) copy instead of heap-wrapping; heap stays for classes/vectors and lifetime extension | ✅ |
+| Destructuring declarations bind each name (`auto` per element; literals inline values; defaults/rest/computed keep the comment fallback) | ✅ |
 
 ## Implementation Files
 
@@ -571,10 +585,20 @@ morph app.ts --to cpp --type strict
 
 ## Future Work
 
-1. **Per-assignment narrowing** — currently widens per-variable; could narrow after dynamic assign ends
-2. **Move vs copy for large structs** — when JS object literal doesn't escape but is large
-3. **Closure detection completeness** — verify all capture patterns in Oxc AST
-4. **True lifespan tracking** — live ranges and last-use moves; today escape analysis picks storage, it does not track lifetimes
+1. **Per-assignment narrowing** — ✅ done: narrowing splits redeclare wide variables as native ints at straight-line literal reassignments (`tally_narrowed_1`).
+2. **Move vs copy for large structs** — ✅ answered by moves, not heap: last-use moves (call args, assignment sources, returns) eliminate deep copies of vectors and strings without putting locals behind `unique_ptr`, which would pessimize every element access with indirection. See [Why locals never get `unique_ptr`](#why-locals-never-get-unique_ptr) below.
+3. **Closure detection completeness** — ✅ done: exhaustive capture walker with collision-proof naming, destructuring-bound names tracked, escaping lambdas capture shared state by value (`[&, count]`).
+4. **True lifespan tracking** — ✅ done: definition/use sites per variable plus span-anchored last-read scans drive moves at final reads.
+
+### Why locals never get `unique_ptr`
+
+A non-escaping `std::vector` or large object stays a stack value even though copying it is expensive, for three reasons:
+
+- Every element access through a pointer pays an indirection (`v[i]` becomes `v->at(i)`-shaped code with aliasing the optimizer cannot see through), while a move at the last use costs exactly one transfer and zero per-access overhead.
+- `unique_ptr` cannot be shared: a second read, a capture, or a branch would need to convert back, adding control flow the analyzer would have to prove safe at every site.
+- The common shapes already avoid the copy: single-owner returns move out as `unique_ptr`, shared factory results wrap once in `shared_ptr`, and last-use moves transfer vectors, strings, and shared handles at their final read.
+
+Heap is for ownership (one vs many owners, lifetime past the frame) — never for size.
 
 ## Related
 

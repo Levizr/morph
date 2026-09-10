@@ -47,6 +47,7 @@ pub struct Ctx {
     pub interface_props: HashMap<String, HashMap<String, String>>, // iface name -> prop -> cpp type
     pub var_types: HashMap<String, String>,
     pub shared_ptr_vars: HashSet<String>,
+    pub unique_ptr_vars: HashSet<String>,
     pub fn_expr_depth: usize,
     pub fn_body_depth: usize,
     pub is_async_fn: usize,
@@ -58,6 +59,8 @@ pub struct Ctx {
     pub state_vars: HashMap<String, String>,
     pub js_object_params: HashSet<String>,
     pub async_fns: HashSet<String>,
+    pub fn_return_types: HashMap<String, String>,
+    pub current_fn: Option<String>,
 }
 
 impl Default for Ctx {
@@ -72,6 +75,7 @@ impl Default for Ctx {
             interface_props: HashMap::new(),
             var_types: HashMap::new(),
             shared_ptr_vars: HashSet::new(),
+            unique_ptr_vars: HashSet::new(),
             fn_expr_depth: 0,
             fn_body_depth: 0,
             is_async_fn: 0,
@@ -83,6 +87,8 @@ impl Default for Ctx {
             state_vars: HashMap::new(),
             js_object_params: HashSet::new(),
             async_fns: HashSet::new(),
+            fn_return_types: HashMap::new(),
+            current_fn: None,
         }
     }
 }
@@ -103,6 +109,7 @@ impl Ctx {
             interface_props: self.interface_props.clone(),
             var_types: self.var_types.clone(),
             shared_ptr_vars: self.shared_ptr_vars.clone(),
+            unique_ptr_vars: self.unique_ptr_vars.clone(),
             fn_expr_depth: self.fn_expr_depth,
             fn_body_depth: self.fn_body_depth,
             is_async_fn: self.is_async_fn,
@@ -114,6 +121,8 @@ impl Ctx {
             state_vars: self.state_vars.clone(),
             js_object_params: self.js_object_params.clone(),
             async_fns: self.async_fns.clone(),
+            fn_return_types: self.fn_return_types.clone(),
+            current_fn: self.current_fn.clone(),
             ..Default::default()
         };
         // Preserve indent_level correctly: sub indent = parent+1
@@ -135,8 +144,14 @@ impl Ctx {
         for v in child.shared_ptr_vars {
             self.shared_ptr_vars.insert(v);
         }
+        for v in child.unique_ptr_vars {
+            self.unique_ptr_vars.insert(v);
+        }
         for v in child.async_fns {
             self.async_fns.insert(v);
+        }
+        for (k, v) in child.fn_return_types {
+            self.fn_return_types.insert(k, v);
         }
     }
 

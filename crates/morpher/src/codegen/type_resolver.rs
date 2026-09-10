@@ -346,6 +346,8 @@ pub fn headers_for(cpp_type: &str) -> Vec<&'static str> {
         ("std::format", "<format>"),
         ("std::shared_ptr", "<memory>"),
         ("std::make_shared", "<memory>"),
+        ("std::unique_ptr", "<memory>"),
+        ("std::make_unique", "<memory>"),
         ("JsNumber", "\"../../runtime/cpp/types/js_types.h\""),
         ("JsString", "\"../../runtime/cpp/types/js_types.h\""),
         ("JsBoolean", "\"../../runtime/cpp/types/js_types.h\""),

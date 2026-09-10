@@ -224,3 +224,145 @@ def test_optimize_flag_is_gone(tmp_path: Path):
         timeout=30,
     )
     assert result.returncode != 0
+
+
+def test_returned_class_moves_out_unique(tmp_path: Path):
+    cpp = translate_source(
+        "class User {\n"
+        "    name: string = \"\";\n"
+        "}\n"
+        "function createUser(nm: string): User {\n"
+        "    const u = new User();\n"
+        "    u.name = nm;\n"
+        "    return u;\n"
+        "}\n"
+        "async function main(): Promise<void> {\n"
+        "    const admin = createUser(\"Ada\");\n"
+        "    console.log(admin.name);\n"
+        "}\n"
+        "main();\n",
+        tmp_path,
+        "unique_return",
+    )
+    code = code_without_strings(cpp)
+    assert "std::unique_ptr<User> createUser" in code
+    assert "std::unique_ptr<User> u = std::make_unique<User>()" in code
+    assert "return u;" in code
+    assert "std::shared_ptr<User> u" not in code
+
+
+def test_shared_factory_result_wraps(tmp_path: Path):
+    cpp = translate_source(
+        "class User {\n"
+        "    name: string = \"\";\n"
+        "}\n"
+        "function createUser(nm: string): User {\n"
+        "    const u = new User();\n"
+        "    u.name = nm;\n"
+        "    return u;\n"
+        "}\n"
+        "async function main(): Promise<void> {\n"
+        "    const guest = createUser(\"Bo\");\n"
+        "    console.log(guest.name);\n"
+        "    console.log(guest.name);\n"
+        "}\n"
+        "main();\n",
+        tmp_path,
+        "shared_wrap",
+    )
+    code = code_without_strings(cpp)
+    assert "std::shared_ptr<User> guest = std::shared_ptr<User>(createUser" in code
+
+
+def test_escaping_closure_captures_shared_by_value(tmp_path: Path):
+    cpp = translate_source(
+        "function makeCounter() {\n"
+        "    let count: number = 0;\n"
+        "    const bump = (): number => {\n"
+        "        count = count + 1;\n"
+        "        return count;\n"
+        "    };\n"
+        "    return bump;\n"
+        "}\n"
+        "async function main(): Promise<void> {\n"
+        "    const next = makeCounter();\n"
+        "    console.log(next());\n"
+        "}\n"
+        "main();\n",
+        tmp_path,
+        "escaping_closure",
+    )
+    code = code_without_strings(cpp)
+    assert "std::shared_ptr<int" in code
+    assert "[&, count]" in code
+
+
+def test_last_use_moves_call_argument(tmp_path: Path):
+    cpp = translate_source(
+        "function take(text: string): void {\n"
+        "    console.log(text);\n"
+        "}\n"
+        "async function main(): Promise<void> {\n"
+        "    let greeting: string = \"hello\";\n"
+        "    console.log(greeting);\n"
+        "    take(greeting);\n"
+        "}\n"
+        "main();\n",
+        tmp_path,
+        "moved_arg",
+    )
+    code = code_without_strings(cpp)
+    assert "take(std::move(greeting))" in code
+    assert code.count("std::move(greeting)") == 1
+
+
+def test_last_use_moves_assignment_source(tmp_path: Path):
+    cpp = translate_source(
+        "async function main(): Promise<void> {\n"
+        "    let label: string = \"lbl\";\n"
+        "    console.log(label);\n"
+        "    let backup: string = \"\";\n"
+        "    backup = label;\n"
+        "    console.log(backup);\n"
+        "}\n"
+        "main();\n",
+        tmp_path,
+        "moved_assign",
+    )
+    code = code_without_strings(cpp)
+    assert "std::move(label)" in code
+    assert "std::shared_ptr<std::string> label" not in code
+
+
+def test_destructuring_binds_each_name(tmp_path: Path):
+    cpp = translate_source(
+        "async function main(): Promise<void> {\n"
+        "    const [a, b] = [1, 2];\n"
+        "    console.log(a + b);\n"
+        "    const point = { x: 10, y: 20 };\n"
+        "    const { x, y } = point;\n"
+        "    console.log(x + y);\n"
+        "}\n"
+        "main();\n",
+        tmp_path,
+        "destructured",
+    )
+    code = code_without_strings(cpp)
+    assert "auto a = 1;" in code
+    assert "auto b = 2;" in code
+    assert 'auto x = point[""];' in code
+    assert "destructuring not supported" not in code
+
+
+def test_exotic_destructuring_keeps_fallback(tmp_path: Path):
+    cpp = translate_source(
+        "async function main(): Promise<void> {\n"
+        "    const obj = { x: 1 };\n"
+        "    const { x = 5 } = obj;\n"
+        "    console.log(x);\n"
+        "}\n"
+        "main();\n",
+        tmp_path,
+        "defaulted",
+    )
+    assert "destructuring not supported" in code_without_strings(cpp)

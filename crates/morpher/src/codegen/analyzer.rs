@@ -745,12 +745,11 @@ impl EscapeAnalyzer {
         let Expression::BinaryExpression(binary) = test.as_ref()? else {
             return None;
         };
-        let (identifier_side, literal_side, flipped) =
-            match (&binary.left, &binary.right) {
-                (Expression::Identifier(id), literal) => (id, literal, false),
-                (literal, Expression::Identifier(id)) => (id, literal, true),
-                _ => return None,
-            };
+        let (identifier_side, literal_side, flipped) = match (&binary.left, &binary.right) {
+            (Expression::Identifier(id), literal) => (id, literal, false),
+            (literal, Expression::Identifier(id)) => (id, literal, true),
+            _ => return None,
+        };
         if identifier_side.name.as_str() != counter_name {
             return None;
         }
@@ -794,10 +793,8 @@ impl EscapeAnalyzer {
             ForStatementInit::VariableDeclaration(d) => {
                 for decl in &d.declarations {
                     let (name, _) = self.binding_to_identifier(&decl.id);
-                    let type_ann = decl
-                        .type_annotation
-                        .as_ref()
-                        .map(|ta| self.type_annotation_to_string(ta));
+                    let type_ann =
+                        decl.type_annotation.as_ref().map(|ta| self.type_annotation_to_string(ta));
                     if let Some(init_expr) = &decl.init {
                         self.analyze_expression(init_expr);
                     }
@@ -966,46 +963,218 @@ impl EscapeAnalyzer {
         }
         if let Expression::Identifier(target_id) = init {
             if target_id.name.as_str() != name {
-                self.pending_identifier_inits
-                    .push((name.to_string(), target_id.name.to_string()));
+                self.pending_identifier_inits.push((name.to_string(), target_id.name.to_string()));
             }
         }
     }
 
     fn analyze_variable_declaration(&mut self, d: &VariableDeclaration) {
         for decl in &d.declarations {
-            let (name, _) = self.binding_to_identifier(&decl.id);
-            let type_ann =
-                decl.type_annotation.as_ref().map(|ta| self.type_annotation_to_string(ta));
-
-            let is_global = self.current_scope_depth == 0;
-
             if let Some(init) = &decl.init {
                 self.analyze_expression(init);
             }
-            let var_info = self.fresh_var_info(
-                name.clone(),
-                type_ann,
-                is_global,
-                d.kind == VariableDeclarationKind::Let,
-            );
+            match &decl.id {
+                BindingPattern::BindingIdentifier(id) => {
+                    self.analyze_identifier_declaration(
+                        &id.name,
+                        decl.type_annotation.as_ref().map(|ta| self.type_annotation_to_string(ta)),
+                        self.current_scope_depth == 0,
+                        d.kind == VariableDeclarationKind::Let,
+                        decl.init.as_ref(),
+                    );
+                }
+                pattern => {
+                    self.analyze_destructured_pattern(
+                        pattern,
+                        decl.init.as_ref(),
+                        self.current_scope_depth == 0,
+                        d.kind == VariableDeclarationKind::Let,
+                    );
+                }
+            }
+        }
+    }
+
+    /// Record one plain identifier declaration: annotation, operand class,
+    /// integer range, identifier chaining, and dynamic widening.
+    fn analyze_identifier_declaration(
+        &mut self,
+        name: &str,
+        type_ann: Option<String>,
+        is_global: bool,
+        is_mutable: bool,
+        init: Option<&Expression>,
+    ) {
+        let var_info = self.fresh_var_info(name.to_string(), type_ann, is_global, is_mutable);
+        self.var_infos.insert(name.to_string(), var_info);
+        if let Some(init) = init {
+            self.track_variable_init(name, init);
+            // Track async arrow assigned to var: let f = async (...) => ...
+            if let Expression::ArrowFunctionExpression(arrow) = init {
+                if arrow.r#async {
+                    self.async_functions.insert(name.to_string());
+                }
+            }
+            // Track async function expression assigned to var
+            if let Expression::FunctionExpression(func) = init {
+                if func.r#async {
+                    self.async_functions.insert(name.to_string());
+                }
+            }
+        }
+    }
+
+    /// Record every name bound by a destructuring declaration. Elements
+    /// taken from a literal initializer keep full precision (integer
+    /// ranges included); anything else stays boxed, exactly as if the
+    /// element had been read off an unknown value.
+    fn analyze_destructured_pattern(
+        &mut self,
+        pattern: &BindingPattern,
+        init: Option<&Expression>,
+        is_global: bool,
+        is_mutable: bool,
+    ) {
+        for (name, element) in Self::destructure_bindings(pattern, init) {
+            let var_info = self.fresh_var_info(name.clone(), None, is_global, is_mutable);
             self.var_infos.insert(name.clone(), var_info);
-            if let Some(init) = &decl.init {
-                self.track_variable_init(&name, init);
-                // Track async arrow assigned to var: let f = async (...) => ...
-                if let Expression::ArrowFunctionExpression(arrow) = init {
-                    if arrow.r#async {
+            match element {
+                Some(expr) => {
+                    self.track_variable_init(&name, expr);
+                    if matches!(expr, Expression::ArrowFunctionExpression(arrow) if arrow.r#async)
+                        || matches!(expr, Expression::FunctionExpression(func) if func.r#async)
+                    {
                         self.async_functions.insert(name.clone());
                     }
                 }
-                // Track async function expression assigned to var
-                if let Expression::FunctionExpression(func) = init {
-                    if func.r#async {
-                        self.async_functions.insert(name.clone());
+                None => {
+                    self.record_def(&name, OperandClass::JsValue, None, None);
+                    if let Some(info) = self.var_infos.get_mut(&name) {
+                        info.init_operand_class = OperandClass::JsValue;
+                        info.int_range_exact = false;
                     }
                 }
             }
         }
+    }
+
+    /// Bound names with the initializer expression each one reads, when a
+    /// literal initializer pins it down. Anything unresolvable (rest
+    /// elements, computed keys, unknown sources) binds with no expression.
+    fn destructure_bindings<'ast>(
+        pattern: &'ast BindingPattern<'ast>,
+        init: Option<&'ast Expression<'ast>>,
+    ) -> Vec<(String, Option<&'ast Expression<'ast>>)> {
+        // A bare defaulted shape proves nothing about the container.
+        let root_init =
+            if matches!(pattern, BindingPattern::AssignmentPattern(_)) { None } else { init };
+        let mut out = Vec::new();
+        Self::collect_bindings(pattern, root_init, &mut out);
+        out
+    }
+
+    /// Walk one pattern level, resolving element expressions against a
+    /// literal container when one is available.
+    fn collect_bindings<'ast>(
+        pattern: &'ast BindingPattern<'ast>,
+        init: Option<&'ast Expression<'ast>>,
+        out: &mut Vec<(String, Option<&'ast Expression<'ast>>)>,
+    ) {
+        match pattern {
+            BindingPattern::BindingIdentifier(id) => {
+                out.push((id.name.to_string(), init));
+            }
+            BindingPattern::ObjectPattern(object) => {
+                for prop in &object.properties {
+                    if prop.computed {
+                        Self::collect_bindings(&prop.value, None, out);
+                        continue;
+                    }
+                    let key = Self::pattern_key_name(&prop.key);
+                    let sub_init =
+                        key.as_deref().and_then(|key| Self::object_init_value(init, key));
+                    Self::collect_default_bindings(&prop.value, sub_init, out);
+                }
+                if let Some(rest) = &object.rest {
+                    Self::collect_bindings(&rest.argument, None, out);
+                }
+            }
+            BindingPattern::ArrayPattern(array) => {
+                for (index, element) in array.elements.iter().enumerate() {
+                    let Some(nested) = element else {
+                        continue;
+                    };
+                    let sub_init = Self::array_init_value(init, index);
+                    Self::collect_default_bindings(nested, sub_init, out);
+                }
+                if let Some(rest) = &array.rest {
+                    Self::collect_bindings(&rest.argument, None, out);
+                }
+            }
+            BindingPattern::AssignmentPattern(assign) => {
+                Self::collect_default_bindings(&assign.left, init, out);
+            }
+            _ => {}
+        }
+    }
+
+    /// Bind a pattern position that may carry a default (`{x = 5}`). A
+    /// default proves nothing statically — the runtime value can come
+    /// from the initializer instead — so only an initializer-provided
+    /// expression carries precision; otherwise the binding stays boxed.
+    fn collect_default_bindings<'ast>(
+        pattern: &'ast BindingPattern<'ast>,
+        init: Option<&'ast Expression<'ast>>,
+        out: &mut Vec<(String, Option<&'ast Expression<'ast>>)>,
+    ) {
+        if let BindingPattern::AssignmentPattern(assign) = pattern {
+            Self::collect_bindings(&assign.left, init, out);
+            return;
+        }
+        Self::collect_bindings(pattern, init, out);
+    }
+
+    /// A static property key as written (`{x}`, `{"x"}`, `{0}`).
+    pub(crate) fn pattern_key_name(key: &PropertyKey) -> Option<String> {
+        match key {
+            PropertyKey::StaticIdentifier(id) => Some(id.name.to_string()),
+            PropertyKey::StringLiteral(literal) => Some(literal.value.to_string()),
+            PropertyKey::NumericLiteral(literal) => Some(literal.value.to_string()),
+            _ => None,
+        }
+    }
+
+    /// The value expression for `key` when the initializer is an object
+    /// literal that defines it.
+    pub(crate) fn object_init_value<'ast>(
+        init: Option<&'ast Expression<'ast>>,
+        key: &str,
+    ) -> Option<&'ast Expression<'ast>> {
+        let Expression::ObjectExpression(object) = init? else {
+            return None;
+        };
+        for prop in &object.properties {
+            let ObjectPropertyKind::ObjectProperty(property) = prop else {
+                continue;
+            };
+            if Self::pattern_key_name(&property.key).as_deref() != Some(key) {
+                continue;
+            }
+            return Some(&property.value);
+        }
+        None
+    }
+
+    /// The element expression at `index` when the initializer is an array
+    /// literal long enough to have one.
+    pub(crate) fn array_init_value<'ast>(
+        init: Option<&'ast Expression<'ast>>,
+        index: usize,
+    ) -> Option<&'ast Expression<'ast>> {
+        let Expression::ArrayExpression(array) = init? else {
+            return None;
+        };
+        array.elements.get(index)?.as_expression()
     }
 
     fn analyze_expression(&mut self, expr: &Expression) {
@@ -1088,17 +1257,10 @@ impl EscapeAnalyzer {
             }
             Expression::StaticMemberExpression(m) => {
                 self.analyze_expression(&m.object);
-                if let Expression::Identifier(id) = &m.object {
-                    let obj_name = id.name.to_string();
-                    self.record_usage(&obj_name, UsageKind::PropertyRead);
-                }
             }
             Expression::ComputedMemberExpression(m) => {
                 self.analyze_expression(&m.object);
                 self.analyze_expression(&m.expression);
-                if let Expression::Identifier(id) = &m.object {
-                    self.record_usage(&id.name, UsageKind::Indexed);
-                }
             }
             Expression::ArrowFunctionExpression(f) => {
                 self.analyze_arrow_function(f);
@@ -1244,11 +1406,8 @@ impl EscapeAnalyzer {
             let assigned_class = self.infer_expression_class(&a.right);
             // Only a plain `=` re-establishes a proven literal. A compound
             // `+= 1` keeps the old value in play, so it must never narrow.
-            let assigned_literal = if a.operator.as_str() == "=" {
-                Self::int_literal_value(&a.right)
-            } else {
-                None
-            };
+            let assigned_literal =
+                if a.operator.as_str() == "=" { Self::int_literal_value(&a.right) } else { None };
             self.record_def(&left_name, assigned_class, assigned_literal, Some(a.span.start));
 
             if self.is_dynamic_source(&a.right) {
@@ -1308,13 +1467,7 @@ impl EscapeAnalyzer {
             let source_range = self
                 .var_infos
                 .get(source_id.name.as_str())
-                .and_then(|info| {
-                    if info.int_range_exact {
-                        info.int_range
-                    } else {
-                        None
-                    }
-                });
+                .and_then(|info| if info.int_range_exact { info.int_range } else { None });
             if let Some((low, high)) = source_range {
                 self.extend_int_range(var_name, low.min(high), low.max(high));
             } else {
@@ -1555,11 +1708,7 @@ impl EscapeAnalyzer {
         }
     }
 
-    fn find_captured_vars_in_chain(
-        &self,
-        chain: &ChainElement,
-        captured: &mut HashSet<String>,
-    ) {
+    fn find_captured_vars_in_chain(&self, chain: &ChainElement, captured: &mut HashSet<String>) {
         match chain {
             ChainElement::CallExpression(c) => {
                 self.find_captured_vars_in_expr(&c.callee, captured);
@@ -1841,11 +1990,7 @@ impl EscapeAnalyzer {
         }
     }
 
-    fn find_captured_vars_in_function_body(
-        &self,
-        f: &Function,
-        captured: &mut HashSet<String>,
-    ) {
+    fn find_captured_vars_in_function_body(&self, f: &Function, captured: &mut HashSet<String>) {
         if let Some(body) = &f.body {
             for stmt in &body.statements {
                 self.find_captured_vars_in_stmt(stmt, captured);
@@ -2046,12 +2191,7 @@ impl EscapeAnalyzer {
     ) {
         let site = self.current_site();
         if let Some(info) = self.var_infos.get_mut(name) {
-            info.def_sites.push(DefSite {
-                site,
-                value_class,
-                int_literal,
-                span_start,
-            });
+            info.def_sites.push(DefSite { site, value_class, int_literal, span_start });
         }
     }
 
@@ -2080,12 +2220,8 @@ impl EscapeAnalyzer {
     /// function, nothing loops over the variable, and no closure captures it.
     /// The emitter redeclares from that assignment onward under a fresh name.
     fn compute_narrow_splits(&mut self) {
-        let captured_names: HashSet<&str> = self
-            .closure_vars
-            .values()
-            .flatten()
-            .map(String::as_str)
-            .collect();
+        let captured_names: HashSet<&str> =
+            self.closure_vars.values().flatten().map(String::as_str).collect();
         let mut splits = Vec::new();
         let mut taken: HashSet<String> = self.var_infos.keys().cloned().collect();
         for (var_name, info) in &self.var_infos {
@@ -2106,16 +2242,12 @@ impl EscapeAnalyzer {
                 if def.value_class != OperandClass::Integer {
                     continue;
                 }
-                let (Some(literal), Some(span_start)) = (def.int_literal, def.span_start)
-                else {
+                let (Some(literal), Some(span_start)) = (def.int_literal, def.span_start) else {
                     continue;
                 };
                 split_count += 1;
-                let narrowed_type = if i32::try_from(literal).is_ok() {
-                    "int32_t"
-                } else {
-                    "int64_t"
-                };
+                let narrowed_type =
+                    if i32::try_from(literal).is_ok() { "int32_t" } else { "int64_t" };
                 let mut suffix = split_count;
                 let mut narrowed_name = format!("{}_narrowed_{}", var_name, suffix);
                 while taken.contains(&narrowed_name) {
@@ -2138,11 +2270,13 @@ impl EscapeAnalyzer {
     /// True when every recorded site sits at branch depth zero in the
     /// declaring function. Anything else makes region renaming unsound.
     fn sites_straight_line(info: &VarInfo) -> bool {
-        info.def_sites.iter().all(|def| {
-            def.site.branch_depth == 0 && def.site.func_depth == info.decl_func_depth
-        }) && info.use_sites.iter().all(|site| {
-            site.branch_depth == 0 && site.func_depth == info.decl_func_depth
-        })
+        info.def_sites
+            .iter()
+            .all(|def| def.site.branch_depth == 0 && def.site.func_depth == info.decl_func_depth)
+            && info
+                .use_sites
+                .iter()
+                .all(|site| site.branch_depth == 0 && site.func_depth == info.decl_func_depth)
     }
 
     fn resolve_cross_function_escapes(&mut self) {
@@ -2208,9 +2342,8 @@ mod tests {
 
     fn analyze_source(source: &str) -> AnalysisResult {
         let allocator = Allocator::default();
-        let source_type = SourceType::from_path("file.ts")
-            .unwrap_or_default()
-            .with_typescript(true);
+        let source_type =
+            SourceType::from_path("file.ts").unwrap_or_default().with_typescript(true);
         let parsed = Parser::new(&allocator, source, source_type).parse();
         assert!(parsed.diagnostics.is_empty());
         assert!(!parsed.panicked);
@@ -2234,10 +2367,7 @@ mod tests {
             "    };\n",
             "    return bump();\n}",
         ));
-        assert_eq!(
-            result.escapes.get("count"),
-            Some(&EscapeKind::ClosureCapture)
-        );
+        assert_eq!(result.escapes.get("count"), Some(&EscapeKind::ClosureCapture));
     }
 
     #[test]
@@ -2259,10 +2389,7 @@ mod tests {
     #[test]
     fn unknown_method_widens_to_js_string() {
         let result = analyze_source("let amount = 100;\nconsole.log(amount.toFixed(2));");
-        assert_eq!(
-            result.widens.get("amount"),
-            Some(&WidenedType::ToJsString)
-        );
+        assert_eq!(result.widens.get("amount"), Some(&WidenedType::ToJsString));
     }
 
     #[test]
@@ -2275,10 +2402,7 @@ mod tests {
     fn length_on_array_widens_to_js_array() {
         let result =
             analyze_source("let items = [1, 2];\nitems.push(3);\nconsole.log(items.length);");
-        assert_eq!(
-            result.widens.get("items"),
-            Some(&WidenedType::ToJsArray)
-        );
+        assert_eq!(result.widens.get("items"), Some(&WidenedType::ToJsArray));
     }
 
     #[test]
@@ -2322,19 +2446,13 @@ mod tests {
             "    cached = await fetchLimit();\n",
             "    return cached;\n}",
         ));
-        assert_eq!(
-            result.widens.get("cached"),
-            Some(&WidenedType::ToJsNumber)
-        );
+        assert_eq!(result.widens.get("cached"), Some(&WidenedType::ToJsNumber));
     }
 
     #[test]
     fn dynamic_call_widens_to_js_number() {
         let result = analyze_source("let count = parseInt(input);\nconsole.log(count);");
-        assert_eq!(
-            result.widens.get("count"),
-            Some(&WidenedType::ToJsNumber)
-        );
+        assert_eq!(result.widens.get("count"), Some(&WidenedType::ToJsNumber));
     }
 
     #[test]
@@ -2366,9 +2484,8 @@ mod capture_tests {
     fn captured_var(body: &str, var: &str) -> bool {
         let source = format!("let target = 5;\nlet other = 1;\nconst useIt = () => {};\n", body);
         let allocator = Allocator::default();
-        let source_type = SourceType::from_path("file.ts")
-            .unwrap_or_default()
-            .with_typescript(true);
+        let source_type =
+            SourceType::from_path("file.ts").unwrap_or_default().with_typescript(true);
         let parsed = Parser::new(&allocator, &source, source_type).parse();
         assert!(parsed.diagnostics.is_empty());
         assert!(!parsed.panicked);
@@ -2494,9 +2611,7 @@ mod capture_tests {
 
     #[test]
     fn captures_yield_argument() {
-        assert!(captured_by_arrow(
-            "{ function* gen() { yield target; } return gen(); }"
-        ));
+        assert!(captured_by_arrow("{ function* gen() { yield target; } return gen(); }"));
     }
 
     #[test]
@@ -2514,13 +2629,20 @@ mod lifespan_tests {
 
     fn analyze_lifespan(source: &str) -> AnalysisResult {
         let allocator = Allocator::default();
-        let source_type = SourceType::from_path("file.ts")
-            .unwrap_or_default()
-            .with_typescript(true);
+        let source_type =
+            SourceType::from_path("file.ts").unwrap_or_default().with_typescript(true);
         let parsed = Parser::new(&allocator, source, source_type).parse();
         assert!(parsed.diagnostics.is_empty());
         assert!(!parsed.panicked);
         EscapeAnalyzer::new().analyze_program(&parsed.program)
+    }
+
+    #[test]
+    fn returned_class_instance_marks_return() {
+        let result = analyze_lifespan(
+            "class User {\nname: string = \"\";\n}\nfunction createUser(nm: string): User {\nconst u = new User();\nu.name = nm;\nreturn u;\n}\n",
+        );
+        assert_eq!(result.escapes.get("u"), Some(&EscapeKind::Return));
     }
 
     #[test]
@@ -2565,11 +2687,9 @@ mod lifespan_tests {
 
     #[test]
     fn class_method_body_captures_outer_variable() {
-        let result = analyze_lifespan("let shared = 1;\nclass Worker {\nwork() {\nreturn shared;\n}\n}");
-        assert_eq!(
-            result.escapes.get("shared"),
-            Some(&EscapeKind::ClosureCapture)
-        );
+        let result =
+            analyze_lifespan("let shared = 1;\nclass Worker {\nwork() {\nreturn shared;\n}\n}");
+        assert_eq!(result.escapes.get("shared"), Some(&EscapeKind::ClosureCapture));
     }
 
     #[test]
@@ -2591,8 +2711,20 @@ mod lifespan_tests {
     }
 
     #[test]
+    fn escaping_closure_keys_captures_to_enclosing_function() {
+        let result = analyze_lifespan(
+            "function makeCounter() {\nlet count = 0;\nconst bump = () => {\ncount = count + 1;\nreturn count;\n};\nreturn bump;\n}",
+        );
+        assert_eq!(result.escapes.get("count"), Some(&EscapeKind::ClosureCapture));
+        let held = result.closure_captures.get("makeCounter").unwrap();
+        assert!(held.contains("count"));
+    }
+
+    #[test]
     fn one_split_at_second_assignment() {
-        let result = analyze_lifespan("let tally = getCount();\nprint(tally);\ntally = 42;\nprint(tally);\n");
+        let result = analyze_lifespan(
+            "let tally = getCount();\nprint(tally);\ntally = 42;\nprint(tally);\n",
+        );
         assert_eq!(result.narrow_splits.len(), 1);
         let split = &result.narrow_splits[0];
         assert_eq!(split.var_name, "tally");
@@ -2602,19 +2734,24 @@ mod lifespan_tests {
 
     #[test]
     fn no_split_when_first_definition_literal() {
-        let result = analyze_lifespan("let tally = 1;\nprint(tally);\ntally = 42;\nprint(tally);\n");
+        let result =
+            analyze_lifespan("let tally = 1;\nprint(tally);\ntally = 42;\nprint(tally);\n");
         assert!(result.narrow_splits.is_empty());
     }
 
     #[test]
     fn no_split_when_later_definition_not_literal() {
-        let result = analyze_lifespan("let tally = getCount();\nprint(tally);\ntally = read();\nprint(tally);\n");
+        let result = analyze_lifespan(
+            "let tally = getCount();\nprint(tally);\ntally = read();\nprint(tally);\n",
+        );
         assert!(result.narrow_splits.is_empty());
     }
 
     #[test]
     fn no_split_compound_assignment() {
-        let result = analyze_lifespan("let tally = getCount();\nprint(tally);\ntally += 1;\nprint(tally);\n");
+        let result = analyze_lifespan(
+            "let tally = getCount();\nprint(tally);\ntally += 1;\nprint(tally);\n",
+        );
         assert!(result.narrow_splits.is_empty());
     }
 
@@ -2631,10 +2768,7 @@ mod lifespan_tests {
         let result = analyze_lifespan(
             "let tally = getCount();\nclass Box {\nread() {\nreturn tally;\n}\n}\ntally = 42;\nprint(tally);\n",
         );
-        assert_eq!(
-            result.escapes.get("tally"),
-            Some(&EscapeKind::ClosureCapture)
-        );
+        assert_eq!(result.escapes.get("tally"), Some(&EscapeKind::ClosureCapture));
         assert!(result.narrow_splits.is_empty());
     }
 
@@ -2643,11 +2777,46 @@ mod lifespan_tests {
         let result = analyze_lifespan(
             "let tally_narrowed_1 = 5;\nlet tally = getCount();\nprint(tally);\ntally = 42;\nprint(tally);\n",
         );
-        let split = result
-            .narrow_splits
-            .iter()
-            .find(|s| s.var_name == "tally")
-            .unwrap();
+        let split = result.narrow_splits.iter().find(|s| s.var_name == "tally").unwrap();
         assert_ne!(split.narrowed_name, "tally_narrowed_1");
+    }
+
+    #[test]
+    fn object_destructuring_binds_names() {
+        let result =
+            analyze_lifespan("let point = {x: 1, y: 2};\nlet {x, y} = point;\nprint(x);\n");
+        assert!(result.var_infos.contains_key("x"));
+        assert!(result.var_infos.contains_key("y"));
+    }
+
+    #[test]
+    fn array_destructuring_binds_names() {
+        let result =
+            analyze_lifespan("let pair = [1, 2];\nlet [first, second] = pair;\nprint(first);\n");
+        assert!(result.var_infos.contains_key("first"));
+        assert!(result.var_infos.contains_key("second"));
+    }
+
+    #[test]
+    fn literal_elements_keep_precision() {
+        let result = analyze_lifespan("let [small] = [42];\nprint(small);\n");
+        let info = result.var_infos.get("small").unwrap();
+        assert_eq!(info.init_operand_class, OperandClass::Integer);
+        assert_eq!(info.int_range, Some((42, 42)));
+    }
+
+    #[test]
+    fn unknown_source_elements_stay_boxed() {
+        let result = analyze_lifespan("let {name} = getUser();\nprint(name);\n");
+        let info = result.var_infos.get("name").unwrap();
+        assert_eq!(info.init_operand_class, OperandClass::JsValue);
+    }
+
+    #[test]
+    fn capture_through_destructured_name() {
+        let result = analyze_lifespan(
+            "let point = {x: 1};\nlet {x} = point;\nconst get = () => x;\nprint(get());\n",
+        );
+        assert_eq!(result.escapes.get("x"), Some(&EscapeKind::ClosureCapture));
     }
 }

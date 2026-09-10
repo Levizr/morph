@@ -1,4 +1,7 @@
 use oxc_ast::ast::*;
+use oxc_ast_visit::{
+    Visit, walk::walk_assignment_target, walk::walk_expression, walk::walk_simple_assignment_target,
+};
 use oxc_span::GetSpan;
 use std::collections::{HashMap, HashSet};
 
@@ -22,6 +25,68 @@ pub struct CppTranslator<'a> {
     comparison_uses: HashSet<ComparisonSignature>,
     narrow_index: HashMap<(String, u32), (String, String)>,
     active_narrows: HashMap<String, String>,
+    last_read_frames: Vec<HashMap<String, u32>>,
+    destructure_count: usize,
+}
+
+/// Collects every variable read in a statement list: plain references
+/// plus read-modify-write targets (`++x`, `x += 1`). Plain writes are
+/// not reads, so moving before a later redefinition stays legal.
+/// The visitor walks every child, so no read can hide in a shape the
+/// scanner does not know by name.
+#[derive(Default)]
+struct ReadScan {
+    reads: HashMap<String, u32>,
+}
+
+impl<'a> Visit<'a> for ReadScan {
+    fn visit_identifier_reference(&mut self, it: &IdentifierReference<'a>) {
+        self.reads.insert(it.name.to_string(), it.span.start);
+    }
+
+    fn visit_update_expression(&mut self, it: &UpdateExpression<'a>) {
+        if let SimpleAssignmentTarget::AssignmentTargetIdentifier(id) = &it.argument {
+            self.reads.insert(id.name.to_string(), id.span.start);
+        }
+        walk_simple_assignment_target(self, &it.argument);
+    }
+
+    fn visit_assignment_expression(&mut self, it: &AssignmentExpression<'a>) {
+        match &it.left {
+            AssignmentTarget::AssignmentTargetIdentifier(id) => {
+                if it.operator.as_str() != "=" {
+                    self.reads.insert(id.name.to_string(), id.span.start);
+                }
+            }
+            _ => walk_assignment_target(self, &it.left),
+        }
+        walk_expression(self, &it.right);
+    }
+}
+
+/// One access step from a destructured root to a bound name.
+#[derive(Clone)]
+enum AccessStep {
+    Key(String),
+    Index(usize),
+}
+
+/// One destructured binding before rendering: declared name plus the
+/// absolute step path from the source root.
+struct RawBinding {
+    name: String,
+    steps: Vec<AccessStep>,
+}
+
+/// Last read span per variable over a statement list. Spans are
+/// absolute source offsets, so the scan and the emitter agree on
+/// positions without mirroring each other's traversal.
+fn last_read_spans(stmts: &[Statement]) -> HashMap<String, u32> {
+    let mut scan = ReadScan::default();
+    for stmt in stmts {
+        scan.visit_statement(stmt);
+    }
+    scan.reads
 }
 
 impl<'a> CppTranslator<'a> {
@@ -43,6 +108,8 @@ impl<'a> CppTranslator<'a> {
             comparison_uses: HashSet::new(),
             narrow_index: HashMap::new(),
             active_narrows: HashMap::new(),
+            last_read_frames: Vec::new(),
+            destructure_count: 0,
         };
         this
     }
@@ -76,6 +143,7 @@ impl<'a> CppTranslator<'a> {
             }
         }
         let mut lines = Vec::new();
+        self.last_read_frames.push(last_read_spans(&program.body));
         for stmt in &program.body {
             if self.is_main_call(stmt) {
                 continue;
@@ -86,6 +154,7 @@ impl<'a> CppTranslator<'a> {
                 }
             }
         }
+        self.last_read_frames.pop();
         let body = lines.join("\n");
         if self.ctx.needed.contains("<print>") {
             // C++23 <print> is self-contained, no need for iostream sync
@@ -94,8 +163,7 @@ impl<'a> CppTranslator<'a> {
         // Header sections come from emit-time records only, so the generated
         // block always matches the helpers actually called below.
         if !self.comparison_uses.is_empty() {
-            let sections =
-                ComparisonSections::from_signatures(&self.comparison_uses);
+            let sections = ComparisonSections::from_signatures(&self.comparison_uses);
             if sections.needs_helpers() {
                 for include in required_includes(sections) {
                     self.ctx.needed.insert(include.to_string());
@@ -284,6 +352,9 @@ impl<'a> CppTranslator<'a> {
         d: &VariableDeclarator<'a>,
         kind: &str,
     ) -> Option<String> {
+        if !matches!(&d.id, BindingPattern::BindingIdentifier(_)) {
+            return self.emit_destructured(d, kind);
+        }
         let (name, _) = self.binding_to_identifier(&d.id);
         if name.starts_with("/*") {
             return Some(format!("{}/* destructuring not supported */", self.indent()));
@@ -292,9 +363,354 @@ impl<'a> CppTranslator<'a> {
         self.emit_typed_variable_declarator(d, &name, kind)
     }
 
+    /// Destructuring declarations (`const {x} = obj`, `const [a] = arr`).
+    ///
+    /// One `auto` per binding. Literal containers inline each element
+    /// value (single evaluation, full precision); identifier sources
+    /// repeat a side-effect-free root; anything else stages through one
+    /// `__destructure_N` temporary. Defaults, rest elements, computed
+    /// keys, and string iteration keep the comment fallback below.
+    /// Bindings emit plain `auto` regardless of `kind`, matching how the
+    /// typed declarator treats deduced locals, so later moves keep working.
+    fn emit_destructured(&mut self, d: &VariableDeclarator<'a>, _kind: &str) -> Option<String> {
+        let fallback = || Some(format!("{}/* destructuring not supported */", self.indent()));
+        let Some(init) = d.init.as_ref() else {
+            return fallback();
+        };
+        let mut raw: Vec<RawBinding> = Vec::new();
+        if !Self::collect_access(&d.id, &mut Vec::new(), &mut raw) {
+            return fallback();
+        }
+        if matches!(init, Expression::ArrayExpression(_) | Expression::ObjectExpression(_)) {
+            if let Some(direct) = self.emit_destructured_values(&raw, init) {
+                return Some(direct);
+            }
+            return self.emit_destructured_staged(&raw, init);
+        }
+        if let Expression::Identifier(id) = init {
+            let container_type =
+                self.ctx.var_types.get(id.name.as_str()).cloned().unwrap_or_default();
+            return self.emit_destructured_access(
+                &raw,
+                &id.name.to_string(),
+                &container_type,
+                None,
+            );
+        }
+        self.emit_destructured_staged(&raw, init)
+    }
+
+    /// Bindings off a literal container, inlining each element value.
+    /// `None` when any step leaves the literal (the caller restages).
+    fn emit_destructured_values(
+        &mut self,
+        raw: &[RawBinding],
+        init: &Expression<'a>,
+    ) -> Option<String> {
+        let mut lines: Vec<String> = Vec::new();
+        for binding in raw {
+            let value = Self::literal_value(init, &binding.steps)?;
+            let rendered = self.emit_expression(value);
+            let elem_type = self.infer_type_from_init(value).unwrap_or("JsValue".to_string());
+            self.ctx.need(&elem_type);
+            self.ctx.var_types.insert(binding.name.clone(), elem_type);
+            let prefix = if self.ctx.indent_level == 0 { "static " } else { "" };
+            lines.push(format!("{}{}auto {} = {};", self.indent(), prefix, binding.name, rendered));
+        }
+        Some(lines.join("\n"))
+    }
+
+    /// Bindings off an arbitrary source, staged once through a temporary
+    /// so the source evaluates exactly once no matter how many names bind.
+    fn emit_destructured_staged(
+        &mut self,
+        raw: &[RawBinding],
+        init: &Expression<'a>,
+    ) -> Option<String> {
+        let container_type = self.infer_type_from_init(init).unwrap_or("JsValue".to_string());
+        let temp = format!("__destructure_{}", self.destructure_count);
+        self.destructure_count += 1;
+        let staged_init = self.emit_expression(init);
+        self.ctx.need(&container_type);
+        self.ctx.var_types.insert(temp.clone(), container_type.clone());
+        let prefix = if self.ctx.indent_level == 0 { "static " } else { "" };
+        let staged_line = format!("{}{}auto {} = {};", self.indent(), prefix, temp, staged_init);
+        self.emit_destructured_access(raw, &temp, &container_type, Some(staged_line))
+    }
+
+    /// Bindings off a repeatable root (identifier or staged temporary),
+    /// rendered as member access. Key steps need an object-shaped root;
+    /// vectors and arrays only serve indices.
+    fn emit_destructured_access(
+        &mut self,
+        raw: &[RawBinding],
+        base: &str,
+        container_type: &str,
+        staged_line: Option<String>,
+    ) -> Option<String> {
+        let fallback = || Some(format!("{}/* destructuring not supported */", self.indent()));
+        let dot = match Self::destructure_dot(container_type, &self.ctx.class_names) {
+            Some(dot) => dot,
+            None => return fallback(),
+        };
+        if !dot
+            && (container_type.starts_with("std::vector<") || container_type == "JsArray")
+            && raw
+                .iter()
+                .any(|binding| binding.steps.iter().any(|step| matches!(step, AccessStep::Key(_))))
+        {
+            return fallback();
+        }
+        let mut lines: Vec<String> = Vec::new();
+        if let Some(staged) = staged_line {
+            lines.push(staged);
+        }
+        for binding in raw {
+            let access = Self::render_access(base, dot, &binding.steps);
+            let elem_type = Self::access_elem_type(container_type, &binding.steps);
+            self.ctx.need(&elem_type);
+            self.ctx.var_types.insert(binding.name.clone(), elem_type);
+            let prefix = if self.ctx.indent_level == 0 { "static " } else { "" };
+            lines.push(format!("{}{}auto {} = {};", self.indent(), prefix, binding.name, access));
+        }
+        Some(lines.join("\n"))
+    }
+
+    /// Member style for destructured access off a container type. `None`
+    /// marks containers destructuring cannot read (strings, scalars).
+    /// Bracket access on an unknown root assumes the usual dynamic value.
+    fn destructure_dot(container_type: &str, class_names: &HashSet<String>) -> Option<bool> {
+        let bare = container_type.trim_start_matches("const ").trim_end_matches('&').trim();
+        if bare.starts_with("std::shared_ptr<")
+            || bare.starts_with("std::unique_ptr<")
+            || class_names.contains(bare)
+        {
+            return Some(true);
+        }
+        if bare == "JsObject"
+            || bare == "JsValue"
+            || bare == "auto"
+            || bare.is_empty()
+            || bare.starts_with("std::vector<")
+            || bare == "JsArray"
+        {
+            return Some(false);
+        }
+        None
+    }
+
+    /// Element type behind one access path. Only a first-level vector
+    /// index carries a precise type; everything else reads boxed.
+    fn access_elem_type(container_type: &str, steps: &[AccessStep]) -> String {
+        if let [AccessStep::Index(_)] = steps {
+            if let Some(inner) = Self::vector_inner_type(container_type) {
+                return inner.trim().to_string();
+            }
+        }
+        "JsValue".to_string()
+    }
+
+    /// Absolute access path per bound name. `false` on anything the
+    /// renderer cannot express (defaults, rest, computed keys).
+    fn collect_access(
+        pattern: &BindingPattern,
+        steps: &mut Vec<AccessStep>,
+        out: &mut Vec<RawBinding>,
+    ) -> bool {
+        match pattern {
+            BindingPattern::BindingIdentifier(id) => {
+                out.push(RawBinding { name: id.name.to_string(), steps: steps.clone() });
+                true
+            }
+            BindingPattern::ObjectPattern(object) => {
+                for prop in &object.properties {
+                    if prop.computed {
+                        return false;
+                    }
+                    let Some(key) = EscapeAnalyzer::pattern_key_name(&prop.key) else {
+                        return false;
+                    };
+                    steps.push(AccessStep::Key(key));
+                    if !Self::collect_access_default(&prop.value, steps, out) {
+                        return false;
+                    }
+                    steps.pop();
+                }
+                if object.rest.is_some() {
+                    return false;
+                }
+                true
+            }
+            BindingPattern::ArrayPattern(array) => {
+                for (index, element) in array.elements.iter().enumerate() {
+                    let Some(nested) = element else {
+                        continue;
+                    };
+                    steps.push(AccessStep::Index(index));
+                    if !Self::collect_access_default(nested, steps, out) {
+                        return false;
+                    }
+                    steps.pop();
+                }
+                if array.rest.is_some() {
+                    return false;
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Defaults keep the comment fallback: they prove nothing statically
+    /// and need runtime presence checks the renderer does not emit.
+    fn collect_access_default(
+        pattern: &BindingPattern,
+        steps: &mut Vec<AccessStep>,
+        out: &mut Vec<RawBinding>,
+    ) -> bool {
+        if matches!(pattern, BindingPattern::AssignmentPattern(_)) {
+            return false;
+        }
+        Self::collect_access(pattern, steps, out)
+    }
+
+    /// Render one access path off a root expression string.
+    fn render_access(base: &str, dot: bool, steps: &[AccessStep]) -> String {
+        let mut out = base.to_string();
+        for step in steps {
+            match step {
+                AccessStep::Key(key) => {
+                    if dot {
+                        out.push('.');
+                        out.push_str(key);
+                    } else {
+                        out.push_str(&format!("[\"{}\"]", key));
+                    }
+                }
+                AccessStep::Index(index) => {
+                    out.push_str(&format!("[{}]", index));
+                }
+            }
+        }
+        out
+    }
+
+    /// Follow an access path through literal containers. `None` as soon
+    /// as any step leaves the literal world.
+    fn literal_value<'x, 'y>(
+        init: &'x Expression<'y>,
+        steps: &[AccessStep],
+    ) -> Option<&'x Expression<'y>> {
+        let mut current = init;
+        for step in steps {
+            current = match (current, step) {
+                (Expression::ObjectExpression(object), AccessStep::Key(key)) => {
+                    Self::object_prop_value(object, key)?
+                }
+                (Expression::ArrayExpression(array), AccessStep::Index(index)) => {
+                    array.elements.get(*index)?.as_expression()?
+                }
+                _ => return None,
+            };
+        }
+        Some(current)
+    }
+
+    /// The value expression for `key` in an object literal.
+    fn object_prop_value<'x, 'y>(
+        object: &'x ObjectExpression<'y>,
+        key: &str,
+    ) -> Option<&'x Expression<'y>> {
+        for prop in &object.properties {
+            if let ObjectPropertyKind::ObjectProperty(property) = prop {
+                if EscapeAnalyzer::pattern_key_name(&property.key).as_deref() == Some(key) {
+                    return Some(&property.value);
+                }
+            }
+        }
+        None
+    }
+
     // Intent-based declarator: base type, widening, trusted annotations,
     // integer-range selection, then escape-based allocation. This is the only
     // variable-declaration path.
+    //
+    // A `new C()` initializer infers as `shared_ptr<C>`, but the declarator
+    // owns the single-owner vs shared decision: unwrap to the bare class so
+    // escape analysis picks the wrapper instead of inheriting a guess.
+    fn new_class_name_of(&self, cpp_type: &str, init: &Option<Expression<'a>>) -> Option<String> {
+        let Some(Expression::NewExpression(new_expr)) = init else {
+            return None;
+        };
+        let Expression::Identifier(callee) = &new_expr.callee else {
+            return None;
+        };
+        if !self.ctx.class_names.contains(callee.name.as_str()) {
+            return None;
+        }
+        if *cpp_type == format!("std::shared_ptr<{}>", callee.name.as_str()) {
+            return Some(callee.name.to_string());
+        }
+        None
+    }
+
+    /// Constructor arguments of a `new C(...)` initializer, unwrapped.
+    /// Each escape arm below chooses its own allocation around them.
+    fn new_class_args(&mut self, init: &Option<Expression<'a>>) -> Option<String> {
+        let Some(Expression::NewExpression(new_expr)) = init else {
+            return None;
+        };
+        if !matches!(&new_expr.callee, Expression::Identifier(_)) {
+            return None;
+        }
+        let args: Vec<String> =
+            new_expr.arguments.iter().map(|arg| self.emit_argument(arg)).collect();
+        Some(args.join(", "))
+    }
+
+    /// Adopt a known factory return type for `auto x = f()`.
+    ///
+    /// Returns the adopted type plus whether the call must be wrapped in a
+    /// shared construction at the use site. A unique result stays unique
+    /// only under single ownership; anything shared wraps instead, since a
+    /// `unique_ptr` cannot be copied into a second owner. Wrapping applies
+    /// to plain locals only, where the declarator below emits the wrapper
+    /// directly around the call.
+    fn adopted_call_result(
+        &self,
+        name: &str,
+        raw_escape: &EscapeKind,
+        init: &Option<Expression<'a>>,
+    ) -> Option<(String, bool)> {
+        let Some(Expression::CallExpression(call)) = init else {
+            return None;
+        };
+        let Expression::Identifier(callee) = &call.callee else {
+            return None;
+        };
+        let recorded = self.ctx.fn_return_types.get(callee.name.as_str())?;
+        let inner = recorded.strip_prefix("std::unique_ptr<")?.strip_suffix('>')?;
+        let Some(analysis) = self.analysis.as_ref() else {
+            return None;
+        };
+        let single_owner = analysis
+            .var_infos
+            .get(name)
+            .is_some_and(|info| !info.has_loop_use && info.read_use_count() <= 1)
+            && !analysis
+                .closure_captures
+                .values()
+                .any(|captured| captured.iter().any(|held| held == name));
+        if single_owner {
+            return Some((recorded.clone(), false));
+        }
+        if matches!(raw_escape, EscapeKind::None) {
+            let shared = format!("std::shared_ptr<{}>", inner);
+            return Some((shared, true));
+        }
+        None
+    }
+
     fn emit_typed_variable_declarator(
         &mut self,
         d: &VariableDeclarator<'a>,
@@ -315,12 +731,25 @@ impl<'a> CppTranslator<'a> {
                 cpp_type = stripped;
             }
         }
+        let new_class_name = self.new_class_name_of(&cpp_type, &d.init);
+        if let Some(class_name) = &new_class_name {
+            cpp_type = class_name.clone();
+        }
+        let new_class_args =
+            if new_class_name.is_some() { self.new_class_args(&d.init) } else { None };
         let escape_kind = self
             .analysis
             .as_ref()
             .and_then(|analysis| analysis.escapes.get(name))
             .cloned()
             .unwrap_or(EscapeKind::None);
+        let mut shared_wrap_call = false;
+        if cpp_type == "auto" {
+            if let Some((adopted, wrap)) = self.adopted_call_result(name, &escape_kind, &d.init) {
+                cpp_type = adopted;
+                shared_wrap_call = wrap;
+            }
+        }
         let escape_kind = if cpp_type == "auto" {
             EscapeKind::None
         } else {
@@ -330,61 +759,118 @@ impl<'a> CppTranslator<'a> {
                 {
                     EscapeKind::None
                 }
+                EscapeKind::MultipleRefs
+                    if !Self::needs_heap_for_escape(&cpp_type, &self.ctx.class_names) =>
+                {
+                    // Aliased value types copy soundly: native scalars and
+                    // strings are values, and Js containers share storage
+                    // internally, so a heap wrapper only adds indirection.
+                    // (Closure and async escapes still wrap: they extend
+                    // lifetime past the frame, which a copy cannot do.)
+                    EscapeKind::None
+                }
                 other => other,
             }
         };
-        let (alloc_type, init_code) = if let Some(init) = &d.init {
-            match escape_kind {
-                EscapeKind::None => {
-                    let init_code = if cpp_type.starts_with("std::vector<")
-                        && matches!(init, Expression::ArrayExpression(_))
-                    {
-                        self.emit_vector_literal_typed(init, Some(&cpp_type))
-                    } else if cpp_type == "char" && matches!(init, Expression::StringLiteral(_))
-                    {
-                        self.emit_char_literal(init)
-                    } else {
-                        self.emit_expression(init)
-                    };
-                    (cpp_type.clone(), init_code)
-                }
-                EscapeKind::Return | EscapeKind::Global => {
-                    let alloc = format!("std::unique_ptr<{}>", cpp_type);
-                    let init_code = if matches!(init, Expression::ArrayExpression(_)) {
-                        format!(
-                            "std::make_unique<{}>(std::vector{{{}}})",
-                            cpp_type,
-                            self.emit_vector_literal_typed(init, Some(&cpp_type))
-                                .trim_start_matches('{')
-                                .trim_end_matches('}')
-                        )
-                    } else {
-                        format!("std::make_unique<{}>({})", cpp_type, self.emit_expression(init))
-                    };
-                    (alloc, init_code)
-                }
-                EscapeKind::ClosureCapture
-                | EscapeKind::MultipleRefs
-                | EscapeKind::AsyncBoundary => {
-                    let alloc = format!("std::shared_ptr<{}>", cpp_type);
-                    let init_code =
-                        format!("std::make_shared<{}>({})", cpp_type, self.emit_expression(init));
-                    (alloc, init_code)
+        let new_class_alloc: Option<(String, String)> =
+            match (&new_class_name, &new_class_args, &escape_kind) {
+                (Some(class_name), Some(args), EscapeKind::Return | EscapeKind::Global) => Some((
+                    format!("std::unique_ptr<{}>", class_name),
+                    format!("std::make_unique<{}>({})", class_name, args),
+                )),
+                (
+                    Some(class_name),
+                    Some(args),
+                    EscapeKind::ClosureCapture
+                    | EscapeKind::MultipleRefs
+                    | EscapeKind::AsyncBoundary
+                    | EscapeKind::None,
+                ) => Some((
+                    // Non-escaping `new` keeps shared ownership: callers may
+                    // hold the value in `shared_ptr` parameters a stack value
+                    // could not satisfy.
+                    format!("std::shared_ptr<{}>", class_name),
+                    format!("std::make_shared<{}>({})", class_name, args),
+                )),
+                _ => None,
+            };
+        let (alloc_type, init_code) = match new_class_alloc {
+            Some(pair) => pair,
+            None => {
+                if let Some(init) = &d.init {
+                    match escape_kind {
+                        EscapeKind::None => {
+                            if shared_wrap_call {
+                                (
+                                    cpp_type.clone(),
+                                    format!("{}({})", cpp_type, self.emit_expression(init)),
+                                )
+                            } else {
+                                let init_code = if cpp_type.starts_with("std::vector<")
+                                    && matches!(init, Expression::ArrayExpression(_))
+                                {
+                                    self.emit_vector_literal_typed(init, Some(&cpp_type))
+                                } else if cpp_type == "char"
+                                    && matches!(init, Expression::StringLiteral(_))
+                                {
+                                    self.emit_char_literal(init)
+                                } else {
+                                    self.emit_expression(init)
+                                };
+                                (cpp_type.clone(), init_code)
+                            }
+                        }
+                        EscapeKind::Return | EscapeKind::Global => {
+                            let alloc = format!("std::unique_ptr<{}>", cpp_type);
+                            let init_code = if matches!(init, Expression::ArrayExpression(_)) {
+                                format!(
+                                    "std::make_unique<{}>(std::vector{{{}}})",
+                                    cpp_type,
+                                    self.emit_vector_literal_typed(init, Some(&cpp_type))
+                                        .trim_start_matches('{')
+                                        .trim_end_matches('}')
+                                )
+                            } else {
+                                format!(
+                                    "std::make_unique<{}>({})",
+                                    cpp_type,
+                                    self.emit_expression(init)
+                                )
+                            };
+                            (alloc, init_code)
+                        }
+                        EscapeKind::ClosureCapture
+                        | EscapeKind::MultipleRefs
+                        | EscapeKind::AsyncBoundary => {
+                            let alloc = format!("std::shared_ptr<{}>", cpp_type);
+                            let init_code = format!(
+                                "std::make_shared<{}>({})",
+                                cpp_type,
+                                self.emit_expression(init)
+                            );
+                            (alloc, init_code)
+                        }
+                    }
+                } else if matches!(
+                    escape_kind,
+                    EscapeKind::ClosureCapture
+                        | EscapeKind::MultipleRefs
+                        | EscapeKind::AsyncBoundary
+                ) {
+                    (format!("std::shared_ptr<{}>", cpp_type), String::new())
+                } else if matches!(escape_kind, EscapeKind::Return | EscapeKind::Global) {
+                    (format!("std::unique_ptr<{}>", cpp_type), String::new())
+                } else {
+                    (cpp_type.clone(), String::new())
                 }
             }
-        } else if matches!(
-            escape_kind,
-            EscapeKind::ClosureCapture | EscapeKind::MultipleRefs | EscapeKind::AsyncBoundary
-        ) {
-            (format!("std::shared_ptr<{}>", cpp_type), String::new())
-        } else if matches!(escape_kind, EscapeKind::Return | EscapeKind::Global) {
-            (format!("std::unique_ptr<{}>", cpp_type), String::new())
-        } else {
-            (cpp_type.clone(), String::new())
         };
 
         if alloc_type.starts_with("std::shared_ptr<") {
             self.ctx.shared_ptr_vars.insert(name.to_string());
+        }
+        if alloc_type.starts_with("std::unique_ptr<") {
+            self.ctx.unique_ptr_vars.insert(name.to_string());
         }
         let init_code = match &d.init {
             Some(init) if Self::is_trusted_native_number(d, &widened).is_some() => {
@@ -417,10 +903,7 @@ impl<'a> CppTranslator<'a> {
             }
         }
 
-        if let Some(init) = &d.init {
-            if matches!(init, Expression::NewExpression(_)) {
-                self.ctx.shared_ptr_vars.insert(name.to_string());
-            }
+        if d.init.is_some() {
             Some(format!("{}{}{} {} = {};", self.indent(), prefix, final_type, name, init_code))
         } else {
             Some(format!("{}{}{} {}{{}};", self.indent(), prefix, final_type, name))
@@ -488,18 +971,13 @@ impl<'a> CppTranslator<'a> {
             WidenedType::ToJsArray => "JsArray".to_string(),
             WidenedType::None => {
                 if base_type == "auto" {
-                    if d.init.is_some() {
-                        base_type
-                    } else {
-                        "JsValue".to_string()
-                    }
+                    if d.init.is_some() { base_type } else { "JsValue".to_string() }
                 } else {
                     base_type.clone()
                 }
             }
         };
-        let inferred =
-            matches!(self.type_mode, TypeMode::Infer) || d.type_annotation.is_none();
+        let inferred = matches!(self.type_mode, TypeMode::Infer) || d.type_annotation.is_none();
         let inferred_integer = matches!(cpp_type.as_str(), "int" | "int32_t" | "int64_t");
         if inferred && matches!(widened, WidenedType::None) && inferred_integer {
             return self.select_integer_type(name);
@@ -513,20 +991,13 @@ impl<'a> CppTranslator<'a> {
     /// initializer, or an `await` boundary (where the annotation is the best
     /// bound information available). Statically known values keep inferred
     /// types.
-    fn is_trusted_native_number(
-        d: &VariableDeclarator,
-        widened: &WidenedType,
-    ) -> Option<String> {
+    fn is_trusted_native_number(d: &VariableDeclarator, widened: &WidenedType) -> Option<String> {
         let annotation = d.type_annotation.as_ref()?;
         let trusted = native_number_annotation_type(Some(annotation))?;
         let unknown_future = d.init.is_none()
             || matches!(widened, WidenedType::ToJsNumber | WidenedType::ToJsValue)
             || matches!(d.init, Some(Expression::AwaitExpression(_)));
-        if unknown_future {
-            Some(trusted)
-        } else {
-            None
-        }
+        if unknown_future { Some(trusted) } else { None }
     }
 
     /// Convert a dynamic right-hand side into a native integer/float target.
@@ -579,95 +1050,91 @@ impl<'a> CppTranslator<'a> {
                     })
             })
             .unwrap_or(false);
-        if proven_small {
-            "int32_t".to_string()
-        } else {
-            "int64_t".to_string()
-        }
+        if proven_small { "int32_t".to_string() } else { "int64_t".to_string() }
     }
 
     fn infer_type_from_init(&self, node: &Expression<'a>) -> Option<String> {
         match node {
-                Expression::StringLiteral(_) => Some("std::string".to_string()),
-                Expression::TemplateLiteral(_) => Some("std::string".to_string()),
-                Expression::BooleanLiteral(_) => Some("bool".to_string()),
-                Expression::NumericLiteral(n) => {
-                    if n.value.fract() == 0.0 && n.value.abs() <= i64::MAX as f64 {
-                        Some("int64_t".to_string())
-                    } else {
-                        Some("double".to_string())
-                    }
+            Expression::StringLiteral(_) => Some("std::string".to_string()),
+            Expression::TemplateLiteral(_) => Some("std::string".to_string()),
+            Expression::BooleanLiteral(_) => Some("bool".to_string()),
+            Expression::NumericLiteral(n) => {
+                if n.value.fract() == 0.0 && n.value.abs() <= i64::MAX as f64 {
+                    Some("int64_t".to_string())
+                } else {
+                    Some("double".to_string())
                 }
-                Expression::NullLiteral(_) => Some("JsNull".to_string()),
-                Expression::Identifier(id) if id.name.as_str() == "undefined" => {
-                    Some("JsUndefined".to_string())
-                }
-                Expression::ArrayExpression(arr) => {
-                    if arr.elements.is_empty() {
-                        Some("std::vector<JsValue>".to_string())
-                    } else {
-                        let mut elem_types = Vec::new();
-                        for el in &arr.elements {
-                            if let Some(expr) = el.as_expression() {
-                                if let Some(t) = self.infer_type_from_init(expr) {
-                                    elem_types.push(t);
-                                } else {
-                                    elem_types.push("JsValue".to_string());
-                                }
-                            }
-                        }
-                        if elem_types.is_empty() {
-                            Some("std::vector<JsValue>".to_string())
-                        } else if elem_types.iter().all(|t| t == &elem_types[0]) {
-                            Some(format!("std::vector<{}>", elem_types[0]))
-                        } else {
-                            Some("std::vector<JsValue>".to_string())
-                        }
-                    }
-                }
-                Expression::ObjectExpression(_) => Some("JsObject".to_string()),
-                Expression::ComputedMemberExpression(m) => {
-                    // Check if we're indexing into a JsArray
-                    if let Expression::Identifier(id) = &m.object {
-                        if let Some(var_type) = self.ctx.var_types.get(id.name.as_str()) {
-                            if var_type == "JsArray" {
-                                return Some("JsValue".to_string());
-                            }
-                        }
-                    }
-                    None
-                }
-                Expression::NewExpression(n) => {
-                    if let Expression::Identifier(id) = &n.callee {
-                        if id.name.as_str() == "Promise" {
-                            let inner = n
-                                .type_arguments
-                                .as_ref()
-                                .and_then(|ta| ta.params.first())
-                                .map(|t| {
-                                    resolve_type(
-                                        Some(t),
-                                        "JsValue",
-                                        &self.ctx.template_params,
-                                        false,
-                                        &self.ctx.class_names,
-                                    )
-                                })
-                                .unwrap_or_else(|| "JsValue".to_string());
-                            if inner == "void" {
-                                return Some("morph::Task".to_string());
-                            }
-                            return Some(format!("morph::Result<{}>", inner));
-                        }
-                        if self.ctx.class_names.contains(id.name.as_str()) {
-                            return Some(format!("std::shared_ptr<{}>", id.name));
-                        }
-                    }
-                    Some("JsValue".to_string())
-                }
-                Expression::Identifier(id) => self.ctx.var_types.get(id.name.as_str()).cloned(),
-                _ => None,
             }
+            Expression::NullLiteral(_) => Some("JsNull".to_string()),
+            Expression::Identifier(id) if id.name.as_str() == "undefined" => {
+                Some("JsUndefined".to_string())
+            }
+            Expression::ArrayExpression(arr) => {
+                if arr.elements.is_empty() {
+                    Some("std::vector<JsValue>".to_string())
+                } else {
+                    let mut elem_types = Vec::new();
+                    for el in &arr.elements {
+                        if let Some(expr) = el.as_expression() {
+                            if let Some(t) = self.infer_type_from_init(expr) {
+                                elem_types.push(t);
+                            } else {
+                                elem_types.push("JsValue".to_string());
+                            }
+                        }
+                    }
+                    if elem_types.is_empty() {
+                        Some("std::vector<JsValue>".to_string())
+                    } else if elem_types.iter().all(|t| t == &elem_types[0]) {
+                        Some(format!("std::vector<{}>", elem_types[0]))
+                    } else {
+                        Some("std::vector<JsValue>".to_string())
+                    }
+                }
+            }
+            Expression::ObjectExpression(_) => Some("JsObject".to_string()),
+            Expression::ComputedMemberExpression(m) => {
+                // Check if we're indexing into a JsArray
+                if let Expression::Identifier(id) = &m.object {
+                    if let Some(var_type) = self.ctx.var_types.get(id.name.as_str()) {
+                        if var_type == "JsArray" {
+                            return Some("JsValue".to_string());
+                        }
+                    }
+                }
+                None
+            }
+            Expression::NewExpression(n) => {
+                if let Expression::Identifier(id) = &n.callee {
+                    if id.name.as_str() == "Promise" {
+                        let inner = n
+                            .type_arguments
+                            .as_ref()
+                            .and_then(|ta| ta.params.first())
+                            .map(|t| {
+                                resolve_type(
+                                    Some(t),
+                                    "JsValue",
+                                    &self.ctx.template_params,
+                                    false,
+                                    &self.ctx.class_names,
+                                )
+                            })
+                            .unwrap_or_else(|| "JsValue".to_string());
+                        if inner == "void" {
+                            return Some("morph::Task".to_string());
+                        }
+                        return Some(format!("morph::Result<{}>", inner));
+                    }
+                    if self.ctx.class_names.contains(id.name.as_str()) {
+                        return Some(format!("std::shared_ptr<{}>", id.name));
+                    }
+                }
+                Some("JsValue".to_string())
+            }
+            Expression::Identifier(id) => self.ctx.var_types.get(id.name.as_str()).cloned(),
+            _ => None,
+        }
     }
 
     fn binding_to_identifier(&self, pat: &BindingPattern<'a>) -> (String, Option<String>) {
@@ -704,7 +1171,15 @@ impl<'a> CppTranslator<'a> {
         let kw = if self.ctx.is_async_fn > 0 { "co_return" } else { "return" };
         if let Some(arg) = &r.argument {
             if let Expression::Identifier(id) = arg {
-                if self.move_eligible(id.name.as_str()) {
+                let already_moved = self
+                    .ctx
+                    .var_types
+                    .get(id.name.as_str())
+                    .map(|var_type| var_type.starts_with("std::unique_ptr<"))
+                    .unwrap_or(false);
+                // A returned `unique_ptr` moves implicitly (and stays
+                // eligible for NRVO); an explicit move would only pessimize.
+                if !already_moved && self.move_eligible_at(id.name.as_str(), id.span.start) {
                     return format!("{}{} std::move({});", self.indent(), kw, id.name);
                 }
             }
@@ -1124,6 +1599,78 @@ impl<'a> CppTranslator<'a> {
         format!("{}throw JsValue({});", self.indent(), self.emit_expression(&t.argument))
     }
 
+    /// `unique_ptr<C>` when a sync function annotated `-> C` hands back
+    /// exactly one `new C()`-built local. Direct body statements only:
+    /// branched or multi-value returns keep today's signature.
+    fn unique_return_class(&self, f: &Function<'a>, ret: &str) -> Option<String> {
+        if !self.ctx.class_names.contains(ret) {
+            return None;
+        }
+        let body = f.body.as_ref()?;
+        let returned = Self::direct_returned_identifiers(body)?;
+        if returned.len() != 1 {
+            return None;
+        }
+        let var_name = &returned[0];
+        let escapes_return = self
+            .analysis
+            .as_ref()
+            .and_then(|analysis| analysis.escapes.get(var_name))
+            .is_some_and(|kind| *kind == EscapeKind::Return);
+        if !escapes_return {
+            return None;
+        }
+        if self.new_built_class(body, var_name).as_deref() != Some(ret) {
+            return None;
+        }
+        Some(format!("std::unique_ptr<{}>", ret))
+    }
+
+    /// Distinct identifiers returned by direct body statements. `None`
+    /// when anything else is returned: the caller must not guess.
+    fn direct_returned_identifiers(body: &FunctionBody<'a>) -> Option<Vec<String>> {
+        let mut returned: Vec<String> = Vec::new();
+        for stmt in &body.statements {
+            if let Statement::ReturnStatement(r) = stmt {
+                match &r.argument {
+                    Some(Expression::Identifier(id)) => {
+                        let name = id.name.to_string();
+                        if !returned.contains(&name) {
+                            returned.push(name);
+                        }
+                    }
+                    Some(_) => {
+                        return None;
+                    }
+                    None => {}
+                }
+            }
+        }
+        Some(returned)
+    }
+
+    /// The constructed class when `var_name` is declared as `new C()`
+    /// in a direct body statement.
+    fn new_built_class(&self, body: &FunctionBody<'a>, var_name: &str) -> Option<String> {
+        for stmt in &body.statements {
+            if let Statement::VariableDeclaration(d) = stmt {
+                for decl in &d.declarations {
+                    let (decl_name, _) = self.binding_to_identifier(&decl.id);
+                    if decl_name != var_name {
+                        continue;
+                    }
+                    if let Some(Expression::NewExpression(n)) = &decl.init {
+                        if let Expression::Identifier(callee) = &n.callee {
+                            return Some(callee.name.to_string());
+                        }
+                    }
+                    return None;
+                }
+            }
+        }
+        None
+    }
+
     fn emit_function_declaration(&mut self, f: &Function<'a>) -> Option<String> {
         let Some(id) = &f.id else {
             return None;
@@ -1178,7 +1725,18 @@ impl<'a> CppTranslator<'a> {
                 }
             }
         }
+        // A bare class return that hands back one `new`-built local must be
+        // unique: the declarator below emits `unique_ptr` for that variable,
+        // so the signature has to match or the result will not compile.
+        if !is_async {
+            if let Some(unique_ret) = self.unique_return_class(f, &final_ret) {
+                final_ret = unique_ret;
+            }
+        }
+        self.ctx.fn_return_types.insert(name.clone(), final_ret.clone());
         self.ctx.need(&final_ret);
+        let outer_fn = self.ctx.current_fn.clone();
+        self.ctx.current_fn = Some(name.clone());
         self.ctx.fn_body_depth += 1;
         if is_async {
             self.ctx.is_async_fn += 1;
@@ -1217,6 +1775,7 @@ impl<'a> CppTranslator<'a> {
         };
         let result = format!("{}{}\n{}", tp, header, body);
         self.ctx.has_infinite_loop = old_has_loop || self.ctx.has_infinite_loop;
+        self.ctx.current_fn = outer_fn;
         Some(result)
     }
 
@@ -1378,7 +1937,11 @@ impl<'a> CppTranslator<'a> {
         self.ctx.is_async_fn += 1;
         let old_drop = self.ctx.drop_return_value;
         self.ctx.drop_return_value = true;
+        let outer_fn = self.ctx.current_fn.clone();
+        let main_name = f.id.as_ref().map(|id| id.name.to_string()).unwrap_or_default();
+        self.ctx.current_fn = Some(main_name);
         let body = self.emit_function_body(f.body.as_ref().unwrap());
+        self.ctx.current_fn = outer_fn;
         self.ctx.drop_return_value = old_drop;
         self.ctx.is_async_fn -= 1;
         let mut body_stripped = body.trim_end().to_string();
@@ -1400,11 +1963,13 @@ impl<'a> CppTranslator<'a> {
         let mut lines = vec!["{".to_string()];
         let old = self.ctx.indent_level;
         self.ctx.indent_level = old + 1;
+        self.last_read_frames.push(last_read_spans(&body.statements));
         for stmt in &body.statements {
             if let Some(code) = self.emit_statement(stmt) {
                 lines.push(code);
             }
         }
+        self.last_read_frames.pop();
         self.ctx.indent_level = old;
         lines.push(format!("{}}}", self.indent()));
         lines.join("\n")
@@ -2193,21 +2758,39 @@ impl<'a> CppTranslator<'a> {
     /// not compile. Class and container pointees keep pointer semantics.
     fn deref_shared_scalar(&self, name: &str) -> Option<String> {
         let var_type = self.ctx.var_types.get(name)?;
-        let inner = var_type
-            .strip_prefix("std::shared_ptr<")?
-            .strip_suffix('>')?;
-        if Self::is_scalar_pointee(inner.trim()) {
-            Some(format!("(*{})", name))
-        } else {
-            None
+        let inner = var_type.strip_prefix("std::shared_ptr<")?.strip_suffix('>')?;
+        if Self::is_scalar_pointee(inner.trim()) { Some(format!("(*{})", name)) } else { None }
+    }
+
+    /// True when member access on an emitted object must use `->`.
+    ///
+    /// Consults both pointer sets and, for deduced holders such as call
+    /// results, the recorded `var_types` entry behind a plain identifier.
+    fn ptr_arrow_access(&self, obj_node: &Expression<'a>, obj_str: &str) -> bool {
+        if self.ctx.shared_ptr_vars.contains(obj_str) || self.ctx.unique_ptr_vars.contains(obj_str)
+        {
+            return true;
         }
+        if let Expression::Identifier(id) = obj_node {
+            return self
+                .ctx
+                .var_types
+                .get(id.name.as_str())
+                .map(|var_type| {
+                    var_type.starts_with("std::shared_ptr<")
+                        || var_type.starts_with("std::unique_ptr<")
+                })
+                .unwrap_or(false);
+        }
+        false
     }
 
     /// True for pointees that read and write as plain values.
     fn is_scalar_pointee(inner_type: &str) -> bool {
         matches!(
             inner_type,
-            "bool" | "char"
+            "bool"
+                | "char"
                 | "float"
                 | "double"
                 | "std::string"
@@ -2765,6 +3348,17 @@ impl<'a> CppTranslator<'a> {
         }
     }
 
+    /// True when `target = source` can move: both sides share one recorded
+    /// type (so the move-assign compiles) and the source dies here.
+    fn last_use_assignable(&self, target: &str, source: &IdentifierReference<'a>) -> bool {
+        let target_type = self.ctx.var_types.get(target).cloned().unwrap_or_default();
+        let source_type = self.ctx.var_types.get(source.name.as_str()).cloned().unwrap_or_default();
+        if target_type.is_empty() || target_type != source_type {
+            return false;
+        }
+        self.move_eligible_at(source.name.as_str(), source.span.start)
+    }
+
     fn emit_assignment(&mut self, a: &AssignmentExpression<'a>) -> String {
         if let AssignmentTarget::AssignmentTargetIdentifier(left_id) = &a.left {
             let var_name = left_id.name.to_string();
@@ -2787,6 +3381,19 @@ impl<'a> CppTranslator<'a> {
                     );
                 }
                 self.active_narrows.remove(&var_name);
+            }
+        }
+        if a.operator.as_str() == "=" {
+            if let AssignmentTarget::AssignmentTargetIdentifier(left_id) = &a.left {
+                if let Expression::Identifier(right_id) = &a.right {
+                    if !self.active_narrows.contains_key(right_id.name.as_str())
+                        && self.deref_shared_scalar(left_id.name.as_str()).is_none()
+                        && self.last_use_assignable(left_id.name.as_str(), right_id)
+                    {
+                        let left = self.emit_assignment_target(&a.left);
+                        return format!("({} = std::move({}))", left, right_id.name);
+                    }
+                }
             }
         }
         let left = self.emit_assignment_target(&a.left);
@@ -2826,7 +3433,7 @@ impl<'a> CppTranslator<'a> {
                 let obj = self.emit_expression(&m.object);
                 let prop = self.emit_expression(&m.expression);
                 // check shared_ptr
-                if self.ctx.shared_ptr_vars.contains(&obj) {
+                if self.ptr_arrow_access(&m.object, &obj) {
                     format!("{}->{}[{}]", obj, "/*computed*/", prop) // fallback
                 } else {
                     format!("{}[{}]", obj, prop)
@@ -2849,7 +3456,7 @@ impl<'a> CppTranslator<'a> {
                     return format!("/* super */{}", prop);
                 }
                 // For shared_ptr variables, use ->
-                if self.ctx.shared_ptr_vars.contains(&obj_str) {
+                if self.ptr_arrow_access(&m.object, &obj_str) {
                     return format!("{}->{}", obj_str, prop);
                 }
                 // For JsObject bracket vs dot
@@ -2896,7 +3503,7 @@ impl<'a> CppTranslator<'a> {
                 if let Expression::ThisExpression(_) = &m.object {
                     return format!("this->{}", prop);
                 }
-                if self.ctx.shared_ptr_vars.contains(&obj_str) {
+                if self.ptr_arrow_access(&m.object, &obj_str) {
                     return format!("{}->{}", obj_str, prop);
                 }
                 format!("{}.{}", obj_str, prop)
@@ -3121,11 +3728,8 @@ impl<'a> CppTranslator<'a> {
             Expression::StaticMemberExpression(m)
                 if matches!(m.property.name.as_str(), "log" | "warn" | "error" | "info")
         );
-        let args: Vec<String> = call
-            .arguments
-            .iter()
-            .map(|a| self.emit_moved_argument(a, allow_move))
-            .collect();
+        let args: Vec<String> =
+            call.arguments.iter().map(|a| self.emit_moved_argument(a, allow_move)).collect();
         if let Expression::Super(_) = &call.callee {
             return format!("super{}({})", type_args_str, args.join(", "));
         }
@@ -3165,44 +3769,39 @@ impl<'a> CppTranslator<'a> {
         }
     }
 
-    /// True when the variable's value can move at this use site.
+    /// True when the variable's value can move at the use starting at
+    /// `span_start`.
     ///
-    /// Sound by construction: exactly one read is recorded (this one), the
-    /// variable is not global, never captured, never touched in a loop, and
-    /// the type is expensive to copy. Anything unproven keeps copying.
-    fn move_eligible(&self, name: &str) -> bool {
+    /// Sound by construction: the use is the variable's last read in the
+    /// enclosing body, the variable is not global, never captured, never
+    /// touched in a loop, and the type is expensive to copy. Anything
+    /// unproven keeps copying.
+    fn move_eligible_at(&self, name: &str, span_start: u32) -> bool {
         let Some(analysis) = self.analysis.as_ref() else {
             return false;
         };
         let Some(info) = analysis.var_infos.get(name) else {
             return false;
         };
-        if info.escape_kind == EscapeKind::Global
-            || info.has_loop_use
-            || info.read_use_count() != 1
-        {
+        if info.escape_kind == EscapeKind::Global || info.has_loop_use {
             return false;
         }
-        if analysis
-            .closure_captures
-            .values()
-            .any(|captured| captured.contains(name))
-        {
+        if analysis.closure_captures.values().any(|captured| captured.contains(name)) {
             return false;
         }
-        let cpp_type = self
-            .ctx
-            .var_types
-            .get(name)
-            .map(String::as_str)
-            .unwrap_or("");
+        let last_read = self.last_read_frames.last().and_then(|frame| frame.get(name)).copied();
+        if last_read != Some(span_start) {
+            return false;
+        }
+        let cpp_type = self.ctx.var_types.get(name).map(String::as_str).unwrap_or("");
         Self::is_move_worthy_type(cpp_type, &self.ctx.class_names)
     }
 
-    /// True for types where moving beats copying. Trivially copyable scalars
-    /// and `unique_ptr` (which already moves on return) are excluded.
+    /// True for types where moving beats copying. `unique_ptr` must move:
+    /// copying one is a compile error, so call sites are required to move it.
     fn is_move_worthy_type(cpp_type: &str, class_names: &HashSet<String>) -> bool {
         cpp_type.starts_with("std::vector<")
+            || cpp_type.starts_with("std::unique_ptr<")
             || cpp_type == "JsObject"
             || cpp_type == "JsArray"
             || cpp_type == "std::string"
@@ -3212,11 +3811,11 @@ impl<'a> CppTranslator<'a> {
             || class_names.contains(cpp_type)
     }
 
-    /// Emit a call argument, moving single-use large values.
+    /// Emit a call argument, moving the value at its last read.
     fn emit_moved_argument(&mut self, arg: &Argument<'a>, allow_move: bool) -> String {
         if allow_move {
             if let Some(Expression::Identifier(id)) = arg.as_expression() {
-                if self.move_eligible(id.name.as_str()) {
+                if self.move_eligible_at(id.name.as_str(), id.span.start) {
                     return format!("std::move({})", id.name);
                 }
             }
@@ -3360,7 +3959,7 @@ impl<'a> CppTranslator<'a> {
         } else if self.should_use_bracket(&m.object, &obj) {
             return format!("{}[\"{}\"]", obj, prop);
         }
-        if self.ctx.shared_ptr_vars.contains(&obj) {
+        if self.ptr_arrow_access(&m.object, &obj) {
             return format!("{}->{}", obj, prop);
         }
         if let Expression::Identifier(id) = &m.object {
@@ -3509,7 +4108,7 @@ impl<'a> CppTranslator<'a> {
     }
 
     fn emit_arrow(&mut self, f: &ArrowFunctionExpression<'a>) -> String {
-        let capture = if self.ctx.fn_body_depth > 0 { "[&]" } else { "[]" };
+        let capture = self.lambda_capture(&f.params);
         let is_async = f.r#async;
         let params = self.format_params(&f.params);
         let mut ret = if let Some(rt) = &f.return_type {
@@ -3570,6 +4169,39 @@ impl<'a> CppTranslator<'a> {
             };
             return format!("{}({}) -> {} {}", capture, params, ret, body);
         }
+    }
+
+    /// Capture list for a lambda. Shared locals the enclosing function
+    /// captures are held by value (`[&, count]`) so an escaping closure
+    /// keeps its state alive; everything else keeps today's default.
+    /// Names are sorted so output is deterministic across runs. File-scope
+    /// lambdas always stay `[]`: namespace scope forbids captures, and
+    /// file statics are visible without them. Parameters shadowing an
+    /// outer name are never captured: the body reads the parameter.
+    fn lambda_capture(&self, params: &FormalParameters<'a>) -> String {
+        if self.ctx.fn_body_depth == 0 {
+            return "[]".to_string();
+        }
+        let scope = self.ctx.current_fn.clone().unwrap_or_default();
+        let mut held: Vec<String> = self
+            .analysis
+            .as_ref()
+            .and_then(|analysis| analysis.closure_captures.get(&scope).cloned())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|var| self.ctx.shared_ptr_vars.contains(var))
+            .filter(|var| {
+                !params.items.iter().any(|param| {
+                    let (param_name, _) = self.binding_to_identifier(&param.pattern);
+                    param_name == *var
+                })
+            })
+            .collect();
+        held.sort();
+        if held.is_empty() {
+            return "[&]".to_string();
+        }
+        format!("[&, {}]", held.join(", "))
     }
 
     fn emit_function_expression(&mut self, f: &Function<'a>) -> String {
@@ -3641,5 +4273,55 @@ impl<'a> CppTranslator<'a> {
             PropertyKey::PrivateIdentifier(p) => Some(p.name.to_string()),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use oxc_allocator::Allocator;
+    use oxc_parser::Parser;
+    use oxc_span::SourceType;
+
+    fn scan_source(source: &str) -> HashMap<String, u32> {
+        let allocator = Allocator::default();
+        let source_type =
+            SourceType::from_path("file.ts").unwrap_or_default().with_typescript(true);
+        let parsed = Parser::new(&allocator, source, source_type).parse();
+        assert!(parsed.diagnostics.is_empty());
+        assert!(!parsed.panicked);
+        last_read_spans(&parsed.program.body)
+    }
+
+    #[test]
+    fn last_read_is_final_use() {
+        let source = "let greeting = \"hi\";\nconsole.log(greeting);\ntake(greeting);\n";
+        let spans = scan_source(source);
+        let expected = source.rfind("greeting);").unwrap() as u32;
+        assert_eq!(spans.get("greeting"), Some(&expected));
+    }
+
+    #[test]
+    fn plain_writes_are_not_reads() {
+        let source = "take(greeting);\ngreeting = \"again\";\n";
+        let spans = scan_source(source);
+        let expected = source.find("greeting);").unwrap() as u32;
+        assert_eq!(spans.get("greeting"), Some(&expected));
+    }
+
+    #[test]
+    fn compound_targets_count_as_reads() {
+        let source = "take(greeting);\ngreeting += \"!\";\n";
+        let spans = scan_source(source);
+        let expected = source.find("greeting +=").unwrap() as u32;
+        assert_eq!(spans.get("greeting"), Some(&expected));
+    }
+
+    #[test]
+    fn update_targets_count_as_reads() {
+        let source = "take(total);\ntotal++;\n";
+        let spans = scan_source(source);
+        let expected = source.find("total++").unwrap() as u32;
+        assert_eq!(spans.get("total"), Some(&expected));
     }
 }
