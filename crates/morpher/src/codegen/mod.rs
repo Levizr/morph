@@ -6,7 +6,10 @@ pub mod rust;
 pub mod string_methods;
 pub mod type_resolver;
 
-pub use analyzer::{AnalysisResult, EscapeAnalyzer, EscapeKind, UsageKind, VarInfo, WidenedType};
+pub use analyzer::{
+    AnalysisResult, DefSite, EscapeAnalyzer, EscapeKind, NarrowSplit, StmtSite, UsageKind,
+    VarInfo, WidenedType,
+};
 pub use cpp::CppTranslator;
 pub use js_comparison::{
     ComparisonKind, ComparisonSections, ComparisonSignature, OperandClass, build_header,

@@ -319,6 +319,22 @@ pub fn resolve_type_annotation<'a>(
     .unwrap_or_else(|| hint.to_string())
 }
 
+/// Read a native *number* annotation (`int`, `double`, …) as the exact C++
+/// type the user wrote. Returns `None` for anything else — including `bool`,
+/// which keeps today's behavior, and `string`/`boolean`, which map to `Js*`.
+pub fn native_number_annotation_type<'a>(ann: Option<&TSTypeAnnotation<'a>>) -> Option<String> {
+    let annotation = ann?;
+    let TSType::TSTypeReference(reference) = &annotation.type_annotation else {
+        return None;
+    };
+    let name = ts_type_name_to_string(&reference.type_name);
+    let cpp_type = lookup(CPP_NATIVE_TYPES, name.as_str())?;
+    if matches!(cpp_type.as_str(), "bool" | "char") {
+        return None;
+    }
+    Some(cpp_type)
+}
+
 pub fn headers_for(cpp_type: &str) -> Vec<&'static str> {
     // Mirrors _TYPE_TO_HEADER in python
     const MAP: &[(&str, &str)] = &[

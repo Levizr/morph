@@ -3,7 +3,7 @@ use colored::Colorize;
 use std::path::Path;
 use morpher::{TranslateOptions, TypeMode};
 
-pub fn run(file: String, to: String, optimize: bool, type_mode: TypeMode) -> Result<()> {
+pub fn run(file: String, to: String, type_mode: TypeMode) -> Result<()> {
     let path = Path::new(&file);
     if !path.exists() {
         anyhow::bail!("file not found: {}", file);
@@ -22,9 +22,6 @@ pub fn run(file: String, to: String, optimize: bool, type_mode: TypeMode) -> Res
     crate::logger::log_key("File", &file);
     crate::logger::log_key("Size", &format!("{} bytes", content.len()));
     crate::logger::log_key("Target", &target);
-    if optimize {
-        crate::logger::log_key("Optimize", "ON (intent-based codegen)");
-    }
 
     crate::logger::log_step("Parsing");
     let pb = crate::logger::spinner(&format!("Parsing {} with Oxc...", file));
@@ -32,7 +29,6 @@ pub fn run(file: String, to: String, optimize: bool, type_mode: TypeMode) -> Res
     // Use morph-js translator (direct oxc -> C++/Rust, fastest, bug-free same as python for cpp)
     let global_runtime = find_global_runtime();
     let options = TranslateOptions {
-        optimize,
         type_mode,
         runtime_path: global_runtime.as_ref().map(|p| p.display().to_string()),
         indent: 0,

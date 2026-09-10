@@ -57,7 +57,7 @@ morph run      # optimized native binary
 - **C++ interop** — Import user `.cpp` files directly into your JSX
 - **DevTools** — Built-in element inspector, rendering profiler, network log
 - **Tiny binaries** — Feature-based dead code elimination, optional UPX compression
-- **Intent-based codegen** — `--optimize` flag uses escape analysis for native types, zero GC
+- **Intent-based codegen** — escape analysis, proven-range natives, and JS-semantics helpers, zero GC
 
 ## Next Steps
 

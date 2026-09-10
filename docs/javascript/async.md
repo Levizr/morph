@@ -148,4 +148,4 @@ int main() {
 - Requests run on a worker thread pool; responses resume on the main thread via the scheduler
 - `morph::Result<T>` and `morph::Task` are in `runtime/cpp/reactivity/promise.h` and `task.h`
 - The scheduler (`process_tasks()`) drives all coroutines and timers
-- `--optimize` mode uses escape analysis to determine smart pointer strategy for async variables
+- Escape analysis determines smart pointer strategy for async variables

@@ -29,7 +29,6 @@ let cpp = translate("let x: number = 42;", "file.ts", TranslateOptions::default(
 
 // With options
 let options = TranslateOptions {
-    optimize: true,
     type_mode: TypeMode::Infer,
     runtime_path: Some("/home/user/.morph/cache/runtimes/cpp/v0.1.0".to_string()),
     indent: 0,

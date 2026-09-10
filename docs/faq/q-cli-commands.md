@@ -8,7 +8,7 @@ The Rust rewrite (`morph`) introduces a cleaner CLI with direct file morphing an
 morph app.ts              # → app.cpp (default target: C++)
 morph app.ts --to cpp     # → app.cpp
 morph app.ts --to rust    # → app.rs (experimental)
-morph app.ts --to cpp --optimize  # intent-based codegen with escape analysis
+morph app.ts --to cpp     # → app.cpp (intent-based codegen)
 ```
 
 - Only `.ts` / `.js` files allowed (`.tsx`/`.jsx`/`.mx` rejected — use `morph build` for projects)

@@ -203,12 +203,7 @@ runtime/cpp/
 
 ## JS/TS → C++ Translation (morph-js crate)
 
-Two modes:
-
-| Mode | Command | Behavior |
-|---|---|---|
-| **Legacy** | `morph file.ts` | `auto` inference, `Js*` types everywhere, no escape analysis |
-| **Optimized** | `morph file.ts --optimize` | Intent-based: escape analysis → stack/`unique_ptr`/`shared_ptr`, native types (`int32_t`, `std::string`, `std::vector`), type widening only when needed |
+One mode — intent-based codegen is the default (`morph file.ts`): escape analysis → stack/`unique_ptr`/`shared_ptr`, native types (`int32_t`, `std::string`, `std::vector`), type widening only when needed. `--type strict` respects annotations, `--type infer` (default) infers from code.
 
 See [Intent-Based Codegen](../guides/intent-based-codegen.md) for details.
 

@@ -10,7 +10,7 @@ Morph has two translation pipelines, and confusing them is the #1 source of wast
 
 | Pipeline | Input | Owner | Output |
 |---|---|---|---|
-| **Direct file morph** | `app.ts` / `.mx` logic | Rust (`morpher` crate) | Native C++ (`--type infer`/`strict`, `--optimize`) |
+| **Direct file morph** | `app.ts` / `.mx` logic | Rust (`morpher` crate) | Native C++ (`--type infer`/`strict`) |
 | **GUI project build** | `.mx` app (`morph build`/`dev`/`run`) | Python CLI (`morph/`) + Rust shell | Windowed native binary |
 
 Direct file morphing is fully Rust-owned and covered by fixtures. GUI builds are split — Python still owns the layout engine, dev hot-reload, and full JS translation. The complete map of who owns what is in [GUI Pipeline: Python vs Rust](gui-pipeline.md).

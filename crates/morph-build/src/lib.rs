@@ -3,7 +3,9 @@ pub mod platform;
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
-pub use platform::{current, is_macos, is_windows, is_linux, exe_suffix, shared_lib_ext, shared_lib_flag, pick_cpp};
+pub use platform::{
+    current, exe_suffix, is_linux, is_macos, is_windows, pick_cpp, shared_lib_ext, shared_lib_flag,
+};
 
 pub fn detect_compiler() -> String {
     pick_cpp()
@@ -12,8 +14,12 @@ pub fn detect_compiler() -> String {
 fn which(bin: &str) -> bool {
     if let Ok(path) = std::env::var("PATH") {
         for dir in std::env::split_paths(&path) {
-            if dir.join(bin).exists() { return true; }
-            if is_windows() && dir.join(format!("{}.exe", bin)).exists() { return true; }
+            if dir.join(bin).exists() {
+                return true;
+            }
+            if is_windows() && dir.join(format!("{}.exe", bin)).exists() {
+                return true;
+            }
         }
     }
     false
@@ -28,11 +34,18 @@ impl Compiler {
     pub fn new(cxx: Option<String>) -> Self {
         let default = pick_cpp();
         let gpp = if let Some(c) = cxx {
-            if which(&c) { c } else {
-                eprintln!("  ⚠ configured compiler '{}' not found — falling back to '{}'", c, default);
+            if which(&c) {
+                c
+            } else {
+                eprintln!(
+                    "  ⚠ configured compiler '{}' not found — falling back to '{}'",
+                    c, default
+                );
                 default
             }
-        } else { default };
+        } else {
+            default
+        };
         Self { gpp, silent: false }
     }
 
@@ -71,7 +84,13 @@ impl Compiler {
     }
 
     /// Compile `source_path` → `binary_path` (executable)
-    pub fn compile(&self, source_path: &Path, binary_path: &Path, runtime_dir: &Path, defines: &[String]) -> Result<()> {
+    pub fn compile(
+        &self,
+        source_path: &Path,
+        binary_path: &Path,
+        runtime_dir: &Path,
+        defines: &[String],
+    ) -> Result<()> {
         let mut cmd = vec![self.gpp.clone()];
         cmd.push("-std=c++20".into());
         cmd.push("-O2".into());
@@ -91,21 +110,61 @@ impl Compiler {
         // Vendor C sources
         let vendor_glad = runtime_dir.join("vendor/glad/glad.c");
         let vendor_stb = runtime_dir.join("vendor/stb_image.c");
-        if vendor_glad.exists() { cmd.push(vendor_glad.display().to_string()); }
-        if vendor_stb.exists() { cmd.push(vendor_stb.display().to_string()); }
+        if vendor_glad.exists() {
+            cmd.push(vendor_glad.display().to_string());
+        }
+        if vendor_stb.exists() {
+            cmd.push(vendor_stb.display().to_string());
+        }
         // Output
         cmd.push("-o".into());
         cmd.push(binary_path.display().to_string());
         // GC dead code eliminated by the renderer backend dispatch
-        cmd.push(if is_macos() { "-Wl,-dead_strip".to_string() } else { "-Wl,--gc-sections".to_string() });
+        cmd.push(if is_macos() {
+            "-Wl,-dead_strip".to_string()
+        } else {
+            "-Wl,--gc-sections".to_string()
+        });
 
         // Platform libs
         if is_macos() {
-            cmd.extend(["-framework".into(), "Cocoa".into(), "-framework".into(), "OpenGL".into(), "-framework".into(), "IOKit".into(), "-framework".into(), "CoreVideo".into(), "-lpthread".into()]);
+            cmd.extend([
+                "-framework".into(),
+                "Cocoa".into(),
+                "-framework".into(),
+                "OpenGL".into(),
+                "-framework".into(),
+                "IOKit".into(),
+                "-framework".into(),
+                "CoreVideo".into(),
+                "-lpthread".into(),
+            ]);
         } else if is_windows() {
-            cmd.extend(["-lopengl32".into(), "-lgdi32".into(), "-lshell32".into(), "-luser32".into(), "-lcomdlg32".into(), "-lole32".into(), "-lws2_32".into(), "-lpthread".into(), "-lm".into()]);
+            cmd.extend([
+                "-lopengl32".into(),
+                "-lgdi32".into(),
+                "-lshell32".into(),
+                "-luser32".into(),
+                "-lcomdlg32".into(),
+                "-lole32".into(),
+                "-lws2_32".into(),
+                "-lpthread".into(),
+                "-lm".into(),
+            ]);
         } else {
-            cmd.extend(["-lglfw".into(), "-lGL".into(), "-lX11".into(), "-lXrandr".into(), "-lXinerama".into(), "-lXcursor".into(), "-lXi".into(), "-lrt".into(), "-lpthread".into(), "-ldl".into(), "-lm".into()]);
+            cmd.extend([
+                "-lglfw".into(),
+                "-lGL".into(),
+                "-lX11".into(),
+                "-lXrandr".into(),
+                "-lXinerama".into(),
+                "-lXcursor".into(),
+                "-lXi".into(),
+                "-lrt".into(),
+                "-lpthread".into(),
+                "-ldl".into(),
+                "-lm".into(),
+            ]);
         }
 
         // Feature defines
@@ -115,17 +174,25 @@ impl Compiler {
 
         // FreeType/HarfBuzz via pkg-config if available
         for dep in &["freetype2", "harfbuzz"] {
-            if let Ok(cflags) = std::process::Command::new("pkg-config").args(["--cflags", dep]).output() {
+            if let Ok(cflags) =
+                std::process::Command::new("pkg-config").args(["--cflags", dep]).output()
+            {
                 if cflags.status.success() {
                     if let Ok(s) = String::from_utf8(cflags.stdout) {
-                        for flag in s.split_whitespace() { cmd.push(flag.to_string()); }
+                        for flag in s.split_whitespace() {
+                            cmd.push(flag.to_string());
+                        }
                     }
                 }
             }
-            if let Ok(libs) = std::process::Command::new("pkg-config").args(["--libs", dep]).output() {
+            if let Ok(libs) =
+                std::process::Command::new("pkg-config").args(["--libs", dep]).output()
+            {
                 if libs.status.success() {
                     if let Ok(s) = String::from_utf8(libs.stdout) {
-                        for flag in s.split_whitespace() { cmd.push(flag.to_string()); }
+                        for flag in s.split_whitespace() {
+                            cmd.push(flag.to_string());
+                        }
                     }
                 }
             }
@@ -147,7 +214,12 @@ impl Compiler {
     }
 
     /// Compile shared library for hot-reload (dev mode)
-    pub fn compile_shared(&self, source_path: &Path, output_path: &Path, runtime_dir: &Path) -> Result<()> {
+    pub fn compile_shared(
+        &self,
+        source_path: &Path,
+        output_path: &Path,
+        runtime_dir: &Path,
+    ) -> Result<()> {
         let mut cmd = vec![self.gpp.clone()];
         cmd.push("-std=c++20".into());
         cmd.push("-O2".into());

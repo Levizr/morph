@@ -4,7 +4,7 @@ What's actively being built right now. These features are functional in the curr
 
 ## Rust CLI Parity (Python CLI Still Present)
 
-The Rust `morph` binary owns direct file morphing (`morph app.ts --to cpp`, `--type`/`--optimize`), but the Python CLI is deliberately still in the repo: GUI builds need its layout engine, dev hot-reload, and full JS translation (see [What Still Needs the Python CLI](../guides/migration.md#what-still-needs-the-python-cli)). The removal sequence is: wire `morpher` into `morph-codegen` in strict mode → parity harness diffing both translators → port the layout engine → delete Python. Until then, file morphing → Rust; `.mx` projects → keep Python installed.
+The Rust `morph` binary owns direct file morphing (`morph app.ts --to cpp`, `--type`), but the Python CLI is deliberately still in the repo: GUI builds need its layout engine, dev hot-reload, and full JS translation (see [What Still Needs the Python CLI](../guides/migration.md#what-still-needs-the-python-cli)). The removal sequence is: wire `morpher` into `morph-codegen` in strict mode → parity harness diffing both translators → port the layout engine → delete Python. Until then, file morphing → Rust; `.mx` projects → keep Python installed.
 
 ## Keyed List Rendering
 

@@ -682,12 +682,12 @@
         "file": "guides/intent-based-codegen",
         "status": "production",
         "author": "PIYUSH",
-        "description": "How Morph's --optimize flag uses compile-time escape analysis to emit native C++ types and smart pointers only where semantically required — no garbage collector needed.",
+        "description": "How Morph compiles TypeScript to native C++ by default: escape analysis, proven-range integers, trusted annotations, and smart pointers only where semantically required — no garbage collector needed.",
         "keywords": [
           "morph intent-based codegen",
           "morph escape analysis",
           "morph memory management",
-          "morph --optimize",
+          "morph trusted annotations",
           "morph native types"
         ],
         "lastUpdated": "2026-09-09",

@@ -66,7 +66,16 @@ impl OperandClass {
 /// Unknown or complex types (`auto`, `std::vector`, `morph::Result`, ...)
 /// map to `Vector` or `Other` so callers can fall back to direct emission.
 pub fn cpp_type_to_class(cpp_type: &str) -> OperandClass {
-    let normalized = cpp_type.trim_start_matches("const ").trim_end_matches('&').trim();
+    let mut normalized = cpp_type.trim_start_matches("const ").trim_end_matches('&').trim();
+    for wrapper in ["std::shared_ptr<", "std::unique_ptr<"] {
+        if let Some(inner) = normalized
+            .strip_prefix(wrapper)
+            .and_then(|rest| rest.strip_suffix('>'))
+        {
+            normalized = inner.trim();
+            break;
+        }
+    }
     match normalized {
         "bool" => OperandClass::Boolean,
         "JsBoolean" => OperandClass::JsBoolean,
@@ -1899,5 +1908,25 @@ mod tests {
         assert_eq!(cpp_type_to_class("JsValue"), OperandClass::JsValue);
         assert_eq!(cpp_type_to_class("std::vector<int32_t>"), OperandClass::Vector);
         assert_eq!(cpp_type_to_class("auto"), OperandClass::Other);
+    }
+
+    #[test]
+    fn smart_pointer_wrappers_classify_by_inner_type() {
+        assert_eq!(
+            cpp_type_to_class("std::shared_ptr<int64_t>"),
+            OperandClass::Integer
+        );
+        assert_eq!(
+            cpp_type_to_class("std::shared_ptr<JsValue>"),
+            OperandClass::JsValue
+        );
+        assert_eq!(
+            cpp_type_to_class("std::unique_ptr<std::string>"),
+            OperandClass::Text
+        );
+        assert_eq!(
+            cpp_type_to_class("const std::shared_ptr<JsNumber>&"),
+            OperandClass::JsNumber
+        );
     }
 }

@@ -39,17 +39,17 @@ This module is provided by `node_modules/morph/index.d.ts` — it ships with eve
 
 ### Type Annotations
 
-| TypeScript | C++ (Legacy) | C++ (`--optimize`) |
+| TypeScript | C++ |
 |---|---|---|
-| `int`, `int32`, `int64` | `int` / `int64_t` | `int32_t` / `int64_t` (stack) |
-| `float`, `double` | `float` / `double` | `float` / `double` (stack) |
-| `string` | `JsString` | `std::string` (stack) or `JsString` if dynamic |
-| `boolean` | `JsBoolean` | `bool` (stack) |
-| `any` | `JsValue` | `JsValue` |
-| `MouseEvent` | `MorphEvent*` | `MorphEvent*` |
-| `Element`, `HTMLElement` | `MorphNode*` | `MorphNode*` |
-| `Promise<T>` | `morph::Result<T>` | `morph::Result<T>` |
-| `Promise<void>` | `morph::Task` | `morph::Task` |
+| `int`, `int32`, `int64` | `int32_t` / `int64_t` (stack, proven range) |
+| `float`, `double` | `float` / `double` (stack) |
+| `string` | `std::string` (stack) or `JsString` if dynamic |
+| `boolean` | `bool` (stack) |
+| `any` | `JsValue` |
+| `MouseEvent` | `MorphEvent*` |
+| `Element`, `HTMLElement` | `MorphNode*` |
+| `Promise<T>` | `morph::Result<T>` |
+| `Promise<void>` | `morph::Task` |
 
 ### Statements
 
@@ -84,23 +84,23 @@ Binary (`+`, `-`, `*`, `/`, `===`, `!==`, `==`, `!=`, `<`, `>`, etc.), unary (`!
 
 The linter (`morph check`) rejects unsupported operators and methods with a clear error before building.
 
-## Two Codegen Modes
+## Codegen Mode
 
-| Mode | Command | Behavior |
+| Aspect | Command | Behavior |
 |---|---|---|
-| **Legacy** | `morph file.ts` | `auto` inference, `Js*` types everywhere, no escape analysis |
-| **Optimized** | `morph file.ts --optimize` | Intent-based: escape analysis → stack/`unique_ptr`/`shared_ptr`, native types (`int32_t`, `std::string`, `std::vector`), type widening only when needed |
+| **Default** | `morph file.ts` | Intent-based: escape analysis → stack/`unique_ptr`/`shared_ptr`, native types (`int32_t`, `std::string`, `std::vector`), type widening only when needed |
+| **Types** | `morph file.ts --type strict` / `--type infer` | Respect annotations, or infer from code (default) |
 
-Orthogonal to both modes, `--type` controls annotations:
+Orthogonal to the mode, `--type` controls annotations:
 
 | Flag | Behavior |
 |---|---|
-| `--type infer` (default) | Ignore annotations, infer the cheapest native type from initializer and usage |
+| `--type infer` (default) | Ignore annotations, infer the cheapest native type from initializer and usage (trusted number annotations excepted) |
 | `--type strict` | Respect annotations (`number` stays `JsNumber`); unannotated variables are still inferred |
 
 ```bash
-morph app.ts --to cpp --type infer --optimize   # native types + escape analysis
-morph app.ts --to cpp --type strict             # annotations exactly as written
+morph app.ts --to cpp --type infer   # native types + escape analysis
+morph app.ts --to cpp --type strict  # annotations exactly as written
 ```
 
 See [Intent-Based Codegen](../guides/intent-based-codegen.md) for the full memory management strategy, and [Native C++ Types](./native-types.md#how---type-picks-native-vs-wrapper) for how the two flags interact.

@@ -2,25 +2,49 @@
 /// Works on Linux, macOS, Windows.
 
 pub fn current() -> &'static str {
-    if cfg!(target_os = "macos") { "macos" }
-    else if cfg!(target_os = "windows") { "windows" }
-    else { "linux" }
+    if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(target_os = "windows") {
+        "windows"
+    } else {
+        "linux"
+    }
 }
 
-pub fn is_macos() -> bool { current() == "macos" }
-pub fn is_windows() -> bool { current() == "windows" }
-pub fn is_linux() -> bool { current() == "linux" }
+pub fn is_macos() -> bool {
+    current() == "macos"
+}
+pub fn is_windows() -> bool {
+    current() == "windows"
+}
+pub fn is_linux() -> bool {
+    current() == "linux"
+}
 
 pub fn exe_suffix() -> &'static str {
-    if is_windows() { ".exe" } else { "" }
+    if is_windows() {
+        ".exe"
+    } else {
+        ""
+    }
 }
 
 pub fn shared_lib_ext() -> &'static str {
-    if is_windows() { ".dll" } else if is_macos() { ".dylib" } else { ".so" }
+    if is_windows() {
+        ".dll"
+    } else if is_macos() {
+        ".dylib"
+    } else {
+        ".so"
+    }
 }
 
 pub fn shared_lib_flag() -> &'static str {
-    if is_macos() { "-dynamiclib" } else { "-shared" }
+    if is_macos() {
+        "-dynamiclib"
+    } else {
+        "-shared"
+    }
 }
 
 pub fn pick_cpp() -> String {
@@ -35,7 +59,9 @@ pub fn pick_cpp() -> String {
         &["g++-14", "g++", "clang++"]
     };
     for c in candidates {
-        if which(c) { return c.to_string(); }
+        if which(c) {
+            return c.to_string();
+        }
     }
     "g++".to_string()
 }
@@ -46,11 +72,15 @@ fn which(bin: &str) -> bool {
     if let Ok(path) = std::env::var("PATH") {
         for dir in std::env::split_paths(&path) {
             let candidate = dir.join(bin);
-            if candidate.exists() { return true; }
+            if candidate.exists() {
+                return true;
+            }
             // On Windows, also check .exe
             if is_windows() {
                 let exe = dir.join(format!("{}.exe", bin));
-                if exe.exists() { return true; }
+                if exe.exists() {
+                    return true;
+                }
             }
         }
     }

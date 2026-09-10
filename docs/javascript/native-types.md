@@ -154,6 +154,20 @@ morph app.ts --to cpp --type strict   # respect annotations: `number` stays JsNu
 - **`infer` (default)** — the analyzer looks at the initializer and how the variable is used (arithmetic, printing, method calls, data size) and picks the cheapest type that works. `let num: number = 42` used only in `console.log` becomes `int32_t`, not `JsNumber`.
 - **`strict`** — an annotated `number`/`string`/`boolean`/`any` keeps its `Js*` wrapper exactly as written; only unannotated variables are inferred.
 
+## Your Annotation Is a Promise
+
+A native number annotation on a proven-unknown future is honored — even in `--type infer`, which otherwise ignores annotations:
+
+```tsx
+let userLimit: int = await fetchLimit();  // the compiler can't know the bound; you do
+```
+
+```cpp
+int userLimit = (std::get<JsNumber>(JsValue(co_await fetchLimit()).inner)).as_int();
+```
+
+The promise fires only when the future is genuinely unknown (dynamic widening, no initializer, or an `await` boundary). Statically known values keep inferred types, and proven non-numeric usage still widens. Assignments into promised variables convert the same way.
+
 ## Rules of Thumb
 
 - Use native annotations (`int`, `double`) at the boundaries: function parameters and returns for C++ interop, counters and indices inside hot loops.

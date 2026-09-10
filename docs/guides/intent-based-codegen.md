@@ -1,6 +1,6 @@
 # Intent-Based Codegen & Memory Management (No GC)
 
-Morph's `--optimize` flag enables **intent-based codegen with compile-time escape analysis** — generating minimal, optimal C++ that matches what a human expert would write, without a garbage collector.
+Morph's translator runs **intent-based codegen with compile-time escape analysis** on every file — generating minimal, optimal C++ that matches what a human expert would write, without a garbage collector. There is no flag to enable; this is the only mode.
 
 ## The Core Idea: Intent, Not Syntax
 
@@ -55,14 +55,14 @@ TypeScript Source
 
 ## The Pipeline in Full
 
-One function runs the whole analysis — `EscapeAnalyzer::analyze_program` (`crates/morpher/src/codegen/analyzer.rs:116`) — in six phases, single pass plus fixpoints. No separate borrow checker, no IR round-trips; the Oxc AST is walked directly:
+One function runs the whole analysis — `EscapeAnalyzer::analyze_program` (`crates/morpher/src/codegen/analyzer.rs`) — in six phases, single pass plus fixpoints. No separate borrow checker, no IR round-trips; the Oxc AST is walked directly:
 
 1. **`collect_signatures`** — every top-level function is recorded (`FunctionSignature`: name, async?, params, return type) and every file-scope variable is pre-marked `EscapeKind::Global`. Async functions and async arrow/function expressions assigned to variables join the `async_functions` set.
-2. **`analyze_statement` (recursive walk)** — each statement is visited: declarations create a `VarInfo`; `return x` marks `Return`; `await x` marks `AsyncBoundary`; `x = y` (identifier to identifier) marks **both** sides `MultipleRefs`; method calls and `.length` accesses record widening (`ToJsString` / `ToJsArray`); every comparison and every truthiness test (`if`/`while`/`for` conditions, `&&`/`||`, `!`, ternaries) records a `ComparisonSignature` for the `js_cmp` emitter.
+2. **`analyze_statement` (recursive walk)** — each statement is visited: declarations create a `VarInfo`; `return x` marks `Return`; `await x` marks `AsyncBoundary`; `x = y` (identifier to identifier) marks **both** sides `MultipleRefs`; unknown method calls record widening (`ToJsString` / `ToJsArray`) while known `morph::str` methods and `.length` reads stay native; every comparison and every truthiness test (`if`/`while`/`for` conditions, `&&`/`||`, `!`, ternaries) records a `ComparisonSignature` for the `js_cmp` emitter; assignments fold observed integer ranges for `int32_t` proofs.
 3. **`detect_chaining`** — a second walk finds `s.toUpperCase().toLowerCase()` shapes (a member access whose object is itself a call) so chained receivers resolve to the base variable's domain instead of degrading to boxed calls.
 4. **`resolve_cross_function_escapes`** — fixpoint over function signatures: parameters of async functions that are awaited or co-returned inside get `AsyncBoundary`, since the coroutine frame will own them.
 5. **`resolve_identifier_init_classes`** — fixpoint over `let alias = target` chains (forward references included): an alias inherits its target's operand class, so `let b = a; b + 1` stays arithmetic instead of falling back to `JsValue`.
-6. **`AnalysisResult`** — the three maps (`escapes`, `widens`, `var_infos`) plus `async_functions` and `comparison_signatures` are handed to the emitter, which makes every declaration decision from them (`emit_optimized_variable_declarator`, `crates/morpher/src/codegen/cpp.rs:390`).
+6. **`AnalysisResult`** — the maps (`escapes`, `widens`, `var_infos`) plus `async_functions`, `comparison_signatures`, `closure_captures`, and `narrow_splits` (with per-variable definition/use sites for liveness) are handed to the emitter, which makes every declaration decision from them (`emit_typed_variable_declarator` in `crates/morpher/src/codegen/cpp.rs`).
 
 ### What the Analyzer Records for Every Variable
 
@@ -77,10 +77,12 @@ pub struct VarInfo {
                                          // MethodCall, Awaited, Iterated, Spread, ...)
     pub init_operand_class: OperandClass, // what the initializer's C++ value is
                                          // (Integer/Float/Text/Boolean/JsValue/...)
+    pub int_range: Option<(i64, i64)>,   // proven min/max over literal assigns
+    pub int_range_exact: bool,           // false once anything dynamic touches it
 }
 ```
 
-`mark_escape` never downgrades: `escapes.insert(name, EscapeKind::max(current, kind))` (`analyzer.rs:1178`), with priority `AsyncBoundary > ClosureCapture > MultipleRefs > Global > Return > None` (`analyzer.rs:1232`). A variable that is both returned *and* captured gets `shared_ptr` — the stricter need always wins.
+`mark_escape` never downgrades: `escapes.insert(name, EscapeKind::max(current, kind))`, with priority `AsyncBoundary > ClosureCapture > MultipleRefs > Global > Return > None`. A variable that is both returned *and* captured gets `shared_ptr` — the stricter need always wins.
 
 ## Escape Analysis: The Decision Tree
 
@@ -97,16 +99,17 @@ Does it escape the function?
 └─► YES → Why does it escape?
         │
         ├─► Returned (single owner moves out)
-        │   → unique_ptr + std::move
+        │   → `unique_ptr` for class instances and vectors;
+        │     scalars and `Js*` values copy out on the stack
         │   User createUser() { auto u = make_unique<User>(); return std::move(u); }
         │
         ├─► Stored in global/container (ownership transferred)
-        │   → unique_ptr + std::move
+        │   → same rule: heap only for class/vector, stack otherwise
         │   global.push_back(std::move(u));
         │
         ├─► Captured by closure (shared ownership)
-        │   → shared_ptr
-        │   auto c = make_shared<int>(0); return [c](){ return ++*c; };
+        │   → shared_ptr (use sites dereference scalars: `(*count)`)
+        │   auto c = make_shared<int>(0); return [c](){ return ++(*c); };
         │
         ├─► Multiple simultaneous references (shared mutable)
         │   → shared_ptr
@@ -129,8 +132,8 @@ Higher priority wins when a variable has multiple escape reasons.
 | EscapeKind | C++ Type | Reason |
 |---|---|---|
 | `None` | `T` (stack) | Zero overhead, auto cleanup |
-| `Return` / `Global` | `std::unique_ptr<T>` + `std::move` | Single owner, move semantics |
-| `ClosureCapture` / `MultipleRefs` / `AsyncBoundary` | `std::shared_ptr<T>` | Shared ownership required |
+| `Return` / `Global` | `std::unique_ptr<T>` + `std::move` for class/vector; stack copy for scalars and `Js*` | Heap only pays off where copies are deep or move-only |
+| `ClosureCapture` / `MultipleRefs` / `AsyncBoundary` | `std::shared_ptr<T>` | Shared ownership required; scalar use sites dereference (`(*x)`) |
 
 **`shared_ptr` only where semantically required** — never "just in case."
 
@@ -140,7 +143,7 @@ There is no garbage collector in emitted code — not a tracing one, not a refer
 
 ### The three storages
 
-Every declaration lands in exactly one bucket (`cpp.rs:453`):
+Every declaration lands in exactly one bucket:
 
 | Storage | When | Allocation | Cleanup | Cost |
 |---|---|---|---|---|
@@ -148,7 +151,7 @@ Every declaration lands in exactly one bucket (`cpp.rs:453`):
 | **`unique_ptr<T>` + `std::move`** | `Return` / `Global` — single owner moves out | One heap allocation (`make_unique`) | Freed when the owner dies | One allocation, no counting |
 | **`shared_ptr<T>`** (`make_shared`) | `ClosureCapture` / `MultipleRefs` / `AsyncBoundary` — genuinely shared | One heap allocation (`make_shared` merges object + control block) | Freed when the last owner dies | Atomic refcount inc/dec per copy |
 
-`const` on a `Js*` scalar folds to `const JsNumber` etc., and file-scope declarations get a `static` prefix (`cpp.rs:513`) so they live for the program's duration instead of per-call.
+`const` on a `Js*` scalar folds to `const JsNumber` etc., and file-scope declarations get a `static` prefix so they live for the program's duration instead of per-call.
 
 ### Why no collector at all
 
@@ -160,7 +163,7 @@ The honest corollary: the proof is conservative. Anything the analyzer can't see
 
 Three JS semantics genuinely require shared ownership — there is no cheaper correct answer:
 
-- **Aliasing** (`let b = a; b.x = 2` must be visible through `a`). The analyzer marks both sides `MultipleRefs` (`analyzer.rs:788`), and both names share one `shared_ptr` — one object, two owners, exactly like the JS heap.
+- **Aliasing** (`let b = a; b.x = 2` must be visible through `a`). The analyzer marks both sides `MultipleRefs`, and both names share one `shared_ptr` — one object, two owners, exactly like the JS heap.
 - **Closures** (`return () => ++count`). The lambda outlives the stack frame that created `count`, so the counter moves to the heap and both the (dead) frame's successor and the lambda hold a `shared_ptr` (`ClosureCapture`).
 - **Coroutines** (anything live across `await`/`co_return`). A suspended coroutine's frame survives the caller's return, so locals it keeps must be heap-owned (`AsyncBoundary`).
 
@@ -181,13 +184,13 @@ Async functions become coroutines returning `morph::Task` (no value) or `morph::
 
 Two refinements keep this cheap:
 
-- **`new Promise<T>` infers `morph::Result<T>`** from the type argument at the declaration (`infer_optimized_type`, `cpp.rs:646`), so `let p: Promise<number> = new Promise<number>(...)` never touches `JsValue`.
-- **Sync strip**: if a variable's initializer is a plain synchronous call but its declared type is `Result<T>`, the emitter strips it to `T` (`strip_result_for_sync_call`, `cpp.rs:1337`) — no coroutine frame, no wrapper, just the value.
+- **`new Promise<T>` infers `morph::Result<T>`** from the type argument at the declaration, so `let p: Promise<number> = new Promise<number>(...)` never touches `JsValue`.
+- **Sync strip**: if a variable's initializer is a plain synchronous call but its declared type is `Result<T>`, the emitter strips it to `T` (`strip_result_for_sync_call`) — no coroutine frame, no wrapper, just the value.
 
 ### Strings and vectors: native storage, JS behavior
 
 - **Strings** live in `std::string` (small-string optimization: short strings never touch the heap) while JS methods are served by `morph::str::*` helpers that take and return `std::string` — chains nest (`to_lower(to_upper(s))`), so no intermediate `JsString` box is ever allocated. Only genuinely dynamic strings become heap-owning `JsString`.
-- **Vectors** are inferred recursively from literals: `[1,2,3]` → `std::vector<int32_t>`, `[[1,2]]` → `std::vector<std::vector<int32_t>>`, mixed or empty → `std::vector<JsValue>` fallback (`infer_optimized_type`, `cpp.rs:678`). Homogeneous data gets contiguous native storage and cache-friendly iteration; only heterogeneous data pays for the variant per element.
+- **Vectors** are inferred recursively from literals: `[1,2,3]` → `std::vector<int32_t>`, `[[1,2]]` → `std::vector<std::vector<int32_t>>`, mixed or empty → `std::vector<JsValue>` fallback. Homogeneous data gets contiguous native storage and cache-friendly iteration; only heterogeneous data pays for the variant per element.
 
 ### Who frees file-scope and global state?
 
@@ -196,32 +199,67 @@ File-scope variables start as `EscapeKind::Global` and emit as `static` (`unique
 ## Type Widening: Static Annotation = Intent, Usage = Reality
 
 ```ts
-let x: int = 5;
+let x = 5;
 x = await fetchBigNumber();  // Could overflow int64, or be string
 ```
 
-The analyzer widens the type based on **usage**, not just annotation:
+The analyzer widens the type based on **usage**, not just annotation. Widening always applies — there is no flag:
 
 | Annotation | Only Arithmetic | Assigned from Dynamic | String/Number Method Called |
 |---|---|---|---|
-| `int` / `int32` / `int64` | `int32_t` / `int64_t` | `JsNumber` | native + `morph::str::*` helper (`to_string`, `charAt`, …) |
-| `float` / `double` | `float` / `double` | `JsNumber` | native + `morph::str::*` helper |
+| `int` / `int32` / `int64` | `int32_t` / `int64_t` (proven range) | trusted annotation, else `JsNumber` | native + `morph::str::*` helper (`to_string`, `charAt`, …) |
+| `float` / `double` | `float` / `double` | trusted annotation, else `JsNumber` | native + `morph::str::*` helper |
 | `string` | `std::string` | `JsString` | `s` stays native, calls nest: `to_lower(to_upper(s))` |
-| `number` | `JsNumber` | `JsNumber` | `x.as_string()` |
-| `T[]` with `.push()` / `.length` | `std::vector<T>` | `JsArray` | method decides: `push_back` vs `push`, `.size()` for both |
+| `number` | `int32_t` / `JsNumber` | `JsNumber` | `x.as_string()` |
+| `T[]` with `.push()` / array methods | `std::vector<T>` | `JsArray` | method decides: `push_back` vs `push`, `.size()` for `.length` reads |
 
 ### Widening Rules
 
-- **Arithmetic only** → keep native (`int64_t`, `double`)
-- **Dynamic assign** (`await`, `fetch`, `JSON.parse`, widened var) → `JsNumber`
-- **String/number methods on native** → keep native, rewrite the call to a `morph::str::*` helper (`runtime/cpp/types/js_string_helpers.h`); chains nest so no intermediate boxes
-- **Array methods (`.push()`, `.length`, iteration)** → `JsArray` when the usage needs JS semantics, else homogeneous `std::vector<T>` inferred from the elements (recursively, so `[[1,2]]` is `vector<vector<int32_t>>`)
+- **Arithmetic only** → keep native (`int32_t` when every assigned literal fits, else `int64_t`; `double` stays `double`)
+- **Dynamic assign** (`parseInt`, widened vars, `x = await …` reassignments) → `JsNumber`
+- **`await` declarations deduce** (`auto x = co_await …`) — the coroutine type is known, so no boxing
+- **String/number methods on native** → keep native, rewrite the call to a `morph::str::*` helper (`runtime/cpp/types/js_string_helpers.h`); chains nest so no intermediate boxes. Only *unknown* methods widen to `JsString`
+- **`.length` reads never widen** — the emitter lowers them to `.size()` for vectors, strings, arrays, and `JsValue` alike; only an actual `.length()` *call* on a non-string widens
+- **Array methods (`.push()`, `.map()`, …)** → `JsArray`, except on proven strings (`slice`/`indexOf`/`includes` exist on both)
 - **Property access on unknown** → `JsValue`
-- **`--type infer` (default) skips widening entirely** — natives are kept and helpers do the work; `--type strict` applies the table above
+
+### Trusted Annotations: Your Bound Beats the Analysis
+
+A native number annotation on a proven-unknown future is a promise the emitter honors — even in `--type infer`, which otherwise ignores annotations:
+
+```ts
+let userLimit: int = await fetchLimit();  // unknown future, user knows the bound
+```
+
+```cpp
+int userLimit = (std::get<JsNumber>(JsValue(co_await fetchLimit()).inner)).as_int();
+```
+
+Trust fires only when the compiler proved the future unknown (dynamic widening, no initializer, or an `await` boundary). Statically known values keep inferred types, and proven non-numeric usage (`JsArray`, unknown methods) still widens. Assignments into trusted variables convert the same way.
+
+### Narrowing Splits: Literals Reclaim Native Storage
+
+Widening is not one-way. When a wide variable is reassigned with a proven integer literal on a straight-line path — every definition and use at branch depth zero in the same function, no loop or closure capture in play — the reassignment redeclares the variable under a fresh native name from that point on:
+
+```ts
+let tally = await fetchCount();  // unknown future: wide
+console.log(tally);
+tally = 42;                      // proven int32 literal, straight line
+console.log(tally);
+```
+
+```cpp
+auto tally = co_await fetchCount();
+std::println("{}", tally);
+int32_t tally_narrowed_1 = 42;
+std::println("{}", tally_narrowed_1);
+```
+
+Later reads and compound assignments (`tally += 1`) use the narrowed name; a subsequent non-literal assignment drops back to the wide name. Anything that breaks the straight line — a branch, a loop, a capture, a compound `+=` at the split point — keeps the wide type. The rule is deliberately narrow: one literal, one region, provably safe.
 
 ### Strict vs Infer: Who Decides the Type?
 
-The two modes differ in exactly one place — the `base_type` computation at the top of `emit_optimized_variable_declarator` (`cpp.rs:401`):
+The modes differ in exactly one place — the `base_type` computation at the top of the single declarator (`emit_typed_variable_declarator`):
 
 ```
 --type strict                          --type infer (default)
@@ -230,16 +268,16 @@ The two modes differ in exactly one place — the `base_type` computation at the
 Has annotation? ──yes──► use it        Always infer from the
     │                      │           initializer, ignore the
     no                     │           annotation entirely
-    │                      │
+    │                      │           (except trusted numbers)
     ▼                      ▼
 infer from init ◄──┴──► (same inference)
     │                      │
     ▼                      ▼
-Apply widening table       Skip widening (natives stay native,
-above                      helpers serve the methods)
+Apply widening table       Apply widening table
+above                      above
 ```
 
-Consequences: in strict mode `let x: number = 5` is `JsNumber` (you asked for the general type, you get it); in infer mode it's `int32_t` (the initializer is all the evidence there is). Parameters follow the same split — strict classifies them from their annotations, infer treats them as `JsValue` until use proves otherwise (`analyzer.rs:481`). Widening from *dynamic sources* (`await`, `fetch`, `JSON.parse`) still fires in both modes: reality beats declarations everywhere.
+Consequences: in strict mode `let x: number = 5` is `JsNumber` (you asked for the general type, you get it); in infer mode it's `int32_t` (the initializer is all the evidence there is). Parameters follow the same split — strict classifies them from their annotations, infer treats them as `JsValue` until use proves otherwise. Widening from *dynamic sources* still fires in both modes: reality beats declarations everywhere, unless a trusted annotation claims the range.
 
 ## JS Comparison Semantics: Native Types, JavaScript Answers
 
@@ -262,10 +300,12 @@ std::println("{}", morph::js_cmp::loose_eq(label, count));
 
 ## Intent Mapping: TS Pattern → C++ Strategy
 
-| TS Pattern | Human Intent | C++ Translation (`--optimize`) |
+| TS Pattern | Human Intent | C++ Translation |
 |---|---|---|
-| `let x: int = 5` | Native integer | `int64_t x = 5;` |
+| `let x: int = 5` | Native integer, known small | `int32_t x = 5;` |
 | `let x = 5` (only `+`, `-`, `*` used) | Native integer | `int32_t x = 5;` (inferred) |
+| `let x = 3000000000` | Native integer, big | `int64_t x = 3000000000;` |
+| `let x: int = await f()` | Native integer, unknown future | `int x = (…).as_int();` (trusted) |
 | `let s = "hello"` | String value | `std::string s = "hello";` |
 | `let a = [1,2,3]` + `for (x of a)` | Iterable sequence | `std::vector<int> a = {1,2,3};` |
 | `let o = {a:1}` + `o.a` | Struct-like | `struct { int a; } o{1};` or `std::map` |
@@ -340,17 +380,19 @@ Task<User> fetchUser() {
 ### 4. Type Widening from Dynamic Source
 
 ```ts
-let x: int = 5;
-x = await fetchBigNumber();  // Could be 10^20 or "not a number"
+let x = 5;
+x = await fetchBigNumber();  // Could overflow int64, or be string
 ```
 
-**Detection**: Native-annotated variable assigned from `await` / dynamic call
-**Translation**: Widen to `JsNumber` (handles int64, double, bigint, string)
+**Detection**: reassignment from an `await` boundary (declarations deduce `await` directly via `auto`)
+**Translation**: widen to `JsNumber` at the declaration (handles int64, double, bigint, string)
 
 ```cpp
 JsNumber x = 5;
 x = co_await fetchBigNumber(); // JsNumber handles overflow/bigint
 ```
+
+With a native number annotation the promise wins instead — see [Trusted Annotations](#trusted-annotations-your-bound-beats-the-analysis).
 
 ### 5. Native Type `.toString()` Call
 
@@ -445,7 +487,7 @@ morph::spawn_detached(http_post("/analytics", data));
 
 ## Template Bloat Elimination
 
-| Feature | Legacy | Optimized |
+| Feature | Naive | Intent-based |
 |---|---|---|
 | Template literal `` `Hi ${x}` `` | `<format>` + `std::format` | `<format>` + `std::format` ✓ |
 | `console.log("Hi", x)` | `<format>` + `std::format` | `<print>` + `std::println("Hi {}", x)` ✗ |
@@ -470,23 +512,23 @@ No blanket `js_types.h` unless a `Js*` type is actually emitted.
 
 ## Performance Targets
 
-| Metric | Legacy (Js* everywhere) | Optimized (`--optimize`) |
+| Metric | Boxed-everything baseline | Intent-based (this mode) |
 |---|---|---|
 | Binary size (simple logic) | ~500 KB | **~150 KB** |
 | Compile time (logic.ts) | ~1.5s | **~0.5s** |
 | Runtime overhead (primitives) | Variant + heap | **Zero (stack)** |
-| `int` arithmetic | `JsNumber` variant | Native `int64_t` |
+| `int` arithmetic | `JsNumber` variant | Native `int32_t` / `int64_t` |
 | String concat | `JsString` heap | `std::string` SSO |
 | Vector push | `JsArray` refcount | `std::vector` native |
 
 ## Usage
 
 ```bash
-# Direct file morph with optimization
-morph app.ts --to cpp --optimize
+# Direct file morph (intent-based codegen is the only mode)
+morph app.ts --to cpp
 
 # Type mode is orthogonal: infer (default) or strict annotations
-morph app.ts --to cpp --type infer --optimize
+morph app.ts --to cpp --type infer
 morph app.ts --to cpp --type strict
 
 # In a project (add to morph.config.json build flags)
@@ -498,17 +540,20 @@ morph app.ts --to cpp --type strict
 | Feature | Status |
 |---|---|
 | Escape analysis (None/Return/Global/Closure/MultipleRefs/AsyncBoundary) | ✅ Built & integrated (`crates/morpher/src/codegen/analyzer.rs`) |
-| Type widening (ToJsNumber/ToJsString/ToJsValue/ToJsArray) + chaining detection | ✅ |
+| Type widening (ToJsNumber/ToJsString/ToJsValue/ToJsArray) + chaining detection | ✅ (only genuinely dynamic usage widens) |
+| Integer-range proofs (`int32_t` when every value fits) + bounded loop counters | ✅ |
+| Trusted native annotations on unknown futures | ✅ |
+| Scalar dereference at `shared_ptr` use sites | ✅ |
 | `--type infer` (default) / `--type strict` | ✅ (`TypeMode` in `context.rs`, `--type` CLI flag) |
 | Native string methods via `morph::str::*` helpers, chains nest | ✅ (`string_methods.rs` + `js_string_helpers.h`) |
 | JS comparison helpers (`morph::js_cmp`, only what's used) | ✅ |
 | Native type emission (`int32_t`, `std::string`, `std::vector`, recursive literals) | ✅ |
-| Smart pointer selection (`unique_ptr`/`shared_ptr`/`stack`) | ✅ |
+| Smart pointer selection (`unique_ptr`/`shared_ptr`/`stack`) | ✅ (heap only for class/vector escapes) |
 | `Promise<T>` → `morph::Result<T>`, `Promise<void>` → `morph::Task`, `new Promise<T>` inference | ✅ |
 | Sync `Result<T>` strip to `T` when no `co_await` | ✅ |
 | Top-level `await` → async main wrapper; side-effectful `static auto` moved into `main` order-safely | ✅ |
 | Global absolute runtime includes; auto `js_value_format.h` for printed vectors | ✅ |
-| All 20 translate fixtures + 4 regression tests passing (outputs match Node.js) | ✅ |
+| All 28 translate fixtures passing (outputs match Node.js) | ✅ |
 
 ## Implementation Files
 
@@ -517,11 +562,11 @@ morph app.ts --to cpp --type strict
 | `crates/morpher/src/codegen/analyzer.rs` | `EscapeAnalyzer`, `EscapeKind`, `WidenedType` (+`ToJsArray`), `UsageKind`, chaining detection, `AnalysisResult` |
 | `crates/morpher/src/codegen/js_comparison.rs` | `OperandClass`, `ComparisonSignature`, `morph::js_cmp` header builder |
 | `crates/morpher/src/codegen/string_methods.rs` | `StringMethod`, `StringMethodHandler` — JS→`morph::str::*` mapping |
-| `crates/morpher/src/codegen/cpp.rs` | `emit_optimized_variable_declarator`, `infer_optimized_type`, `strip_result_for_sync_call`, `emit_new` (Promise→Result), `str_helper_decision`, recursive vector literals |
+| `crates/morpher/src/codegen/cpp.rs` | `emit_typed_variable_declarator`, `select_integer_type`, trusted annotations, `strip_result_for_sync_call`, `emit_new` (Promise→Result), `str_helper_decision`, recursive vector literals |
 | `crates/morpher/src/codegen/type_resolver.rs` | Native type maps, `Promise`→`Result`, denormalization |
 | `crates/morpher/src/codegen/context.rs` | `Ctx` with `var_types`, `async_fns`, `escape_hints`, `TypeMode`, `runtime_path` |
-| `crates/morpher/src/lib.rs` | `TranslateOptions { optimize, type_mode, runtime_path, indent }` |
-| `crates/morphc/src/commands/translate.rs` | `--optimize` / `--type` flags, `wrap_top_level_in_main`, safe `static auto` move |
+| `crates/morpher/src/lib.rs` | `TranslateOptions { type_mode, runtime_path, indent }` |
+| `crates/morphc/src/commands/translate.rs` | `--type` flag, `wrap_top_level_in_main`, safe `static auto` move |
 | `runtime/cpp/types/js_string_helpers.h` | `namespace morph::str` — native string method equivalents |
 
 ## Future Work
@@ -529,7 +574,7 @@ morph app.ts --to cpp --type strict
 1. **Per-assignment narrowing** — currently widens per-variable; could narrow after dynamic assign ends
 2. **Move vs copy for large structs** — when JS object literal doesn't escape but is large
 3. **Closure detection completeness** — verify all capture patterns in Oxc AST
-4. **Default to `--optimize`** — after more real-world validation
+4. **True lifespan tracking** — live ranges and last-use moves; today escape analysis picks storage, it does not track lifetimes
 
 ## Related
 

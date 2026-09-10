@@ -86,12 +86,9 @@ Morph scans the IR tree and detects which features your app actually uses. Only 
 
 This is why Morph binaries are so small — a simple "Hello World" app doesn't include image loading, animation, or scroll code.
 
-## Two Codegen Modes (JS/TS → C++)
+## Codegen Mode (JS/TS → C++)
 
-| Mode | Command | Behavior |
-|---|---|---|
-| **Legacy** | `morph file.ts` | `auto` inference, `Js*` types everywhere, no escape analysis |
-| **Optimized** | `morph file.ts --optimize` | Intent-based: escape analysis → stack/`unique_ptr`/`shared_ptr`, native types (`int32_t`, `std::string`, `std::vector`), type widening only when needed |
+One mode — intent-based codegen is the default (`morph file.ts`): escape analysis → stack/`unique_ptr`/`shared_ptr`, native types (`int32_t`, `std::string`, `std::vector`), type widening only when needed. `--type strict` respects annotations, `--type infer` (default) infers from code.
 
 See [Intent-Based Codegen](../guides/intent-based-codegen.md) for the full memory management strategy.
 

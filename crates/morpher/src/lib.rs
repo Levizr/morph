@@ -7,11 +7,11 @@ pub use codegen::context::TypeMode;
 pub use error::MorphJsError;
 pub use parser::{translate_str, translate_to_cpp, translate_to_rust};
 
-/// Options controlling translation
+/// Options controlling translation.
+/// Intent-based codegen (escape analysis, type widening, native types) is
+/// always on; there is no optimize flag.
 #[derive(Debug, Clone, Default)]
 pub struct TranslateOptions {
-    /// Enable optimized intent-based codegen (escape analysis, native types)
-    pub optimize: bool,
     /// Type resolution mode (default: Infer)
     pub type_mode: TypeMode,
     /// Absolute path to the runtime cpp directory (used to emit global includes).

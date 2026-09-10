@@ -39,7 +39,6 @@ pub fn translate_to_cpp(
                 let mut translator = CppTranslator::new(
                     &normalized,
                     options.indent,
-                    options.optimize,
                     options.type_mode,
                     options.runtime_path,
                 );
@@ -60,7 +59,6 @@ pub fn translate_to_cpp(
                 let mut translator = CppTranslator::new(
                     &normalized,
                     options.indent,
-                    options.optimize,
                     options.type_mode,
                     options.runtime_path,
                 );
@@ -78,7 +76,6 @@ pub fn translate_to_cpp(
     let mut translator = CppTranslator::new(
         source,
         options.indent,
-        options.optimize,
         options.type_mode,
         options.runtime_path,
     );

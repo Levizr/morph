@@ -8,11 +8,9 @@ Translate a `.ts` or `.js` file to C++ or Rust instantly:
 
 ```bash
 morph app.ts              # → app.cpp (default target: C++)
-morph app.ts --to cpp     # → app.cpp
+morph app.ts --to cpp     # → app.cpp (intent-based codegen)
 morph app.ts --to rust    # → app.rs (experimental)
-morph app.ts --to cpp --optimize  # intent-based codegen with escape analysis
 morph app.ts --to cpp --type strict    # respect TS annotations (default: --type infer)
-morph app.ts --to cpp --type infer --optimize  # infer natives + escape analysis
 ```
 
 - Only `.ts` / `.js` files allowed (`.tsx`/`.jsx`/`.mx` rejected — use `morph build` for projects)

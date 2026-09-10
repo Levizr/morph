@@ -16,7 +16,7 @@ This guide helps you migrate from the legacy Python-based `morph` CLI to the new
 | `morph doctor` | `morph doctor` | Same |
 | `morph cache` | `morph cache` | Same |
 | `morph translate file.ts` | `morph file.ts` | Direct file morphing, no subcommand |
-| `morph translate file.ts --to cpp` | `morph file.ts --to cpp` | New flags: `--to`, `--optimize` |
+| `morph translate file.ts --to cpp` | `morph file.ts --to cpp` | New flag: `--to` |
 | `morph pkg add` | *(not yet)* | Package manager in development |
 
 ## Installation Changes
@@ -99,7 +99,6 @@ morph translate app.ts --to cpp
 morph app.ts              # → app.cpp
 morph app.ts --to cpp     # → app.cpp
 morph app.ts --to rust    # → app.rs (experimental)
-morph app.ts --optimize   # intent-based codegen
 ```
 
 ### Project Commands
@@ -245,7 +244,7 @@ The `morph/` Python package is still present in the repo on purpose. The Rust CL
 
 | Area | Rust status | Python still needed | Why |
 |---|---|---|---|
-| Direct file morph (`morph app.ts`) | ✅ Complete (`morpher`, `--type`/`--optimize`) | No | Covered by 21 fixtures + 4 regression tests, outputs match Node.js |
+| Direct file morph (`morph app.ts`) | ✅ Complete (`morpher`, `--type`) | No | Covered by 28 fixtures + intent tests, outputs match Node.js |
 | GUI layout engine | ❌ Missing | **Yes** — `morph/layout/engine.py` | Measure + layout pass writes real `x/y/w/h`; Rust `IRBuilder` hardcodes `0.0`, so every widget would pile at the origin |
 | JS logic inside GUI builds | ❌ Not wired | **Yes** — `morph/js/codegen.py` | `morph build` never calls `morpher`; `morph-codegen` has only a string-level `translate_js` shim and emits `premain` bodies as raw JS verbatim (won't compile) |
 | Dev hot reload | ❌ Stub | **Yes** — `morph/dev/` | Rust `dev` verifies IR and stops: no logic-TU emit, no `.so` compile, no IPC push (`dev.rs:118-119`); Python compiles `logic.<hash>.so` and `dlopen`s it live |

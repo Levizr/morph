@@ -155,5 +155,5 @@ jobs:
 ## Related
 
 - [Debugging & Profiling](debugging.md) — GDB, sanitizers, DevTools
-- [Intent-Based Codegen](intent-based-codegen.md) — what `--optimize` changes
+- [Intent-Based Codegen](intent-based-codegen.md) — how declarations, widening, and helpers are chosen
 - [Runtime Internals](runtime-internals.md) — signals, coroutines, scene graph

@@ -10,23 +10,24 @@ use super::js_comparison::{
 };
 use super::string_methods::StringMethodHandler;
 use super::type_resolver::{
-    param_type, resolve_type, resolve_type_annotation, ts_type_name_to_string,
+    native_number_annotation_type, param_type, resolve_type, resolve_type_annotation,
+    ts_type_name_to_string,
 };
 
 pub struct CppTranslator<'a> {
     source: &'a str,
     pub ctx: Ctx,
-    optimize: bool,
     type_mode: TypeMode,
     analysis: Option<crate::codegen::analyzer::AnalysisResult>,
     comparison_uses: HashSet<ComparisonSignature>,
+    narrow_index: HashMap<(String, u32), (String, String)>,
+    active_narrows: HashMap<String, String>,
 }
 
 impl<'a> CppTranslator<'a> {
     pub fn new(
         source: &'a str,
         indent_level: usize,
-        optimize: bool,
         type_mode: TypeMode,
         runtime_path: Option<String>,
     ) -> Self {
@@ -37,10 +38,11 @@ impl<'a> CppTranslator<'a> {
         let this = Self {
             source,
             ctx,
-            optimize,
             type_mode,
             analysis: None,
             comparison_uses: HashSet::new(),
+            narrow_index: HashMap::new(),
+            active_narrows: HashMap::new(),
         };
         this
     }
@@ -60,10 +62,18 @@ impl<'a> CppTranslator<'a> {
     }
 
     pub fn translate_program(&mut self, program: &Program<'a>) -> String {
-        // Always run analysis for type widening (array methods, toString, etc.)
-        // Escape analysis is only used when optimize=true
+        // Analysis always runs: escape analysis, type widening, comparison
+        // tracking, and integer-range proofs feed the single emitter path.
         if self.analysis.is_none() {
             self.run_analysis(program);
+        }
+        if let Some(analysis) = self.analysis.as_ref() {
+            for split in &analysis.narrow_splits {
+                self.narrow_index.insert(
+                    (split.var_name.clone(), split.def_span_start),
+                    (split.narrowed_name.clone(), split.narrowed_type.clone()),
+                );
+            }
         }
         let mut lines = Vec::new();
         for stmt in &program.body {
@@ -279,187 +289,59 @@ impl<'a> CppTranslator<'a> {
             return Some(format!("{}/* destructuring not supported */", self.indent()));
         }
 
-        if self.optimize && self.analysis.is_some() {
-            self.emit_optimized_variable_declarator(d, &name, kind)
-        } else {
-            self.emit_legacy_variable_declarator(d, &name, kind)
-        }
+        self.emit_typed_variable_declarator(d, &name, kind)
     }
 
-    fn emit_legacy_variable_declarator(
+    // Intent-based declarator: base type, widening, trusted annotations,
+    // integer-range selection, then escape-based allocation. This is the only
+    // variable-declaration path.
+    fn emit_typed_variable_declarator(
         &mut self,
         d: &VariableDeclarator<'a>,
         name: &str,
         kind: &str,
     ) -> Option<String> {
-        let cpp_type = match self.type_mode {
-            TypeMode::Strict => {
-                // In strict mode: use annotation if present, otherwise infer from init
-                if let Some(ta) = &d.type_annotation {
-                    resolve_type_annotation(
-                        Some(ta),
-                        "auto",
-                        &self.ctx.template_params,
-                        false,
-                        &self.ctx.class_names,
-                    )
-                } else if let Some(init) = &d.init {
-                    self.infer_type_from_init(init).unwrap_or_else(|| "auto".to_string())
-                } else {
-                    "auto".to_string()
-                }
-            }
-            TypeMode::Infer => {
-                // In infer mode: always infer from init, ignore user annotations
-                if let Some(init) = &d.init {
-                    self.infer_type_from_init(init).unwrap_or_else(|| "auto".to_string())
-                } else {
-                    "auto".to_string()
-                }
-            }
-        };
-        // Apply type widening from analyzer (if available)
-        // In infer mode, skip widening - keep native types and use helpers
-        let widened = if matches!(self.type_mode, TypeMode::Infer) {
-            WidenedType::None
-        } else {
-            self.analysis
-                .as_ref()
-                .and_then(|a| a.widens.get(name))
-                .cloned()
-                .unwrap_or(WidenedType::None)
-        };
-
-        // Check if the base type is a class type (shouldn't be widened to JS primitives)
-        let is_class_type = cpp_type.starts_with("std::shared_ptr<")
-            || self.ctx.class_names.contains(cpp_type.as_str());
-
-        let mut cpp_type = match widened {
-            WidenedType::ToJsNumber => "JsNumber".to_string(),
-            WidenedType::ToJsString => {
-                if is_class_type {
-                    cpp_type // Keep class type, don't widen to JsString
-                } else {
-                    "JsString".to_string()
-                }
-            }
-            WidenedType::ToJsValue => "JsValue".to_string(),
-            WidenedType::ToJsArray => "JsArray".to_string(),
-            WidenedType::None => cpp_type,
-        };
+        let base_type = self.declaration_base_type(d);
+        let widened = self
+            .analysis
+            .as_ref()
+            .and_then(|analysis| analysis.widens.get(name))
+            .cloned()
+            .unwrap_or(WidenedType::None);
+        let mut cpp_type = self.apply_declaration_widening(d, name, base_type, widened);
         // Intent-based: Promise<T> annotated but init is sync plain call -> use T (match JS runtime)
         if let Some(init) = &d.init {
             if let Some(stripped) = self.strip_result_for_sync_call(&cpp_type, init) {
                 cpp_type = stripped;
             }
         }
-        self.ctx.need(&cpp_type);
-        self.ctx.var_types.insert(name.to_string(), cpp_type.clone());
-        let mut final_type = cpp_type.clone();
-        if kind == "const"
-            && matches!(
-                cpp_type.as_str(),
-                "JsNumber" | "JsBoolean" | "JsString" | "JsUndefined" | "JsNull"
-            )
-        {
-            if !cpp_type.starts_with("const ") {
-                final_type = format!("const {}", cpp_type);
-            }
-        }
-        let prefix = if self.ctx.indent_level == 0 { "static " } else { "" };
-        if let Some(init) = &d.init {
-            let init_code = if cpp_type.starts_with("std::vector<")
-                && matches!(init, Expression::ArrayExpression(_))
-            {
-                self.emit_vector_literal_typed(init, Some(&cpp_type))
-            } else if cpp_type == "char" && matches!(init, Expression::StringLiteral(_)) {
-                self.emit_char_literal(init)
-            } else {
-                self.emit_expression(init)
-            };
-            if matches!(init, Expression::NewExpression(_)) {
-                self.ctx.shared_ptr_vars.insert(name.to_string());
-            }
-            Some(format!("{}{}{} {} = {};", self.indent(), prefix, final_type, name, init_code))
+        let escape_kind = self
+            .analysis
+            .as_ref()
+            .and_then(|analysis| analysis.escapes.get(name))
+            .cloned()
+            .unwrap_or(EscapeKind::None);
+        let escape_kind = if cpp_type == "auto" {
+            EscapeKind::None
         } else {
-            Some(format!("{}{}{} {}{{}};", self.indent(), prefix, final_type, name))
-        }
-    }
-
-    // Optimized variable declarator using escape analysis and type widening
-    fn emit_optimized_variable_declarator(
-        &mut self,
-        d: &VariableDeclarator<'a>,
-        name: &str,
-        kind: &str,
-    ) -> Option<String> {
-        let analysis = self.analysis.as_ref().unwrap();
-        let escape_kind = analysis.escapes.get(name).cloned().unwrap_or(EscapeKind::None);
-        let widened = analysis.widens.get(name).cloned().unwrap_or(WidenedType::None);
-
-        // Determine base C++ type from annotation or inference based on type_mode
-        let base_type = match self.type_mode {
-            TypeMode::Strict => {
-                // In strict mode: use annotation if present, otherwise infer from init
-                if let Some(ta) = &d.type_annotation {
-                    resolve_type_annotation(
-                        Some(ta),
-                        "auto",
-                        &self.ctx.template_params,
-                        false,
-                        &self.ctx.class_names,
-                    )
-                } else if let Some(init) = &d.init {
-                    self.infer_type_from_init(init).unwrap_or_else(|| "auto".to_string())
-                } else {
-                    "auto".to_string()
+            match escape_kind {
+                EscapeKind::Return | EscapeKind::Global
+                    if !Self::needs_heap_for_escape(&cpp_type, &self.ctx.class_names) =>
+                {
+                    EscapeKind::None
                 }
-            }
-            TypeMode::Infer => {
-                // In infer mode: always infer from init, ignore user annotations
-                if let Some(init) = &d.init {
-                    self.infer_type_from_init(init).unwrap_or_else(|| "auto".to_string())
-                } else {
-                    "auto".to_string()
-                }
+                other => other,
             }
         };
-
-        // Apply type widening
-        let mut cpp_type = match widened {
-            WidenedType::ToJsNumber => "JsNumber".to_string(),
-            WidenedType::ToJsString => "JsString".to_string(),
-            WidenedType::ToJsValue => "JsValue".to_string(),
-            WidenedType::ToJsArray => "JsArray".to_string(),
-            WidenedType::None => {
-                if base_type == "auto" {
-                    if let Some(init) = &d.init {
-                        self.infer_type_from_init(init).unwrap_or_else(|| "JsValue".to_string())
-                    } else {
-                        "JsValue".to_string()
-                    }
-                } else {
-                    base_type
-                }
-            }
-        };
-        // Intent-based: strip Result<T> to T when init is sync plain call
-        if let Some(init) = &d.init {
-            if let Some(stripped) = self.strip_result_for_sync_call(&cpp_type, init) {
-                cpp_type = stripped;
-            }
-        }
-
-        // Determine allocation strategy based on escape kind
         let (alloc_type, init_code) = if let Some(init) = &d.init {
             match escape_kind {
                 EscapeKind::None => {
-                    // Stack allocation with native type
                     let init_code = if cpp_type.starts_with("std::vector<")
                         && matches!(init, Expression::ArrayExpression(_))
                     {
                         self.emit_vector_literal_typed(init, Some(&cpp_type))
-                    } else if cpp_type == "char" && matches!(init, Expression::StringLiteral(_)) {
+                    } else if cpp_type == "char" && matches!(init, Expression::StringLiteral(_))
+                    {
                         self.emit_char_literal(init)
                     } else {
                         self.emit_expression(init)
@@ -467,7 +349,6 @@ impl<'a> CppTranslator<'a> {
                     (cpp_type.clone(), init_code)
                 }
                 EscapeKind::Return | EscapeKind::Global => {
-                    // unique_ptr + move for single-owner escapes
                     let alloc = format!("std::unique_ptr<{}>", cpp_type);
                     let init_code = if matches!(init, Expression::ArrayExpression(_)) {
                         format!(
@@ -485,28 +366,41 @@ impl<'a> CppTranslator<'a> {
                 EscapeKind::ClosureCapture
                 | EscapeKind::MultipleRefs
                 | EscapeKind::AsyncBoundary => {
-                    // shared_ptr for shared ownership
                     let alloc = format!("std::shared_ptr<{}>", cpp_type);
                     let init_code =
                         format!("std::make_shared<{}>({})", cpp_type, self.emit_expression(init));
                     (alloc, init_code)
                 }
             }
+        } else if matches!(
+            escape_kind,
+            EscapeKind::ClosureCapture | EscapeKind::MultipleRefs | EscapeKind::AsyncBoundary
+        ) {
+            (format!("std::shared_ptr<{}>", cpp_type), String::new())
+        } else if matches!(escape_kind, EscapeKind::Return | EscapeKind::Global) {
+            (format!("std::unique_ptr<{}>", cpp_type), String::new())
         } else {
-            // No initializer
-            match escape_kind {
-                EscapeKind::None => (cpp_type.clone(), String::new()),
-                EscapeKind::Return | EscapeKind::Global => {
-                    (format!("std::unique_ptr<{}>", cpp_type), String::new())
-                }
-                EscapeKind::ClosureCapture
-                | EscapeKind::MultipleRefs
-                | EscapeKind::AsyncBoundary => {
-                    (format!("std::shared_ptr<{}>", cpp_type), String::new())
-                }
-            }
+            (cpp_type.clone(), String::new())
         };
 
+        if alloc_type.starts_with("std::shared_ptr<") {
+            self.ctx.shared_ptr_vars.insert(name.to_string());
+        }
+        let init_code = match &d.init {
+            Some(init) if Self::is_trusted_native_number(d, &widened).is_some() => {
+                self.convert_number_value(&cpp_type, init, init_code)
+            }
+            Some(init)
+                if cpp_type == "JsString"
+                    && matches!(
+                        self.operand_class_of(init),
+                        OperandClass::Integer | OperandClass::Float
+                    ) =>
+            {
+                format!("JsString(JsNumber({}))", init_code)
+            }
+            _ => init_code,
+        };
         self.ctx.need(&alloc_type);
         self.ctx.var_types.insert(name.to_string(), alloc_type.clone());
 
@@ -533,11 +427,167 @@ impl<'a> CppTranslator<'a> {
         }
     }
 
-    fn infer_type_from_init(&self, node: &Expression<'a>) -> Option<String> {
-        if self.optimize {
-            self.infer_optimized_type(node)
+    /// Resolve the declared base type: annotations in Strict mode, init
+    /// inference otherwise. Shared by every declaration path.
+    fn declaration_base_type(&mut self, d: &VariableDeclarator<'a>) -> String {
+        match self.type_mode {
+            TypeMode::Strict => {
+                // In strict mode: use annotation if present, otherwise infer from init
+                if let Some(ta) = &d.type_annotation {
+                    resolve_type_annotation(
+                        Some(ta),
+                        "auto",
+                        &self.ctx.template_params,
+                        false,
+                        &self.ctx.class_names,
+                    )
+                } else if let Some(init) = &d.init {
+                    self.infer_type_from_init(init).unwrap_or_else(|| "auto".to_string())
+                } else {
+                    "auto".to_string()
+                }
+            }
+            TypeMode::Infer => {
+                // In infer mode: always infer from init, ignore user annotations
+                if let Some(init) = &d.init {
+                    self.infer_type_from_init(init).unwrap_or_else(|| "auto".to_string())
+                } else {
+                    "auto".to_string()
+                }
+            }
+        }
+    }
+
+    /// Apply analyzer widening to a declared base type.
+    ///
+    /// A native number annotation on a proven-unknown future is a trusted
+    /// range promise and beats `ToJsNumber`/`ToJsValue` widening. Inferred
+    /// integers shrink to `int32_t` when the analyzer proved the full range.
+    fn apply_declaration_widening(
+        &self,
+        d: &VariableDeclarator<'a>,
+        name: &str,
+        base_type: String,
+        widened: WidenedType,
+    ) -> String {
+        if let Some(trusted) = Self::is_trusted_native_number(d, &widened) {
+            return trusted;
+        }
+        let is_class_type = base_type.starts_with("std::shared_ptr<")
+            || self.ctx.class_names.contains(base_type.as_str());
+        let cpp_type = match widened {
+            WidenedType::ToJsNumber => "JsNumber".to_string(),
+            WidenedType::ToJsString => {
+                if is_class_type {
+                    base_type.clone()
+                } else {
+                    "JsString".to_string()
+                }
+            }
+            WidenedType::ToJsValue => "JsValue".to_string(),
+            WidenedType::ToJsArray => "JsArray".to_string(),
+            WidenedType::None => {
+                if base_type == "auto" {
+                    if d.init.is_some() {
+                        base_type
+                    } else {
+                        "JsValue".to_string()
+                    }
+                } else {
+                    base_type.clone()
+                }
+            }
+        };
+        let inferred =
+            matches!(self.type_mode, TypeMode::Infer) || d.type_annotation.is_none();
+        let inferred_integer = matches!(cpp_type.as_str(), "int" | "int32_t" | "int64_t");
+        if inferred && matches!(widened, WidenedType::None) && inferred_integer {
+            return self.select_integer_type(name);
+        }
+        cpp_type
+    }
+
+    /// Check whether a declaration carries a trusted native-number annotation.
+    ///
+    /// Trust fires only on proven-unknown futures: dynamic widening, no
+    /// initializer, or an `await` boundary (where the annotation is the best
+    /// bound information available). Statically known values keep inferred
+    /// types.
+    fn is_trusted_native_number(
+        d: &VariableDeclarator,
+        widened: &WidenedType,
+    ) -> Option<String> {
+        let annotation = d.type_annotation.as_ref()?;
+        let trusted = native_number_annotation_type(Some(annotation))?;
+        let unknown_future = d.init.is_none()
+            || matches!(widened, WidenedType::ToJsNumber | WidenedType::ToJsValue)
+            || matches!(d.init, Some(Expression::AwaitExpression(_)));
+        if unknown_future {
+            Some(trusted)
         } else {
-            match node {
+            None
+        }
+    }
+
+    /// Convert a dynamic right-hand side into a native integer/float target.
+    ///
+    /// `int x = <JsNumber>` has no implicit conversion, so the emitter spells
+    /// the narrowing: `.as_int()` / `.as_double()`. Anything else passes
+    /// through untouched.
+    fn convert_number_value(
+        &self,
+        cpp_type: &str,
+        init: &Expression<'a>,
+        init_code: String,
+    ) -> String {
+        let init_class = self.operand_class_of(init);
+        if !matches!(init_class, OperandClass::JsNumber | OperandClass::JsValue) {
+            return init_code;
+        }
+        let int_target = cpp_type == "int"
+            || cpp_type == "int32_t"
+            || cpp_type == "int64_t"
+            || cpp_type.starts_with("uint")
+            || cpp_type == "size_t";
+        let float_target = cpp_type == "float" || cpp_type == "double";
+        if !int_target && !float_target {
+            return init_code;
+        }
+        let primitive = if init_class == OperandClass::JsNumber {
+            init_code
+        } else {
+            format!("std::get<JsNumber>(JsValue({}).inner)", init_code)
+        };
+        if int_target {
+            format!("({}).as_int()", primitive)
+        } else {
+            format!("({}).as_double()", primitive)
+        }
+    }
+
+    /// Pick `int32_t` when the analyzer proved every assigned value fits,
+    /// otherwise `int64_t`. Dynamic futures never reach here (they widen).
+    fn select_integer_type(&self, name: &str) -> String {
+        let proven_small = self
+            .analysis
+            .as_ref()
+            .and_then(|analysis| analysis.var_infos.get(name))
+            .map(|info| {
+                info.int_range_exact
+                    && info.int_range.is_some_and(|(low, high)| {
+                        low >= i32::MIN as i64 && high <= i32::MAX as i64
+                    })
+            })
+            .unwrap_or(false);
+        if proven_small {
+            "int32_t".to_string()
+        } else {
+            "int64_t".to_string()
+        }
+    }
+
+    fn infer_type_from_init(&self, node: &Expression<'a>) -> Option<String> {
+        match node {
                 Expression::StringLiteral(_) => Some("std::string".to_string()),
                 Expression::TemplateLiteral(_) => Some("std::string".to_string()),
                 Expression::BooleanLiteral(_) => Some("bool".to_string()),
@@ -618,100 +668,6 @@ impl<'a> CppTranslator<'a> {
                 Expression::Identifier(id) => self.ctx.var_types.get(id.name.as_str()).cloned(),
                 _ => None,
             }
-        }
-    }
-
-    fn infer_optimized_type(&self, node: &Expression<'a>) -> Option<String> {
-        match node {
-            Expression::StringLiteral(_) => Some("std::string".to_string()),
-            Expression::TemplateLiteral(_) => Some("std::string".to_string()),
-            Expression::BooleanLiteral(_) => Some("bool".to_string()),
-            Expression::NumericLiteral(n) => {
-                let val = n.value;
-                if val.fract() == 0.0 {
-                    let int_val = val as i64;
-                    if int_val >= i32::MIN as i64 && int_val <= i32::MAX as i64 {
-                        Some("int32_t".to_string())
-                    } else {
-                        Some("int64_t".to_string())
-                    }
-                } else {
-                    Some("double".to_string())
-                }
-            }
-            Expression::NullLiteral(_) => Some("JsNull".to_string()),
-            Expression::Identifier(id) if id.name.as_str() == "undefined" => {
-                Some("JsUndefined".to_string())
-            }
-            Expression::NewExpression(n) => {
-                // new Promise<T>(...) emits morph::Result<T>::resolved(...) - infer that type
-                if let Expression::Identifier(id) = &n.callee {
-                    if id.name.as_str() == "Promise" {
-                        let inner = n
-                            .type_arguments
-                            .as_ref()
-                            .and_then(|ta| ta.params.first())
-                            .map(|t| {
-                                resolve_type(
-                                    Some(t),
-                                    "JsValue",
-                                    &self.ctx.template_params,
-                                    false,
-                                    &self.ctx.class_names,
-                                )
-                            })
-                            .unwrap_or_else(|| "JsValue".to_string());
-                        if inner == "void" {
-                            return Some("morph::Task".to_string());
-                        }
-                        return Some(format!("morph::Result<{}>", inner));
-                    }
-                }
-                // For class instantiation, return the class name as type (wrapped in shared_ptr by emit_new)
-                if let Expression::Identifier(id) = &n.callee {
-                    if self.ctx.class_names.contains(id.name.as_str()) {
-                        return Some(format!("std::shared_ptr<{}>", id.name));
-                    }
-                }
-                Some("JsValue".to_string())
-            }
-            Expression::ArrayExpression(arr) => {
-                if arr.elements.is_empty() {
-                    return Some("std::vector<JsValue>".to_string());
-                }
-                let mut elem_types = Vec::new();
-                for el in &arr.elements {
-                    if let Some(expr) = el.as_expression() {
-                        if let Some(t) = self.infer_optimized_type(expr) {
-                            elem_types.push(t);
-                        } else {
-                            elem_types.push("JsValue".to_string());
-                        }
-                    }
-                }
-                if elem_types.is_empty() {
-                    Some("std::vector<JsValue>".to_string())
-                } else if elem_types.iter().all(|t| t == &elem_types[0]) {
-                    Some(format!("std::vector<{}>", elem_types[0]))
-                } else {
-                    Some("std::vector<JsValue>".to_string())
-                }
-            }
-            Expression::ObjectExpression(_) => Some("JsObject".to_string()),
-            Expression::ComputedMemberExpression(m) => {
-                // Check if we're indexing into a JsArray - return element type
-                if let Expression::Identifier(id) = &m.object {
-                    if let Some(var_type) = self.ctx.var_types.get(id.name.as_str()) {
-                        if var_type == "JsArray" {
-                            return Some("int32_t".to_string()); // Element type of JsArray<number>
-                        }
-                    }
-                }
-                None
-            }
-            Expression::Identifier(id) => self.ctx.var_types.get(id.name.as_str()).cloned(),
-            _ => None,
-        }
     }
 
     fn binding_to_identifier(&self, pat: &BindingPattern<'a>) -> (String, Option<String>) {
@@ -747,6 +703,11 @@ impl<'a> CppTranslator<'a> {
         }
         let kw = if self.ctx.is_async_fn > 0 { "co_return" } else { "return" };
         if let Some(arg) = &r.argument {
+            if let Expression::Identifier(id) = arg {
+                if self.move_eligible(id.name.as_str()) {
+                    return format!("{}{} std::move({});", self.indent(), kw, id.name);
+                }
+            }
             format!("{}{} {};", self.indent(), kw, self.emit_expression(arg))
         } else {
             format!("{}{};", self.indent(), kw)
@@ -1956,6 +1917,9 @@ impl<'a> CppTranslator<'a> {
                 if let Some(mapped) = self.ctx.state_vars.get(id.name.as_str()) {
                     return mapped.clone();
                 }
+                if let Some(narrowed) = self.active_narrows.get(id.name.as_str()).cloned() {
+                    return narrowed;
+                }
                 if id.name == "undefined" {
                     return "JsUndefined{}".to_string();
                 }
@@ -1967,6 +1931,9 @@ impl<'a> CppTranslator<'a> {
                 }
                 if id.name == "Infinity" {
                     return "std::numeric_limits<double>::infinity()".to_string();
+                }
+                if let Some(dereferenced) = self.deref_shared_scalar(id.name.as_str()) {
+                    return dereferenced;
                 }
                 id.name.to_string()
             }
@@ -2219,6 +2186,50 @@ impl<'a> CppTranslator<'a> {
         format!("JsObject{{{}}}", pairs.join(", "))
     }
 
+    /// Dereference a `shared_ptr` variable holding a scalar value.
+    ///
+    /// Escape analysis wraps captured scalars in `shared_ptr`, but use sites
+    /// must see the value: `total + x` with `shared_ptr<int64_t> total` does
+    /// not compile. Class and container pointees keep pointer semantics.
+    fn deref_shared_scalar(&self, name: &str) -> Option<String> {
+        let var_type = self.ctx.var_types.get(name)?;
+        let inner = var_type
+            .strip_prefix("std::shared_ptr<")?
+            .strip_suffix('>')?;
+        if Self::is_scalar_pointee(inner.trim()) {
+            Some(format!("(*{})", name))
+        } else {
+            None
+        }
+    }
+
+    /// True for pointees that read and write as plain values.
+    fn is_scalar_pointee(inner_type: &str) -> bool {
+        matches!(
+            inner_type,
+            "bool" | "char"
+                | "float"
+                | "double"
+                | "std::string"
+                | "JsNumber"
+                | "JsBoolean"
+                | "JsString"
+                | "JsValue"
+                | "JsNull"
+                | "JsUndefined"
+        ) || inner_type.starts_with("int")
+            || inner_type.starts_with("uint")
+            || inner_type.starts_with("long")
+            || inner_type.starts_with("short")
+            || inner_type == "size_t"
+    }
+
+    /// Heap ownership only pays off for class instances and vectors. Scalars
+    /// and `Js*` values copy cheaply, so single-owner escapes stay on stack.
+    fn needs_heap_for_escape(cpp_type: &str, class_names: &HashSet<String>) -> bool {
+        class_names.contains(cpp_type) || cpp_type.starts_with("std::vector<")
+    }
+
     /// Classify an operand into the C++ value class its emitted code has.
     ///
     /// Mirrors the analyzer-side classification but uses the exact types chosen
@@ -2300,7 +2311,22 @@ impl<'a> CppTranslator<'a> {
                     OperandClass::Other
                 }
             }
-            Expression::ComputedMemberExpression(_) => OperandClass::JsValue,
+            Expression::ComputedMemberExpression(member) => {
+                if let Expression::Identifier(object_id) = &member.object {
+                    if let Some(object_type) = self.ctx.var_types.get(object_id.name.as_str()) {
+                        if object_type == "JsArray" {
+                            return OperandClass::JsValue;
+                        }
+                        if let Some(element_type) = object_type
+                            .strip_prefix("std::vector<")
+                            .and_then(|rest| rest.strip_suffix('>'))
+                        {
+                            return cpp_type_to_class(element_type.trim());
+                        }
+                    }
+                }
+                OperandClass::JsValue
+            }
             Expression::StaticMemberExpression(member) => {
                 if member.property.name.as_str() == "length" {
                     OperandClass::Integer
@@ -2740,11 +2766,39 @@ impl<'a> CppTranslator<'a> {
     }
 
     fn emit_assignment(&mut self, a: &AssignmentExpression<'a>) -> String {
+        if let AssignmentTarget::AssignmentTargetIdentifier(left_id) = &a.left {
+            let var_name = left_id.name.to_string();
+            if a.operator.as_str() == "=" {
+                if let Some((narrowed_name, narrowed_type)) =
+                    self.narrow_index.get(&(var_name.clone(), a.span.start)).cloned()
+                {
+                    let rhs = self.emit_expression(&a.right);
+                    self.active_narrows.insert(var_name, narrowed_name.clone());
+                    self.ctx.var_types.insert(narrowed_name.clone(), narrowed_type.clone());
+                    self.ctx.needed.insert("<cstdint>".to_string());
+                    let prefix = if self.ctx.indent_level == 0 { "static " } else { "" };
+                    return format!(
+                        "{}{}{} {} = {}",
+                        self.indent(),
+                        prefix,
+                        narrowed_type,
+                        narrowed_name,
+                        rhs
+                    );
+                }
+                self.active_narrows.remove(&var_name);
+            }
+        }
         let left = self.emit_assignment_target(&a.left);
         let right = self.emit_expression(&a.right);
         // Check if we need to convert JsValue from array element to int
         let right = if self.is_jsvalue_var(&a.right) {
             format!("std::get<JsNumber>({}.inner).as_int()", right)
+        } else if let AssignmentTarget::AssignmentTargetIdentifier(left_id) = &a.left {
+            match self.ctx.var_types.get(left_id.name.as_str()).cloned() {
+                Some(left_type) => self.convert_number_value(&left_type, &a.right, right),
+                None => right,
+            }
         } else {
             right
         };
@@ -2759,7 +2813,15 @@ impl<'a> CppTranslator<'a> {
 
     fn emit_assignment_target(&mut self, target: &AssignmentTarget<'a>) -> String {
         match target {
-            AssignmentTarget::AssignmentTargetIdentifier(id) => id.name.to_string(),
+            AssignmentTarget::AssignmentTargetIdentifier(id) => {
+                if let Some(narrowed) = self.active_narrows.get(id.name.as_str()).cloned() {
+                    return narrowed;
+                }
+                if let Some(dereferenced) = self.deref_shared_scalar(id.name.as_str()) {
+                    return dereferenced;
+                }
+                id.name.to_string()
+            }
             AssignmentTarget::ComputedMemberExpression(m) => {
                 let obj = self.emit_expression(&m.object);
                 let prop = self.emit_expression(&m.expression);
@@ -2814,7 +2876,15 @@ impl<'a> CppTranslator<'a> {
 
     fn emit_simple_target(&mut self, target: &SimpleAssignmentTarget<'a>) -> String {
         match target {
-            SimpleAssignmentTarget::AssignmentTargetIdentifier(id) => id.name.to_string(),
+            SimpleAssignmentTarget::AssignmentTargetIdentifier(id) => {
+                if let Some(narrowed) = self.active_narrows.get(id.name.as_str()).cloned() {
+                    return narrowed;
+                }
+                if let Some(dereferenced) = self.deref_shared_scalar(id.name.as_str()) {
+                    return dereferenced;
+                }
+                id.name.to_string()
+            }
             SimpleAssignmentTarget::ComputedMemberExpression(m) => format!(
                 "{}[{}]",
                 self.emit_expression(&m.object),
@@ -3005,7 +3075,7 @@ impl<'a> CppTranslator<'a> {
         if let Expression::StaticMemberExpression(m) = &call.callee {
             if m.property.name.as_str() == "push" && call.arguments.len() == 1 {
                 let obj = self.emit_expression(&m.object);
-                let arg = self.emit_argument(&call.arguments[0]);
+                let arg = self.emit_moved_argument(&call.arguments[0], true);
                 // std::vector uses push_back, JsArray uses push.
                 // this->member is a JsArray class field -> push.
                 if !obj.contains("->") {
@@ -3046,7 +3116,16 @@ impl<'a> CppTranslator<'a> {
                 }
             }
         }
-        let args: Vec<String> = call.arguments.iter().map(|a| self.emit_argument(a)).collect();
+        let allow_move = !matches!(
+            &call.callee,
+            Expression::StaticMemberExpression(m)
+                if matches!(m.property.name.as_str(), "log" | "warn" | "error" | "info")
+        );
+        let args: Vec<String> = call
+            .arguments
+            .iter()
+            .map(|a| self.emit_moved_argument(a, allow_move))
+            .collect();
         if let Expression::Super(_) = &call.callee {
             return format!("super{}({})", type_args_str, args.join(", "));
         }
@@ -3084,6 +3163,65 @@ impl<'a> CppTranslator<'a> {
                 }
             }
         }
+    }
+
+    /// True when the variable's value can move at this use site.
+    ///
+    /// Sound by construction: exactly one read is recorded (this one), the
+    /// variable is not global, never captured, never touched in a loop, and
+    /// the type is expensive to copy. Anything unproven keeps copying.
+    fn move_eligible(&self, name: &str) -> bool {
+        let Some(analysis) = self.analysis.as_ref() else {
+            return false;
+        };
+        let Some(info) = analysis.var_infos.get(name) else {
+            return false;
+        };
+        if info.escape_kind == EscapeKind::Global
+            || info.has_loop_use
+            || info.read_use_count() != 1
+        {
+            return false;
+        }
+        if analysis
+            .closure_captures
+            .values()
+            .any(|captured| captured.contains(name))
+        {
+            return false;
+        }
+        let cpp_type = self
+            .ctx
+            .var_types
+            .get(name)
+            .map(String::as_str)
+            .unwrap_or("");
+        Self::is_move_worthy_type(cpp_type, &self.ctx.class_names)
+    }
+
+    /// True for types where moving beats copying. Trivially copyable scalars
+    /// and `unique_ptr` (which already moves on return) are excluded.
+    fn is_move_worthy_type(cpp_type: &str, class_names: &HashSet<String>) -> bool {
+        cpp_type.starts_with("std::vector<")
+            || cpp_type == "JsObject"
+            || cpp_type == "JsArray"
+            || cpp_type == "std::string"
+            || cpp_type == "JsString"
+            || cpp_type == "JsValue"
+            || cpp_type.starts_with("std::shared_ptr<")
+            || class_names.contains(cpp_type)
+    }
+
+    /// Emit a call argument, moving single-use large values.
+    fn emit_moved_argument(&mut self, arg: &Argument<'a>, allow_move: bool) -> String {
+        if allow_move {
+            if let Some(Expression::Identifier(id)) = arg.as_expression() {
+                if self.move_eligible(id.name.as_str()) {
+                    return format!("std::move({})", id.name);
+                }
+            }
+        }
+        self.emit_argument(arg)
     }
 
     fn vector_inner_type(vec_type: &str) -> Option<&str> {

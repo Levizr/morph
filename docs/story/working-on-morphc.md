@@ -23,11 +23,11 @@ We're also redesigning the **JS/TS → C++ translator** (`morph-js` crate) to us
 - **Native types preferred** — `int64_t` not `JsNumber` when usage allows
 
 **Current status (Sept 2026)**: 
-- **Semantic Analyzer implemented** in `crates/morph-js/src/codegen/analyzer.rs` — performs escape analysis, type widening, async boundary detection, and closure capture detection
-- **Optimized Emitter implemented** — uses escape analysis to emit native types (`int64_t`, `std::string`, `std::vector`), `unique_ptr` + move, `shared_ptr` based on escape analysis
-- **24/24 tests passing** (previously 21/24; fixed 17_async file-scope moves, 18_promises Promise/Result handling, 19_fetch linking, 11_complex OOB + try/finally)
-- **Analyzer integrated** — runs during translation with `--optimize` flag (e.g. `morph app.ts --to cpp --optimize`), produces `AnalysisResult` with escape kinds, widened types, variable info, and async function set
-- **CLI**: direct file morphing `morph <file> [--to cpp|rust] [--optimize]` (no `translate` subcommand)
+- **Semantic Analyzer implemented** in `crates/morpher/src/codegen/analyzer.rs` — performs escape analysis, type widening, async boundary detection, closure capture detection, integer-range proofs, and comparison tracking
+- **Intent emitter implemented** — uses analysis to emit native types (`int32_t`, `std::string`, `std::vector`), `unique_ptr` + move, `shared_ptr` based on escape analysis
+- **28/28 tests passing** (previously 21/24; fixed 17_async file-scope moves, 18_promises Promise/Result handling, 19_fetch linking, 11_complex OOB + try/finally)
+- **Analyzer integrated** — runs on every translation, produces `AnalysisResult` with escape kinds, widened types, variable info, async function set, and comparison signatures
+- **CLI**: direct file morphing `morph <file> [--to cpp|rust]` (no `translate` subcommand, no optimize flag — intent-based codegen is the only mode)
 
 See [full plan](../../help/js-memory-management-without-gc-and-intent-based-codegen.md).
 
