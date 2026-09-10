@@ -62,7 +62,7 @@ One function runs the whole analysis — `EscapeAnalyzer::analyze_program` (`cra
 3. **`detect_chaining`** — a second walk finds `s.toUpperCase().toLowerCase()` shapes (a member access whose object is itself a call) so chained receivers resolve to the base variable's domain instead of degrading to boxed calls.
 4. **`resolve_cross_function_escapes`** — fixpoint over function signatures: parameters of async functions that are awaited or co-returned inside get `AsyncBoundary`, since the coroutine frame will own them.
 5. **`resolve_identifier_init_classes`** — fixpoint over `let alias = target` chains (forward references included): an alias inherits its target's operand class, so `let b = a; b + 1` stays arithmetic instead of falling back to `JsValue`.
-6. **`AnalysisResult`** — the maps (`escapes`, `widens`, `var_infos`) plus `async_functions`, `comparison_signatures`, `closure_captures`, and `narrow_splits` (with per-variable definition/use sites for liveness) are handed to the emitter, which makes every declaration decision from them (`emit_typed_variable_declarator` in `crates/morpher/src/codegen/cpp.rs`).
+6. **`AnalysisResult`** — the maps (`escapes`, `widens`, `var_infos`) plus `async_functions`, `comparison_signatures`, `closure_captures`, `narrow_splits` (with per-variable definition/use sites for liveness), and `last_read_spans` (last read offset per variable per function, driving moves) are handed to the emitter, which makes every declaration decision from them (`emit_typed_variable_declarator` in `crates/morpher/src/codegen/cpp.rs`).
 
 ### What the Analyzer Records for Every Variable
 
@@ -186,6 +186,8 @@ Two refinements keep this cheap:
 
 - **`new Promise<T>` infers `morph::Result<T>`** from the type argument at the declaration, so `let p: Promise<number> = new Promise<number>(...)` never touches `JsValue`.
 - **Sync strip**: if a variable's initializer is a plain synchronous call but its declared type is `Result<T>`, the emitter strips it to `T` (`strip_result_for_sync_call`) — no coroutine frame, no wrapper, just the value.
+
+Frames are reclaimed, not leaked: both `Task` and `Result<T>` destroy a completed frame on destruction (and release a completed frame on move-assignment), mirroring each other. Verified by allocation counting — 1000 `Result` lifecycles allocate and free 1000 frames. The one exception is a *suspending* coroutine nobody owns: a fire-and-forget call that actually suspends (e.g. an un-awaited network fetch) has no owner to destroy its frame, so it leaks until a detached-spawn primitive exists to own it.
 
 ### Strings and vectors: native storage, JS behavior
 
@@ -568,6 +570,9 @@ morph app.ts --to cpp --type strict
 | Last-use moves at call args, assignment sources, and returns (span-anchored scans; plain writes never veto) | ✅ |
 | Aliased value types (strings, `Js*`) copy instead of heap-wrapping; heap stays for classes/vectors and lifetime extension | ✅ |
 | Destructuring declarations bind each name (`auto` per element; literals inline values; defaults/rest/computed keep the comment fallback) | ✅ |
+| `Result<T>` coroutine frames destroyed on completion (no per-call leak; verified 1000/1000 freed) | ✅ |
+| `JsObject::clear()` / `JsArray::clear()` break reference cycles manually (cycles documented as the no-GC limit) | ✅ |
+| Last-read spans owned by the analyzer (one map per function); emitter moves consume them, no parallel scan | ✅ |
 
 ## Implementation Files
 
@@ -588,7 +593,15 @@ morph app.ts --to cpp --type strict
 1. **Per-assignment narrowing** — ✅ done: narrowing splits redeclare wide variables as native ints at straight-line literal reassignments (`tally_narrowed_1`).
 2. **Move vs copy for large structs** — ✅ answered by moves, not heap: last-use moves (call args, assignment sources, returns) eliminate deep copies of vectors and strings without putting locals behind `unique_ptr`, which would pessimize every element access with indirection. See [Why locals never get `unique_ptr`](#why-locals-never-get-unique_ptr) below.
 3. **Closure detection completeness** — ✅ done: exhaustive capture walker with collision-proof naming, destructuring-bound names tracked, escaping lambdas capture shared state by value (`[&, count]`).
-4. **True lifespan tracking** — ✅ done: definition/use sites per variable plus span-anchored last-read scans drive moves at final reads.
+4. **True lifespan tracking** — ⚠️ half done, honestly: definition/use sites are recorded per variable and narrowing splits consume them, and last-use moves fire off analyzer-owned last-read spans (one map per function, keyed like captures — no parallel emitter scan anymore). What does *not* exist: live intervals, dead-store elimination, declare-late/destroy-early, scope shrinking, loop-aware liveness beyond a boolean, or inter-procedural lifespan. Values live to end of scope — correct, sometimes larger than necessary.
+
+### Reference cycles: the known no-GC limit
+
+Shared ownership cannot collect cycles — `a.self = a` keeps storage alive forever, exactly like `Rc` cycles in Rust or strong cycles in Swift. There is no cycle detector and no `weak_ptr` anywhere in the runtime, by design: tracing cycles would be a garbage collector. The contract is explicit:
+
+- Acyclic graphs free deterministically via RAII (proven per variable by escape analysis).
+- Cyclic graphs must be broken manually: `JsObject::clear()` and `JsArray::clear()` drop every edge the container holds, reclaiming the cycle (verified by allocation counting — a self-referential object leaks without it, frees fully with it).
+- The analyzer does not yet detect cycle formation; that detection (plus `arr.length = 0` lowering to `clear()`) is open future work.
 
 ### Why locals never get `unique_ptr`
 

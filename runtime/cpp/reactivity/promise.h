@@ -40,6 +40,15 @@ public:
 
     Result(Result&& other) noexcept : handle(std::exchange(other.handle, nullptr)) {}
 
+    ~Result() {
+        // Reclaim the coroutine frame once it completed. A suspended frame
+        // (not done) is owned by whoever suspends it and must survive us.
+        if (handle && handle.done()) {
+            handle.destroy();
+            handle = nullptr;
+        }
+    }
+
     // Create an already-resolved Result from a value
     static Result resolved(T v) {
         return [v = std::move(v)]() mutable -> Result {
@@ -60,6 +69,9 @@ public:
 
     Result& operator=(Result&& other) noexcept {
         if (this != &other) {
+            if (handle && handle.done()) {
+                handle.destroy();
+            }
             handle = std::exchange(other.handle, nullptr);
         }
         return *this;

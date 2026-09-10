@@ -33,6 +33,10 @@ struct JsArray {
 
     void push(const JsValue& item);
     JsValue pop();
+
+    // Drop every element. See JsObject::clear: the manual edge-breaker
+    // for reference cycles, which shared ownership cannot collect.
+    void clear();
     JsArray slice(int64_t start, int64_t end) const;
     JsArray slice(int64_t start) const;
 

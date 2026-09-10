@@ -344,6 +344,8 @@ inline JsValue JsArray::pop() {
     return back;
 }
 
+inline void JsArray::clear() { elements->clear(); }
+
 inline JsValue JsArray::operator[](int64_t idx) const {
     if (idx < 0 || (size_t)idx >= elements->size()) return JsValue(JsUndefined{});
     return (*elements)[idx];
@@ -398,6 +400,8 @@ inline JsValue JsObject::get(const std::string& key) const {
 inline void JsObject::set(const std::string& key, const JsValue& val) {
     (*properties)[key] = val;
 }
+
+inline void JsObject::clear() { properties->clear(); }
 
 inline JsObject::JsObject()
     : properties(std::make_shared<std::map<std::string, JsValue>>()) {}

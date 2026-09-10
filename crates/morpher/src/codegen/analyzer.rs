@@ -2,6 +2,9 @@
 // Performs escape analysis, type widening, async boundary detection, and closure capture detection
 
 use oxc_ast::ast::*;
+use oxc_ast_visit::{
+    Visit, walk::walk_assignment_target, walk::walk_expression, walk::walk_simple_assignment_target,
+};
 use oxc_span::GetSpan;
 use std::collections::{HashMap, HashSet};
 
@@ -70,7 +73,6 @@ pub struct VarInfo {
     pub def_sites: Vec<DefSite>,
     pub use_sites: Vec<StmtSite>,
     pub has_loop_use: bool,
-    pub decl_branch_depth: usize,
     pub decl_func_depth: usize,
 }
 
@@ -165,6 +167,7 @@ pub struct EscapeAnalyzer {
     branch_depth: usize,
     func_depth: usize,
     narrow_splits: Vec<NarrowSplit>,
+    last_reads: HashMap<String, HashMap<String, u32>>,
 }
 
 #[derive(Debug, Clone)]
@@ -173,6 +176,51 @@ pub struct FunctionSignature {
     pub is_async: bool,
     pub params: Vec<(String, Option<String>)>,
     pub return_type: Option<String>,
+}
+
+/// Collects every variable read in a statement list: plain references
+/// plus read-modify-write targets (`++x`, `x += 1`). Plain writes are
+/// not reads, so moving before a later redefinition stays legal.
+/// The visitor walks every child, so no read can hide in a shape the
+/// scanner does not know by name.
+#[derive(Default)]
+struct ReadScan {
+    reads: HashMap<String, u32>,
+}
+
+impl<'a> Visit<'a> for ReadScan {
+    fn visit_identifier_reference(&mut self, it: &IdentifierReference<'a>) {
+        self.reads.insert(it.name.to_string(), it.span.start);
+    }
+
+    fn visit_update_expression(&mut self, it: &UpdateExpression<'a>) {
+        if let SimpleAssignmentTarget::AssignmentTargetIdentifier(id) = &it.argument {
+            self.reads.insert(id.name.to_string(), id.span.start);
+        }
+        walk_simple_assignment_target(self, &it.argument);
+    }
+
+    fn visit_assignment_expression(&mut self, it: &AssignmentExpression<'a>) {
+        if let AssignmentTarget::AssignmentTargetIdentifier(id) = &it.left {
+            if it.operator.as_str() != "=" {
+                self.reads.insert(id.name.to_string(), id.span.start);
+            }
+        } else {
+            walk_assignment_target(self, &it.left);
+        }
+        walk_expression(self, &it.right);
+    }
+}
+
+/// Last read span per variable over a statement list. Spans are
+/// absolute source offsets, so analysis and emission agree on positions
+/// without mirroring each other's traversal.
+fn last_read_spans(stmts: &[Statement]) -> HashMap<String, u32> {
+    let mut scan = ReadScan::default();
+    for stmt in stmts {
+        scan.visit_statement(stmt);
+    }
+    scan.reads
 }
 
 impl EscapeAnalyzer {
@@ -195,6 +243,7 @@ impl EscapeAnalyzer {
             branch_depth: 0,
             func_depth: 0,
             narrow_splits: Vec::new(),
+            last_reads: HashMap::new(),
         }
     }
 
@@ -209,6 +258,11 @@ impl EscapeAnalyzer {
         for stmt in &program.body {
             self.analyze_statement(stmt);
         }
+
+        // Last-read spans per function, keyed like captures: the top level
+        // is "". Each map covers the whole subtree, so an outer use never
+        // counts as last while a nested read follows it.
+        self.last_reads.insert(String::new(), last_read_spans(&program.body));
 
         // Detect chaining patterns and mark variables for JsString
         self.detect_chaining(program);
@@ -225,6 +279,7 @@ impl EscapeAnalyzer {
             comparison_signatures: self.comparison_signatures.iter().cloned().collect(),
             closure_captures: self.closure_vars.clone(),
             narrow_splits: self.narrow_splits.clone(),
+            last_read_spans: self.last_reads.clone(),
         }
     }
 
@@ -853,7 +908,6 @@ impl EscapeAnalyzer {
                 def_sites: Vec::new(),
                 use_sites: Vec::new(),
                 has_loop_use: false,
-                decl_branch_depth: self.branch_depth,
                 decl_func_depth: self.func_depth,
             });
             self.record_def(&param_name, param_class, None, Some(param.span.start));
@@ -861,6 +915,7 @@ impl EscapeAnalyzer {
 
         if let Some(body) = &f.body {
             self.analyze_function_body(body);
+            self.last_reads.insert(name, last_read_spans(&body.statements));
         }
 
         self.func_depth -= 1;
@@ -921,7 +976,6 @@ impl EscapeAnalyzer {
             def_sites: Vec::new(),
             use_sites: Vec::new(),
             has_loop_use: false,
-            decl_branch_depth: self.branch_depth,
             decl_func_depth: self.func_depth,
         }
     }
@@ -2326,6 +2380,7 @@ pub struct AnalysisResult {
     pub comparison_signatures: Vec<ComparisonSignature>,
     pub closure_captures: HashMap<String, HashSet<String>>,
     pub narrow_splits: Vec<NarrowSplit>,
+    pub last_read_spans: HashMap<String, HashMap<String, u32>>,
 }
 
 impl Default for EscapeAnalyzer {
@@ -2818,5 +2873,59 @@ mod lifespan_tests {
             "let point = {x: 1};\nlet {x} = point;\nconst get = () => x;\nprint(get());\n",
         );
         assert_eq!(result.escapes.get("x"), Some(&EscapeKind::ClosureCapture));
+    }
+
+    #[test]
+    fn last_read_is_final_use() {
+        let source = "let greeting = \"hi\";\nconsole.log(greeting);\ntake(greeting);\n";
+        let result = analyze_lifespan(source);
+        let top = result.last_read_spans.get("").unwrap();
+        let expected = source.rfind("greeting);").unwrap() as u32;
+        assert_eq!(top.get("greeting"), Some(&expected));
+    }
+
+    #[test]
+    fn plain_writes_are_not_reads() {
+        let source = "take(greeting);\ngreeting = \"again\";\n";
+        let result = analyze_lifespan(source);
+        let top = result.last_read_spans.get("").unwrap();
+        let expected = source.find("greeting);").unwrap() as u32;
+        assert_eq!(top.get("greeting"), Some(&expected));
+    }
+
+    #[test]
+    fn compound_targets_count_as_reads() {
+        let source = "take(greeting);\ngreeting += \"!\";\n";
+        let result = analyze_lifespan(source);
+        let top = result.last_read_spans.get("").unwrap();
+        let expected = source.find("greeting +=").unwrap() as u32;
+        assert_eq!(top.get("greeting"), Some(&expected));
+    }
+
+    #[test]
+    fn update_targets_count_as_reads() {
+        let source = "take(total);\ntotal++;\n";
+        let result = analyze_lifespan(source);
+        let top = result.last_read_spans.get("").unwrap();
+        let expected = source.find("total++").unwrap() as u32;
+        assert_eq!(top.get("total"), Some(&expected));
+    }
+
+    #[test]
+    fn last_reads_keyed_per_function() {
+        let source = "function f() {\ntake(item);\ntake(item);\n}\n";
+        let result = analyze_lifespan(source);
+        let scoped = result.last_read_spans.get("f").unwrap();
+        let expected = source.rfind("item);").unwrap() as u32;
+        assert_eq!(scoped.get("item"), Some(&expected));
+    }
+
+    #[test]
+    fn nested_read_suppresses_outer_move() {
+        let source = "take(thing);\nfunction g() {\ntake(thing);\n}\n";
+        let result = analyze_lifespan(source);
+        let top = result.last_read_spans.get("").unwrap();
+        let expected = source.rfind("thing);").unwrap() as u32;
+        assert_eq!(top.get("thing"), Some(&expected));
     }
 }

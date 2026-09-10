@@ -1,7 +1,4 @@
 use oxc_ast::ast::*;
-use oxc_ast_visit::{
-    Visit, walk::walk_assignment_target, walk::walk_expression, walk::walk_simple_assignment_target,
-};
 use oxc_span::GetSpan;
 use std::collections::{HashMap, HashSet};
 
@@ -25,43 +22,7 @@ pub struct CppTranslator<'a> {
     comparison_uses: HashSet<ComparisonSignature>,
     narrow_index: HashMap<(String, u32), (String, String)>,
     active_narrows: HashMap<String, String>,
-    last_read_frames: Vec<HashMap<String, u32>>,
     destructure_count: usize,
-}
-
-/// Collects every variable read in a statement list: plain references
-/// plus read-modify-write targets (`++x`, `x += 1`). Plain writes are
-/// not reads, so moving before a later redefinition stays legal.
-/// The visitor walks every child, so no read can hide in a shape the
-/// scanner does not know by name.
-#[derive(Default)]
-struct ReadScan {
-    reads: HashMap<String, u32>,
-}
-
-impl<'a> Visit<'a> for ReadScan {
-    fn visit_identifier_reference(&mut self, it: &IdentifierReference<'a>) {
-        self.reads.insert(it.name.to_string(), it.span.start);
-    }
-
-    fn visit_update_expression(&mut self, it: &UpdateExpression<'a>) {
-        if let SimpleAssignmentTarget::AssignmentTargetIdentifier(id) = &it.argument {
-            self.reads.insert(id.name.to_string(), id.span.start);
-        }
-        walk_simple_assignment_target(self, &it.argument);
-    }
-
-    fn visit_assignment_expression(&mut self, it: &AssignmentExpression<'a>) {
-        match &it.left {
-            AssignmentTarget::AssignmentTargetIdentifier(id) => {
-                if it.operator.as_str() != "=" {
-                    self.reads.insert(id.name.to_string(), id.span.start);
-                }
-            }
-            _ => walk_assignment_target(self, &it.left),
-        }
-        walk_expression(self, &it.right);
-    }
 }
 
 /// One access step from a destructured root to a bound name.
@@ -76,17 +37,6 @@ enum AccessStep {
 struct RawBinding {
     name: String,
     steps: Vec<AccessStep>,
-}
-
-/// Last read span per variable over a statement list. Spans are
-/// absolute source offsets, so the scan and the emitter agree on
-/// positions without mirroring each other's traversal.
-fn last_read_spans(stmts: &[Statement]) -> HashMap<String, u32> {
-    let mut scan = ReadScan::default();
-    for stmt in stmts {
-        scan.visit_statement(stmt);
-    }
-    scan.reads
 }
 
 impl<'a> CppTranslator<'a> {
@@ -108,7 +58,6 @@ impl<'a> CppTranslator<'a> {
             comparison_uses: HashSet::new(),
             narrow_index: HashMap::new(),
             active_narrows: HashMap::new(),
-            last_read_frames: Vec::new(),
             destructure_count: 0,
         };
         this
@@ -143,7 +92,6 @@ impl<'a> CppTranslator<'a> {
             }
         }
         let mut lines = Vec::new();
-        self.last_read_frames.push(last_read_spans(&program.body));
         for stmt in &program.body {
             if self.is_main_call(stmt) {
                 continue;
@@ -154,7 +102,6 @@ impl<'a> CppTranslator<'a> {
                 }
             }
         }
-        self.last_read_frames.pop();
         let body = lines.join("\n");
         if self.ctx.needed.contains("<print>") {
             // C++23 <print> is self-contained, no need for iostream sync
@@ -1963,13 +1910,11 @@ impl<'a> CppTranslator<'a> {
         let mut lines = vec!["{".to_string()];
         let old = self.ctx.indent_level;
         self.ctx.indent_level = old + 1;
-        self.last_read_frames.push(last_read_spans(&body.statements));
         for stmt in &body.statements {
             if let Some(code) = self.emit_statement(stmt) {
                 lines.push(code);
             }
         }
-        self.last_read_frames.pop();
         self.ctx.indent_level = old;
         lines.push(format!("{}}}", self.indent()));
         lines.join("\n")
@@ -3773,9 +3718,10 @@ impl<'a> CppTranslator<'a> {
     /// `span_start`.
     ///
     /// Sound by construction: the use is the variable's last read in the
-    /// enclosing body, the variable is not global, never captured, never
-    /// touched in a loop, and the type is expensive to copy. Anything
-    /// unproven keeps copying.
+    /// enclosing function (the analyzer maps last-read spans once per
+    /// function, keyed like captures), the variable is not global, never
+    /// captured, never touched in a loop, and the type is expensive to
+    /// copy. Anything unproven keeps copying.
     fn move_eligible_at(&self, name: &str, span_start: u32) -> bool {
         let Some(analysis) = self.analysis.as_ref() else {
             return false;
@@ -3789,7 +3735,9 @@ impl<'a> CppTranslator<'a> {
         if analysis.closure_captures.values().any(|captured| captured.contains(name)) {
             return false;
         }
-        let last_read = self.last_read_frames.last().and_then(|frame| frame.get(name)).copied();
+        let scope = self.ctx.current_fn.clone().unwrap_or_default();
+        let last_read =
+            analysis.last_read_spans.get(&scope).and_then(|reads| reads.get(name)).copied();
         if last_read != Some(span_start) {
             return false;
         }
@@ -4273,55 +4221,5 @@ impl<'a> CppTranslator<'a> {
             PropertyKey::PrivateIdentifier(p) => Some(p.name.to_string()),
             _ => None,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use oxc_allocator::Allocator;
-    use oxc_parser::Parser;
-    use oxc_span::SourceType;
-
-    fn scan_source(source: &str) -> HashMap<String, u32> {
-        let allocator = Allocator::default();
-        let source_type =
-            SourceType::from_path("file.ts").unwrap_or_default().with_typescript(true);
-        let parsed = Parser::new(&allocator, source, source_type).parse();
-        assert!(parsed.diagnostics.is_empty());
-        assert!(!parsed.panicked);
-        last_read_spans(&parsed.program.body)
-    }
-
-    #[test]
-    fn last_read_is_final_use() {
-        let source = "let greeting = \"hi\";\nconsole.log(greeting);\ntake(greeting);\n";
-        let spans = scan_source(source);
-        let expected = source.rfind("greeting);").unwrap() as u32;
-        assert_eq!(spans.get("greeting"), Some(&expected));
-    }
-
-    #[test]
-    fn plain_writes_are_not_reads() {
-        let source = "take(greeting);\ngreeting = \"again\";\n";
-        let spans = scan_source(source);
-        let expected = source.find("greeting);").unwrap() as u32;
-        assert_eq!(spans.get("greeting"), Some(&expected));
-    }
-
-    #[test]
-    fn compound_targets_count_as_reads() {
-        let source = "take(greeting);\ngreeting += \"!\";\n";
-        let spans = scan_source(source);
-        let expected = source.find("greeting +=").unwrap() as u32;
-        assert_eq!(spans.get("greeting"), Some(&expected));
-    }
-
-    #[test]
-    fn update_targets_count_as_reads() {
-        let source = "take(total);\ntotal++;\n";
-        let spans = scan_source(source);
-        let expected = source.find("total++").unwrap() as u32;
-        assert_eq!(spans.get("total"), Some(&expected));
     }
 }

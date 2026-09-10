@@ -25,6 +25,11 @@ struct JsObject {
     void set(const std::string& key, const JsValue& val);
     bool has(const std::string& key) const;
 
+    // Drop every property. Shared ownership has no cycle collector, so a
+    // reference cycle (a.self = a) lives until someone breaks an edge;
+    // this is that edge-breaker. Same role as `= null` in JS runtimes.
+    void clear();
+
     // Bracket access: obj["key"]
     JsValue operator[](const std::string& key) const;
     JsValue& operator[](const std::string& key);
