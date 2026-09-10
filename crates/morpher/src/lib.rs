@@ -37,9 +37,55 @@ pub fn translate(
     parser::translate_to_cpp(source, filename, options)
 }
 
-/// Translate with default options (optimize=false, type_mode=Infer, no runtime path)
+/// Translate with default options (type_mode=Infer, no runtime path)
 pub fn translate_default(source: &str, filename: &str) -> Result<String, MorphJsError> {
     translate(source, filename, TranslateOptions::default())
+}
+
+/// Translate a file as a linkable fragment for app builds (GUI mode).
+/// Same translation as [`translate`], then wrapped so the result links
+/// into a larger binary: `#include` lines stay at top level, everything
+/// else goes inside a per-file namespace (no `main`, no globals leak).
+/// CLI file morphing is untouched and keeps emitting standalone code.
+pub fn translate_fragment(
+    source: &str,
+    filename: &str,
+    options: TranslateOptions,
+) -> Result<String, MorphJsError> {
+    let code = translate_to_cpp(source, filename, options)?;
+    Ok(wrap_fragment_namespace(&code, filename))
+}
+
+/// Split leading `#include` lines from the body and wrap the body in a
+/// namespace derived from the file stem (`app.ts` → `app_logic`). Nested
+/// helper blocks (e.g. `morph::js_cmp`) nest along harmlessly: every use
+/// site sits inside the same wrapper, so names keep resolving.
+fn wrap_fragment_namespace(code: &str, filename: &str) -> String {
+    let stem = std::path::Path::new(filename)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("fragment");
+    let mut namespace: String = stem
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
+        .collect();
+    if namespace.is_empty() || namespace.chars().next().is_some_and(|ch| ch.is_ascii_digit()) {
+        namespace.insert(0, '_');
+    }
+    namespace.push_str("_logic");
+
+    let mut header_end = 0;
+    for line in code.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("#include") {
+            header_end += line.len() + 1;
+        } else {
+            break;
+        }
+    }
+    let header_end = header_end.min(code.len());
+    let (header, body) = code.split_at(header_end);
+    format!("{}namespace {} {{\n\n{}}} // namespace {}\n", header, namespace, body, namespace)
 }
 
 /// Translate with custom indent and default options
@@ -60,4 +106,44 @@ pub fn translate_file_to_cpp(path: &std::path::Path) -> Result<String, MorphJsEr
     let source = std::fs::read_to_string(path).map_err(|e| MorphJsError::Io(e.to_string()))?;
     let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("file.ts");
     translate_default(&source, filename)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fragment_wraps_body_in_file_namespace() {
+        let code =
+            translate_fragment("let x = 1;\nconsole.log(x);\n", "app.ts", TranslateOptions::default())
+                .unwrap();
+        assert!(code.contains("namespace app_logic {"));
+        assert!(code.ends_with("} // namespace app_logic\n"));
+    }
+
+    #[test]
+    fn fragment_keeps_includes_at_top_level() {
+        let code =
+            translate_fragment("let x = 1;\nconsole.log(x);\n", "app.ts", TranslateOptions::default())
+                .unwrap();
+        let namespace_at = code.find("namespace app_logic").unwrap();
+        for line in code[..namespace_at].lines() {
+            let trimmed = line.trim();
+            assert!(trimmed.is_empty() || trimmed.starts_with("#include"), "line: {line}");
+        }
+    }
+
+    #[test]
+    fn fragment_namespace_sanitizes_stem() {
+        let code = translate_fragment("let x = 1;\n", "my-app.v2.ts", TranslateOptions::default())
+            .unwrap();
+        assert!(code.contains("namespace my_app_v2_logic {"));
+    }
+
+    #[test]
+    fn fragment_keeps_exe_output_untouched() {
+        let source = "let x = 1;\nconsole.log(x);\n";
+        let exe = translate(source, "app.ts", TranslateOptions::default()).unwrap();
+        assert!(!exe.contains("namespace app_logic"));
+    }
 }
