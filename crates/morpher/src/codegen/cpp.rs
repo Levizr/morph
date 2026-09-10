@@ -39,6 +39,71 @@ struct RawBinding {
     steps: Vec<AccessStep>,
 }
 
+/// Escape cooked text for a C++ double-quoted literal. Backslash and
+/// quote first, then newlines, returns, tabs, and any remaining C0
+/// control as `\u00xx` (fixed width, so a following hex digit cannot
+/// merge into the escape). A raw newline would end the literal and fail
+/// compilation — the Python transpiler broke on exactly this input.
+fn escape_cpp_text(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// A cooked string value as a C++ literal, quotes included.
+fn cpp_string_literal(value: &str) -> String {
+    format!("\"{}\"", escape_cpp_text(value))
+}
+
+/// Escape raw template text (escapes unprocessed) for a C++ literal.
+/// Backslash sequences pass through untouched — they are already valid
+/// C++ escapes — except backtick, which C++ does not know.
+fn escape_cpp_template_raw(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut chars = raw.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\\' if chars.peek() == Some(&'`') => {
+                chars.next();
+                out.push('`');
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// A single-char value as a C++ character literal.
+fn cpp_char_literal(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('\'');
+    for ch in value.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '\'' => out.push_str("\\'"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c => out.push(c),
+        }
+    }
+    out.push('\'');
+    out
+}
+
 impl<'a> CppTranslator<'a> {
     pub fn new(
         source: &'a str,
@@ -1688,7 +1753,12 @@ impl<'a> CppTranslator<'a> {
         if is_async {
             self.ctx.is_async_fn += 1;
         }
+        // Nested functions own their returns; only the async-main wrapper
+        // discards them (the old Python transpiler dropped nested ones too).
+        let old_drop = self.ctx.drop_return_value;
+        self.ctx.drop_return_value = false;
         let mut body = self.emit_function_body(f.body.as_ref().unwrap());
+        self.ctx.drop_return_value = old_drop;
         if is_async {
             self.ctx.is_async_fn -= 1;
         }
@@ -2291,7 +2361,13 @@ impl<'a> CppTranslator<'a> {
                         .value
                         .body
                         .as_ref()
-                        .map(|b| self.emit_function_body(b))
+                        .map(|b| {
+                            let saved_drop = self.ctx.drop_return_value;
+                            self.ctx.drop_return_value = false;
+                            let body = self.emit_function_body(b);
+                            self.ctx.drop_return_value = saved_drop;
+                            body
+                        })
                         .unwrap_or_else(|| "{}".to_string());
                     if m.value.r#async {
                         self.ctx.is_async_fn -= 1;
@@ -2448,9 +2524,7 @@ impl<'a> CppTranslator<'a> {
                 id.name.to_string()
             }
             Expression::NumericLiteral(n) => self.emit_number(n),
-            Expression::StringLiteral(s) => {
-                format!("\"{}\"", s.value.replace('\\', "\\\\").replace('"', "\\\""))
-            }
+            Expression::StringLiteral(s) => cpp_string_literal(&s.value),
             Expression::BooleanLiteral(b) => {
                 if b.value {
                     "true".to_string()
@@ -2610,7 +2684,7 @@ impl<'a> CppTranslator<'a> {
     fn emit_template_literal(&mut self, t: &TemplateLiteral<'a>) -> String {
         if t.expressions.is_empty() {
             let raw: String = t.quasis.iter().map(|q| q.value.raw.as_str().to_string()).collect();
-            return format!("\"{}\"", raw.replace('\\', "\\\\").replace('"', "\\\""));
+            return format!("\"{}\"", escape_cpp_template_raw(&raw));
         }
         let mut fmt_str = String::new();
         let mut args = Vec::new();
@@ -2623,7 +2697,7 @@ impl<'a> CppTranslator<'a> {
                 args.push(self.emit_expression(expr));
             }
         }
-        let esc = fmt_str.replace('\\', "\\\\").replace('"', "\\\"");
+        let esc = escape_cpp_text(&fmt_str);
         if args.is_empty() {
             return format!("\"{}\"", esc);
         }
@@ -3541,13 +3615,13 @@ impl<'a> CppTranslator<'a> {
                             if let Expression::TemplateLiteral(t) = expr {
                                 let (fstr, targs) = self.extract_template_parts(t);
                                 if targs.is_empty() {
-                                    let esc = fstr.replace('\\', "\\\\").replace('"', "\\\"");
+                                    let esc = escape_cpp_text(&fstr);
                                     if is_warn || is_error {
                                         return format!("std::println(stderr, \"{}\")", esc);
                                     }
                                     return format!("std::println(\"{}\")", esc);
                                 }
-                                let esc = fstr.replace('\\', "\\\\").replace('"', "\\\"");
+                                let esc = escape_cpp_text(&fstr);
                                 if is_warn || is_error {
                                     return format!(
                                         "std::println(stderr, \"{}\", {})",
@@ -3558,7 +3632,7 @@ impl<'a> CppTranslator<'a> {
                                 return format!("std::println(\"{}\", {})", esc, targs.join(", "));
                             }
                             if let Expression::StringLiteral(s) = expr {
-                                let esc = s.value.replace('\\', "\\\\").replace('"', "\\\"");
+                                let esc = escape_cpp_text(&s.value);
                                 if is_warn || is_error {
                                     return format!("std::println(stderr, \"{}\")", esc);
                                 }
@@ -3584,7 +3658,7 @@ impl<'a> CppTranslator<'a> {
                     if args.len() == 1 {
                         if let Some(expr) = call.arguments[0].as_expression() {
                             if let Expression::StringLiteral(s) = expr {
-                                let esc = s.value.replace('\\', "\\\\").replace('"', "\\\"");
+                                let esc = escape_cpp_text(&s.value);
                                 if is_warn || is_error {
                                     return format!("std::println(stderr, \"{}\")", esc);
                                 }
@@ -3593,13 +3667,13 @@ impl<'a> CppTranslator<'a> {
                             if let Expression::TemplateLiteral(t) = expr {
                                 let (fstr, targs) = self.extract_template_parts(t);
                                 if targs.is_empty() {
-                                    let esc = fstr.replace('\\', "\\\\").replace('"', "\\\"");
+                                    let esc = escape_cpp_text(&fstr);
                                     if is_warn || is_error {
                                         return format!("std::println(stderr, \"{}\")", esc);
                                     }
                                     return format!("std::println(\"{}\")", esc);
                                 }
-                                let esc = fstr.replace('\\', "\\\\").replace('"', "\\\"");
+                                let esc = escape_cpp_text(&fstr);
                                 if is_warn || is_error {
                                     return format!(
                                         "std::println(stderr, \"{}\", {})",
@@ -3820,7 +3894,7 @@ impl<'a> CppTranslator<'a> {
         if let Expression::StringLiteral(s) = init {
             let ch = s.value.as_str();
             if ch.len() == 1 {
-                return format!("'{}'", ch.replace('\\', "\\\\").replace('\'', "\\'"));
+                return cpp_char_literal(ch);
             }
         }
         self.emit_expression(init)
@@ -4095,7 +4169,10 @@ impl<'a> CppTranslator<'a> {
                 }
                 return format!("{}( {} ) -> void {{ }}", capture, event_params);
             } else {
+                let saved_drop = self.ctx.drop_return_value;
+                self.ctx.drop_return_value = false;
                 let body = self.emit_function_body(f.body.as_function_body().unwrap());
+                self.ctx.drop_return_value = saved_drop;
                 return format!("{}( {} ) -> void {}", capture, event_params, body);
             }
         }
@@ -4107,6 +4184,8 @@ impl<'a> CppTranslator<'a> {
             }
             return format!("{}({}) -> {} {{}}", capture, params, ret);
         } else {
+            let saved_drop = self.ctx.drop_return_value;
+            self.ctx.drop_return_value = false;
             let body = if is_async {
                 self.ctx.is_async_fn += 1;
                 let b = self.emit_function_body(f.body.as_function_body().unwrap());
@@ -4115,6 +4194,7 @@ impl<'a> CppTranslator<'a> {
             } else {
                 self.emit_function_body(f.body.as_function_body().unwrap())
             };
+            self.ctx.drop_return_value = saved_drop;
             return format!("{}({}) -> {} {}", capture, params, ret, body);
         }
     }
@@ -4177,6 +4257,8 @@ impl<'a> CppTranslator<'a> {
         };
 
         self.ctx.need(&ret);
+        let saved_drop = self.ctx.drop_return_value;
+        self.ctx.drop_return_value = false;
         let body = if let Some(b) = &f.body {
             if is_async {
                 self.ctx.is_async_fn += 1;
@@ -4189,6 +4271,7 @@ impl<'a> CppTranslator<'a> {
         } else {
             "{}".to_string()
         };
+        self.ctx.drop_return_value = saved_drop;
         self.ctx.fn_expr_depth -= 1;
         self.ctx.need("JsValue");
         if is_async {
@@ -4210,7 +4293,7 @@ impl<'a> CppTranslator<'a> {
                 args.push(self.emit_expression(expr));
             }
         }
-        (fmt_str.replace('\\', "\\\\").replace('"', "\\\""), args)
+        (escape_cpp_text(&fmt_str), args)
     }
 
     fn property_key_to_string(&self, key: &PropertyKey<'a>) -> Option<String> {
@@ -4221,5 +4304,38 @@ impl<'a> CppTranslator<'a> {
             PropertyKey::PrivateIdentifier(p) => Some(p.name.to_string()),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quotes_and_backslashes_escape() {
+        assert_eq!(cpp_string_literal("say \"hi\""), "\"say \\\"hi\\\"\"");
+        assert_eq!(cpp_string_literal("a\\b"), "\"a\\\\b\"");
+    }
+
+    #[test]
+    fn newlines_and_controls_escape() {
+        assert_eq!(cpp_string_literal("a\nb"), "\"a\\nb\"");
+        assert_eq!(cpp_string_literal("a\rb\tc"), "\"a\\rb\\tc\"");
+        assert_eq!(cpp_string_literal("a\x01b"), "\"a\\u0001b\"");
+    }
+
+    #[test]
+    fn raw_template_text_keeps_valid_escapes() {
+        assert_eq!(escape_cpp_template_raw("a\\nb"), "a\\nb");
+        assert_eq!(escape_cpp_template_raw("say \"hi\""), "say \\\"hi\\\"");
+        assert_eq!(escape_cpp_template_raw("a\nb"), "a\\nb");
+        assert_eq!(escape_cpp_template_raw("a\\`b"), "a`b");
+    }
+
+    #[test]
+    fn char_literal_escapes() {
+        assert_eq!(cpp_char_literal("a"), "'a'");
+        assert_eq!(cpp_char_literal("\n"), "'\\n'");
+        assert_eq!(cpp_char_literal("'"), "'\\''");
     }
 }

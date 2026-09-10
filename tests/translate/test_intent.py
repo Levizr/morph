@@ -366,3 +366,35 @@ def test_exotic_destructuring_keeps_fallback(tmp_path: Path):
         "defaulted",
     )
     assert "destructuring not supported" in code_without_strings(cpp)
+
+
+def test_nested_function_keeps_return_value(tmp_path: Path):
+    cpp = translate_source(
+        "async function main(): Promise<void> {\n"
+        "    function helper(): number {\n"
+        "        return 42;\n"
+        "    }\n"
+        "    console.log(helper());\n"
+        "}\n"
+        "main();\n",
+        tmp_path,
+        "nested_return",
+    )
+    code = code_without_strings(cpp)
+    assert "return 42;" in code
+
+
+def test_nested_arrow_keeps_return_value(tmp_path: Path):
+    cpp = translate_source(
+        "async function main(): Promise<void> {\n"
+        "    const get = (): number => {\n"
+        "        return 7;\n"
+        "    };\n"
+        "    console.log(get());\n"
+        "}\n"
+        "main();\n",
+        tmp_path,
+        "nested_arrow_return",
+    )
+    code = code_without_strings(cpp)
+    assert "return 7;" in code
