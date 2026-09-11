@@ -1,6 +1,6 @@
 use anyhow::Result;
 use colored::Colorize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub fn run(
     entry: Option<String>,
@@ -128,6 +128,39 @@ pub fn run(
     pb.finish_and_clear();
     crate::logger::log_success(&format!("C++ generated → {}", output_dir.display()));
 
+    // ── Translate companion TypeScript files into linkable fragments ──
+    // Entry-referenced .ts plus src/**/*.ts, each translated in the
+    // configured type mode and compiled+linked below. Failures here are
+    // hard errors: silently dropping app logic would miscompile the app.
+    let fragment_inputs = collect_typescript_sources(&cwd, &entry_path, &parsed.imports)?;
+    let mut extra_sources: Vec<PathBuf> = Vec::new();
+    if !fragment_inputs.is_empty() {
+        let pb = crate::logger::spinner("Translating TypeScript...");
+        let mut used_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for (ts_path, ts_source) in &fragment_inputs {
+            let filename = ts_path.file_name().and_then(|n| n.to_str()).unwrap_or("file.ts");
+            let mut options = morpher::TranslateOptions::default();
+            options.type_mode = type_mode;
+            let code = morpher::translate_fragment(ts_source, filename, options)
+                .map_err(|e| anyhow::anyhow!("translating {}: {}", ts_path.display(), e))?;
+            let stem = ts_path.file_stem().and_then(|s| s.to_str()).unwrap_or("fragment");
+            let mut out_name = format!("{}.ts.cpp", stem);
+            let mut counter = 2;
+            while !used_names.insert(out_name.clone()) {
+                out_name = format!("{}_{}.ts.cpp", stem, counter);
+                counter += 1;
+            }
+            let out_path = output_dir.join(&out_name);
+            std::fs::write(&out_path, &code)?;
+            extra_sources.push(out_path);
+        }
+        pb.finish_and_clear();
+        crate::logger::log_success(&format!(
+            "Translated {} TypeScript file(s)",
+            fragment_inputs.len()
+        ));
+    }
+
     // ── Compile (skip when nothing changed, like cargo run) ──
     let compiler_name = morph_build::detect_compiler();
     // Find runtime dir (for headers)
@@ -180,6 +213,9 @@ pub fn run(
         };
         owned_inputs.push((path.clone(), text));
     }
+    for (ts_path, ts_source) in &fragment_inputs {
+        owned_inputs.push((format!("ts:{}", ts_path.display()), ts_source.clone()));
+    }
     let fingerprint_inputs: Vec<(&str, &str)> = owned_inputs
         .iter()
         .map(|(p, c)| (p.as_str(), c.as_str()))
@@ -198,7 +234,13 @@ pub fn run(
     fs.scan(&windows);
     let defines = fs.required_defines();
     // Ensure output dir exists (already created by emitter)
-    if let Err(e) = compiler.compile(&output_dir.join("app.cpp"), &binary_path, &runtime_dir, &defines) {
+    if let Err(e) = compiler.compile(
+        &output_dir.join("app.cpp"),
+        &binary_path,
+        &runtime_dir,
+        &defines,
+        &extra_sources,
+    ) {
         pb.finish_and_clear();
         // On failure we STOP and do not run any stale binary.
         crate::logger::log_error(&format!("Compile failed: {}", e));
@@ -216,4 +258,131 @@ pub fn run(
     println!();
 
     Ok(binary_path)
+}
+
+/// Collect companion TypeScript sources: `.ts` Component imports plus
+/// every `*.ts` under the entry directory (excluding the entry itself,
+/// ambient `*.d.ts` declarations, generated output, and tooling dirs).
+/// Returns canonical paths with contents in stable order. Anything
+/// unreadable or unlisted-but-required is a hard error: silently dropping
+/// app logic would miscompile the app.
+fn collect_typescript_sources(
+    cwd: &Path,
+    entry_path: &Path,
+    imports: &[morph_parser::MxImport],
+) -> anyhow::Result<Vec<(std::path::PathBuf, String)>> {
+    let mut found: Vec<PathBuf> = Vec::new();
+    let mut seen: std::collections::HashSet<std::path::PathBuf> = std::collections::HashSet::new();
+    let mut push_candidate = |path: std::path::PathBuf| {
+        let canonical = path.canonicalize().unwrap_or(path);
+        if seen.insert(canonical.clone()) {
+            found.push(canonical);
+        }
+    };
+    let entry_parent = entry_path.parent().unwrap_or(cwd);
+    for imp in imports {
+        if let morph_parser::MxImportKind::Component { path, .. } = &imp.kind {
+            if path.ends_with(".ts") && !path.ends_with(".tsx") {
+                let mut located = false;
+                for base in [entry_parent, cwd] {
+                    let candidate = base.join(path);
+                    if candidate.is_file() {
+                        push_candidate(candidate);
+                        located = true;
+                        break;
+                    }
+                }
+                if !located {
+                    anyhow::bail!("TypeScript import not found: {}", path);
+                }
+            }
+        }
+    }
+    let src_dir = cwd.join("src");
+    for search_root in [entry_parent, src_dir.as_path()] {
+        if !search_root.is_dir() {
+            continue;
+        }
+        for entry in walkdir::WalkDir::new(search_root).into_iter().filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if !name.ends_with(".ts") || name.ends_with(".tsx") || name.ends_with(".d.ts") {
+                continue;
+            }
+            if name.ends_with(".ts.cpp") {
+                continue;
+            }
+            let under_tooling = path.components().any(|component| {
+                matches!(
+                    component.as_os_str().to_str(),
+                    Some(".morph" | "dist" | "target" | "node_modules")
+                )
+            });
+            if under_tooling {
+                continue;
+            }
+            push_candidate(path.to_path_buf());
+        }
+    }
+    let mut sources = Vec::new();
+    for path in found {
+        if path == entry_path {
+            continue;
+        }
+        let text = std::fs::read_to_string(&path).map_err(|e| {
+            anyhow::anyhow!("cannot read TypeScript source {}: {}", path.display(), e)
+        })?;
+        sources.push((path, text));
+    }
+    sources.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(sources)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scratch_project(name: &str) -> PathBuf {
+        let root =
+            std::env::temp_dir().join(format!("morph_build_test_{}_{}", name, std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        root
+    }
+
+    #[test]
+    fn collects_companion_ts_sources() {
+        let root = scratch_project("collect");
+        std::fs::write(root.join("src/App.mx"), "<body/>").unwrap();
+        std::fs::write(root.join("src/util.ts"), "export const x = 1;\n").unwrap();
+        std::fs::write(root.join("src/env.d.ts"), "declare const y: number;\n").unwrap();
+        let entry = root.join("src/App.mx");
+        let found = collect_typescript_sources(&root, &entry, &[]).unwrap();
+        let names: Vec<String> = found
+            .iter()
+            .map(|(path, _)| path.file_name().unwrap().to_string_lossy().to_string())
+            .collect();
+        assert_eq!(names, vec!["util.ts".to_string()]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn missing_component_import_is_hard_error() {
+        let root = scratch_project("missing");
+        std::fs::write(root.join("src/App.mx"), "<body/>").unwrap();
+        let entry = root.join("src/App.mx");
+        let imports = vec![morph_parser::MxImport {
+            kind: morph_parser::MxImportKind::Component {
+                path: "missing.ts".to_string(),
+                specifiers: Vec::new(),
+            },
+            style: "import".to_string(),
+        }];
+        let err = collect_typescript_sources(&root, &entry, &imports).unwrap_err();
+        assert!(err.to_string().contains("missing.ts"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

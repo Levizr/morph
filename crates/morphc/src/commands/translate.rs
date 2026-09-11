@@ -32,6 +32,7 @@ pub fn run(file: String, to: String, type_mode: TypeMode) -> Result<()> {
         type_mode,
         runtime_path: global_runtime.as_ref().map(|p| p.display().to_string()),
         indent: 0,
+        ..Default::default()
     };
     let (ext, code) = match target.as_str() {
         "rust" => {

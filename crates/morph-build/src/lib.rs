@@ -90,9 +90,12 @@ impl Compiler {
         binary_path: &Path,
         runtime_dir: &Path,
         defines: &[String],
+        extra_sources: &[PathBuf],
     ) -> Result<()> {
         let mut cmd = vec![self.gpp.clone()];
-        cmd.push("-std=c++20".into());
+        // C++23: generated code uses std::println (<print>), which does not
+        // exist in C++20 mode. pick_cpp already prefers g++-14 for this.
+        cmd.push("-std=c++23".into());
         cmd.push("-O2".into());
         cmd.push("-ffunction-sections".into());
         cmd.push("-fdata-sections".into());
@@ -103,6 +106,10 @@ impl Compiler {
         cmd.push(format!("-I{}", runtime_dir.join("renderers").display()));
         // Generated app source
         cmd.push(source_path.display().to_string());
+        // Translated TypeScript fragments linked into the app
+        for extra in extra_sources {
+            cmd.push(extra.display().to_string());
+        }
         // Runtime .cpp sources
         for s in self.runtime_sources(runtime_dir) {
             cmd.push(s.display().to_string());
