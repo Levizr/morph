@@ -80,7 +80,7 @@ impl IRBuilder {
             keyframes: self.convert_keyframes(css_keyframes),
         };
         for comp in &source.components {
-            let node = self.build_node(&comp.jsx, css_rules, 0);
+            let node = self.build_node(&comp.jsx, css_rules, 0, &[]);
             window.nodes.push(node);
         }
         windows.push(window);
@@ -92,6 +92,7 @@ impl IRBuilder {
         jsx: &morph_parser::JsxNode,
         css_rules: &[(String, morph_parser::CssRule)],
         depth: usize,
+        ancestors: &[AncestorHint],
     ) -> IRNode {
         match jsx {
             morph_parser::JsxNode::Element { tag, props, children, line: _, col: _, .. } => {
@@ -105,29 +106,57 @@ impl IRBuilder {
                 apply_ua_defaults(&mut style, tag);
                 let mut hover_style = IRStyle::new();
                 let mut active_style = IRStyle::new();
-                for (selector, rule) in css_rules {
-                    match selector_matches(tag, props, selector) {
-                        Some(PseudoKind::Base) => {
-                            for (prop, val) in &rule.properties {
-                                apply_css_prop(&mut style, prop, val);
-                            }
+                let (classes, id) = element_classes_id(props);
+                // Cascade: collect every matching declaration with its
+                // specificity and source order, then apply weakest-first so
+                // the winner writes last. Stable sort keeps source order
+                // among equal specificities (later sheets win ties).
+                let mut declarations: Vec<(Specificity, usize, String, String, PseudoKind)> =
+                    Vec::new();
+                for (order, (selector, rule)) in css_rules.iter().enumerate() {
+                    if let Some((pseudo, specificity)) =
+                        match_selector_detailed(tag, &classes, id.as_deref(), ancestors, selector)
+                    {
+                        for (prop, val) in &rule.properties {
+                            declarations.push((
+                                specificity,
+                                order,
+                                prop.clone(),
+                                val.clone(),
+                                pseudo,
+                            ));
                         }
-                        Some(PseudoKind::Hover) => {
-                            for (prop, val) in &rule.properties {
-                                apply_css_prop(&mut hover_style, prop, val);
-                            }
-                        }
-                        Some(PseudoKind::Active) => {
-                            for (prop, val) in &rule.properties {
-                                apply_css_prop(&mut active_style, prop, val);
-                            }
-                        }
-                        None => {}
                     }
+                }
+                declarations.sort();
+                for (_, _, prop, val, pseudo) in &declarations {
+                    let target = match pseudo {
+                        PseudoKind::Base => &mut style,
+                        PseudoKind::Hover => &mut hover_style,
+                        PseudoKind::Active => &mut active_style,
+                    };
+                    apply_css_prop(target, prop, val);
                 }
                 if let Some(morph_parser::JsxPropValue::String(cls)) = props.get("className").or_else(|| props.get("class")) {
                     for (prop, val) in self.tailwind.resolve_many(cls) {
                         apply_css_prop(&mut style, &prop, &val);
+                    }
+                }
+                // Presentational hints lose to every stylesheet rule: HTML
+                // width/height attributes apply only when the cascade left
+                // the property unset (browsers treat them as weakest).
+                if style.width.is_none() {
+                    if let Some(morph_parser::JsxPropValue::String(raw)) = props.get("width") {
+                        if let Some(px) = parse_length(raw) {
+                            style.width = Some(px);
+                        }
+                    }
+                }
+                if style.height.is_none() {
+                    if let Some(morph_parser::JsxPropValue::String(raw)) = props.get("height") {
+                        if let Some(px) = parse_length(raw) {
+                            style.height = Some(px);
+                        }
                     }
                 }
                 if let Some(morph_parser::JsxPropValue::Style(map)) = props.get("style") {
@@ -142,6 +171,16 @@ impl IRBuilder {
                 if !hover_style.is_empty_style() { node.hover_style = Some(hover_style); }
                 if !active_style.is_empty_style() { node.active_style = Some(active_style); }
                 for (k, v) in props {
+                    if let morph_parser::JsxPropValue::Fn(f) = v {
+                        if let Some(trigger) = event_trigger(k) {
+                            node.events.push(IREvent {
+                                trigger: trigger.into(),
+                                action: "call".into(),
+                                target: f.clone(),
+                            });
+                            continue;
+                        }
+                    }
                     match (k.as_str(), v) {
                         ("id", morph_parser::JsxPropValue::String(s)) => { node.attrs.insert("id".into(), s.clone()); }
                         ("src", morph_parser::JsxPropValue::String(s)) => { node.attrs.insert("src".into(), s.clone()); }
@@ -149,15 +188,19 @@ impl IRBuilder {
                         ("type", morph_parser::JsxPropValue::String(s)) => { node.attrs.insert("type".into(), s.clone()); }
                         ("className", morph_parser::JsxPropValue::String(s)) => { node.reactive_class = s.clone(); }
                         ("class", morph_parser::JsxPropValue::String(s)) => { node.reactive_class = s.clone(); }
-                        ("onClick", morph_parser::JsxPropValue::Fn(f)) => { node.events.push(IREvent { trigger: "click".into(), action: "call".into(), target: f.clone() }); }
-                        ("onInput", morph_parser::JsxPropValue::Fn(f)) => { node.events.push(IREvent { trigger: "input".into(), action: "call".into(), target: f.clone() }); }
                         _ => {}
                     }
                 }
                 let text_parts: Vec<String> = children.iter().filter_map(|c| if let morph_parser::JsxNode::Text(t) = c { Some(t.clone()) } else { None }).collect();
                 if !text_parts.is_empty() { node.text_content = text_parts.join(""); }
+                let mut child_ancestors = ancestors.to_vec();
+                child_ancestors.insert(0, AncestorHint {
+                    tag: tag.clone(),
+                    classes: classes.clone(),
+                    id: id.clone(),
+                });
                 for child in children.iter() {
-                    let child_node = self.build_node(child, css_rules, depth + 1);
+                    let child_node = self.build_node(child, css_rules, depth + 1, &child_ancestors);
                     if child_node.node_type == "__text__" && child_node.text_content.trim().is_empty() {
                         continue;
                     }
@@ -168,7 +211,7 @@ impl IRBuilder {
             morph_parser::JsxNode::Fragment { children, .. } => {
                 let mut node = IRNode { node_id: self.next_id(), node_type: "__fragment__".into(), ..Default::default() };
                 for child in children.iter() {
-                    node.children.push(self.build_node(child, css_rules, depth));
+                    node.children.push(self.build_node(child, css_rules, depth, ancestors));
                 }
                 node
             }
@@ -186,10 +229,10 @@ impl IRBuilder {
                 let mut node = IRNode { node_id: self.next_id(), node_type: "__conditional__".into(), ..Default::default() };
                 node.condition_expr = condition.clone();
                 for c in then_branch.iter() {
-                    node.then_nodes.push(self.build_node(c, css_rules, depth));
+                    node.then_nodes.push(self.build_node(c, css_rules, depth, ancestors));
                 }
                 for c in else_branch.iter() {
-                    node.else_nodes.push(self.build_node(c, css_rules, depth));
+                    node.else_nodes.push(self.build_node(c, css_rules, depth, ancestors));
                 }
                 node
             }
@@ -197,7 +240,9 @@ impl IRBuilder {
                 let mut node = IRNode { node_id: self.next_id(), node_type: "__list__".into(), ..Default::default() };
                 node.list_expr = array_expr.clone();
                 node.list_key_expr = key_expr.clone();
-                node.item_template = Some(Box::new(self.build_node(item_template, css_rules, depth)));
+                node.item_template = Some(Box::new(
+                    self.build_node(item_template, css_rules, depth, ancestors),
+                ));
                 node
             }
         }
@@ -238,7 +283,7 @@ impl IRBuilder {
 }
 
 /// Which style bucket a matched CSS rule targets.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum PseudoKind {
     Base,
     Hover,
@@ -276,33 +321,9 @@ fn apply_ua_defaults(style: &mut IRStyle, tag: &str) {
 /// as the `:hover` / `:active` pseudo-classes (`button.btn.ghost:hover`).
 /// A comma-separated selector list matches if any alternative matches.
 fn selector_matches(tag: &str, props: &std::collections::HashMap<String, morph_parser::JsxPropValue>, selector: &str) -> Option<PseudoKind> {
-    let classes: Vec<String> = {
-        match props.get("className").or_else(|| props.get("class")) {
-            Some(morph_parser::JsxPropValue::String(c)) => {
-                c.split_whitespace().map(|s| s.to_string()).collect()
-            }
-            _ => Vec::new(),
-        }
-    };
-    let id = props.get("id").and_then(|v| match v {
-        morph_parser::JsxPropValue::String(s) => Some(s.clone()),
-        _ => None,
-    });
-
-    for alternative in selector.trim().split(',') {
-        let alternative = alternative.trim();
-        if alternative.is_empty() { continue; }
-        // A compound selector may carry a trailing pseudo-class on the last component.
-        let (structural, pseudo) = match split_trailing_pseudo(alternative) {
-            Some(p) => p,
-            None => (alternative, None),
-        };
-        if !match_selector_compound(tag, &classes, id.as_deref(), structural) {
-            continue;
-        }
-        return Some(pseudo.unwrap_or(PseudoKind::Base));
-    }
-    None
+    let (classes, id) = element_classes_id(props);
+    match_selector_detailed(tag, &classes, id.as_deref(), &[], selector)
+        .map(|(pseudo, _)| pseudo)
 }
 
 /// Split a leading/trailing `:hover` / `:active` pseudo-class off a simple or
@@ -393,6 +414,42 @@ fn match_selector_compound(tag: &str, classes: &[String], id: Option<&str>, sel:
     true
 }
 
+/// Map a JSX event prop to its trigger name. Anything unlisted is not
+/// an event the runtime wires, so it falls through to attribute handling.
+fn event_trigger(prop: &str) -> Option<&'static str> {
+    match prop {
+        "onClick" => Some("click"),
+        "onInput" => Some("input"),
+        "onChange" => Some("change"),
+        "onFocus" => Some("focus"),
+        "onBlur" => Some("blur"),
+        "onKeyUp" => Some("keyup"),
+        "onKeyDown" => Some("keydown"),
+        "onMouseEnter" => Some("mouseenter"),
+        "onMouseLeave" => Some("mouseleave"),
+        "onMouseDown" => Some("mousedown"),
+        "onMouseUp" => Some("mouseup"),
+        _ => None,
+    }
+}
+
+/// Class list and id of an element, shared by matching and ancestry.
+fn element_classes_id(
+    props: &std::collections::HashMap<String, morph_parser::JsxPropValue>,
+) -> (Vec<String>, Option<String>) {
+    let classes = match props.get("className").or_else(|| props.get("class")) {
+        Some(morph_parser::JsxPropValue::String(c)) => {
+            c.split_whitespace().map(|s| s.to_string()).collect()
+        }
+        _ => Vec::new(),
+    };
+    let id = props.get("id").and_then(|v| match v {
+        morph_parser::JsxPropValue::String(s) => Some(s.clone()),
+        _ => None,
+    });
+    (classes, id)
+}
+
 /// Flush a buffered bare tag token (e.g. `button` in `button.btn.ghost`).
 fn flush_tag(buf: &mut String, tag_found: &mut bool, matched_tag: &mut bool, tag: &str) {
     let s = buf.trim();
@@ -401,6 +458,211 @@ fn flush_tag(buf: &mut String, tag_found: &mut bool, matched_tag: &mut bool, tag
         if s == tag { *matched_tag = true; }
     }
     buf.clear();
+}
+
+/// One ancestor step for descendant-selector matching.
+#[derive(Clone, Default)]
+struct AncestorHint {
+    tag: String,
+    classes: Vec<String>,
+    id: Option<String>,
+}
+
+/// Selector specificity as (ids, classes, tags): higher wins regardless
+/// of source order, matching browser cascade. Pseudo-classes count as
+/// classes. `!important` is not tracked (the parser merges it away), and
+/// sibling combinators are unsupported (see below).
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Debug)]
+struct Specificity(u32, u32, u32);
+
+/// Count specificity of one comma-free alternative: `#` per id, `.` and
+/// `:` runs per class/pseudo-class, bare leading words per tag.
+fn selector_specificity(alternative: &str) -> Specificity {
+    let mut ids = 0;
+    let mut classes = 0;
+    let mut tags = 0;
+    let mut word_start = true;
+    let mut chars = alternative.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '#' => {
+                ids += 1;
+                word_start = false;
+            }
+            '.' => {
+                classes += 1;
+                word_start = false;
+            }
+            ':' => {
+                if chars.peek() == Some(&':') {
+                    chars.next();
+                }
+                classes += 1;
+                word_start = false;
+            }
+            '[' => {
+                classes += 1;
+                word_start = false;
+            }
+            ' ' | '>' | '+' | '~' | ',' | '*' => {
+                word_start = true;
+            }
+            _ => {
+                if word_start && ch.is_alphabetic() {
+                    tags += 1;
+                }
+                word_start = false;
+            }
+        }
+    }
+    Specificity(ids, classes, tags)
+}
+
+/// How one compound attaches to the previous one. Sibling combinators
+/// (`+`, `~`) have no meaning in a flat single-node walk.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Combinator {
+    Descendant,
+    Child,
+}
+
+/// Split `div > p` into per-compound steps with their combinators.
+/// `None` for sibling combinators and attribute selectors: ignoring the
+/// rule beats applying it to the wrong element.
+fn split_selector_sequence(selector: &str) -> Option<Vec<(Option<Combinator>, String)>> {
+    if selector.contains('[') {
+        return None;
+    }
+    let mut steps: Vec<(Option<Combinator>, String)> = Vec::new();
+    let mut current = String::new();
+    let mut pending = None;
+    let mut chars = selector.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            ' ' | '\t' => {
+                if !current.trim().is_empty() {
+                    steps.push((pending.take(), current.trim().to_string()));
+                    current = String::new();
+                }
+                if pending.is_none() {
+                    pending = Some(Combinator::Descendant);
+                }
+            }
+            '>' => {
+                if !current.trim().is_empty() {
+                    steps.push((pending.take(), current.trim().to_string()));
+                    current = String::new();
+                }
+                pending = Some(Combinator::Child);
+            }
+            '+' | '~' => {
+                return None;
+            }
+            _ => {
+                current.push(ch);
+            }
+        }
+    }
+    if !current.trim().is_empty() {
+        steps.push((pending.take(), current.trim().to_string()));
+    }
+    if steps.is_empty() {
+        return None;
+    }
+    Some(steps)
+}
+
+/// Match full steps right-to-left: the last compound hits the element,
+/// the rest walk the ancestor chain (`ancestors[0]` is the parent).
+fn match_sequence(
+    tag: &str,
+    classes: &[String],
+    id: Option<&str>,
+    ancestors: &[AncestorHint],
+    steps: &[(Option<Combinator>, String)],
+) -> bool {
+    let Some((_, last)) = steps.last() else {
+        return false;
+    };
+    if !match_selector_compound(tag, classes, id, last) {
+        return false;
+    }
+    let mut ancestor_at = 0;
+    for index in (1..steps.len()).rev() {
+        let compound = &steps[index - 1].1;
+        match steps[index].0 {
+            None | Some(Combinator::Child) => {
+                let Some(ancestor) = ancestors.get(ancestor_at) else {
+                    return false;
+                };
+                if !match_selector_compound(
+                    &ancestor.tag,
+                    &ancestor.classes,
+                    ancestor.id.as_deref(),
+                    compound,
+                ) {
+                    return false;
+                }
+                ancestor_at += 1;
+            }
+            Some(Combinator::Descendant) => {
+                let mut found = false;
+                while let Some(ancestor) = ancestors.get(ancestor_at) {
+                    ancestor_at += 1;
+                    if match_selector_compound(
+                        &ancestor.tag,
+                        &ancestor.classes,
+                        ancestor.id.as_deref(),
+                        compound,
+                    ) {
+                        found = true;
+                        break;
+                    }
+                }
+                if !found {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
+/// Match with specificity of the winning alternative. Unknown pseudos
+/// and attribute selectors never match (unsupported, ignored); among
+/// matching alternatives the most specific one counts, not the first.
+fn match_selector_detailed(
+    tag: &str,
+    classes: &[String],
+    id: Option<&str>,
+    ancestors: &[AncestorHint],
+    selector: &str,
+) -> Option<(PseudoKind, Specificity)> {
+    let mut best: Option<(PseudoKind, Specificity)> = None;
+    for alternative in selector.trim().split(',') {
+        let alternative = alternative.trim();
+        if alternative.is_empty() {
+            continue;
+        }
+        let (structural, pseudo) = match split_trailing_pseudo(alternative) {
+            Some(split) => split,
+            None => (alternative, None),
+        };
+        if structural.contains(':') || structural.contains('[') {
+            continue;
+        }
+        let Some(steps) = split_selector_sequence(structural) else {
+            continue;
+        };
+        if match_sequence(tag, classes, id, ancestors, &steps) {
+            let specificity = selector_specificity(alternative);
+            let better = best.map(|(_, held)| specificity > held).unwrap_or(true);
+            if better {
+                best = Some((pseudo.unwrap_or(PseudoKind::Base), specificity));
+            }
+        }
+    }
+    best
 }
 
 /// Apply a CSS property to a style, returning the IR field name that was set
@@ -573,5 +835,102 @@ mod tests {
         assert!(close(parse_color("rgba(79, 124, 255, 0)"), [0.3098, 0.4863, 1.0, 0.0]));
         assert!(close(parse_color("rgba(255,255,255,0.5)"), [1.0, 1.0, 1.0, 0.5]));
         assert!(close(parse_color("rgb(255,0,0)"), [1.0, 0.0, 0.0, 1.0]));
+    }
+
+    #[test]
+    fn specificity_orders_id_over_class_over_tag() {
+        assert!(selector_specificity("#a") > selector_specificity(".b.c.d"));
+        assert!(selector_specificity(".b") > selector_specificity("div"));
+        assert!(selector_specificity("div p") > selector_specificity("p"));
+        assert_eq!(selector_specificity(".a"), selector_specificity(".b"));
+    }
+
+    fn detailed(
+        tag: &str,
+        classes: &[&str],
+        ancestors: &[(&str, &[&str])],
+        selector: &str,
+    ) -> Option<(PseudoKind, Specificity)> {
+        let owned_classes: Vec<String> = classes.iter().map(|s| s.to_string()).collect();
+        let owned_ancestors: Vec<AncestorHint> = ancestors
+            .iter()
+            .map(|(tag, classes)| AncestorHint {
+                tag: tag.to_string(),
+                classes: classes.iter().map(|s| s.to_string()).collect(),
+                id: None,
+            })
+            .collect();
+        match_selector_detailed(tag, &owned_classes, None, &owned_ancestors, selector)
+    }
+
+    #[test]
+    fn descendant_matches_through_ancestors() {
+        let wrap: &[&str] = &["wrap"];
+        let ancestors = [("div", wrap)];
+        assert!(detailed("p", &[], &ancestors, "div p").is_some());
+        assert!(detailed("p", &[], &[], "div p").is_none());
+        assert!(detailed("span", &[], &ancestors, "div > span").is_some());
+    }
+
+    #[test]
+    fn sibling_combinators_never_match() {
+        let empty: &[&str] = &[];
+        let ancestors = [("h2", empty)];
+        assert!(detailed("p", &[], &ancestors, "h2 + p").is_none());
+        assert!(detailed("p", &[], &ancestors, "h2 ~ p").is_none());
+    }
+
+    #[test]
+    fn grouped_alternatives_use_matching_specificity() {
+        let matched = detailed("p", &["note"], &[], ".note, #other").unwrap();
+        assert_eq!(matched.1, selector_specificity(".note"));
+    }
+
+    #[test]
+    fn width_attribute_loses_to_stylesheet() {
+        let builder = IRBuilder::new();
+        let mut props = std::collections::HashMap::new();
+        props.insert("width".to_string(), JsxPropValue::String("400".to_string()));
+        let node = builder.build_node(
+            &morph_parser::JsxNode::Element {
+                tag: "img".to_string(),
+                props,
+                children: Vec::new(),
+                self_closing: true,
+                line: 0,
+                col: 0,
+            },
+            &[],
+            0,
+            &[],
+        );
+        assert_eq!(node.style.width, Some(400.0));
+
+        let mut props = std::collections::HashMap::new();
+        props.insert("width".to_string(), JsxPropValue::String("400".to_string()));
+        let rules = vec![(
+            ".wide".to_string(),
+            morph_parser::CssRule {
+                selector: ".wide".to_string(),
+                properties: [("width".to_string(), "100px".to_string())]
+                    .into_iter()
+                    .collect(),
+            },
+        )];
+        props.insert("className".to_string(), JsxPropValue::String("wide".to_string()));
+        let node = builder.build_node(
+            &morph_parser::JsxNode::Element {
+                tag: "img".to_string(),
+                props,
+                children: Vec::new(),
+                self_closing: true,
+                line: 0,
+                col: 0,
+            },
+            &rules,
+            0,
+            &[],
+        );
+        assert_eq!(node.style.width, Some(100.0));
     }
 }
