@@ -54,6 +54,10 @@ impl<'a> CppEmitter<'a> {
                     }
                 }
             }
+            // Reactive const lambdas re-evaluate on every reference.
+            for name in &win.reactive_consts {
+                state_map.insert(name.clone(), format!("{}()", name));
+            }
             let mut code = String::new();
             let var = format!("win_{}", win.window_id);
             code.push_str(&format!("MorphWindow* {var} = new MorphWindow(\"{}\", {}, {}, {});\n", win.title, win.width, win.height, if win.visible { "true" } else { "false" }));
@@ -72,6 +76,23 @@ impl<'a> CppEmitter<'a> {
             for log in &win.startup_logs {
                 code.push_str(&format!("    fprintf(stderr, \"{}\\n\");\n", log.replace('\\', "\\\\").replace('"', "\\\"")));
             }
+            // morphEffect declarations: empty deps run once, otherwise the
+            // effect auto-subscribes to whatever signals the body reads.
+            for ed in &win.effect_decls {
+                let lambda = ed.get("lambda").map(String::as_str).unwrap_or("");
+                if lambda.is_empty() {
+                    continue;
+                }
+                let deps = ed.get("deps").map(|d| d.trim()).unwrap_or("");
+                if deps == "[]" {
+                    code.push_str("    { // morphEffect (run once)\n");
+                    code.push_str(&format!("        auto __ef_fn = {};\n", lambda));
+                    code.push_str("        __ef_fn();\n");
+                    code.push_str("    }\n");
+                } else {
+                    code.push_str(&format!("    morph::create_effect({});\n", lambda));
+                }
+            }
             window_code_parts.push(code);
         }
         let window_code = window_code_parts.join("\n");
@@ -87,6 +108,9 @@ impl<'a> CppEmitter<'a> {
                         state_map.insert(setter.clone(), format!("__st_{}.set", getter));
                     }
                 }
+            }
+            for name in &w.reactive_consts {
+                state_map.insert(name.clone(), format!("{}()", name));
             }
             for n in logic_emitter::collect_list_nodes(&w.nodes) {
                 if let Some(ref tmpl) = n.item_template {
@@ -159,4 +183,62 @@ fn infer_cpp_type(init: &str) -> String {
 fn is_array_literal(s: &str) -> bool {
     let t = s.trim();
     t.starts_with('[') && t.ends_with(']')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_window() -> morph_ir::IRWindow {
+        morph_ir::IRWindow {
+            window_id: "main".to_string(),
+            title: "Test".to_string(),
+            width: 800,
+            height: 600,
+            visible: true,
+            min_width: None,
+            max_width: None,
+            min_height: None,
+            max_height: None,
+            modal: false,
+            renderer: "flash".to_string(),
+            nodes: Vec::new(),
+            startup_logs: Vec::new(),
+            premain_functions: vec!["auto helper()\n{\n    return 1;\n}".to_string()],
+            extra_headers: Vec::new(),
+            state_vars: Vec::new(),
+            reactive_consts: Vec::new(),
+            effect_decls: vec![
+                [("lambda".to_string(), "[]() { run_once(); }".to_string()),
+                 ("deps".to_string(), "[]".to_string())]
+                    .into_iter()
+                    .collect(),
+                [("lambda".to_string(), "[]() { track(); }".to_string()),
+                 ("deps".to_string(), "[count]".to_string())]
+                    .into_iter()
+                    .collect(),
+                [("lambda".to_string(), "[]() { always(); }".to_string()),
+                 ("deps".to_string(), String::new())]
+                    .into_iter()
+                    .collect(),
+            ],
+            cpp_imports: Vec::new(),
+            keyframes: std::collections::HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn effect_decls_emit_run_once_and_subscribed_forms() {
+        let windows = vec![test_window()];
+        let dir = std::env::temp_dir().join(format!("morph_fx_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        CppEmitter::new(&windows).emit(&dir).unwrap();
+        let app = std::fs::read_to_string(dir.join("app.cpp")).unwrap();
+        assert!(app.contains("auto helper()"), "premain spliced");
+        assert!(app.contains("// morphEffect (run once)"), "run-once block");
+        assert!(app.contains("auto __ef_fn = []() { run_once(); };"), "run-once call");
+        assert!(app.contains("morph::create_effect([]() { track(); });"), "deps subscribe");
+        assert!(app.contains("morph::create_effect([]() { always(); });"), "no-deps subscribe");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

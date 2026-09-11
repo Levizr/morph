@@ -137,7 +137,7 @@ pub fn run(
             }
         }
     }
-    let builder = morph_ir::IRBuilder::new();
+    let builder = morph_ir::IRBuilder::new().with_type_mode(type_mode);
     let windows = builder.build(&parsed, &css_rules, &css_keyframes);
     pb.finish_and_clear();
     crate::logger::log_success(&format!("IR built — {} window(s)", windows.len()));

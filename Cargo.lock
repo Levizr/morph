@@ -1466,6 +1466,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "morph-parser",
+ "morpher",
  "serde",
  "serde_json",
 ]

@@ -88,6 +88,7 @@ pub struct IRWindow {
     pub premain_functions: Vec<String>,
     pub extra_headers: Vec<String>,
     pub state_vars: Vec<HashMap<String, String>>,
+    pub reactive_consts: Vec<String>,
     pub effect_decls: Vec<HashMap<String, String>>,
     pub cpp_imports: Vec<HashMap<String, String>>,
     pub keyframes: HashMap<String, Vec<IRKeyframe>>,

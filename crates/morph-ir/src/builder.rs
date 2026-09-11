@@ -8,11 +8,23 @@ use crate::tailwind::TailwindResolver;
 pub struct IRBuilder {
     tailwind: TailwindResolver,
     counter: std::cell::Cell<usize>,
+    type_mode: morpher::TypeMode,
 }
 
 impl IRBuilder {
     pub fn new() -> Self {
-        Self { tailwind: TailwindResolver::new(), counter: std::cell::Cell::new(0) }
+        Self {
+            tailwind: TailwindResolver::new(),
+            counter: std::cell::Cell::new(0),
+            type_mode: morpher::TypeMode::default(),
+        }
+    }
+
+    /// Type mode for translating embedded logic (handlers, effects, globals).
+    /// Defaults to inference; `morph build --types` overrides it.
+    pub fn with_type_mode(mut self, mode: morpher::TypeMode) -> Self {
+        self.type_mode = mode;
+        self
     }
 
     /// Assign the next flat `node_NNNN` id (Python-style global counter).
@@ -29,30 +41,120 @@ impl IRBuilder {
         css_keyframes: &HashMap<String, Vec<morph_parser::CssKeyframe>>,
     ) -> Vec<IRWindow> {
         let mut windows = Vec::new();
-        let all_state: Vec<HashMap<String, String>> = source.components.iter().flat_map(|c| {
-            c.state_vars.iter().map(|sv| {
-                let mut m = HashMap::new();
-                m.insert("getter".into(), sv.getter.clone());
-                m.insert("setter".into(), sv.setter.clone());
-                m.insert("init".into(), sv.init.clone());
-                m
-            })
-        }).collect();
-        let all_effects: Vec<HashMap<String, String>> = source.components.iter().flat_map(|c| {
-            c.effects.iter().map(|e| {
-                let mut m = HashMap::new();
-                m.insert("callback".into(), e.callback.clone());
-                m.insert("deps".into(), e.deps.clone());
-                m
-            })
-        }).collect();
+        // Ambient state map shared by every embedded-logic translation:
+        // getters read signals, setters write them, reactive const lambdas
+        // re-evaluate. Extended with component consts below, mirroring the
+        // order Python builds its per-component translator state.
+        let mut ambient_vars: HashMap<String, String> = HashMap::new();
+        let mut ambient_types: HashMap<String, String> = HashMap::new();
+        let mut all_state: Vec<HashMap<String, String>> = Vec::new();
+        for sv in source
+            .state_vars
+            .iter()
+            .chain(source.components.iter().flat_map(|c| c.state_vars.iter()))
+        {
+            let mut m = HashMap::new();
+            m.insert("getter".into(), sv.getter.clone());
+            m.insert("setter".into(), sv.setter.clone());
+            m.insert("init".into(), sv.init.clone());
+            all_state.push(m);
+            if !sv.getter.is_empty() {
+                ambient_vars.insert(sv.getter.clone(), format!("__st_{}.get()", sv.getter));
+                if let Some(ty) = infer_state_type(&sv.init) {
+                    ambient_types.insert(sv.getter.clone(), ty);
+                }
+            }
+            if !sv.setter.is_empty() {
+                ambient_vars.insert(sv.setter.clone(), format!("__st_{}.set", sv.getter));
+            }
+        }
         let wc = source.window_config.as_ref();
-        // Collect premain functions (inner functions like doLogin, logout) from all components
-        let premain: Vec<String> = source.components.iter().flat_map(|c| {
-            c.inner_functions.iter().map(|f| f.source.clone()).chain(
-                c.consts.iter().map(|cst| format!("auto {} = {};", cst.name, cst.rhs))
-            )
-        }).collect();
+        let mut extra_headers: Vec<String> = source.extra_headers.clone();
+        // ── Module-level logic first (Python: function_declarations, global_vars) ──
+        let mut premain: Vec<String> = Vec::new();
+        for fd in &source.function_declarations {
+            self.push_snippet(
+                &mut premain,
+                &mut extra_headers,
+                &fd.source,
+                &ambient_vars,
+                &ambient_types,
+            );
+        }
+        for gv in &source.global_vars {
+            self.push_snippet(&mut premain, &mut extra_headers, gv, &ambient_vars, &ambient_types);
+        }
+        // ── Component consts become reactive lambdas; later translations ──
+        // see them as `name()` calls (Python: `auto x = []() { return …; };`).
+        let mut reactive_consts: Vec<String> = Vec::new();
+        for c in &source.components {
+            for cst in &c.consts {
+                if cst.name.is_empty() || cst.rhs.is_empty() {
+                    continue;
+                }
+                if let Some(out) =
+                    self.translate_logic(&cst.rhs, &ambient_vars, &ambient_types)
+                {
+                    let expr = out.body.trim().trim_end_matches(';').trim();
+                    if expr.is_empty() {
+                        continue;
+                    }
+                    extra_headers.extend(include_lines(&out.includes));
+                    premain.push(format!(
+                        "auto {} = []() {{ return ({}); }};",
+                        cst.name, expr
+                    ));
+                    ambient_vars.insert(cst.name.clone(), format!("{}()", cst.name));
+                    reactive_consts.push(cst.name.clone());
+                }
+            }
+        }
+        // ── Inner functions (module + component) with the extended map ──
+        for f in source
+            .inner_functions
+            .iter()
+            .chain(source.components.iter().flat_map(|c| c.inner_functions.iter()))
+        {
+            self.push_snippet(
+                &mut premain,
+                &mut extra_headers,
+                &f.source,
+                &ambient_vars,
+                &ambient_types,
+            );
+        }
+        // ── Effects: transpile callbacks now, emit `create_effect` later ──
+        let mut all_effects: Vec<HashMap<String, String>> = Vec::new();
+        for e in source
+            .effects
+            .iter()
+            .chain(source.components.iter().flat_map(|c| c.effects.iter()))
+        {
+            if let Some(out) = self.translate_logic(&e.callback, &ambient_vars, &ambient_types)
+            {
+                let lambda = out.body.trim().trim_end_matches(';').trim().to_string();
+                if lambda.is_empty() {
+                    continue;
+                }
+                extra_headers.extend(include_lines(&out.includes));
+                let mut m = HashMap::new();
+                m.insert("lambda".into(), lambda);
+                m.insert("deps".into(), e.deps.clone());
+                all_effects.push(m);
+            }
+        }
+        extra_headers.sort();
+        extra_headers.dedup();
+        // Startup logs: module logs, then each component's body logs
+        // (Python: per-component `body_logs` → window `startup_logs`).
+        let mut startup_logs = source.console_logs.clone();
+        for c in &source.components {
+            for log in &c.console_logs {
+                if !startup_logs.contains(log) {
+                    startup_logs.push(log.clone());
+                }
+            }
+        }
         let mut window = IRWindow {
             window_id: self.next_id(),
             title: wc.map(|w| w.title.clone()).unwrap_or_else(|| "Morph App".into()),
@@ -66,10 +168,11 @@ impl IRBuilder {
             modal: wc.map(|w| w.modal).unwrap_or(false),
             renderer: "flash".into(),
             nodes: vec![],
-            startup_logs: source.console_logs.clone(),
+            startup_logs,
             premain_functions: premain,
-            extra_headers: vec![],
+            extra_headers,
             state_vars: all_state,
+            reactive_consts,
             effect_decls: all_effects,
             cpp_imports: source.cpp_imports.iter().map(|ci| {
                 let mut m = HashMap::new();
@@ -85,6 +188,43 @@ impl IRBuilder {
         }
         windows.push(window);
         windows
+    }
+
+    /// Translate embedded JS/TS against ambient app state. `None` when the
+    /// snippet does not parse or has no translatable content (the caller
+    /// skips it, mirroring Python's per-block try/except).
+    fn translate_logic(
+        &self,
+        source: &str,
+        ambient_vars: &HashMap<String, String>,
+        ambient_types: &HashMap<String, String>,
+    ) -> Option<morpher::SnippetOutput> {
+        let mut options = morpher::TranslateOptions::default();
+        options.type_mode = self.type_mode;
+        options.state_vars = ambient_vars.clone();
+        options.state_types = ambient_types.clone();
+        morpher::translate_snippet(source, "snippet.ts", options).ok().filter(|out| {
+            !out.body.trim().is_empty()
+        })
+    }
+
+    /// Translate a statement-level snippet and splice its body into `premain`
+    /// with external linkage (mirrors Python's `strip_static_function`).
+    fn push_snippet(
+        &self,
+        premain: &mut Vec<String>,
+        extra_headers: &mut Vec<String>,
+        source: &str,
+        ambient_vars: &HashMap<String, String>,
+        ambient_types: &HashMap<String, String>,
+    ) {
+        if let Some(out) = self.translate_logic(source, ambient_vars, ambient_types) {
+            extra_headers.extend(include_lines(&out.includes));
+            let body = strip_static_linkage(&out.body);
+            if !body.is_empty() {
+                premain.push(body);
+            }
+        }
     }
 
     fn build_node(
@@ -315,6 +455,56 @@ fn apply_ua_defaults(style: &mut IRStyle, tag: &str) {
     }
 }
 
+/// Infer a C++ type for a state init literal so snippet translations get
+/// operand classes and member-access style for ambient reads. Mirrors the
+/// init-based inference in `morph-codegen`'s emitter.
+fn infer_state_type(init: &str) -> Option<String> {
+    let s = init.trim();
+    if s == "true" || s == "false" {
+        return Some("bool".to_string());
+    }
+    if (s.starts_with('"') && s.ends_with('"') && s.len() >= 2)
+        || (s.starts_with('\'') && s.ends_with('\'') && s.len() >= 2)
+    {
+        return Some("std::string".to_string());
+    }
+    if s.starts_with('[') && s.ends_with(']') {
+        return Some("JsArray".to_string());
+    }
+    if s.parse::<i64>().is_ok() {
+        return Some("int".to_string());
+    }
+    if s.parse::<f64>().is_ok() {
+        return Some("double".to_string());
+    }
+    None
+}
+
+/// Remove `static`/`static inline` linkage from a translated top-level
+/// function so it gets external linkage in the app TU (mirrors Python's
+/// `strip_static_function`, visible to user .cpp code).
+fn strip_static_linkage(cpp: &str) -> String {
+    let mut text = cpp.trim().to_string();
+    for prefix in ["static inline", "static"] {
+        if text.starts_with(prefix)
+            && text[prefix.len()..].chars().next().map(|c| c.is_whitespace()).unwrap_or(false)
+        {
+            text = text[prefix.len()..].trim_start().to_string();
+            break;
+        }
+    }
+    text
+}
+
+/// Collect `#include` lines from a snippet's split-off header block.
+fn include_lines(header: &str) -> Vec<String> {
+    header
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with("#include"))
+        .map(str::to_string)
+        .collect()
+}
 /// Split a leading/trailing `:hover` / `:active` pseudo-class off a simple or
 /// compound selector. Only the *last* component's pseudo applies to the element
 /// itself; earlier-ancestor pseudos are not handled by this builder.
@@ -922,6 +1112,91 @@ mod tests {
             &[],
         );
         assert_eq!(node.style.width, Some(100.0));
+    }
+
+    #[test]
+    fn embedded_logic_transpiles_to_cpp_premain() {
+        use morph_parser::{
+            ComponentConst, InnerFunction, MxComponent, MxEffect, MxSource, StateVar,
+        };
+        let source = MxSource {
+            filename: "app.mx".to_string(),
+            imports: Vec::new(),
+            window_config: None,
+            components: vec![MxComponent {
+                name: "App".to_string(),
+                exported: true,
+                params: Vec::new(),
+                jsx: morph_parser::JsxNode::Text("hi".to_string()),
+                state_vars: vec![StateVar {
+                    getter: "count".to_string(),
+                    setter: "setCount".to_string(),
+                    init: "0".to_string(),
+                }],
+                effects: vec![
+                    MxEffect {
+                        callback: "() => { console.log(count); }".to_string(),
+                        deps: "[]".to_string(),
+                    },
+                    MxEffect {
+                        callback: "() => { console.log(count); }".to_string(),
+                        deps: "[count]".to_string(),
+                    },
+                ],
+                inner_functions: vec![InnerFunction {
+                    name: "doLogin".to_string(),
+                    source: "function doLogin() { setCount(count + 1); }".to_string(),
+                }],
+                consts: vec![ComponentConst {
+                    name: "doubled".to_string(),
+                    rhs: "count * 2".to_string(),
+                }],
+                console_logs: vec!["body log".to_string()],
+            }],
+            state_vars: Vec::new(),
+            effects: Vec::new(),
+            inner_functions: Vec::new(),
+            function_declarations: vec![InnerFunction {
+                name: "helper".to_string(),
+                source: "function helper() { return 1; }".to_string(),
+            }],
+            global_vars: vec!["const API_URL = \"https://api.test\";".to_string()],
+            console_logs: vec!["module log".to_string()],
+            extra_headers: Vec::new(),
+            cpp_imports: Vec::new(),
+        };
+        let windows = IRBuilder::new().build(&source, &[], &HashMap::new());
+        assert_eq!(windows.len(), 1);
+        let win = &windows[0];
+        let premain = win.premain_functions.join("\n");
+        // Raw JS must never reach the app TU: functions are transpiled and
+        // stripped of internal linkage, consts become reactive lambdas.
+        assert!(premain.contains("void doLogin()"), "handler transpiled: {}", premain);
+        assert!(premain.contains("auto helper"), "module fn transpiled: {}", premain);
+        assert!(premain.contains("API_URL"), "global transpiled: {}", premain);
+        assert!(!premain.contains("function "), "no raw JS: {}", premain);
+        assert!(
+            premain.contains("auto doubled = []() { return ("),
+            "const is reactive lambda: {}",
+            premain
+        );
+        assert!(
+            premain.contains("__st_count.get()"),
+            "ambient state mapped: {}",
+            premain
+        );
+        assert!(!premain.contains("static "), "external linkage: {}", premain);
+        assert_eq!(win.reactive_consts, vec!["doubled".to_string()]);
+        // Effects carry transpiled lambdas, not JS callbacks.
+        assert_eq!(win.effect_decls.len(), 2);
+        assert!(win.effect_decls[0].get("lambda").unwrap().starts_with('['));
+        assert!(!win.effect_decls[0].get("lambda").unwrap().contains("=>"));
+        assert_eq!(win.effect_decls[0].get("deps").unwrap(), "[]");
+        assert_eq!(win.effect_decls[1].get("deps").unwrap(), "[count]");
+        // Snippet headers (e.g. <print> for console.log) merge upward.
+        assert!(win.extra_headers.iter().any(|h| h.contains("print")), "{:?}", win.extra_headers);
+        // Logs merge: module first, then component body.
+        assert_eq!(win.startup_logs, vec!["module log".to_string(), "body log".to_string()]);
     }
 
     #[test]
