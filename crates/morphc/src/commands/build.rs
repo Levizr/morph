@@ -99,7 +99,27 @@ pub fn run(
     // Collect CSS rules from imports
     let mut css_rules: Vec<(String, morph_parser::CssRule)> = Vec::new();
     let mut css_keyframes: std::collections::HashMap<String, Vec<morph_parser::CssKeyframe>> = std::collections::HashMap::new();
+    let mut remote_css: Vec<(String, String)> = Vec::new();
+    let css_fetcher =
+        morph_build::css_fetch::CssFetcher::new(cwd.join(".morph").join("css-cache")).silent();
     for imp in &parsed.imports {
+        if let morph_parser::MxImportKind::CssUrl { url } = &imp.kind {
+            // Remote stylesheets are fetched once into .morph/css-cache
+            // (fonts alongside them, URLs rewritten local); a failed fetch
+            // warns and continues without it, like a browser offline.
+            match css_fetcher.fetch_with_fonts(url) {
+                Some(text) if !text.is_empty() => {
+                    if let Ok(data) = morph_parser::parse_css(&text) {
+                        css_rules.extend(data.rules);
+                        for (k, v) in data.keyframes {
+                            css_keyframes.entry(k).or_default().extend(v);
+                        }
+                        remote_css.push((url.clone(), text));
+                    }
+                }
+                _ => crate::logger::log_dim(&format!("Remote CSS unavailable, skipping: {}", url)),
+            }
+        }
         if let morph_parser::MxImportKind::CssLocal { path } = &imp.kind {
             let candidates = [
                 entry_path.parent().map(|p| p.join(path)).unwrap_or_else(|| cwd.join(path)),
@@ -231,6 +251,9 @@ pub fn run(
     }
     for (ts_path, ts_source) in &fragment_inputs {
         owned_inputs.push((format!("ts:{}", ts_path.display()), ts_source.clone()));
+    }
+    for (url, text) in &remote_css {
+        owned_inputs.push((format!("css:{}", url), text.clone()));
     }
     let fingerprint_inputs: Vec<(&str, &str)> = owned_inputs
         .iter()

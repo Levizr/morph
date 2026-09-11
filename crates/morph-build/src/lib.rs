@@ -1,3 +1,4 @@
+pub mod css_fetch;
 pub mod platform;
 pub mod static_deps;
 pub mod upx;
