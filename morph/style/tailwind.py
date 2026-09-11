@@ -483,6 +483,11 @@ class TailwindResolver:
             return {"transform": f"{fn}({_negate_transform_value(value)})"}
         if prefix in _TRANSFORM_ARBITRARY:
             return {"transform": f"{_TRANSFORM_ARBITRARY[prefix]}({value})"}
+        # px-/py- expand to both axes (a single-side mapping breaks symmetry).
+        if prefix == "px":
+            return {"padding-left": value, "padding-right": value}
+        if prefix == "py":
+            return {"padding-top": value, "padding-bottom": value}
         if prefix in ARBITRARY_PREFIX:
             return {ARBITRARY_PREFIX[prefix]: value}
         return None

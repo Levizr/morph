@@ -315,17 +315,6 @@ fn apply_ua_defaults(style: &mut IRStyle, tag: &str) {
     }
 }
 
-/// Match a CSS selector against an element. Returns the style bucket to apply.
-///
-/// Supports compound selectors (`.btn.ghost`, `button.btn`, `#main.card`) as well
-/// as the `:hover` / `:active` pseudo-classes (`button.btn.ghost:hover`).
-/// A comma-separated selector list matches if any alternative matches.
-fn selector_matches(tag: &str, props: &std::collections::HashMap<String, morph_parser::JsxPropValue>, selector: &str) -> Option<PseudoKind> {
-    let (classes, id) = element_classes_id(props);
-    match_selector_detailed(tag, &classes, id.as_deref(), &[], selector)
-        .map(|(pseudo, _)| pseudo)
-}
-
 /// Split a leading/trailing `:hover` / `:active` pseudo-class off a simple or
 /// compound selector. Only the *last* component's pseudo applies to the element
 /// itself; earlier-ancestor pseudos are not handled by this builder.
@@ -808,7 +797,8 @@ mod tests {
     fn match_sel(sel: &str, cls: &[&str]) -> bool {
         let mut props = std::collections::HashMap::new();
         props.insert("className".to_string(), JsxPropValue::String(cls.join(" ")));
-        selector_matches("button", &props, sel).is_some()
+        let (classes, id) = element_classes_id(&props);
+        match_selector_detailed("button", &classes, id.as_deref(), &[], sel).is_some()
     }
 
     #[test]
@@ -932,5 +922,32 @@ mod tests {
             &[],
         );
         assert_eq!(node.style.width, Some(100.0));
+    }
+
+    #[test]
+    fn tailwind_class_names_flow_into_style() {
+        let builder = IRBuilder::new();
+        let mut props = std::collections::HashMap::new();
+        props.insert(
+            "className".to_string(),
+            JsxPropValue::String("bg-red-500 text-lg".to_string()),
+        );
+        let node = builder.build_node(
+            &morph_parser::JsxNode::Element {
+                tag: "div".to_string(),
+                props,
+                children: Vec::new(),
+                self_closing: true,
+                line: 0,
+                col: 0,
+            },
+            &[],
+            0,
+            &[],
+        );
+        assert!((node.style.bg_color[0] - 0xef as f32 / 255.0).abs() < 0.001);
+        assert!((node.style.bg_color[1] - 0x44 as f32 / 255.0).abs() < 0.001);
+        assert_eq!(node.style.bg_color[3], 1.0);
+        assert_eq!(node.style.font_size, 18.0);
     }
 }
