@@ -7,6 +7,17 @@ use crate::codegen::cpp::CppTranslator;
 use crate::codegen::rust::RustTranslator;
 use crate::error::MorphJsError;
 
+/// Seed ambient app state into a translator: mapped read expressions plus
+/// recorded types for operand classes and member-access style.
+fn apply_ambient_state(translator: &mut CppTranslator, options: &TranslateOptions) {
+    for (name, cpp_type) in &options.state_types {
+        translator.ctx.var_types.insert(name.clone(), cpp_type.clone());
+    }
+    for (name, expression) in &options.state_vars {
+        translator.ctx.state_vars.insert(name.clone(), expression.clone());
+    }
+}
+
 pub fn translate_to_cpp(
     source: &str,
     filename: &str,
@@ -40,8 +51,9 @@ pub fn translate_to_cpp(
                     &normalized,
                     options.indent,
                     options.type_mode,
-                    options.runtime_path,
+                    options.runtime_path.clone(),
                 );
+                apply_ambient_state(&mut translator, &options);
                 let code = translator.translate_program(&ret2.program);
                 return Ok(code);
             }
@@ -60,8 +72,9 @@ pub fn translate_to_cpp(
                     &normalized,
                     options.indent,
                     options.type_mode,
-                    options.runtime_path,
+                    options.runtime_path.clone(),
                 );
+                apply_ambient_state(&mut translator, &options);
                 let code = translator.translate_program(&ret2.program);
                 return Ok(code);
             }
@@ -77,10 +90,41 @@ pub fn translate_to_cpp(
         source,
         options.indent,
         options.type_mode,
-        options.runtime_path,
+        options.runtime_path.clone(),
     );
+    apply_ambient_state(&mut translator, &options);
     let code = translator.translate_program(&ret.program);
     Ok(code)
+}
+
+/// Translate one `.mx`-embedded logic snippet (handler body, effect,
+/// inner function) against ambient app state. Single parse attempt, no
+/// C++-type fallback: snippets must be plain TypeScript; anything else
+/// is a hard error for the caller to route elsewhere.
+pub fn translate_snippet_to_cpp(
+    source: &str,
+    filename: &str,
+    options: TranslateOptions,
+) -> Result<String, MorphJsError> {
+    let allocator = Allocator::default();
+    let source_type = SourceType::from_path(filename).unwrap_or_default().with_typescript(true);
+    let ret = Parser::new(&allocator, source, source_type).parse();
+    if ret.panicked || !ret.diagnostics.is_empty() {
+        let msgs: Vec<String> = ret.diagnostics.iter().map(|e| e.message.to_string()).collect();
+        return Err(MorphJsError::Parse(format!(
+            "parse errors in snippet {}: {}",
+            filename,
+            msgs.join("; ")
+        )));
+    }
+    let mut translator = CppTranslator::new(
+        source,
+        options.indent,
+        options.type_mode,
+        options.runtime_path.clone(),
+    );
+    apply_ambient_state(&mut translator, &options);
+    Ok(translator.translate_program(&ret.program))
 }
 
 fn normalize_cpp_types(source: &str) -> String {
