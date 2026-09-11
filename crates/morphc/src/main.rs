@@ -82,6 +82,9 @@ enum Commands {
         upx: Option<bool>,
         #[arg(long = "no-upx")]
         no_upx: bool,
+        /// Pin a UPX release (overrides build.upx_version in config)
+        #[arg(long = "upx-version", value_name = "VERSION")]
+        upx_version: Option<String>,
         /// Type resolution mode for translated logic: strict or infer (default, from morph.config.json)
         #[arg(long = "types", value_name = "MODE")]
         type_mode: Option<String>,
@@ -95,6 +98,13 @@ enum Commands {
         output: Option<String>,
         #[arg(long)]
         static_: bool,
+        #[arg(long)]
+        upx: Option<bool>,
+        #[arg(long = "no-upx")]
+        no_upx: bool,
+        /// Pin a UPX release (overrides build.upx_version in config)
+        #[arg(long = "upx-version", value_name = "VERSION")]
+        upx_version: Option<String>,
         /// Type resolution mode for translated logic: strict or infer (default, from morph.config.json)
         #[arg(long = "types", value_name = "MODE")]
         type_mode: Option<String>,
@@ -216,11 +226,16 @@ fn main() {
             commands::update::run(runtime, self_update)
         }
         Some(Commands::Dev { entry }) => commands::dev::run(entry),
-        Some(Commands::Build { entry, output, static_, upx, no_upx, type_mode }) => {
-            commands::build::run(entry, output, static_, upx, no_upx, false, type_mode).map(|_| ())
+        Some(Commands::Build { entry, output, static_, upx, no_upx, upx_version, type_mode }) => {
+            commands::build::run(
+                entry, output, static_, upx, no_upx, false, type_mode, upx_version,
+            )
+            .map(|_| ())
         }
-        Some(Commands::Run { binary, entry, output, static_, type_mode }) => {
-            commands::run::run(binary, entry, output, static_, type_mode)
+        Some(Commands::Run {
+            binary, entry, output, static_, upx, no_upx, upx_version, type_mode,
+        }) => {
+            commands::run::run(binary, entry, output, static_, type_mode, upx, no_upx, upx_version)
         }
         Some(Commands::Check { path, entry, migrate }) => commands::check::run(path, entry, migrate),
         Some(Commands::Doctor { verbose, yes }) => commands::doctor::run(verbose, yes),

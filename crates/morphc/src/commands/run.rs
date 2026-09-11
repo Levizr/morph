@@ -7,6 +7,9 @@ pub fn run(
     output: Option<String>,
     static_: bool,
     type_mode: Option<String>,
+    upx: Option<bool>,
+    no_upx: bool,
+    upx_version: Option<String>,
 ) -> Result<()> {
     let cwd = std::env::current_dir()?;
     let cfg = morph_config::MorphConfig::from_file(&cwd.join("morph.config.json")).unwrap_or_default();
@@ -18,7 +21,9 @@ pub fn run(
     let bin_path = if let Some(bin) = input_binary {
         std::path::PathBuf::from(bin)
     } else {
-        crate::commands::build::run(entry, output, static_, None, false, true, type_mode)?
+        crate::commands::build::run(
+            entry, output, static_, upx, no_upx, true, type_mode, upx_version,
+        )?
     };
 
     if bin_path.exists() {

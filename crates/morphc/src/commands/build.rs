@@ -10,6 +10,7 @@ pub fn run(
     no_upx: bool,
     suppress_banner: bool,
     type_mode: Option<String>,
+    upx_version: Option<String>,
 ) -> Result<PathBuf> {
     let cwd = std::env::current_dir()?;
     let config_path = cwd.join("morph.config.json");
@@ -49,6 +50,13 @@ pub fn run(
     );
     if static_ {
         crate::logger::log_key("Static", "enabled");
+        crate::logger::log_key(
+            "GLFW backend",
+            if config.build.wayland { "Wayland + X11" } else { "X11 only (Wayland off)" },
+        );
+        if config.build.system_freetype {
+            crate::logger::log_key("FreeType", "system archive (config.build.system_freetype)");
+        }
     }
     if let Some(u) = upx {
         crate::logger::log_key("UPX", &u.to_string());
@@ -163,6 +171,12 @@ pub fn run(
 
     // ── Compile (skip when nothing changed, like cargo run) ──
     let compiler_name = morph_build::detect_compiler();
+    // Compiler override: config build.cxx, then MORPH_CXX, then platform default.
+    let cxx_override = if !config.build.cxx.is_empty() {
+        Some(config.build.cxx.clone())
+    } else {
+        std::env::var("MORPH_CXX").ok().filter(|v| !v.is_empty())
+    };
     // Find runtime dir (for headers)
     let runtime_dir = {
         let mut candidates = vec![
@@ -182,7 +196,8 @@ pub fn run(
         }
         candidates.into_iter().find(|p| p.join("core/window.h").exists() || p.join("include").exists() || p.exists()).unwrap_or_else(|| cwd.join("runtime/cpp"))
     };
-    let compiler = morph_build::Compiler::new(None).silent();
+    let compiler = morph_build::Compiler::new(cxx_override.clone()).silent();
+    let compiler_name = cxx_override.unwrap_or_else(morph_build::detect_compiler);
     let binary_path = output_dir.join(format!("{}{}", clean_name, morph_build::exe_suffix()));
 
     // A build is "fresh" (cargo-style) only when every input fingerprint is
@@ -193,6 +208,7 @@ pub fn run(
         ("morph.config.json".to_string(), config_text),
         ("entry".to_string(), source.clone()),
         ("runtime".to_string(), runtime_hash),
+        ("static".to_string(), static_.to_string()),
     ];
     let entry_parent = entry_path.parent().unwrap_or(cwd.as_path());
     for imp in &parsed.imports {
@@ -234,12 +250,25 @@ pub fn run(
     fs.scan(&windows);
     let defines = fs.required_defines();
     // Ensure output dir exists (already created by emitter)
-    if let Err(e) = compiler.compile(
+    let build_opts = morph_build::BuildOptions {
+        static_mode: static_,
+        wayland: config.build.wayland,
+        system_freetype: config.build.system_freetype,
+        native: morph_build::NativeFlags {
+            include_dirs: config.native.include_dirs.clone(),
+            library_dirs: config.native.library_dirs.clone(),
+            libraries: config.native.libraries.clone(),
+            cflags: config.native.cflags.clone(),
+            ldflags: config.native.ldflags.clone(),
+        },
+    };
+    if let Err(e) = compiler.compile_with_options(
         &output_dir.join("app.cpp"),
         &binary_path,
         &runtime_dir,
         &defines,
         &extra_sources,
+        &build_opts,
     ) {
         pb.finish_and_clear();
         // On failure we STOP and do not run any stale binary.
@@ -251,9 +280,27 @@ pub fn run(
     // Only record the fingerprint after a successful compile.
     let _ = morph_cache::write_stored_fingerprint(&cwd, &clean_name, &fingerprint);
     crate::logger::log_success(&format!("Compiled → {}", binary_path.display()));
-    // UPX compression if requested (stub)
-    if upx.unwrap_or(false) && !no_upx {
-        crate::logger::log_dim("UPX compression requested (not yet implemented in Rust, skipping)");
+    // UPX compression: config default is on; --upx / --no-upx override.
+    let upx_enabled = if no_upx { false } else { upx.unwrap_or(config.build.upx) };
+    let upx_version = upx_version.filter(|v| !v.is_empty()).or_else(|| {
+        if config.build.upx_version.is_empty() {
+            None
+        } else {
+            Some(config.build.upx_version.clone())
+        }
+    });
+    if upx_enabled {
+        if let Some(upx_bin) = morph_build::upx::ensure_upx(upx_version.as_deref(), true) {
+            crate::logger::log_step("Compressing binary with UPX ...");
+            if morph_build::upx::compress(&binary_path, &upx_bin) {
+                crate::logger::log_success(&format!(
+                    "UPX compressed → {}",
+                    binary_path.display()
+                ));
+            }
+        } else {
+            crate::logger::log_dim("UPX not available, skipping compression");
+        }
     }
     println!();
 
