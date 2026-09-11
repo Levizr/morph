@@ -40,6 +40,11 @@ inline void setColor(float rgba[4], const std::string& c) {
         rgba[1] = std::stoi(c.substr(3,2), nullptr, 16) / 255.0f;
         rgba[2] = std::stoi(c.substr(5,2), nullptr, 16) / 255.0f;
         rgba[3] = 1.0f;
+    } else if (c.size() == 9 && c[0] == '#') {
+        rgba[0] = std::stoi(c.substr(1,2), nullptr, 16) / 255.0f;
+        rgba[1] = std::stoi(c.substr(3,2), nullptr, 16) / 255.0f;
+        rgba[2] = std::stoi(c.substr(5,2), nullptr, 16) / 255.0f;
+        rgba[3] = std::stoi(c.substr(7,2), nullptr, 16) / 255.0f;
     } else if (c.size() == 4 && c[0] == '#') {
         rgba[0] = std::stoi(c.substr(1,1) + c[1], nullptr, 16) / 255.0f;
         rgba[1] = std::stoi(c.substr(2,1) + c[2], nullptr, 16) / 255.0f;
