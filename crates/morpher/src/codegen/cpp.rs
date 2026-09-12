@@ -3267,7 +3267,7 @@ impl<'a> CppTranslator<'a> {
         false
     }
 
-    /// Decide whether a string-method call should use morph::str:: helpers (native)
+    /// Decide whether a string-method call should use morph::strutil:: helpers (native)
     /// Returns Some(true) = use helper, Some(false) = use direct Js call, None = not applicable
     fn str_helper_decision(&self, recv: &Expression<'a>) -> Option<bool> {
         match recv {
@@ -3721,7 +3721,7 @@ impl<'a> CppTranslator<'a> {
             }
         }
         // Handle string methods on native types (std::string and number types)
-        // Supports chaining: morph::str::outer(morph::str::inner(...))
+        // Supports chaining: morph::strutil::outer(morph::strutil::inner(...))
         if let Expression::StaticMemberExpression(m) = &call.callee {
             let method = m.property.name.as_str();
             if StringMethodHandler::is_string_method(method) {

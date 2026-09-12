@@ -48,7 +48,10 @@ class FeatureSet:
             self.features.add("flex")
         if s.cursor not in ("default", "", None):
             self.features.add("cursor")
-        if (s.border_width is not None and s.border_width > 0) or s.border_style not in ("", "none"):
+        # Any border member access needs the mixin — including a lone
+        # border-color (e.g. hover-only), which carries no width/style.
+        if ((s.border_width is not None and s.border_width > 0) or s.border_style not in ("", "none")
+                or (s.border_color is not None and s.border_color != (0.0, 0.0, 0.0, 1.0))):
             self.features.add("border")
         if s.transform_ops or s.transform_origin:
             self.features.add("transform")

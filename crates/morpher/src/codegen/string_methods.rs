@@ -75,112 +75,112 @@ impl StringMethod {
     /// Generate C++ code for the method call using morph::str helpers
     pub fn emit_cpp(&self, receiver: &str, args: &[String]) -> String {
         match self {
-            Self::ToUpperCase => format!("morph::str::to_upper({})", receiver),
-            Self::ToLowerCase => format!("morph::str::to_lower({})", receiver),
+            Self::ToUpperCase => format!("morph::strutil::to_upper({})", receiver),
+            Self::ToLowerCase => format!("morph::strutil::to_lower({})", receiver),
             Self::CharAt => {
                 let idx = args.first().cloned().unwrap_or("0".to_string());
-                format!("morph::str::char_at({}, {})", receiver, idx)
+                format!("morph::strutil::char_at({}, {})", receiver, idx)
             }
             Self::IndexOf => {
                 let search = args.first().cloned().unwrap_or("\"\"".to_string());
                 let from = args.get(1).cloned().unwrap_or("0".to_string());
-                format!("morph::str::index_of({}, {}, {})", receiver, search, from)
+                format!("morph::strutil::index_of({}, {}, {})", receiver, search, from)
             }
             Self::LastIndexOf => {
                 let search = args.first().cloned().unwrap_or("\"\"".to_string());
                 let from = args.get(1).cloned().unwrap_or("-1".to_string());
-                format!("morph::str::last_index_of({}, {}, {})", receiver, search, from)
+                format!("morph::strutil::last_index_of({}, {}, {})", receiver, search, from)
             }
             Self::Substring => {
                 let start = args.first().cloned().unwrap_or("0".to_string());
                 let end = args.get(1).map(|s| s.as_str()).unwrap_or("");
                 if end.is_empty() {
-                    format!("morph::str::substring({}, {})", receiver, start)
+                    format!("morph::strutil::substring({}, {})", receiver, start)
                 } else {
-                    format!("morph::str::substring({}, {}, {})", receiver, start, end)
+                    format!("morph::strutil::substring({}, {}, {})", receiver, start, end)
                 }
             }
             Self::Substr => {
                 let start = args.first().cloned().unwrap_or("0".to_string());
                 let len = args.get(1).map(|s| s.as_str()).unwrap_or("");
                 if len.is_empty() {
-                    format!("morph::str::substr({}, {})", receiver, start)
+                    format!("morph::strutil::substr({}, {})", receiver, start)
                 } else {
-                    format!("morph::str::substr({}, {}, {})", receiver, start, len)
+                    format!("morph::strutil::substr({}, {}, {})", receiver, start, len)
                 }
             }
             Self::Slice => {
                 let start = args.first().cloned().unwrap_or("0".to_string());
                 let end = args.get(1).map(|s| s.as_str()).unwrap_or("");
                 if end.is_empty() {
-                    format!("morph::str::slice({}, {})", receiver, start)
+                    format!("morph::strutil::slice({}, {})", receiver, start)
                 } else {
-                    format!("morph::str::slice({}, {}, {})", receiver, start, end)
+                    format!("morph::strutil::slice({}, {}, {})", receiver, start, end)
                 }
             }
-            Self::Trim => format!("morph::str::trim({})", receiver),
-            Self::TrimStart => format!("morph::str::trim_start({})", receiver),
-            Self::TrimEnd => format!("morph::str::trim_end({})", receiver),
+            Self::Trim => format!("morph::strutil::trim({})", receiver),
+            Self::TrimStart => format!("morph::strutil::trim_start({})", receiver),
+            Self::TrimEnd => format!("morph::strutil::trim_end({})", receiver),
             Self::Replace => {
                 let search = args.first().cloned().unwrap_or("\"\"".to_string());
                 let replace = args.get(1).cloned().unwrap_or("\"\"".to_string());
-                format!("morph::str::replace({}, {}, {})", receiver, search, replace)
+                format!("morph::strutil::replace({}, {}, {})", receiver, search, replace)
             }
             Self::ReplaceAll => {
                 let search = args.first().cloned().unwrap_or("\"\"".to_string());
                 let replace = args.get(1).cloned().unwrap_or("\"\"".to_string());
-                format!("morph::str::replace_all({}, {}, {})", receiver, search, replace)
+                format!("morph::strutil::replace_all({}, {}, {})", receiver, search, replace)
             }
             Self::Split => {
                 let sep = args.first().cloned().unwrap_or("\"\"".to_string());
-                format!("morph::str::split({}, {})", receiver, sep)
+                format!("morph::strutil::split({}, {})", receiver, sep)
             }
             Self::Match => {
                 let regex = args.first().cloned().unwrap_or("\"\"".to_string());
-                format!("morph::str::match_regex({}, {})", receiver, regex)
+                format!("morph::strutil::match_regex({}, {})", receiver, regex)
             }
             Self::MatchAll => {
                 let regex = args.first().cloned().unwrap_or("\"\"".to_string());
-                format!("morph::str::match_all({}, {})", receiver, regex)
+                format!("morph::strutil::match_all({}, {})", receiver, regex)
             }
             Self::Search => {
                 let regex = args.first().cloned().unwrap_or("\"\"".to_string());
-                format!("morph::str::search({}, {})", receiver, regex)
+                format!("morph::strutil::search({}, {})", receiver, regex)
             }
             Self::PadStart => {
                 let len = args.first().cloned().unwrap_or("0".to_string());
                 let pad = args.get(1).cloned().unwrap_or("\" \"".to_string());
-                format!("morph::str::pad_start({}, {}, {})", receiver, len, pad)
+                format!("morph::strutil::pad_start({}, {}, {})", receiver, len, pad)
             }
             Self::PadEnd => {
                 let len = args.first().cloned().unwrap_or("0".to_string());
                 let pad = args.get(1).cloned().unwrap_or("\" \"".to_string());
-                format!("morph::str::pad_end({}, {}, {})", receiver, len, pad)
+                format!("morph::strutil::pad_end({}, {}, {})", receiver, len, pad)
             }
             Self::Repeat => {
                 let count = args.first().cloned().unwrap_or("0".to_string());
-                format!("morph::str::repeat({}, {})", receiver, count)
+                format!("morph::strutil::repeat({}, {})", receiver, count)
             }
             Self::StartsWith => {
                 let prefix = args.first().cloned().unwrap_or("\"\"".to_string());
-                format!("morph::str::starts_with({}, {})", receiver, prefix)
+                format!("morph::strutil::starts_with({}, {})", receiver, prefix)
             }
             Self::EndsWith => {
                 let suffix = args.first().cloned().unwrap_or("\"\"".to_string());
-                format!("morph::str::ends_with({}, {})", receiver, suffix)
+                format!("morph::strutil::ends_with({}, {})", receiver, suffix)
             }
             Self::Includes => {
                 let substr = args.first().cloned().unwrap_or("\"\"".to_string());
-                format!("morph::str::includes({}, {})", receiver, substr)
+                format!("morph::strutil::includes({}, {})", receiver, substr)
             }
             Self::LocaleCompare => {
                 let other = args.first().cloned().unwrap_or("\"\"".to_string());
-                format!("morph::str::locale_compare({}, {})", receiver, other)
+                format!("morph::strutil::locale_compare({}, {})", receiver, other)
             }
-            Self::Normalize => format!("morph::str::normalize({})", receiver),
-            Self::ToLocaleUpperCase => format!("morph::str::to_locale_upper({})", receiver),
-            Self::ToLocaleLowerCase => format!("morph::str::to_locale_lower({})", receiver),
-            Self::ToString => format!("morph::str::to_string({})", receiver),
+            Self::Normalize => format!("morph::strutil::normalize({})", receiver),
+            Self::ToLocaleUpperCase => format!("morph::strutil::to_locale_upper({})", receiver),
+            Self::ToLocaleLowerCase => format!("morph::strutil::to_locale_lower({})", receiver),
+            Self::ToString => format!("morph::strutil::to_string({})", receiver),
         }
     }
 }

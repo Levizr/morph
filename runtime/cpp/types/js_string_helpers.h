@@ -9,7 +9,7 @@
 #include <cctype>
 #include <regex>
 
-namespace morph::str {
+namespace morph::strutil {
 
 // Convert to uppercase
 inline std::string to_upper(std::string s) {
@@ -278,4 +278,4 @@ inline std::string to_string(T n) {
     return std::to_string(n);
 }
 
-} // namespace morph::str
+} // namespace morph::strutil

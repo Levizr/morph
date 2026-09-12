@@ -326,8 +326,20 @@ impl IRBuilder {
                         ("src", morph_parser::JsxPropValue::String(s)) => { node.attrs.insert("src".into(), s.clone()); }
                         ("placeholder", morph_parser::JsxPropValue::String(s)) => { node.attrs.insert("placeholder".into(), s.clone()); }
                         ("type", morph_parser::JsxPropValue::String(s)) => { node.attrs.insert("type".into(), s.clone()); }
-                        ("className", morph_parser::JsxPropValue::String(s)) => { node.reactive_class = s.clone(); }
-                        ("class", morph_parser::JsxPropValue::String(s)) => { node.reactive_class = s.clone(); }
+                        // Static class strings only drive build-time matching;
+                        // only dynamic className={...} becomes a reactive
+                        // expression (translated with state at emit time).
+                        // Stuffing static strings through JS translation
+                        // mangles any word colliding with state (`key op`
+                        // with an `op` signal became `key __st_op.get()`).
+                        ("className", morph_parser::JsxPropValue::Expr(s))
+                        | ("class", morph_parser::JsxPropValue::Expr(s))
+                        | ("className", morph_parser::JsxPropValue::Template(s))
+                        | ("class", morph_parser::JsxPropValue::Template(s))
+                        | ("className", morph_parser::JsxPropValue::Ref(s))
+                        | ("class", morph_parser::JsxPropValue::Ref(s)) => {
+                            node.reactive_class = s.clone();
+                        }
                         _ => {}
                     }
                 }
@@ -496,13 +508,16 @@ fn strip_static_linkage(cpp: &str) -> String {
     text
 }
 
-/// Collect `#include` lines from a snippet's split-off header block.
+/// Collect bare `#include` specs (`<string>`, `"x.h"`) from a snippet's
+/// split-off header block. The app template adds the `#include` keyword
+/// itself, mirroring Python's translator `_needed` set.
 fn include_lines(header: &str) -> Vec<String> {
     header
         .lines()
         .map(str::trim)
-        .filter(|l| l.starts_with("#include"))
-        .map(str::to_string)
+        .filter_map(|l| l.strip_prefix("#include"))
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
         .collect()
 }
 /// Split a leading/trailing `:hover` / `:active` pseudo-class off a simple or
@@ -870,6 +885,49 @@ fn apply_css_prop(style: &mut IRStyle, prop: &str, val: &str) -> Option<&'static
         "justify-content" => { style.justify_content = val.to_string(); Some("justify_content") }
         "align-items" => { style.align_items = val.to_string(); Some("align_items") }
         "flex-wrap" => { style.flex_wrap = val.to_string(); Some("flex_wrap") }
+        "flex-grow" => if let Ok(v) = val.trim().parse::<f32>() {
+            style.flex_grow = v; Some("flex_grow")
+        } else { None },
+        "flex-shrink" => if let Ok(v) = val.trim().parse::<f32>() {
+            style.flex_shrink = v; Some("flex_shrink")
+        } else { None },
+        "flex-basis" => {
+            let v = val.trim();
+            style.flex_basis = if v == "auto" {
+                "auto".to_string()
+            } else if let Some(px) = parse_length(v) {
+                format!("{}px", px)
+            } else {
+                v.to_string()
+            };
+            Some("flex_basis")
+        }
+        "flex" => { parse_flex_shorthand(&mut *style, val); Some("flex") }
+        "border" => { parse_border_shorthand(&mut *style, val); Some("border") }
+        "margin-top" => if let Some(v) = parse_length(val) {
+            style.margin[0] = v; Some("margin")
+        } else { None },
+        "margin-right" => if let Some(v) = parse_length(val) {
+            style.margin[1] = v; Some("margin")
+        } else { None },
+        "margin-bottom" => if let Some(v) = parse_length(val) {
+            style.margin[2] = v; Some("margin")
+        } else { None },
+        "margin-left" => if let Some(v) = parse_length(val) {
+            style.margin[3] = v; Some("margin")
+        } else { None },
+        "padding-top" => if let Some(v) = parse_length(val) {
+            style.padding[0] = v; Some("padding")
+        } else { None },
+        "padding-right" => if let Some(v) = parse_length(val) {
+            style.padding[1] = v; Some("padding")
+        } else { None },
+        "padding-bottom" => if let Some(v) = parse_length(val) {
+            style.padding[2] = v; Some("padding")
+        } else { None },
+        "padding-left" => if let Some(v) = parse_length(val) {
+            style.padding[3] = v; Some("padding")
+        } else { None },
         "cursor" => { style.cursor = val.to_string(); Some("cursor") }
         "overflow" => { style.overflow = val.to_string(); Some("overflow") }
         "opacity" => if let Ok(v) = val.trim().parse::<f32>() { style.opacity = v; Some("opacity") } else { None },
@@ -879,6 +937,78 @@ fn apply_css_prop(style: &mut IRStyle, prop: &str, val: &str) -> Option<&'static
         "border-style" => { style.border_style = val.to_string(); Some("border_style") }
         "box-sizing" => { style.box_sizing = val.to_string(); Some("box_sizing") }
         _ => None,
+    }
+}
+
+/// Parse the CSS `flex` shorthand into grow/shrink/basis.
+/// Mirrors Python `_parse_flex_shorthand`.
+fn parse_flex_shorthand(style: &mut IRStyle, val: &str) {
+    let kw = val.trim();
+    let parts: Vec<&str> = kw.split_whitespace().collect();
+    match kw {
+        "none" => {
+            style.flex_grow = 0.0;
+            style.flex_shrink = 0.0;
+            style.flex_basis = "auto".to_string();
+        }
+        "auto" => {
+            style.flex_grow = 1.0;
+            style.flex_shrink = 1.0;
+            style.flex_basis = "auto".to_string();
+        }
+        "initial" => {
+            style.flex_grow = 0.0;
+            style.flex_shrink = 1.0;
+            style.flex_basis = "auto".to_string();
+        }
+        _ => match parts.len() {
+            1 => {
+                if let Ok(v) = parts[0].parse::<f32>() {
+                    style.flex_grow = v;
+                    style.flex_shrink = 1.0;
+                    style.flex_basis = "0%".to_string();
+                }
+            }
+            2 => {
+                if let (Ok(g), Ok(s)) =
+                    (parts[0].parse::<f32>(), parts[1].parse::<f32>())
+                {
+                    style.flex_grow = g;
+                    style.flex_shrink = s;
+                    style.flex_basis = "0%".to_string();
+                }
+            }
+            _ => {
+                if parts.len() >= 3 {
+                    if let (Ok(g), Ok(s)) =
+                        (parts[0].parse::<f32>(), parts[1].parse::<f32>())
+                    {
+                        style.flex_grow = g;
+                        style.flex_shrink = s;
+                        style.flex_basis = parts[2].to_string();
+                    }
+                }
+            }
+        },
+    }
+}
+
+/// Split the CSS `border` shorthand (`1px solid #232b3d`) into
+/// width/style/color. Mirrors Python's `_css_to_ir_kw` branch.
+fn parse_border_shorthand(style: &mut IRStyle, val: &str) {
+    for part in val.split_whitespace() {
+        if matches!(part, "solid" | "dashed" | "dotted" | "none") {
+            style.border_style = part.to_string();
+        } else if part.starts_with('#')
+            || part.starts_with("rgb")
+            || part == "transparent"
+        {
+            if let Some(c) = parse_color(part) {
+                style.border_color = c;
+            }
+        } else if let Some(w) = parse_length(part) {
+            style.border_width = w;
+        }
     }
 }
 
@@ -1197,6 +1327,74 @@ mod tests {
         assert!(win.extra_headers.iter().any(|h| h.contains("print")), "{:?}", win.extra_headers);
         // Logs merge: module first, then component body.
         assert_eq!(win.startup_logs, vec!["module log".to_string(), "body log".to_string()]);
+    }
+
+    #[test]
+    fn flex_and_border_shorthands_map() {
+        let builder = IRBuilder::new();
+        let mut style = IRStyle::default();
+        apply_css_prop(&mut style, "flex-grow", "1");
+        apply_css_prop(&mut style, "flex-shrink", "0");
+        assert_eq!(style.flex_grow, 1.0);
+        assert_eq!(style.flex_shrink, 0.0);
+        apply_css_prop(&mut style, "flex", "2");
+        assert_eq!(style.flex_grow, 2.0);
+        assert_eq!(style.flex_shrink, 1.0);
+        assert_eq!(style.flex_basis, "0%");
+        apply_css_prop(&mut style, "border", "1px solid #232b3d");
+        assert_eq!(style.border_width, 1.0);
+        assert_eq!(style.border_style, "solid");
+        assert!(style.border_color[0] > 0.1 && style.border_color[0] < 0.2);
+        apply_css_prop(&mut style, "margin-top", "50px");
+        apply_css_prop(&mut style, "padding-left", "6px");
+        assert_eq!(style.margin[0], 50.0);
+        assert_eq!(style.padding[3], 6.0);
+        let _ = builder;
+    }
+
+    #[test]
+    fn static_class_names_stay_out_of_reactive_class() {
+        // `key op` with an `op` signal must survive verbatim; only
+        // className={...} becomes a reactive expression.
+        let builder = IRBuilder::new();
+        let mut props = std::collections::HashMap::new();
+        props.insert(
+            "className".to_string(),
+            JsxPropValue::String("key op".to_string()),
+        );
+        let node = builder.build_node(
+            &morph_parser::JsxNode::Element {
+                tag: "button".to_string(),
+                props,
+                children: Vec::new(),
+                self_closing: true,
+                line: 0,
+                col: 0,
+            },
+            &[],
+            0,
+            &[],
+        );
+        assert!(node.reactive_class.is_empty());
+        let mut props = std::collections::HashMap::new();
+        props.insert(
+            "className".to_string(),
+            JsxPropValue::Expr("op === 1 ? \"a\" : \"b\"".to_string()),
+        );
+        let node = builder.build_node(
+            &morph_parser::JsxNode::Element {
+                tag: "button".to_string(),
+                props,
+                children: Vec::new(),
+                self_closing: true,
+                line: 0,
+                col: 0,
+            },
+            &[],
+            0,
+            &[],
+        );
+        assert!(!node.reactive_class.is_empty());
     }
 
     #[test]

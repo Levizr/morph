@@ -38,7 +38,12 @@ impl FeatureSet {
             self.features.insert("flex".into());
         }
         if s.cursor != "default" && !s.cursor.is_empty() { self.features.insert("cursor".into()); }
-        if s.border_width > 0.0 || (s.border_style != "" && s.border_style != "none") {
+        // Any border member access needs the mixin — including a lone
+        // border-color (e.g. hover-only), which carries no width/style.
+        if s.border_width > 0.0
+            || (s.border_style != "" && s.border_style != "none")
+            || s.border_color != [0.0, 0.0, 0.0, 1.0]
+        {
             self.features.insert("border".into());
         }
         if s.transform_ops.is_some() || s.transform_origin.is_some() {
@@ -176,5 +181,54 @@ impl FeatureSet {
             }
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn node_with_hover_border_color() -> IRNode {
+        let mut node = IRNode {
+            node_id: "node_0001".to_string(),
+            node_type: "div".to_string(),
+            ..Default::default()
+        };
+        let mut hover = IRStyle::default();
+        hover.border_color = [0.5, 0.5, 0.5, 1.0];
+        node.hover_style = Some(hover);
+        node
+    }
+
+    #[test]
+    fn hover_only_border_color_enables_border_feature() {
+        // Regression: hover border-color with no width/style still emits
+        // `->borderColor`, which needs MORPH_FEATURE_BORDER compiled in.
+        let win = IRWindow {
+            window_id: "main".to_string(),
+            title: "Test".to_string(),
+            width: 800,
+            height: 600,
+            visible: true,
+            min_width: None,
+            max_width: None,
+            min_height: None,
+            max_height: None,
+            modal: false,
+            renderer: "flash".to_string(),
+            nodes: vec![node_with_hover_border_color()],
+            startup_logs: Vec::new(),
+            premain_functions: Vec::new(),
+            extra_headers: Vec::new(),
+            state_vars: Vec::new(),
+            reactive_consts: Vec::new(),
+            effect_decls: Vec::new(),
+            cpp_imports: Vec::new(),
+            keyframes: std::collections::HashMap::new(),
+        };
+        let mut fs = FeatureSet::new();
+        fs.scan(std::slice::from_ref(&win));
+        assert!(fs.features.contains("border"));
+        assert!(fs.required_defines().contains(&"MORPH_FEATURE_BORDER".to_string()));
     }
 }

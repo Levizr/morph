@@ -58,7 +58,7 @@ def test_string_method_stays_native(tmp_path: Path):
     code = code_without_strings(cpp)
     assert "std::string greeting" in code
     assert "JsString greeting" not in code
-    assert "morph::str::to_upper" in code
+    assert "morph::strutil::to_upper" in code
 
 
 def test_closure_capture_uses_shared_ptr(tmp_path: Path):
