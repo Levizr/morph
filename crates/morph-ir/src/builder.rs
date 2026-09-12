@@ -872,8 +872,8 @@ fn apply_css_prop(style: &mut IRStyle, prop: &str, val: &str) -> Option<&'static
         "max-width" => if let Some(v) = parse_length(val) { style.max_width = Some(v); Some("max_width") } else { None },
         "min-height" => if let Some(v) = parse_length(val) { style.min_height = Some(v); Some("min_height") } else { None },
         "max-height" => if let Some(v) = parse_length(val) { style.max_height = Some(v); Some("max_height") } else { None },
-        "padding" => if let Some(v) = parse_length(val) { style.padding = [v,v,v,v]; Some("padding") } else { None },
-        "margin" => if let Some(v) = parse_length(val) { style.margin = [v,v,v,v]; Some("margin") } else { None },
+        "padding" => if let Some(v) = parse_box_sides(val) { style.padding = v; Some("padding") } else { None },
+        "margin" => if let Some(v) = parse_box_sides(val) { style.margin = v; Some("margin") } else { None },
         "border-radius" => if let Some(v) = parse_length(val) { style.border_radius = v; Some("border_radius") } else { None },
         "font-size" => if let Some(v) = parse_length(val) { style.font_size = v; Some("font_size") } else { None },
         "font-weight" => { style.font_weight = val.to_string(); Some("font_weight") }
@@ -882,6 +882,22 @@ fn apply_css_prop(style: &mut IRStyle, prop: &str, val: &str) -> Option<&'static
         "flex-direction" => { style.flex_dir = val.to_string(); Some("flex_dir") }
         "gap" => if let Some(v) = parse_length(val) { style.gap = v; Some("gap") } else { None },
         "position" => { style.position = val.to_string(); Some("position") }
+        "left" => {
+            style.left = parse_length(val);
+            if style.left.is_some() { Some("left") } else { None }
+        }
+        "right" => {
+            style.right = parse_length(val);
+            if style.right.is_some() { Some("right") } else { None }
+        }
+        "top" => {
+            style.top = parse_length(val);
+            if style.top.is_some() { Some("top") } else { None }
+        }
+        "bottom" => {
+            style.bottom = parse_length(val);
+            if style.bottom.is_some() { Some("bottom") } else { None }
+        }
         "justify-content" => { style.justify_content = val.to_string(); Some("justify_content") }
         "align-items" => { style.align_items = val.to_string(); Some("align_items") }
         "flex-wrap" => { style.flex_wrap = val.to_string(); Some("flex_wrap") }
@@ -1010,6 +1026,22 @@ fn parse_border_shorthand(style: &mut IRStyle, val: &str) {
             style.border_width = w;
         }
     }
+}
+
+/// Parse CSS 1-4 value box shorthand (`10px`, `6px 12px`, ...) into
+/// [top, right, bottom, left], mirroring Python's per-side conversion.
+fn parse_box_sides(s: &str) -> Option<[f32; 4]> {
+    let parts: Vec<Option<f32>> = s.split_whitespace().map(parse_length).collect();
+    if parts.is_empty() || parts.len() > 4 || parts.iter().any(|p| p.is_none()) {
+        return None;
+    }
+    let v: Vec<f32> = parts.into_iter().map(|p| p.unwrap_or(0.0)).collect();
+    Some(match v.len() {
+        1 => [v[0], v[0], v[0], v[0]],
+        2 => [v[0], v[1], v[0], v[1]],
+        3 => [v[0], v[1], v[2], v[1]],
+        _ => [v[0], v[1], v[2], v[3]],
+    })
 }
 
 fn parse_length(s: &str) -> Option<f32> {
@@ -1327,6 +1359,19 @@ mod tests {
         assert!(win.extra_headers.iter().any(|h| h.contains("print")), "{:?}", win.extra_headers);
         // Logs merge: module first, then component body.
         assert_eq!(win.startup_logs, vec!["module log".to_string(), "body log".to_string()]);
+    }
+
+    #[test]
+    fn box_shorthands_expand_per_side() {
+        assert_eq!(parse_box_sides("18px"), Some([18.0, 18.0, 18.0, 18.0]));
+        assert_eq!(parse_box_sides("10px 6px"), Some([10.0, 6.0, 10.0, 6.0]));
+        assert_eq!(
+            parse_box_sides("36px 32px 28px 32px"),
+            Some([36.0, 32.0, 28.0, 32.0])
+        );
+        assert_eq!(parse_box_sides("1px 2px 3px"), Some([1.0, 2.0, 3.0, 2.0]));
+        assert_eq!(parse_box_sides("10px auto"), None);
+        assert_eq!(parse_box_sides(""), None);
     }
 
     #[test]
