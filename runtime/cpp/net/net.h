@@ -195,6 +195,66 @@ inline morph::Result<JsString> fetch(const JsString& url, const JsObject& init) 
 }
 inline morph::Result<JsString> fetch(const char* url, const char* init) = delete; // avoid ambiguity
 
+// ── fetch_response ───────────────────────────────────────────────
+// Same transports as fetch(), but resolves to the full Response
+// (status/ok/headers/body) instead of just the body text. Emitted for
+// `await fetch(...)` when the result uses the Response API (r.ok(),
+// r.status, r.text(), ...); plain body-text awaits keep using fetch().
+// Returns the awaitable directly (not wrapped in a Result-lambda): the
+// awaiting coroutine must suspend until the worker thread finishes.
+// Awaiting an eagerly-read Result would race and yield a default Response.
+inline detail::HttpAwaitable fetch_response(const std::string& url) {
+    auto state = std::make_shared<detail::SharedState>();
+    state->url = url;
+    state->response.url = url;
+    return detail::HttpAwaitable{state};
+}
+inline detail::HttpAwaitable fetch_response(const char* url) {
+    return fetch_response(std::string(url));
+}
+inline detail::HttpAwaitable fetch_response(const JsString& url) {
+    return fetch_response(url.value);
+}
+inline detail::HttpAwaitable fetch_response(const std::string& url, const JsValue& init) {
+    auto state = std::make_shared<detail::SharedState>();
+    state->url = url;
+    state->response.url = url;
+    if (init.is_object()) {
+        auto obj = std::get<JsObject>(init.inner);
+        if (obj.has("method")) {
+            auto m = obj.get("method");
+            if (m.is_string()) state->method = std::get<JsString>(m.inner).value;
+        }
+        if (obj.has("headers") && obj.get("headers").is_object()) {
+            auto hobj = std::get<JsObject>(obj.get("headers").inner);
+            for (auto& k : hobj.keys()) {
+                auto v = hobj.get(k);
+                if (v.is_string()) state->requestHeaders.set(k, std::get<JsString>(v.inner).value);
+            }
+        }
+        if (obj.has("body")) {
+            auto b = obj.get("body");
+            if (b.is_string()) state->requestBody = std::get<JsString>(b.inner).value;
+        }
+    }
+    return detail::HttpAwaitable{state};
+}
+inline detail::HttpAwaitable fetch_response(const char* url, const JsValue& init) {
+    return fetch_response(std::string(url), init);
+}
+inline detail::HttpAwaitable fetch_response(const JsString& url, const JsValue& init) {
+    return fetch_response(url.value, init);
+}
+inline detail::HttpAwaitable fetch_response(const std::string& url, const JsObject& init) {
+    return fetch_response(url, JsValue(init));
+}
+inline detail::HttpAwaitable fetch_response(const char* url, const JsObject& init) {
+    return fetch_response(std::string(url), JsValue(init));
+}
+inline detail::HttpAwaitable fetch_response(const JsString& url, const JsObject& init) {
+    return fetch_response(url.value, JsValue(init));
+}
+
 // ── Synchronous helpers ──────────────────────────────────────────
 Response http_get(const std::string& url);
 Response http_request(const std::string& url, const std::string& method, const Headers& headers, const std::string& body);

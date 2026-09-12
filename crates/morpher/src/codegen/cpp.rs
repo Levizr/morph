@@ -723,12 +723,82 @@ impl<'a> CppTranslator<'a> {
         None
     }
 
+    /// True when `name` uses the fetch Response API (`r.ok()`, `r.status`,
+    /// `r.text()`, ...) anywhere in the translated source. Only consulted
+    /// for `await fetch(...)` declarators, so the scan is narrow and the
+    /// body-text default is untouched.
+    fn uses_response_api(&self, name: &str) -> bool {
+        const MEMBERS: &[&str] = &["ok", "status", "text", "headers", "statusText"];
+        let src = self.source.as_bytes();
+        let name_bytes = name.as_bytes();
+        if name_bytes.is_empty() {
+            return false;
+        }
+        let is_ident = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b == b'$';
+        let mut i = 0;
+        while i + name_bytes.len() + 1 < src.len() {
+            if &src[i..i + name_bytes.len()] == name_bytes
+                && (i == 0 || !is_ident(src[i - 1]))
+                && src[i + name_bytes.len()] == b'.'
+            {
+                let rest = &src[i + name_bytes.len() + 1..];
+                for member in MEMBERS {
+                    if rest.len() > member.len()
+                        && &rest[..member.len()] == member.as_bytes()
+                        && !is_ident(rest[member.len()])
+                    {
+                        return true;
+                    }
+                }
+                i += name_bytes.len() + 1;
+            } else {
+                i += 1;
+            }
+        }
+        false
+    }
+
     fn emit_typed_variable_declarator(
         &mut self,
         d: &VariableDeclarator<'a>,
         name: &str,
         kind: &str,
     ) -> Option<String> {
+        // `await fetch()` whose result uses the Response API (r.ok(),
+        // r.status, r.text(), ...) declares the full Response and awaits
+        // fetch_response. Body-text-only awaits keep the JsString path
+        // below, so existing fixtures are unaffected.
+        if let Some(init) = &d.init {
+            if let Expression::AwaitExpression(awaited) = init {
+                if let Expression::CallExpression(call) = &awaited.argument {
+                    if let Expression::Identifier(callee) = &call.callee {
+                        if callee.name.as_str() == "fetch" && self.uses_response_api(name) {
+                            self.ctx.needed.insert(
+                                "\"../../runtime/cpp/net/net.h\"".to_string(),
+                            );
+                            let args: Vec<String> = call
+                                .arguments
+                                .iter()
+                                .map(|a| self.emit_argument(a))
+                                .collect();
+                            self.ctx.var_types.insert(
+                                name.to_string(),
+                                "morph::net::Response".to_string(),
+                            );
+                            let prefix =
+                                if self.ctx.indent_level == 0 { "static " } else { "" };
+                            return Some(format!(
+                                "{}{}morph::net::Response {} = co_await morph::net::fetch_response({});",
+                                self.indent(),
+                                prefix,
+                                name,
+                                args.join(", ")
+                            ));
+                        }
+                    }
+                }
+            }
+        }
         let base_type = self.declaration_base_type(d);
         let widened = self
             .analysis
@@ -2932,6 +3002,10 @@ impl<'a> CppTranslator<'a> {
             Expression::StaticMemberExpression(member) => {
                 if member.property.name.as_str() == "length" {
                     OperandClass::Integer
+                } else if matches!(member.property.name.as_str(), "status") && Self::is_response_obj(&member.object, &self.ctx.var_types) {
+                    OperandClass::Integer
+                } else if matches!(member.property.name.as_str(), "statusText") && Self::is_response_obj(&member.object, &self.ctx.var_types) {
+                    OperandClass::Text
                 } else {
                     OperandClass::Other
                 }
@@ -2945,6 +3019,19 @@ impl<'a> CppTranslator<'a> {
             Expression::TSTypeAssertion(cast) => self.operand_class_of(&cast.expression),
             _ => OperandClass::Other,
         }
+    }
+
+    fn is_response_obj(
+        object: &Expression<'a>,
+        var_types: &std::collections::HashMap<String, String>,
+    ) -> bool {
+        if let Expression::Identifier(id) = object {
+            return var_types
+                .get(id.name.as_str())
+                .map(|t| t.contains("Response"))
+                .unwrap_or(false);
+        }
+        false
     }
 
     /// Classify a call result: known string/number/boolean methods keep their
@@ -2963,6 +3050,14 @@ impl<'a> CppTranslator<'a> {
             }
             if StringMethodHandler::is_string_method(method_name) {
                 return OperandClass::Text;
+            }
+            // Response.text() resolves the body string (sync in morph's API).
+            if method_name == "text" {
+                if let Expression::StaticMemberExpression(member) = &call.callee {
+                    if Self::is_response_obj(&member.object, &self.ctx.var_types) {
+                        return OperandClass::Text;
+                    }
+                }
             }
         }
         OperandClass::JsValue
@@ -3135,6 +3230,18 @@ impl<'a> CppTranslator<'a> {
         }
     }
 
+    /// Wrap a non-string `+` operand for JsString concatenation:
+    /// natives via morph::str, JsNumber via its string constructor.
+    fn string_concat_operand(&self, emitted: String, expr: &Expression<'a>) -> String {
+        match self.operand_class_of(expr) {
+            OperandClass::Integer | OperandClass::Float | OperandClass::Boolean => {
+                format!("JsString(morph::str({}))", emitted)
+            }
+            OperandClass::JsNumber => format!("JsString({})", emitted),
+            _ => emitted,
+        }
+    }
+
     fn emit_binary(&mut self, b: &BinaryExpression<'a>) -> String {
         let op = b.operator.as_str();
 
@@ -3181,6 +3288,16 @@ impl<'a> CppTranslator<'a> {
         }
         if is_right_str {
             right = format!("JsString({})", right);
+        }
+        // `"text" + number` (e.g. `"HTTP error " + r.status`): convert the
+        // native side so JsString operator+ resolves. Textual other sides
+        // keep today's direct emission.
+        if op == "+" {
+            if is_left_str && !is_right_str {
+                right = self.string_concat_operand(right, &b.right);
+            } else if is_right_str && !is_left_str {
+                left = self.string_concat_operand(left, &b.left);
+            }
         }
 
         // For division, use double to match JS semantics (float division)
@@ -3943,7 +4060,9 @@ impl<'a> CppTranslator<'a> {
                 || obj.contains("fetch")
                 || self.ctx.needed.iter().any(|h| h.contains("net.h"));
             if is_response {
-                return format!("{}.ok()", obj);
+                // Bare member: emit_call appends the argument parens, so
+                // `r.ok()` renders exactly once (not `r.ok()()`).
+                return format!("{}.ok", obj);
             }
         }
         if prop == "length" {
