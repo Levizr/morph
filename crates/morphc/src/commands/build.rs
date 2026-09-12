@@ -190,7 +190,6 @@ pub fn run(
     }
 
     // ── Compile (skip when nothing changed, like cargo run) ──
-    let compiler_name = morph_build::detect_compiler();
     // Compiler override: config build.cxx, then MORPH_CXX, then platform default.
     let cxx_override = if !config.build.cxx.is_empty() {
         Some(config.build.cxx.clone())

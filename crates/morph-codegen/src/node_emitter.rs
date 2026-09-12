@@ -1141,20 +1141,21 @@ fn emit_reactive_effects(node: &IRNode, indent: &str, _features: &std::collectio
         }
     }
 
-    // ── Reactive className (stores string on node) ──
+    // ── Reactive className (a translated C++ string expression from the
+    // builder; used verbatim like Python's `morph::str(<expr>)` contract) ──
     if !node.reactive_class.is_empty() {
-        let cpp = translate_js(&node.reactive_class, state_map);
-        let cpp = cpp.trim().trim_end_matches(';').to_string();
+        let cpp = node.reactive_class.trim().trim_end_matches(';').trim();
         lines.push(open_effect(id));
-        lines.push(format!("{indent}    {id}->setClassName(\"{cpp}\");"));
+        lines.push(format!("{indent}    {id}->setClassName(morph::str({cpp}));"));
         lines.push(close_effect.to_string());
     }
 
     // ── Conditional class style effects (direct condition → style) ──
     if !node.class_conditional_effects.is_empty() {
         for eff in &node.class_conditional_effects {
-            let cond_cpp = translate_js(&eff.condition, state_map);
-            let cond_cpp = cond_cpp.trim().trim_end_matches(';').to_string();
+            // Conditions arrive translated from the builder (ambient state
+            // already mapped); use verbatim so C++ is never re-translated.
+            let cond_cpp = eff.condition.trim().trim_end_matches(';').trim().to_string();
             lines.push(open_effect(id));
             lines.push(format!("{indent}    {id}->interruptStateTransitions();"));
             lines.push(format!("{indent}    if ({cond_cpp}) {{"));

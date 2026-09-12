@@ -1467,6 +1467,10 @@ dependencies = [
  "anyhow",
  "morph-parser",
  "morpher",
+ "oxc_allocator",
+ "oxc_ast",
+ "oxc_parser",
+ "oxc_span 0.147.0",
  "serde",
  "serde_json",
 ]

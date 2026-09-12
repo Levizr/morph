@@ -1,5 +1,10 @@
 use std::collections::HashMap;
 
+use oxc_allocator::Allocator;
+use oxc_ast::ast::*;
+use oxc_parser::Parser;
+use oxc_span::{GetSpan, SourceType};
+
 use crate::css_registry;
 use crate::node::{IRWindow, IRNode, IREvent};
 use crate::style::IRStyle;
@@ -155,6 +160,20 @@ impl IRBuilder {
                 }
             }
         }
+        let mut nodes = Vec::new();
+        for comp in &source.components {
+            nodes.push(self.build_node(
+                &comp.jsx,
+                css_rules,
+                0,
+                &[],
+                &ambient_vars,
+                &ambient_types,
+                &mut extra_headers,
+            ));
+        }
+        extra_headers.sort();
+        extra_headers.dedup();
         let mut window = IRWindow {
             window_id: self.next_id(),
             title: wc.map(|w| w.title.clone()).unwrap_or_else(|| "Morph App".into()),
@@ -182,10 +201,7 @@ impl IRBuilder {
             }).collect(),
             keyframes: self.convert_keyframes(css_keyframes),
         };
-        for comp in &source.components {
-            let node = self.build_node(&comp.jsx, css_rules, 0, &[]);
-            window.nodes.push(node);
-        }
+        window.nodes = nodes;
         windows.push(window);
         windows
     }
@@ -233,6 +249,9 @@ impl IRBuilder {
         css_rules: &[(String, morph_parser::CssRule)],
         depth: usize,
         ancestors: &[AncestorHint],
+        ambient_vars: &HashMap<String, String>,
+        ambient_types: &HashMap<String, String>,
+        extra_headers: &mut Vec<String>,
     ) -> IRNode {
         match jsx {
             morph_parser::JsxNode::Element { tag, props, children, line: _, col: _, .. } => {
@@ -338,7 +357,33 @@ impl IRBuilder {
                         | ("class", morph_parser::JsxPropValue::Template(s))
                         | ("className", morph_parser::JsxPropValue::Ref(s))
                         | ("class", morph_parser::JsxPropValue::Ref(s)) => {
-                            node.reactive_class = s.clone();
+                            // Runtime class string via the full translator.
+                            if let Some(out) =
+                                self.translate_logic(s, ambient_vars, ambient_types)
+                            {
+                                extra_headers.extend(include_lines(&out.includes));
+                                let body = out
+                                    .body
+                                    .trim()
+                                    .trim_end_matches(';')
+                                    .trim()
+                                    .to_string();
+                                if !body.is_empty() {
+                                    node.reactive_class = body;
+                                }
+                            }
+                            // Build-time branch resolution for ternary arms.
+                            let mut fx = analyze_dynamic_class(
+                                s,
+                                tag,
+                                css_rules,
+                                &self.tailwind,
+                                ambient_vars,
+                                ambient_types,
+                                self.type_mode,
+                                extra_headers,
+                            );
+                            node.class_conditional_effects.append(&mut fx);
                         }
                         _ => {}
                     }
@@ -352,7 +397,15 @@ impl IRBuilder {
                     id: id.clone(),
                 });
                 for child in children.iter() {
-                    let child_node = self.build_node(child, css_rules, depth + 1, &child_ancestors);
+                    let child_node = self.build_node(
+                        child,
+                        css_rules,
+                        depth + 1,
+                        &child_ancestors,
+                        ambient_vars,
+                        ambient_types,
+                        extra_headers,
+                    );
                     if child_node.node_type == "__text__" && child_node.text_content.trim().is_empty() {
                         continue;
                     }
@@ -363,7 +416,15 @@ impl IRBuilder {
             morph_parser::JsxNode::Fragment { children, .. } => {
                 let mut node = IRNode { node_id: self.next_id(), node_type: "__fragment__".into(), ..Default::default() };
                 for child in children.iter() {
-                    node.children.push(self.build_node(child, css_rules, depth, ancestors));
+                    node.children.push(self.build_node(
+                        child,
+                        css_rules,
+                        depth,
+                        ancestors,
+                        ambient_vars,
+                        ambient_types,
+                        extra_headers,
+                    ));
                 }
                 node
             }
@@ -381,10 +442,26 @@ impl IRBuilder {
                 let mut node = IRNode { node_id: self.next_id(), node_type: "__conditional__".into(), ..Default::default() };
                 node.condition_expr = condition.clone();
                 for c in then_branch.iter() {
-                    node.then_nodes.push(self.build_node(c, css_rules, depth, ancestors));
+                    node.then_nodes.push(self.build_node(
+                        c,
+                        css_rules,
+                        depth,
+                        ancestors,
+                        ambient_vars,
+                        ambient_types,
+                        extra_headers,
+                    ));
                 }
                 for c in else_branch.iter() {
-                    node.else_nodes.push(self.build_node(c, css_rules, depth, ancestors));
+                    node.else_nodes.push(self.build_node(
+                        c,
+                        css_rules,
+                        depth,
+                        ancestors,
+                        ambient_vars,
+                        ambient_types,
+                        extra_headers,
+                    ));
                 }
                 node
             }
@@ -392,9 +469,15 @@ impl IRBuilder {
                 let mut node = IRNode { node_id: self.next_id(), node_type: "__list__".into(), ..Default::default() };
                 node.list_expr = array_expr.clone();
                 node.list_key_expr = key_expr.clone();
-                node.item_template = Some(Box::new(
-                    self.build_node(item_template, css_rules, depth, ancestors),
-                ));
+                node.item_template = Some(Box::new(self.build_node(
+                    item_template,
+                    css_rules,
+                    depth,
+                    ancestors,
+                    ambient_vars,
+                    ambient_types,
+                    extra_headers,
+                )));
                 node
             }
         }
@@ -512,6 +595,123 @@ fn strip_static_linkage(cpp: &str) -> String {
         }
     }
     text
+}
+
+/// Analyze a dynamic `className` template/expression for ternary branches
+/// with string-literal arms (`... ${cond ? "a" : "b"}`). Each branch's
+/// classes resolve to CSS declarations at build time (Tailwind + matching
+/// stylesheet rules, pseudo rules skipped), and the condition becomes a
+/// translated C++ bool expression. Mirrors Python's
+/// `_analyze_class_template` / `_analyze_class_expression`.
+/// Returns the conditional effects; best-effort (unparseable input yields none).
+fn analyze_dynamic_class(
+    source: &str,
+    tag: &str,
+    css_rules: &[(String, morph_parser::CssRule)],
+    tailwind: &TailwindResolver,
+    ambient_vars: &HashMap<String, String>,
+    ambient_types: &HashMap<String, String>,
+    type_mode: morpher::TypeMode,
+    extra_headers: &mut Vec<String>,
+) -> Vec<crate::node::IRConditionalClassEffect> {
+    let mut effects = Vec::new();
+    let allocator = Allocator::default();
+    let source_type = SourceType::from_path("snippet.ts")
+        .unwrap_or_default()
+        .with_typescript(true);
+    let parsed = Parser::new(&allocator, source, source_type).parse();
+    if parsed.panicked || !parsed.diagnostics.is_empty() {
+        return effects;
+    }
+    let first = parsed.program.body.first();
+    let expr = match first {
+        Some(Statement::ExpressionStatement(stmt)) => &stmt.expression,
+        _ => return effects,
+    };
+    // Collect top-level ternary expressions: the template's ${...} parts
+    // plus a bare ternary expression.
+    let mut ternaries: Vec<&ConditionalExpression> = Vec::new();
+    match expr {
+        Expression::TemplateLiteral(tpl) => {
+            for part in tpl.expressions.iter() {
+                if let Expression::ConditionalExpression(cond) = part {
+                    ternaries.push(cond);
+                }
+            }
+        }
+        Expression::ConditionalExpression(cond) => ternaries.push(cond),
+        _ => {}
+    }
+    for ternary in ternaries {
+        let on_str = string_branch(&ternary.consequent);
+        let off_str = string_branch(&ternary.alternate);
+        let on_styles = resolve_branch_classes(&on_str, tag, css_rules, tailwind);
+        let off_styles = resolve_branch_classes(&off_str, tag, css_rules, tailwind);
+        if on_styles.is_empty() && off_styles.is_empty() {
+            continue;
+        }
+        let cond_src = &source[ternary.test.span().start as usize..ternary.test.span().end as usize];
+        let mut options = morpher::TranslateOptions::default();
+        options.type_mode = type_mode;
+        options.state_vars = ambient_vars.clone();
+        options.state_types = ambient_types.clone();
+        let cond_cpp = morpher::translate_snippet(cond_src, "snippet.ts", options)
+            .ok()
+            .map(|out| {
+                extra_headers.extend(include_lines(&out.includes));
+                out.body.trim().trim_end_matches(';').trim().to_string()
+            })
+            .unwrap_or_default();
+        if cond_cpp.is_empty() {
+            continue;
+        }
+        effects.push(crate::node::IRConditionalClassEffect {
+            condition: cond_cpp,
+            on_styles,
+            off_styles,
+        });
+    }
+    effects
+}
+
+/// The class string of a ternary branch when it is a plain string literal.
+fn string_branch(expr: &Expression) -> String {
+    match expr {
+        Expression::StringLiteral(lit) => lit.value.to_string(),
+        _ => String::new(),
+    }
+}
+
+/// Resolve a branch's class tokens to CSS declarations: Tailwind first,
+/// then matching non-pseudo stylesheet rules (later winners overwrite).
+fn resolve_branch_classes(
+    class_str: &str,
+    tag: &str,
+    css_rules: &[(String, morph_parser::CssRule)],
+    tailwind: &TailwindResolver,
+) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    let tokens: Vec<String> = class_str
+        .split_whitespace()
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .collect();
+    for token in &tokens {
+        for (prop, val) in tailwind.resolve(token) {
+            out.insert(prop, val);
+        }
+    }
+    for (selector, rule) in css_rules {
+        if selector.contains(":hover") || selector.contains(":active") {
+            continue;
+        }
+        if match_selector_detailed(tag, &tokens, None, &[], selector).is_some() {
+            for (prop, val) in &rule.properties {
+                out.insert(prop.clone(), val.clone());
+            }
+        }
+    }
+    out
 }
 
 /// Collect bare `#include` specs (`<string>`, `"x.h"`) from a snippet's
@@ -1251,6 +1451,9 @@ mod tests {
             &[],
             0,
             &[],
+            &HashMap::new(),
+            &HashMap::new(),
+            &mut Vec::new(),
         );
         assert_eq!(node.style.width, Some(400.0));
 
@@ -1278,6 +1481,9 @@ mod tests {
             &rules,
             0,
             &[],
+            &HashMap::new(),
+            &HashMap::new(),
+            &mut Vec::new(),
         );
         assert_eq!(node.style.width, Some(100.0));
     }
@@ -1425,6 +1631,9 @@ mod tests {
             &[],
             0,
             &[],
+                &HashMap::new(),
+                &HashMap::new(),
+                &mut Vec::new(),
         );
         assert!(node.reactive_class.is_empty());
         let mut props = std::collections::HashMap::new();
@@ -1444,6 +1653,70 @@ mod tests {
             &[],
             0,
             &[],
+                &HashMap::new(),
+                &HashMap::new(),
+                &mut Vec::new(),
+        );
+        assert!(!node.reactive_class.is_empty());
+    }
+
+    #[test]
+    fn template_className_analyzes_ternary_branches() {
+        use morph_parser::{MxComponent, MxSource, StateVar};
+        let mut props = std::collections::HashMap::new();
+        props.insert(
+            "className".to_string(),
+            JsxPropValue::Template(
+                "`header ${theme == \"light\" ? \"bg-white\" : \"bg-gray-900\"}`".to_string(),
+            ),
+        );
+        let source = MxSource {
+            filename: "app.mx".to_string(),
+            imports: Vec::new(),
+            window_config: None,
+            components: vec![MxComponent {
+                name: "App".to_string(),
+                exported: true,
+                params: Vec::new(),
+                jsx: morph_parser::JsxNode::Element {
+                    tag: "div".to_string(),
+                    props,
+                    children: Vec::new(),
+                    self_closing: true,
+                    line: 0,
+                    col: 0,
+                },
+                state_vars: vec![StateVar {
+                    getter: "theme".to_string(),
+                    setter: "setTheme".to_string(),
+                    init: "\"light\"".to_string(),
+                }],
+                effects: Vec::new(),
+                inner_functions: Vec::new(),
+                consts: Vec::new(),
+                console_logs: Vec::new(),
+            }],
+            state_vars: Vec::new(),
+            effects: Vec::new(),
+            inner_functions: Vec::new(),
+            function_declarations: Vec::new(),
+            global_vars: Vec::new(),
+            console_logs: Vec::new(),
+            extra_headers: Vec::new(),
+            cpp_imports: Vec::new(),
+        };
+        let windows = IRBuilder::new().build(&source, &[], &HashMap::new());
+        let node = &windows[0].nodes[0];
+        assert_eq!(node.class_conditional_effects.len(), 1);
+        let fx = &node.class_conditional_effects[0];
+        assert!(fx.condition.contains("__st_theme"), "cond mapped: {}", fx.condition);
+        assert_eq!(
+            fx.on_styles.get("background-color").map(String::as_str),
+            Some("#ffffff")
+        );
+        assert_eq!(
+            fx.off_styles.get("background-color").map(String::as_str),
+            Some("#111827")
         );
         assert!(!node.reactive_class.is_empty());
     }
@@ -1468,6 +1741,9 @@ mod tests {
             &[],
             0,
             &[],
+                &HashMap::new(),
+                &HashMap::new(),
+                &mut Vec::new(),
         );
         assert!((node.style.bg_color[0] - 0xef as f32 / 255.0).abs() < 0.001);
         assert!((node.style.bg_color[1] - 0x44 as f32 / 255.0).abs() < 0.001);
