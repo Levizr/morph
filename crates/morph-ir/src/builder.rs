@@ -460,7 +460,13 @@ fn apply_ua_defaults(style: &mut IRStyle, tag: &str) {
     match tag {
         "h1" => { style.font_size = 32.0; style.font_weight = "bold".into(); }
         "h2" => { style.font_size = 24.0; style.font_weight = "bold".into(); }
-        "button" => { style.display = "inline-block".into(); style.cursor = "pointer".into(); }
+        // Browsers center button labels via the UA stylesheet; Python's
+        // builder carries the same default (text-align: center).
+        "button" => {
+            style.display = "inline-block".into();
+            style.cursor = "pointer".into();
+            style.text_align = "center".into();
+        }
         "input" => { style.display = "inline-block".into(); style.border_width = 1.0; style.border_style = "solid".into(); }
         "img" => { style.display = "inline-block".into(); }
         _ => {}
