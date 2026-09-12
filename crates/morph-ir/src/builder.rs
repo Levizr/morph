@@ -170,6 +170,7 @@ impl IRBuilder {
                 &ambient_vars,
                 &ambient_types,
                 &mut extra_headers,
+                css_keyframes,
             ));
         }
         extra_headers.sort();
@@ -252,6 +253,7 @@ impl IRBuilder {
         ambient_vars: &HashMap<String, String>,
         ambient_types: &HashMap<String, String>,
         extra_headers: &mut Vec<String>,
+        keyframes: &HashMap<String, Vec<morph_parser::CssKeyframe>>,
     ) -> IRNode {
         match jsx {
             morph_parser::JsxNode::Element { tag, props, children, line: _, col: _, .. } => {
@@ -288,6 +290,10 @@ impl IRBuilder {
                     }
                 }
                 declarations.sort();
+                // Winning declarations per bucket, for animation parsing
+                // (Python: matched CSS merged before tailwind/attrs/inline).
+                let mut base_props: HashMap<String, String> = HashMap::new();
+                let mut hover_props: HashMap<String, String> = HashMap::new();
                 for (_, _, prop, val, pseudo) in &declarations {
                     let target = match pseudo {
                         PseudoKind::Base => &mut style,
@@ -295,10 +301,20 @@ impl IRBuilder {
                         PseudoKind::Active => &mut active_style,
                     };
                     apply_css_prop(target, prop, val);
+                    match pseudo {
+                        PseudoKind::Base => {
+                            base_props.insert(prop.clone(), val.clone());
+                        }
+                        PseudoKind::Hover => {
+                            hover_props.insert(prop.clone(), val.clone());
+                        }
+                        PseudoKind::Active => {}
+                    }
                 }
                 if let Some(morph_parser::JsxPropValue::String(cls)) = props.get("className").or_else(|| props.get("class")) {
                     for (prop, val) in self.tailwind.resolve_many(cls) {
                         apply_css_prop(&mut style, &prop, &val);
+                        base_props.insert(prop, val);
                     }
                 }
                 // Presentational hints lose to every stylesheet rule: HTML
@@ -308,6 +324,7 @@ impl IRBuilder {
                     if let Some(morph_parser::JsxPropValue::String(raw)) = props.get("width") {
                         if let Some(px) = parse_length(raw) {
                             style.width = Some(px);
+                            base_props.insert("width".to_string(), raw.clone());
                         }
                     }
                 }
@@ -315,13 +332,17 @@ impl IRBuilder {
                     if let Some(morph_parser::JsxPropValue::String(raw)) = props.get("height") {
                         if let Some(px) = parse_length(raw) {
                             style.height = Some(px);
+                            base_props.insert("height".to_string(), raw.clone());
                         }
                     }
                 }
                 if let Some(morph_parser::JsxPropValue::Style(map)) = props.get("style") {
                     for (prop, val) in map {
                         match val {
-                            morph_parser::StyleValue::Static(s) => { apply_css_prop(&mut style, prop, s); }
+                            morph_parser::StyleValue::Static(s) => {
+                                apply_css_prop(&mut style, prop, s);
+                                base_props.insert(prop.clone(), s.clone());
+                            }
                             morph_parser::StyleValue::Expr(e) => { node.reactive_style.insert(prop.clone(), e.clone()); }
                         }
                     }
@@ -329,6 +350,16 @@ impl IRBuilder {
                 node.style = style;
                 if !hover_style.is_empty_style() { node.hover_style = Some(hover_style); }
                 if !active_style.is_empty_style() { node.active_style = Some(active_style); }
+                // CSS animations from merged declarations; keyframe names
+                // unknown to the build are dropped like browsers do.
+                node.animations = parse_animations(&base_props)
+                    .into_iter()
+                    .filter(|anim| keyframes.contains_key(&anim.name))
+                    .collect();
+                node.hover_animations = parse_animations(&hover_props)
+                    .into_iter()
+                    .filter(|anim| keyframes.contains_key(&anim.name))
+                    .collect();
                 for (k, v) in props {
                     if let morph_parser::JsxPropValue::Fn(f) = v {
                         if let Some(trigger) = event_trigger(k) {
@@ -405,6 +436,7 @@ impl IRBuilder {
                         ambient_vars,
                         ambient_types,
                         extra_headers,
+                        keyframes,
                     );
                     if child_node.node_type == "__text__" && child_node.text_content.trim().is_empty() {
                         continue;
@@ -424,6 +456,7 @@ impl IRBuilder {
                         ambient_vars,
                         ambient_types,
                         extra_headers,
+                        keyframes,
                     ));
                 }
                 node
@@ -450,6 +483,7 @@ impl IRBuilder {
                         ambient_vars,
                         ambient_types,
                         extra_headers,
+                        keyframes,
                     ));
                 }
                 for c in else_branch.iter() {
@@ -461,6 +495,7 @@ impl IRBuilder {
                         ambient_vars,
                         ambient_types,
                         extra_headers,
+                        keyframes,
                     ));
                 }
                 node
@@ -477,6 +512,7 @@ impl IRBuilder {
                     ambient_vars,
                     ambient_types,
                     extra_headers,
+                    keyframes,
                 )));
                 node
             }
@@ -1250,6 +1286,209 @@ fn parse_box_sides(s: &str) -> Option<[f32; 4]> {
     })
 }
 
+/// Parse a CSS time (`0.3s` / `500ms` / unitless seconds) to seconds.
+fn parse_css_time(raw: &str) -> Option<f32> {
+    let s = raw.trim().to_lowercase();
+    if let Some(ms) = s.strip_suffix("ms") {
+        return ms.trim().parse::<f32>().ok().map(|v| v / 1000.0);
+    }
+    if let Some(sec) = s.strip_suffix('s') {
+        return sec.trim().parse::<f32>().ok();
+    }
+    s.parse::<f32>().ok()
+}
+
+fn map_easing(low: &str) -> Option<&'static str> {
+    // The runtime has no separate `ease` curve: it is ease-in-out,
+    // mirroring Python's _EASING_KEYWORDS.
+    Some(match low {
+        "linear" => "linear",
+        "ease" | "ease-in-out" => "ease-in-out",
+        "ease-in" => "ease-in",
+        "ease-out" => "ease-out",
+        _ => return None,
+    })
+}
+
+/// Split `animation: a, b` on top-level commas (ignores parens).
+fn split_animation_list(raw: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut depth = 0i32;
+    let mut cur = String::new();
+    for ch in raw.chars() {
+        match ch {
+            '(' => {
+                depth += 1;
+                cur.push(ch);
+            }
+            ')' => {
+                depth -= 1;
+                cur.push(ch);
+            }
+            ',' if depth == 0 => {
+                if !cur.trim().is_empty() {
+                    parts.push(cur.trim().to_string());
+                }
+                cur = String::new();
+            }
+            _ => cur.push(ch),
+        }
+    }
+    if !cur.trim().is_empty() {
+        parts.push(cur.trim().to_string());
+    }
+    parts
+}
+
+/// Parse one comma-separated `animation` shorthand value. Mirrors Python's
+/// `_parse_animation_component` (first time = duration, second = delay,
+/// bare numbers = iteration count, first unclassified token = name).
+fn parse_animation_component(raw: &str) -> crate::node::IRAnimation {
+    let mut anim = crate::node::IRAnimation::default();
+    let mut unclassified: Vec<String> = Vec::new();
+    for tok in raw.split_whitespace() {
+        let low = tok.to_lowercase();
+        if let Some(easing) = map_easing(&low) {
+            anim.easing = easing.to_string();
+        } else if matches!(low.as_str(), "normal" | "reverse" | "alternate" | "alternate-reverse") {
+            anim.direction = low;
+        } else if matches!(low.as_str(), "none" | "forwards" | "backwards" | "both") {
+            anim.fill_mode = low;
+        } else if matches!(low.as_str(), "running" | "paused") {
+            anim.play_state = low;
+        } else if low == "infinite" {
+            anim.iterations = -1.0;
+        } else if low.parse::<f32>().is_ok() {
+            // Fractional counts (2.5) must not misparse as times.
+            anim.iterations = low.parse::<f32>().unwrap_or(1.0);
+        } else if let Some(t) = parse_css_time(&low) {
+            if anim.duration == 0.0 {
+                anim.duration = t;
+            } else {
+                anim.delay = t;
+            }
+        } else if !low.contains('(') {
+            // Unsupported easing functions (cubic-bezier, steps) ignored.
+            unclassified.push(tok.to_string());
+        }
+    }
+    if !unclassified.is_empty() {
+        anim.name = unclassified.into_iter().next().unwrap_or_default();
+    }
+    anim
+}
+
+fn parse_animation_shorthand(raw: &str) -> Vec<crate::node::IRAnimation> {
+    split_animation_list(raw)
+        .iter()
+        .map(|part| parse_animation_component(part))
+        .filter(|anim| !anim.name.is_empty())
+        .collect()
+}
+
+const ANIMATION_LONGHANDS: &[&str] = &[
+    "animation-name",
+    "animation-duration",
+    "animation-timing-function",
+    "animation-delay",
+    "animation-iteration-count",
+    "animation-direction",
+    "animation-fill-mode",
+    "animation-play-state",
+];
+
+fn apply_animation_longhand(
+    anim: &mut crate::node::IRAnimation,
+    prop: &str,
+    value: &str,
+) -> bool {
+    let val = value.trim().to_lowercase();
+    match prop {
+        "animation-name" => anim.name = val,
+        "animation-duration" => {
+            anim.duration = parse_css_time(&val).unwrap_or(anim.duration);
+            if parse_css_time(&val).is_none() {
+                return false;
+            }
+        }
+        "animation-timing-function" => {
+            if let Some(easing) = map_easing(&val) {
+                anim.easing = easing.to_string();
+            }
+        }
+        "animation-delay" => {
+            if parse_css_time(&val).is_none() {
+                return false;
+            }
+            anim.delay = parse_css_time(&val).unwrap_or(anim.delay);
+        }
+        "animation-iteration-count" => {
+            if val == "infinite" {
+                anim.iterations = -1.0;
+            } else if let Ok(n) = val.parse::<f32>() {
+                anim.iterations = n;
+            } else {
+                return false;
+            }
+        }
+        "animation-direction" => {
+            if matches!(val.as_str(), "normal" | "reverse" | "alternate" | "alternate-reverse") {
+                anim.direction = val;
+            }
+        }
+        "animation-fill-mode" => {
+            if matches!(val.as_str(), "none" | "forwards" | "backwards" | "both") {
+                anim.fill_mode = val;
+            }
+        }
+        "animation-play-state" => {
+            if matches!(val.as_str(), "running" | "paused") {
+                anim.play_state = val;
+            }
+        }
+        _ => {}
+    }
+    true
+}
+
+/// Build a node's animation list from merged CSS declarations: the
+/// `animation` shorthand first, then longhands as per-index overrides
+/// (CSS list semantics: the last value repeats). Animations without a
+/// name are dropped; play-state alone never creates one.
+fn parse_animations(merged: &HashMap<String, String>) -> Vec<crate::node::IRAnimation> {
+    let mut anims: Vec<crate::node::IRAnimation> = merged
+        .get("animation")
+        .map(|raw| parse_animation_shorthand(raw))
+        .unwrap_or_default();
+    let mut longhands: Vec<(&str, Vec<String>)> = Vec::new();
+    for prop in ANIMATION_LONGHANDS {
+        if let Some(raw) = merged.get(*prop) {
+            longhands.push((prop, split_animation_list(raw)));
+        }
+    }
+    if longhands.is_empty() {
+        return anims.into_iter().filter(|a| !a.name.is_empty()).collect();
+    }
+    let count = longhands
+        .iter()
+        .map(|(_, values)| values.len())
+        .max()
+        .unwrap_or(0)
+        .max(anims.len());
+    while anims.len() < count {
+        anims.push(crate::node::IRAnimation::default());
+    }
+    for (prop, values) in &longhands {
+        for (i, anim) in anims.iter_mut().enumerate().take(count) {
+            let val = values.get(i).or_else(|| values.last());
+            if let Some(val) = val {
+                apply_animation_longhand(anim, prop, val);
+            }
+        }
+    }
+    anims.into_iter().filter(|a| !a.name.is_empty()).collect()
+}
+
 fn parse_length(s: &str) -> Option<f32> {
     let s = s.trim();
     if let Some(num) = s.strip_suffix("px") { return num.trim().parse().ok(); }
@@ -1454,6 +1693,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             &mut Vec::new(),
+            &HashMap::new(),
         );
         assert_eq!(node.style.width, Some(400.0));
 
@@ -1484,6 +1724,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             &mut Vec::new(),
+            &HashMap::new(),
         );
         assert_eq!(node.style.width, Some(100.0));
     }
@@ -1634,6 +1875,7 @@ mod tests {
                 &HashMap::new(),
                 &HashMap::new(),
                 &mut Vec::new(),
+            &HashMap::new(),
         );
         assert!(node.reactive_class.is_empty());
         let mut props = std::collections::HashMap::new();
@@ -1656,6 +1898,7 @@ mod tests {
                 &HashMap::new(),
                 &HashMap::new(),
                 &mut Vec::new(),
+            &HashMap::new(),
         );
         assert!(!node.reactive_class.is_empty());
     }
@@ -1722,6 +1965,89 @@ mod tests {
     }
 
     #[test]
+    fn animation_shorthand_parses_and_filters_unknown_keyframes() {
+        use morph_parser::{CssKeyframe, CssRule};
+        let rules = vec![(
+            ".pulse".to_string(),
+            CssRule {
+                selector: ".pulse".to_string(),
+                properties: [(
+                    "animation".to_string(),
+                    "pulse 2s ease-in-out infinite".to_string(),
+                )]
+                .into_iter()
+                .collect(),
+            },
+        )];
+        let mut keyframes = HashMap::new();
+        keyframes.insert("pulse".to_string(), Vec::<CssKeyframe>::new());
+        let mut props = std::collections::HashMap::new();
+        props.insert(
+            "className".to_string(),
+            JsxPropValue::String("pulse".to_string()),
+        );
+        let jsx = morph_parser::JsxNode::Element {
+            tag: "div".to_string(),
+            props,
+            children: Vec::new(),
+            self_closing: true,
+            line: 0,
+            col: 0,
+        };
+        let builder = IRBuilder::new();
+        let node = builder.build_node(
+            &jsx,
+            &rules,
+            0,
+            &[],
+            &HashMap::new(),
+            &HashMap::new(),
+            &mut Vec::new(),
+            &keyframes,
+        );
+        assert_eq!(node.animations.len(), 1);
+        let anim = &node.animations[0];
+        assert_eq!(anim.name, "pulse");
+        assert_eq!(anim.duration, 2.0);
+        assert_eq!(anim.easing, "ease-in-out");
+        assert_eq!(anim.iterations, -1.0);
+        // Unknown keyframe names are dropped like browsers do.
+        let rules = vec![(
+            ".ghost".to_string(),
+            CssRule {
+                selector: ".ghost".to_string(),
+                properties: [("animation".to_string(), "nope 1s linear infinite".to_string())]
+                    .into_iter()
+                    .collect(),
+            },
+        )];
+        let mut props = std::collections::HashMap::new();
+        props.insert(
+            "className".to_string(),
+            JsxPropValue::String("ghost".to_string()),
+        );
+        let jsx = morph_parser::JsxNode::Element {
+            tag: "div".to_string(),
+            props,
+            children: Vec::new(),
+            self_closing: true,
+            line: 0,
+            col: 0,
+        };
+        let node = builder.build_node(
+            &jsx,
+            &rules,
+            0,
+            &[],
+            &HashMap::new(),
+            &HashMap::new(),
+            &mut Vec::new(),
+            &keyframes,
+        );
+        assert!(node.animations.is_empty());
+    }
+
+    #[test]
     fn tailwind_class_names_flow_into_style() {
         let builder = IRBuilder::new();
         let mut props = std::collections::HashMap::new();
@@ -1744,6 +2070,7 @@ mod tests {
                 &HashMap::new(),
                 &HashMap::new(),
                 &mut Vec::new(),
+            &HashMap::new(),
         );
         assert!((node.style.bg_color[0] - 0xef as f32 / 255.0).abs() < 0.001);
         assert!((node.style.bg_color[1] - 0x44 as f32 / 255.0).abs() < 0.001);

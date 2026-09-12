@@ -40,25 +40,43 @@ pub fn parse_css(source: &str) -> Result<CssData> {
             };
             let entry = keyframes.entry(name).or_default();
             for kf in &kf_rule.keyframes {
-                let offset = kf.selectors.first().and_then(|s| match s {
-                    lightningcss::rules::keyframes::KeyframeSelector::Percentage(p) => Some(p.0),
-                    lightningcss::rules::keyframes::KeyframeSelector::From => Some(0.0),
-                    lightningcss::rules::keyframes::KeyframeSelector::To => Some(1.0),
-                    _ => None,
-                });
-                if let Some(offset) = offset {
-                    let mut properties = HashMap::new();
-                    for prop in &kf.declarations.declarations {
-                        let name = prop.property_id().to_css_string(PrinterOptions::default()).unwrap_or_default();
-                        let value = prop.value_to_css_string(PrinterOptions::default()).unwrap_or_default();
-                        properties.insert(name, value);
+                // A grouped block (`0%, 100% { ... }`) fans out to one
+                // entry per selector; duplicate offsets merge with
+                // later blocks winning per-property (mirrors Python's
+                // `_merge_keyframe`).
+                let mut offsets = Vec::new();
+                for s in &kf.selectors {
+                    let offset = match s {
+                        lightningcss::rules::keyframes::KeyframeSelector::Percentage(p) => Some(p.0),
+                        lightningcss::rules::keyframes::KeyframeSelector::From => Some(0.0),
+                        lightningcss::rules::keyframes::KeyframeSelector::To => Some(1.0),
+                        _ => None,
+                    };
+                    if let Some(offset) = offset {
+                        offsets.push(offset);
                     }
-                    for prop in &kf.declarations.important_declarations {
-                        let name = prop.property_id().to_css_string(PrinterOptions::default()).unwrap_or_default();
-                        let value = prop.value_to_css_string(PrinterOptions::default()).unwrap_or_default();
-                        properties.insert(name, value);
+                }
+                if offsets.is_empty() {
+                    continue;
+                }
+                let mut properties = HashMap::new();
+                for prop in &kf.declarations.declarations {
+                    let name = prop.property_id().to_css_string(PrinterOptions::default()).unwrap_or_default();
+                    let value = prop.value_to_css_string(PrinterOptions::default()).unwrap_or_default();
+                    properties.insert(name, value);
+                }
+                for prop in &kf.declarations.important_declarations {
+                    let name = prop.property_id().to_css_string(PrinterOptions::default()).unwrap_or_default();
+                    let value = prop.value_to_css_string(PrinterOptions::default()).unwrap_or_default();
+                    properties.insert(name, value);
+                }
+                for offset in offsets {
+                    match entry.iter_mut().find(|kf| (kf.offset - offset).abs() < 1e-9) {
+                        Some(existing) => {
+                            existing.properties.extend(properties.clone());
+                        }
+                        None => entry.push(CssKeyframe { offset, properties: properties.clone() }),
                     }
-                    entry.push(CssKeyframe { offset, properties });
                 }
             }
         }
@@ -67,3 +85,32 @@ pub fn parse_css(source: &str) -> Result<CssData> {
     Ok(CssData { rules, keyframes })
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn grouped_keyframe_selectors_fan_out() {
+        let data = parse_css(
+            "@keyframes bounce-x { 0%, 100% { left: 0; } 25% { left: 100%; } 50% { left: 30%; } }",
+        )
+        .unwrap();
+        let frames = &data.keyframes["bounce-x"];
+        assert_eq!(frames.len(), 4);
+        let offsets: Vec<f32> = frames.iter().map(|kf| kf.offset).collect();
+        assert!(offsets.contains(&0.0));
+        assert!(offsets.contains(&1.0));
+    }
+
+    #[test]
+    fn duplicate_keyframe_offsets_merge_later_wins() {
+        let data = parse_css(
+            "@keyframes dupe { 50% { left: 10px; top: 1px; } 50% { left: 20px; } }",
+        )
+        .unwrap();
+        let frames = &data.keyframes["dupe"];
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].properties.get("left").map(String::as_str), Some("20px"));
+        assert_eq!(frames[0].properties.get("top").map(String::as_str), Some("1px"));
+    }
+}
