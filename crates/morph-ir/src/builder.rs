@@ -9,6 +9,7 @@ use crate::css_registry;
 use crate::node::{IRWindow, IRNode, IREvent};
 use crate::style::IRStyle;
 use crate::tailwind::TailwindResolver;
+use crate::transforms;
 
 pub struct IRBuilder {
     tailwind: TailwindResolver,
@@ -266,7 +267,9 @@ impl IRBuilder {
                 let mut style = IRStyle::new();
                 apply_ua_defaults(&mut style, tag);
                 let mut hover_style = IRStyle::new();
+                for (prop, val) in ua_hover_defaults(tag) { apply_css_prop(&mut hover_style, prop, val); }
                 let mut active_style = IRStyle::new();
+                for (prop, val) in ua_active_defaults(tag) { apply_css_prop(&mut active_style, prop, val); }
                 let (classes, id) = element_classes_id(props);
                 // Cascade: collect every matching declaration with its
                 // specificity and source order, then apply weakest-first so
@@ -575,20 +578,143 @@ fn needs_layout(val: &str) -> bool {
     v.ends_with('%') || v.ends_with("vh") || v.ends_with("vw")
 }
 
-fn apply_ua_defaults(style: &mut IRStyle, tag: &str) {
+/// User-agent default styles for HTML tags (lowest priority — overridden by
+/// every later cascade stage). Mirrors Python's `_UA_DEFAULTS` verbatim; the
+/// `color: #010101` near-black sentinel on form controls signals "explicit
+/// value, never inherit the parent's color".
+fn ua_defaults(tag: &str) -> &'static [(&'static str, &'static str)] {
     match tag {
-        "h1" => { style.font_size = 32.0; style.font_weight = "bold".into(); }
-        "h2" => { style.font_size = 24.0; style.font_weight = "bold".into(); }
-        // Browsers center button labels via the UA stylesheet; Python's
-        // builder carries the same default (text-align: center).
-        "button" => {
-            style.display = "inline-block".into();
-            style.cursor = "pointer".into();
-            style.text_align = "center".into();
-        }
-        "input" => { style.display = "inline-block".into(); style.border_width = 1.0; style.border_style = "solid".into(); }
-        "img" => { style.display = "inline-block".into(); }
-        _ => {}
+        // ── Document ────────────────────────────────────────────
+        "html" => &[("display", "block")],
+        "body" => &[("display", "block"), ("padding", "8px")],
+
+        // ── Headings ────────────────────────────────────────────
+        "h1" => &[("display", "block"), ("font-size", "32px"), ("font-weight", "bold"), ("margin", "21.44px 0")],
+        "h2" => &[("display", "block"), ("font-size", "24px"), ("font-weight", "bold"), ("margin", "19.92px 0")],
+        "h3" => &[("display", "block"), ("font-size", "18.72px"), ("font-weight", "bold"), ("margin", "18.72px 0")],
+        "h4" => &[("display", "block"), ("font-size", "16px"), ("font-weight", "bold"), ("margin", "21.28px 0")],
+        "h5" => &[("display", "block"), ("font-size", "13.28px"), ("font-weight", "bold"), ("margin", "22.18px 0")],
+        "h6" => &[("display", "block"), ("font-size", "10.72px"), ("font-weight", "bold"), ("margin", "24.97px 0")],
+
+        // ── Grouping ────────────────────────────────────────────
+        "div" => &[("display", "block")],
+        "p" => &[("display", "block"), ("margin", "16px 0")],
+        "pre" => &[("display", "block"), ("margin", "16px 0")],
+        "blockquote" => &[("display", "block"), ("margin", "16px 40px")],
+        "hr" => &[("display", "block")],
+        "figure" => &[("display", "block"), ("margin", "16px 40px")],
+        "figcaption" => &[("display", "block")],
+        "main" => &[("display", "block")],
+        "header" => &[("display", "block")],
+        "footer" => &[("display", "block")],
+        "nav" => &[("display", "block")],
+        "section" => &[("display", "block")],
+        "article" => &[("display", "block")],
+        "aside" => &[("display", "block")],
+
+        // ── Lists ───────────────────────────────────────────────
+        "ul" => &[("display", "block"), ("margin", "16px 0")],
+        "ol" => &[("display", "block"), ("margin", "16px 0")],
+        "li" => &[("display", "block")],
+        "dl" => &[("display", "block"), ("margin", "16px 0")],
+        "dt" => &[("display", "block")],
+        "dd" => &[("display", "block"), ("margin-left", "40px")],
+
+        // ── Text-level ──────────────────────────────────────────
+        "span" => &[("display", "inline")],
+        "a" => &[("display", "inline"), ("color", "#0000ee"), ("cursor", "pointer")],
+        "strong" => &[("font-weight", "bold")],
+        "b" => &[("font-weight", "bold")],
+        "small" => &[("font-size", "13.28px")],
+        "mark" => &[("background-color", "#ffff00"), ("color", "#000000")],
+        "sub" => &[("font-size", "13.28px")],
+        "sup" => &[("font-size", "13.28px")],
+        "code" => &[("display", "inline")],
+        "kbd" => &[("display", "inline")],
+        "samp" => &[("display", "inline")],
+        "em" => &[("display", "inline")],
+        "i" => &[("display", "inline")],
+        "ins" => &[("display", "inline")],
+        "u" => &[("display", "inline")],
+        "del" => &[("display", "inline")],
+        "s" => &[("display", "inline")],
+        "q" => &[("display", "inline")],
+
+        // ── Embedded ────────────────────────────────────────────
+        "img" => &[("display", "inline-block")],
+
+        // ── Forms ───────────────────────────────────────────────
+        "button" => &[
+            ("display", "inline-block"),
+            ("background-color", "#efefef"),
+            ("color", "#010101"),
+            ("border-width", "1px"),
+            ("border-style", "solid"),
+            ("border-color", "#767676"),
+            ("border-radius", "4px"),
+            ("padding", "1px 6px"),
+            ("font-size", "13.33px"),
+            ("text-align", "center"),
+        ],
+        "input" => &[
+            ("display", "inline-block"),
+            ("background-color", "#ffffff"),
+            ("color", "#010101"),
+            ("border-width", "1px"),
+            ("border-style", "solid"),
+            ("border-color", "#767676"),
+            ("border-radius", "4px"),
+            ("padding", "1px 6px"),
+            ("font-size", "13.33px"),
+            ("cursor", "text"),
+        ],
+        "select" => &[("display", "inline-block")],
+        "textarea" => &[("display", "inline-block")],
+        "label" => &[("display", "inline")],
+        "fieldset" => &[("display", "block"), ("border-width", "2px"), ("border-style", "groove"), ("margin", "0 2px"), ("padding", "5px 12px 10px")],
+        "legend" => &[("display", "block"), ("padding", "0 2px")],
+        "form" => &[("display", "block")],
+
+        // ── Tables ──────────────────────────────────────────────
+        "table" => &[("display", "block")],
+        "caption" => &[("display", "block")],
+        "thead" => &[("display", "block")],
+        "tbody" => &[("display", "block")],
+        "tfoot" => &[("display", "block")],
+        "tr" => &[("display", "block")],
+        "td" => &[("display", "block")],
+        "th" => &[("display", "block"), ("font-weight", "bold"), ("text-align", "center")],
+
+        // ── Interactive ─────────────────────────────────────────
+        "details" => &[("display", "block")],
+        "summary" => &[("display", "block")],
+        "dialog" => &[("display", "block")],
+
+        _ => &[],
+    }
+}
+
+/// User-agent default :hover styles (lowest priority — merged FIRST, any
+/// matching user `:hover` rule overrides per-property, like browsers).
+fn ua_hover_defaults(tag: &str) -> &'static [(&'static str, &'static str)] {
+    match tag {
+        "button" => &[("background-color", "#e6e6e6")],
+        _ => &[],
+    }
+}
+
+/// User-agent default :active styles (pressed state — darker face + border,
+/// mirroring the browser's buttonface → buttonhighlight/buttonshadow shift).
+fn ua_active_defaults(tag: &str) -> &'static [(&'static str, &'static str)] {
+    match tag {
+        "button" => &[("background-color", "#d4d4d4"), ("border-color", "#5a5a5a")],
+        _ => &[],
+    }
+}
+
+fn apply_ua_defaults(style: &mut IRStyle, tag: &str) {
+    for (prop, val) in ua_defaults(tag) {
+        apply_css_prop(style, prop, val);
     }
 }
 
@@ -1189,6 +1315,32 @@ fn apply_css_prop(style: &mut IRStyle, prop: &str, val: &str) -> Option<&'static
         "cursor" => { style.cursor = val.to_string(); Some("cursor") }
         "overflow" => { style.overflow = val.to_string(); Some("overflow") }
         "opacity" => if let Ok(v) = val.trim().parse::<f32>() { style.opacity = v; Some("opacity") } else { None },
+        "transform" => {
+            // Resolve at build time so the emitted style carries a concrete
+            // matrix (Python resolves via its layout engine in dev; prod leaves
+            // it unresolved, so Rust is strictly a superset here).
+            match transforms::parse_transform(val) {
+                Some(ops) => {
+                    style.transform_ops = Some(ops.clone());
+                    if !ops.is_empty() {
+                        style.transform_matrix =
+                            Some(transforms::compose_transform(&ops, 0.0, 0.0));
+                    }
+                    Some("transform")
+                }
+                None => None,
+            }
+        }
+        "transform-origin" => {
+            match transforms::parse_transform_origin(val) {
+                Some((raw, resolved)) => {
+                    style.transform_origin = Some(raw);
+                    style.transform_origin_resolved = resolved;
+                    Some("transform_origin")
+                }
+                None => None,
+            }
+        }
         "z-index" => if let Ok(v) = val.parse::<i32>() { style.z_index = Some(v); Some("z_index") } else { None },
         "border-width" => if let Some(v) = parse_length(val) { style.border_width = v; Some("border_width") } else { None },
         "border-color" => if let Some(c) = parse_color(val) { style.border_color = c; Some("border_color") } else { None },

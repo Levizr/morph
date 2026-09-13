@@ -7,6 +7,7 @@ pub mod style;
 pub mod node;
 pub mod css_registry;
 pub mod tailwind;
+pub mod transforms;
 pub mod builder;
 
 pub use style::IRStyle;

@@ -622,16 +622,19 @@ fn set_style(node: &IRNode, indent: &str, parent: Option<&IRStyle>, features: &s
     if s.box_sizing != "content-box" { lines.push(format!("{ind}.boxSizing = \"{}\";", s.box_sizing)); }
     if s.text_align != "left" { lines.push(format!("{ind}.textAlign = \"{}\";", s.text_align)); }
 
-    // Long-form transform: emit via runtime parser so % and functions resolve
-    // against the element box at layout time (matches Python's resolved matrix).
+    // ── TRANSFORM ──
     if features.contains("transform") {
-        if let Some(ops) = &s.transform_ops {
-            if let Some((name, args)) = ops.first() {
-                if name == "rawcss" {
-                    let css = args.first().map(|v| format!("{}", v)).unwrap_or_default();
-                    // placeholder (raw transform handled via keyframes); avoid emitting invalid float parse
-                    let _ = css;
-                }
+        if let Some(m) = s.transform_matrix {
+            lines.push(format!("{ind}transformSet = true;"));
+            for (i, v) in m.iter().enumerate() {
+                lines.push(format!("{ind}matrix[{i}] = {};", fmt(*v)));
+            }
+        }
+        if let Some(o) = s.transform_origin_resolved {
+            if o != (0.5, 0.5) {
+                lines.push(format!("{ind}originSet = true;"));
+                lines.push(format!("{ind}originX = {};", fmt(o.0)));
+                lines.push(format!("{ind}originY = {};", fmt(o.1)));
             }
         }
     }
@@ -774,6 +777,23 @@ fn emit_hover_style(node: &IRNode, indent: &str, features: &std::collections::Ha
     if features.contains("cursor") {
         if s.cursor != "default" && !s.cursor.is_empty() && s.cursor != base.cursor { o.push(format!("{hv}->cursor = \"{}\";", s.cursor)); }
     }
+    if features.contains("transform") {
+        if let Some(m) = s.transform_matrix {
+            if s.transform_matrix != base.transform_matrix {
+                o.push(format!("{hv}->transformSet = true;"));
+                for (i, v) in m.iter().enumerate() {
+                    o.push(format!("{hv}->matrix[{i}] = {};", fmt(*v)));
+                }
+            }
+        }
+        if let (Some(or), Some(bor)) = (s.transform_origin_resolved, base.transform_origin_resolved) {
+            if or != bor {
+                o.push(format!("{hv}->originSet = true;"));
+                o.push(format!("{hv}->originX = {};", fmt(or.0)));
+                o.push(format!("{hv}->originY = {};", fmt(or.1)));
+            }
+        }
+    }
     if o.is_empty() { return String::new(); }
     let mut lines = vec![format!("{} = new MorphStyle(); // delta only", hv)];
     for l in o { lines.push(format!("{indent}{l}")); }
@@ -803,6 +823,23 @@ fn emit_active_style(node: &IRNode, indent: &str, features: &std::collections::H
         o.push(format!("{hv}->zIndexSet = true;"));
     }
     if features.contains("opacity") && (s.opacity - 1.0).abs() > f32::EPSILON && s.opacity != base.opacity { o.push(format!("{hv}->opacity = {};", fmt(s.opacity))); }
+    if features.contains("transform") {
+        if let Some(m) = s.transform_matrix {
+            if s.transform_matrix != base.transform_matrix {
+                o.push(format!("{hv}->transformSet = true;"));
+                for (i, v) in m.iter().enumerate() {
+                    o.push(format!("{hv}->matrix[{i}] = {};", fmt(*v)));
+                }
+            }
+        }
+        if let (Some(or), Some(bor)) = (s.transform_origin_resolved, base.transform_origin_resolved) {
+            if or != bor {
+                o.push(format!("{hv}->originSet = true;"));
+                o.push(format!("{hv}->originX = {};", fmt(or.0)));
+                o.push(format!("{hv}->originY = {};", fmt(or.1)));
+            }
+        }
+    }
     if o.is_empty() { return String::new(); }
     let mut lines = vec![format!("{} = new MorphStyle(); // delta only", hv)];
     for l in o { lines.push(format!("{indent}{l}")); }

@@ -45,7 +45,7 @@ pub struct IRStyle {
     pub scrollbar_thumb_color: [f32; 4],
     pub scrollbar_border_radius: f32,
     // ── Transform (feature: transform) ───────────────────────────────
-    pub transform_ops: Option<Vec<(String, Vec<f32>)>>,
+    pub transform_ops: Option<Vec<crate::transforms::TransformOp>>,
     pub transform_matrix: Option<[f32; 16]>,
     pub transform_origin: Option<((f32, bool), (f32, bool))>,
     pub transform_origin_resolved: Option<(f32, f32)>,
@@ -118,5 +118,7 @@ impl IRStyle {
             && self.right.is_none()
             && self.top.is_none()
             && self.bottom.is_none()
+            && self.transform_matrix.is_none()
+            && self.transform_origin.is_none()
     }
 }
