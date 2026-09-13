@@ -3,13 +3,15 @@ use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
 use std::collections::HashMap;
 
-pub mod style;
-pub mod node;
+pub mod builder;
 pub mod css_registry;
+pub mod node;
+pub mod serializer;
+pub mod style;
 pub mod tailwind;
 pub mod transforms;
-pub mod builder;
 
-pub use style::IRStyle;
-pub use node::{IRNode, IRWindow, IREvent, IRAnimation, IRKeyframe, IRConditionalClassEffect};
 pub use builder::IRBuilder;
+pub use node::{IRAnimation, IRConditionalClassEffect, IREvent, IRKeyframe, IRNode, IRWindow};
+pub use serializer::IRSerializer;
+pub use style::IRStyle;

@@ -56,6 +56,7 @@ impl IRStyle {
         Self {
             bg_color: [0.0, 0.0, 0.0, 0.0],
             color: [0.0, 0.0, 0.0, 1.0],
+            border_color: [0.0, 0.0, 0.0, 1.0],
             width: None,
             height: None,
             font_size: 16.0,

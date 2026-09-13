@@ -10,6 +10,10 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tera = { workspace = true }
 morph-ir = { path = "../morph-ir" }
+morpher = { path = "../morpher" }
+
+[dev-dependencies]
+morph-parser = { path = "../morph-parser" }
 
 [lints]
 workspace = true

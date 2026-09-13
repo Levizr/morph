@@ -197,24 +197,7 @@ pub fn run(
         std::env::var("MORPH_CXX").ok().filter(|v| !v.is_empty())
     };
     // Find runtime dir (for headers)
-    let runtime_dir = {
-        let mut candidates = vec![
-            cwd.join("runtime").join("cpp"),
-            cwd.join("../runtime").join("cpp"),
-            cwd.join("../../runtime").join("cpp"),
-            cwd.join("../../../runtime").join("cpp"),
-            cwd.join("../../../../runtime").join("cpp"),
-            std::path::PathBuf::from("runtime/cpp"),
-        ];
-        if let Ok(exe) = std::env::current_exe() {
-            if let Some(dir) = exe.parent() {
-                candidates.push(dir.join("../runtime/cpp"));
-                candidates.push(dir.join("../../runtime/cpp"));
-                candidates.push(dir.join("../../../runtime/cpp"));
-            }
-        }
-        candidates.into_iter().find(|p| p.join("core/window.h").exists() || p.join("include").exists() || p.exists()).unwrap_or_else(|| cwd.join("runtime/cpp"))
-    };
+    let runtime_dir = morph_build::find_runtime_dir(&cwd);
     let compiler = morph_build::Compiler::new(cxx_override.clone()).silent();
     let compiler_name = cxx_override.unwrap_or_else(morph_build::detect_compiler);
     let binary_path = output_dir.join(format!("{}{}", clean_name, morph_build::exe_suffix()));

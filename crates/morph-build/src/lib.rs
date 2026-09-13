@@ -1,4 +1,8 @@
 pub mod css_fetch;
+pub mod dev;
+pub mod devrt;
+pub mod ipc;
+pub mod logic;
 pub mod platform;
 pub mod static_deps;
 pub mod upx;
@@ -12,6 +16,30 @@ pub use platform::{
 
 pub fn detect_compiler() -> String {
     pick_cpp()
+}
+
+/// Locate the runtime sources (`runtime/cpp`) from a project directory,
+/// mirroring the candidate search the build command uses.
+pub fn find_runtime_dir(cwd: &Path) -> PathBuf {
+    let mut candidates = vec![
+        cwd.join("runtime").join("cpp"),
+        cwd.join("../runtime").join("cpp"),
+        cwd.join("../../runtime").join("cpp"),
+        cwd.join("../../../runtime").join("cpp"),
+        cwd.join("../../../../runtime").join("cpp"),
+        PathBuf::from("runtime/cpp"),
+    ];
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("../runtime/cpp"));
+            candidates.push(dir.join("../../runtime/cpp"));
+            candidates.push(dir.join("../../../runtime/cpp"));
+        }
+    }
+    candidates
+        .into_iter()
+        .find(|p| p.join("core/window.h").exists() || p.join("include").exists() || p.exists())
+        .unwrap_or_else(|| cwd.join("runtime/cpp"))
 }
 
 fn which(bin: &str) -> bool {
@@ -382,44 +410,6 @@ impl Compiler {
 
         if !status.success() {
             anyhow::bail!("compilation failed with status: {}", status);
-        }
-        Ok(())
-    }
-
-    /// Compile shared library for hot-reload (dev mode)
-    pub fn compile_shared(
-        &self,
-        source_path: &Path,
-        output_path: &Path,
-        runtime_dir: &Path,
-    ) -> Result<()> {
-        let mut cmd = vec![self.gpp.clone()];
-        cmd.push("-std=c++20".into());
-        cmd.push("-O2".into());
-        cmd.push("-fPIC".into());
-        cmd.push(shared_lib_flag().into());
-        cmd.push(format!("-I{}", runtime_dir.display()));
-        cmd.push(source_path.display().to_string());
-        cmd.push("-o".into());
-        cmd.push(output_path.display().to_string());
-        // Minimal libs for shared
-        if is_macos() {
-            cmd.extend(["-framework".into(), "Cocoa".into()]);
-        } else if !is_windows() {
-            cmd.extend(["-lGL".into(), "-lX11".into()]);
-        }
-
-        if !self.silent {
-            println!("  $ {}", cmd.join(" "));
-        }
-
-        let status = std::process::Command::new(&cmd[0])
-            .args(&cmd[1..])
-            .status()
-            .with_context(|| format!("failed to execute compiler: {}", cmd[0]))?;
-
-        if !status.success() {
-            anyhow::bail!("shared compilation failed: {}", status);
         }
         Ok(())
     }

@@ -16,6 +16,8 @@ venv/
 .venv/
 target/
 runtime/cpp/dev/build/
+runtime/bin/
+runtime/cpp/dev/.devrt_source_hash
 
 my-app
 test.py

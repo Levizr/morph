@@ -70,7 +70,7 @@ impl Default for IRNode {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct IRWindow {
     pub window_id: String,
     pub title: String,

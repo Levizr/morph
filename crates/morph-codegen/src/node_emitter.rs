@@ -15,7 +15,7 @@ fn color4(c: &[f32; 4]) -> String {
     format!("{:.4}f, {:.4}f, {:.4}f, {:.4}f", c[0], c[1], c[2], c[3])
 }
 
-fn translate_js(js: &str, state_map: &std::collections::HashMap<String, String>) -> String {
+pub(crate) fn translate_js(js: &str, state_map: &std::collections::HashMap<String, String>) -> String {
     let mut s = js.trim().to_string();
     if let Some(idx) = s.find("=>") {
         let body = s[idx+2..].trim();
@@ -325,7 +325,7 @@ fn translate_js_value(s: &str) -> String {
     js_transform_leaf(s)
 }
 
-fn translate_condition(cond: &str, state_map: &std::collections::HashMap<String, String>) -> String {
+pub(crate) fn translate_condition(cond: &str, state_map: &std::collections::HashMap<String, String>) -> String {
     let mut s = cond.trim().to_string();
     // Use state_map for getters only (those ending with .get())
     for (from, to) in state_map {
@@ -543,7 +543,7 @@ fn emit_list(node: &IRNode, parent_id: Option<&str>, _indent: &str, state_map: &
 /// Translate a JSX `key={expr}` where the map variable (`item`) refers to the
 /// current list element, held in `__it` (a JsValue). JavaScript property access
 /// `item.id` -> `__it["id"]`; simple `item` -> `__it`.
-fn translate_list_key(expr: &str) -> String {
+pub(crate) fn translate_list_key(expr: &str) -> String {
     let s = expr.trim();
     if let Some(rest) = s.strip_prefix("item.") {
         format!("__it[\"{}\"]", rest)
@@ -919,7 +919,7 @@ fn emit_hover_animations(node: &IRNode, indent: &str, features: &std::collection
 /// CSS property → (C++ style field name, value type). Matches Python's
 /// `_CSS_TO_STYLE_FIELD` in logic_emitter.py so reactive styles and
 /// conditional-class effects write to the same C++ style fields.
-fn css_to_style_field(css_prop: &str) -> Option<(&'static str, &'static str)> {
+pub(crate) fn css_to_style_field(css_prop: &str) -> Option<(&'static str, &'static str)> {
     Some(match css_prop {
         "background-color" => ("bgColor", "color"),
         "color" => ("color", "color"),
@@ -965,7 +965,7 @@ fn css_to_style_field(css_prop: &str) -> Option<(&'static str, &'static str)> {
 }
 
 /// Default/clean value per style field (used when resetting class-based styles).
-fn css_field_reset(node_var: &str, field_name: &str, indent: &str) -> Vec<String> {
+pub(crate) fn css_field_reset(node_var: &str, field_name: &str, indent: &str) -> Vec<String> {
     if field_name == "transform" {
         return vec![format!("{indent}        morph::resetCssTransform({node_var}->style);")];
     }
@@ -1010,7 +1010,7 @@ fn css_field_reset(node_var: &str, field_name: &str, indent: &str) -> Vec<String
 }
 
 /// Resolve a literal CSS value to C++ `<node_var>->style.<field>` assignments.
-fn css_val_to_cpp(node_var: &str, css_prop: &str, css_val: &str, indent: &str) -> Vec<String> {
+pub(crate) fn css_val_to_cpp(node_var: &str, css_prop: &str, css_val: &str, indent: &str) -> Vec<String> {
     let Some((field_name, val_type)) = css_to_style_field(css_prop) else { return vec![] };
     let prefix = format!("{node_var}->style.{field_name}");
     let out: Vec<String> = match val_type {

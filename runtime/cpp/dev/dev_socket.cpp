@@ -52,6 +52,31 @@ static void closeFd(int fd) {
 #endif
 }
 
+// Bind the loopback address on the given port (0 = OS-assigned ephemeral).
+// Returns the bound port, or -1 on failure. A failed bind leaves the socket
+// unbound, so the caller may retry on the same fd.
+static int bindLoopback(int fd, int port) {
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons((u_short)port);
+    addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+#ifdef _WIN32
+    if (bind((SOCKET)fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) return -1;
+#else
+    if (bind(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) return -1;
+#endif
+    if (port != 0) return port;
+    socklen_t len = sizeof(addr);
+#ifdef _WIN32
+    if (getsockname((SOCKET)fd, (struct sockaddr*)&addr, &len) < 0) return -1;
+#else
+    if (getsockname(fd, (struct sockaddr*)&addr, &len) < 0) return -1;
+#endif
+    return (int)ntohs(addr.sin_port);
+}
+
 DevSocket::DevSocket() {}
 
 DevSocket::~DevSocket() { close(); }
@@ -73,13 +98,13 @@ bool DevSocket::listen() {
     int opt = 1;
     setsockopt(m_sock, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt));
 
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons((u_short)kDevPort);
-    addr.sin_addr.s_addr = inet_addr("127.0.0.1");
-
-    if (bind(m_sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+    // Preferred loopback port shared with morph/dev/server.py (IPCClient).
+    // When it is taken (a second `morph dev` on this machine), fall back to
+    // an OS-assigned ephemeral port so sessions never collide. The bound
+    // port is announced on stdout for the dev driver to connect to.
+    m_port = bindLoopback(m_sock, kDevPort);
+    if (m_port < 0) m_port = bindLoopback(m_sock, 0);
+    if (m_port < 0) {
         fprintf(stderr, "[morph] dev socket: bind failed\n");
         close();
         return false;
@@ -91,6 +116,8 @@ bool DevSocket::listen() {
     }
 
     setNonBlocking(m_sock);
+    printf("[morph] dev socket on 127.0.0.1:%d\n", m_port);
+    fflush(stdout);
     return true;
 }
 
@@ -173,6 +200,7 @@ void DevSocket::close() {
     if (m_sock >= 0) {
         closeFd(m_sock);
         m_sock = -1;
+        m_port = -1;
     }
     m_recvBuf.clear();
 }

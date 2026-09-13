@@ -1420,6 +1420,7 @@ dependencies = [
  "anyhow",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]
@@ -1445,6 +1446,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "morph-ir",
+ "morph-parser",
+ "morpher",
  "serde",
  "serde_json",
  "tera",

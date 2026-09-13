@@ -355,7 +355,10 @@ static MorphNode* deserializeNode(const JsonValue& val,
         node = new RectNode(0.0f, 0.0f, 0.0f, 0.0f);
     } else if (type == "__list__") {
         node = new morph::ListContainer(0.0f, 0.0f, 0.0f, 0.0f);
-    } else if (type == "__text__") {
+    } else if (type == "__text__" || type == "__expr__") {
+        // Rust IR keeps reactive expression placeholders as `__expr__`;
+        // Python's builder folds them into `__text__`. Both deserialize to
+        // a TextNode so the logic library can setText() them via effects.
         std::string text;
         if (val.has("text") && !val["text"].isNull())
             text = val["text"].asString();
@@ -406,7 +409,7 @@ static MorphNode* deserializeNode(const JsonValue& val,
     // Apply style inheritance (same logic as codegen)
     // For text nodes, skip color inheritance — text reads parent's
     // color at render time to support hover animation.
-    if (type == "__text__") {
+    if (type == "__text__" || type == "__expr__") {
         InheritedStyle noColor = parentStyle;
         noColor.color[0] = 0; noColor.color[1] = 0;
         noColor.color[2] = 0; noColor.color[3] = 1;

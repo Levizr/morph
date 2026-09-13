@@ -1,7 +1,6 @@
 /// Platform helpers — mirrors Python's `morph/build/platform.py`
 /// Works on Linux, macOS, Windows.
-
-pub fn current() -> &'static str {
+pub const fn current() -> &'static str {
     if cfg!(target_os = "macos") {
         "macos"
     } else if cfg!(target_os = "windows") {
@@ -22,11 +21,7 @@ pub fn is_linux() -> bool {
 }
 
 pub fn exe_suffix() -> &'static str {
-    if is_windows() {
-        ".exe"
-    } else {
-        ""
-    }
+    if is_windows() { ".exe" } else { "" }
 }
 
 pub fn shared_lib_ext() -> &'static str {
@@ -40,11 +35,7 @@ pub fn shared_lib_ext() -> &'static str {
 }
 
 pub fn shared_lib_flag() -> &'static str {
-    if is_macos() {
-        "-dynamiclib"
-    } else {
-        "-shared"
-    }
+    if is_macos() { "-dynamiclib" } else { "-shared" }
 }
 
 pub fn pick_cpp() -> String {
@@ -77,7 +68,7 @@ fn which(bin: &str) -> bool {
             }
             // On Windows, also check .exe
             if is_windows() {
-                let exe = dir.join(format!("{}.exe", bin));
+                let exe = dir.join(format!("{bin}.exe"));
                 if exe.exists() {
                     return true;
                 }
@@ -87,14 +78,12 @@ fn which(bin: &str) -> bool {
     false
 }
 
-/// IPC socket path — Unix socket on Unix, TCP on Windows
-/// Returns (socket_path_for_unix, tcp_addr_for_windows)
-pub fn dev_ipc_addr(project_dir: &std::path::Path) -> String {
-    if is_windows() {
-        // Windows: no Unix socket, use TCP
-        "127.0.0.1:3000".to_string()
-    } else {
-        // Unix: use .morph/dev.sock
-        project_dir.join(".morph").join("dev.sock").display().to_string()
-    }
+/// Dev IPC address for display before the runtime announces its port.
+///
+/// The dev runtime binds the preferred loopback port and falls back to an
+/// OS-assigned ephemeral port on collision, announcing the bound port on
+/// stdout (`[morph] dev socket on 127.0.0.1:PORT`); the driver always
+/// connects to the announced port.
+pub fn dev_ipc_addr() -> String {
+    format!("127.0.0.1:{}", crate::ipc::DEV_PORT_DEFAULT)
 }
