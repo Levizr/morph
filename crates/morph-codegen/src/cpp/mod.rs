@@ -147,6 +147,25 @@ impl<'a> CppEmitter<'a> {
         // Premain code (functions like doLogin, logout)
         let premain_code = self.windows.iter().flat_map(|w| w.premain_functions.clone()).collect::<Vec<_>>().join("\n\n");
 
+        // Native mode: user C++ imports via `import "./file.cpp"`
+        // Native mode: user C++ imports via `import "./file.cpp"`
+        let mut cpp_includes: Vec<serde_json::Value> = Vec::new();
+        let mut seen_paths = std::collections::HashSet::new();
+        for w in self.windows {
+            for import in &w.cpp_imports {
+                if let Some(path) = import.get("path") {
+                    if !path.is_empty() && seen_paths.insert(path.clone()) {
+                        let import_path = import.get("import_path").map(String::as_str).unwrap_or("");
+                        cpp_includes.push(serde_json::json!({
+                            "import_path": import_path,
+                            "path": path,
+                        }));
+                    }
+                }
+            }
+        }
+        let native_mode = !cpp_includes.is_empty();
+
         // Render via Tera one_off
         let mut ctx = tera::Context::new();
         ctx.insert("windows", &self.windows);
@@ -159,13 +178,18 @@ impl<'a> CppEmitter<'a> {
         ctx.insert("dev_mode", &false);
         ctx.insert("premain_code", &premain_code);
         ctx.insert("state_decls", &state_decls);
-        ctx.insert("native_mode", &false);
-        let cpp_includes: Vec<serde_json::Value> = vec![];
+        ctx.insert("native_mode", &native_mode);
         ctx.insert("cpp_includes", &cpp_includes);
 
         let rendered = tera::Tera::one_off(TEMPLATE, &ctx, false).unwrap_or_else(|e| format!("// Tera error: {}\n{}", e, TEMPLATE));
 
         std::fs::write(output_dir.join("app.cpp"), rendered)?;
+
+        // Generate _morph_state.h for native mode (signals + JSX wrappers + function decls)
+        if native_mode {
+            let state_header = logic_emitter::generate_state_header(self.windows, &[premain_code.clone()]);
+            std::fs::write(output_dir.join("_morph_state.h"), state_header)?;
+        }
         Ok(())
     }
 }

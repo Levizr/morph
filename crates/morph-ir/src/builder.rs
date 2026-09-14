@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::Path;
 
 use oxc_allocator::Allocator;
 use oxc_ast::ast::*;
@@ -196,8 +197,11 @@ impl IRBuilder {
             reactive_consts,
             effect_decls: all_effects,
             cpp_imports: source.cpp_imports.iter().map(|ci| {
+                let base = Path::new(&source.filename).parent().unwrap_or_else(|| Path::new("."));
+                let path = base.join(&ci.path);
+                let abs_path = path.canonicalize().unwrap_or_else(|_| path);
                 let mut m = HashMap::new();
-                m.insert("path".into(), ci.path.clone());
+                m.insert("path".into(), abs_path.display().to_string());
                 m.insert("specifiers".into(), ci.specifiers.join(", "));
                 m
             }).collect(),
