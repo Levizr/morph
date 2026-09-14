@@ -46,15 +46,17 @@ morph new . --ext tsx    # scaffold into current directory
 
 ```bash
 morph update              # show current + available versions
-morph update --runtime    # upgrade runtime
-morph update --self       # upgrade morph (cargo install)
+morph update --runtime    # upgrade runtime (downloads from GitHub Releases)
+morph update --self       # upgrade morph (downloads the release tarball)
 ```
 
-**`morph dev`** — 100ms debounce, Unix socket (`.morph/dev.sock`), `morph_devrt` hot reload.
+**`morph dev`** — 100ms debounce, loopback TCP IPC (port 39573, ephemeral fallback on collision), `morph_devrt` hot reload.
 
 **`morph build`** — Fingerprinting incremental builds, UPX/static flags, feature detection.
 
-**`morph check`** — Exit code 0 = clean, 1 = errors (CI-friendly).
+**`morph check`** — Exit code 0 = clean (warnings only don't fail), 1 = errors (CI-friendly).
+
+**`morph doctor`** — Reports required tools (g++, clang++, cmake, pkg-config), optional graphics/text libs, and project state. `-v` shows verbose version info. Auto-install of missing system packages via `-y` is not implemented yet.
 
 ## Version System
 
@@ -73,8 +75,8 @@ morph --version
 | Python `morph` | Rust `morph` |
 |---|---|
 | `morph init` | `morph new` |
-| `morph translate file.ts` | `morph file.ts` |
-| `pip install levizr-morph` | `cargo install morph` |
-| `morph config.json` | `morph.config.json` + `morph.lock` |
+| `morph translate file.ts` | `morph file.ts --to cpp` |
+| `pip install levizr-morph` | `cargo install morphc` |
+| Python runtime + pip deps | Single Rust binary, C++ runtime downloaded by `morph install` |
 
 See the [Migration Guide](../guides/migration.md) for full details.

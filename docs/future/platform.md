@@ -10,7 +10,7 @@ Morph currently targets **Linux** (X11, optionally Wayland). The system-requirem
 
 - The largest desktop app markets are Windows + macOS
 - GLFW is already cross-platform — the windowing layer is portable in principle
-- Everything above the windowing layer (layout, renderer, compiler, JS runtime) is platform-agnostic C++/Python
+- Everything above the windowing layer (layout, renderer, compiler, JS runtime) is platform-agnostic C++/Rust
 
 ## What's platform-specific today
 

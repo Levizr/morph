@@ -8,7 +8,7 @@ Closing the gap between "JS you can write" and "JS that compiles to C++". `morph
 
 ## Why it matters
 
-The translator (`morph/js/codegen.py`) is the heart of the "write JS, get native binary" promise. Every unsupported operator, builtin, or method is a workaround users hit. Coverage growth is also the top contribution area.
+The translator (`crates/morpher/`) is the heart of the "write JS, get native binary" promise. Every unsupported operator, builtin, or method is a workaround users hit. Coverage growth is also the top contribution area.
 
 ## Currently supported (the baseline)
 

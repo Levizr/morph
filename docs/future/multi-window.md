@@ -63,7 +63,7 @@ void navigate(const std::string& windowId,
               const std::string& pageId);      // swap the window's page
 ```
 
-The event emitter (`morph/codegen/event_emitter.py`) already generates these calls for JSX event handlers:
+The event emitter in `crates/morph-codegen/` already generates these calls for JSX event handlers:
 
 ```tsx
 <button morph-open="settings">Open Settings</button>

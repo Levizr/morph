@@ -205,7 +205,7 @@ gdb -p $(pidof morph_devrt)
 | Segfault on startup | Missing runtime, wrong GL version | `morph doctor`, check `glxinfo \| grep OpenGL` |
 | Blank window | Forge renderer bug | Switch to `flash` in `morph.config.json` |
 | Text not rendering | FreeType not found | `morph doctor -y`, check `build.system_freetype` |
-| Hot reload not working | Socket permission / stale `.morph/dev.sock` | `rm .morph/dev.sock && morph dev` |
+| Hot reload not working | Stale `morph_devrt` / IPC port collision | Restart `morph dev`; kill stale `morph_devrt` processes |
 | `morph build` hangs | CMake configure (first run) | Wait or run `morph doctor` first |
 | Linker errors | Missing `-l` flags for C++ imports | Add to `native.libraries` in config |
 

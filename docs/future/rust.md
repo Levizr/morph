@@ -45,8 +45,8 @@ src/App.mx ──► MorphParser ──► JSXWalker ──► IRBuilder ──�
                                                                   cargo build → binary
 ```
 
-- Parsing, JSX walking, IR building, CSS/Tailwind resolution, and layout math stay in Python — the exact same IR the C++ pipeline uses
-- The **codegen templates** (`node_emitter.py`) get a Rust sibling that emits `.rs` instead of `.cpp`
+- Parsing, JSX walking, IR building, CSS/Tailwind resolution, and layout math are all handled in Rust — the same `morpher` / `morph-ir` crates the C++ pipeline uses
+- The **codegen templates** (`morph-codegen`) get a Rust sibling that emits `.rs` instead of `.cpp`
 - Dev mode compiles the app's JS logic to a `logic-<hash>.so` **Rust cdylib** loaded via `dlopen` — hot reload works exactly like today's `logic.so` (the `dlopen`/`RTLD_NOLOAD` machinery is language-agnostic)
 - Production compiles one self-contained binary via `cargo build --release` (static GLFW/FreeType/HarfBuzz story mirrors `morph build --static`)
 
@@ -126,7 +126,7 @@ The `TSToCppTranslator` gets a sibling translator. Type mapping:
 
 `morph translate file.ts --lang rust` emits `.rs`. The existing `morph check` diagnostics apply unchanged — they audit the JS surface, not the backend.
 
-> **Related:** the toolchain that compiles all of this is itself moving to Rust (SWC/Oxc parsing, native CLI, Python removed) — see [Rust Compiler & Native CLI](compiler.md).
+> **Related:** the toolchain is already in Rust (Oxc parsing, native CLI, Python removed) — see [Rust Compiler](compiler.md).
 
 ## What stays identical for users
 

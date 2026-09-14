@@ -17,8 +17,8 @@ Morph is a **native UI framework** where your TypeScript/JSX source compiles dir
 │  └────┬────┘         └────┬────┘                                            │
 │       │                   │                                                 │
 │       ▼                   ▼                                                 │
-│  IPC Socket          CppEmitter                                             │
-│  (Unix/TCP)             │                                                   │
+│  IPC TCP             CppEmitter                                             │
+│  (loopback)                │                                                   │
 │       │                 ▼                                                   │
 │       ▼          ┌─────────────┐                                            │
 │  morph_devrt     │  app.cpp    │                                            │
@@ -38,19 +38,22 @@ Morph is a **native UI framework** where your TypeScript/JSX source compiles dir
 morph/
 ├── Cargo.toml                    # Workspace root
 ├── crates/
-│   ├── morph/                   # CLI binary (~12 MB)
-│   │   ├── src/main.rs           # CLI entry, command dispatch
-│   │   └── src/commands/         # new/install/update/dev/build/run/check/doctor/cache
-│   ├── morph-config/             # morph.config.json + morph.lock parsing/validation
-│   ├── morph-cache/              # Global cache (~/.morph/), runtime download, fingerprints
-│   ├── morph-parser/             # Oxc + lightningcss → MxSource (AST + CSS)
-│   ├── morph-ir/                 # Intermediate Representation (nodes, style, layout, keyframes)
-│   ├── morph-codegen/            # C++ codegen via Tera templates
-│   │   ├── src/cpp/              # CppEmitter, node_emitter, logic_emitter, feature_set
-│   │   └── src/rust/             # RustEmitter (stub)
-│   ├── morph-build/              # Compilation (g++/clang++), platform abstraction, dev IPC
-│   └── morph-js/                 # Direct file morph: TS/JS → C++/Rust (Oxc-based)
-│       └── src/codegen/          # analyzer, cpp, rust, type_resolver, context
+│   ├── morphc/                  # CLI binary (~12 MB)
+│   │   ├── src/main.rs          # CLI entry, command dispatch
+│   │   └── src/commands/        # new/install/update/dev/build/run/check/doctor/cache
+│   ├── morph-config/            # morph.config.json + morph.lock parsing/validation
+│   ├── morph-cache/             # Global cache (~/.morph/), runtime download, fingerprints
+│   ├── morph-parser/            # Oxc + lightningcss → MxSource (AST + CSS)
+│   ├── morph-ir/                # Intermediate Representation (nodes, style, layout, keyframes)
+│   ├── morph-codegen/           # C++ codegen via Tera templates
+│   │   ├── src/cpp/             # C++ template helpers
+│   │   ├── src/node_emitter.rs  # Node → C++ emitter
+│   │   ├── src/logic_emitter.rs # Logic (effects, signals) → C++ emitter
+│   │   ├── src/feature_set.rs   # Feature detection + #define emission
+│   │   └── src/rust/            # RustEmitter (stub)
+│   ├── morph-build/             # Compilation (g++/clang++), platform abstraction, dev IPC
+│   └── morpher/                 # Direct file morph: TS/JS → C++/Rust (Oxc-based)
+│       └── src/codegen/         # analyzer, cpp, rust, type_resolver, context
 ├── runtime/
 │   └── cpp/                      # C++ runtime source (shipped as release artifact)
 └── versions/                     # Version files = release triggers
@@ -85,17 +88,17 @@ morph/
 
 ### Why Tera Templates?
 
-- Jinja2-compatible syntax (easy migration from Python toolchain)
+- Jinja2-compatible syntax (familiar to teams coming from Jinja/Python templating)
 - Fast runtime compilation, sandboxed, no arbitrary code execution
 - Powers `node_emitter.rs` + `logic_emitter.rs` for C++ generation
 
 ## Dev Mode Architecture
 
 ```
-┌──────────────┐      Unix Socket       ┌──────────────────┐
-│   morph     │  ◄──────────────────►  │   morph_devrt    │
-│  (watcher)   │      JSON IR +         │  (always running)│
-│              │      logic.so path     │                  │
+┌──────────────┐    Loopback TCP     ┌──────────────────┐
+│   morph     │  ◄────────────────►  │   morph_devrt    │
+│  (watcher)   │    JSON IR +         │  (always running)│
+│              │      logic.so path   │                  │
 └──────┬───────┘                        └────────┬─────────┘
        │                                         │
        ▼                                         ▼
@@ -201,7 +204,7 @@ runtime/cpp/
     └── stb_image.h
 ```
 
-## JS/TS → C++ Translation (morph-js crate)
+## JS/TS → C++ Translation (morpher crate)
 
 One mode — intent-based codegen is the default (`morph file.ts`): escape analysis → stack/`unique_ptr`/`shared_ptr`, native types (`int32_t`, `std::string`, `std::vector`), type widening only when needed. `--type strict` respects annotations, `--type infer` (default) infers from code.
 

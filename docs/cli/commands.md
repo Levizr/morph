@@ -63,11 +63,11 @@ Run this once after `morph new` or when switching runtime versions manually.
 ```bash
 morph update              # show current versions + available updates
 morph update --runtime    # update runtime to latest compatible version
-morph update --self       # update morph binary (cargo install)
+morph update --self       # update morph binary (downloads release tarball)
 ```
 
 - `--runtime`: reads `versions/runtime/cpp.json` from GitHub, rewrites `morph.config.json` + `morph.lock`, re-links runtime
-- `--self`: runs `cargo install --git https://github.com/Levizr/morph.git morph`
+- `--self`: downloads `morph-{os}-{arch}.tar.gz` from the latest GitHub release and replaces the current binary
 
 ### `morph dev` — Start Dev Mode with Hot Reload
 
@@ -78,8 +78,8 @@ morph dev [--entry src/App.mx]
 - Ensures runtime is installed
 - Builds dev runtime (CMake + g++/clang++)
 - Starts file watcher on `src/` + entry dir (100ms debounce)
-- On save: re-runs parse → CSS → IR → compiles `logic.<hash>.so` → pushes IR over Unix socket to `morph_devrt`
-- IPC: Unix socket `.morph/dev.sock` (Linux/macOS), TCP `127.0.0.1:3000` (Windows)
+- On save: re-runs parse → CSS → IR → compiles `logic.<hash>.so` → pushes IR over loopback TCP to `morph_devrt`
+- IPC: loopback TCP on `127.0.0.1:39573` (ephemeral fallback on collision)
 
 ### `morph build` — Compile Production Binary
 

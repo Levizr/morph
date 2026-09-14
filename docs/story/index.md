@@ -75,9 +75,9 @@ The story is really a series of choices. Each has its own page:
 
 | What | Status | Full plan |
 |------|--------|-----------|
-| morph — the Rust rewrite | In progress | [Working on morph](working-on-morphc.md) |
+| morph — the Rust rewrite (Python toolchain replaced and removed) | Done (Sept 2026) | [Working on morph](working-on-morphc.md) |
 
-The Rust rewrite replaces the Python toolchain with a single native binary. Updated as work progresses.
+The Rust rewrite replaced the Python toolchain with a single native binary (`cargo install morphc`) and removed Python from the repo. See [Future Plans](../future/index.md) for what's next.
 
 ## Questions people ask
 

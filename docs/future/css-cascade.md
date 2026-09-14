@@ -4,7 +4,7 @@
 
 > **Note:** This is a future plan, not a commitment. The syntax and API shown here are proposals — they can be completely different when actually implemented.
 
-A complete runtime CSS cascade: merging every matched rule — across CSS files, Tailwind utilities, inline styles, and defaults — by **specificity and origin** into one final computed style per element. The selector engine exists; the cascade engine (`morph/style/resolver.py`) is a stub.
+A complete runtime CSS cascade: merging every matched rule — across CSS files, Tailwind utilities, inline styles, and defaults — by **specificity and origin** into one final computed style per element. The selector engine exists; the cascade resolver (planned as a Rust stage in the IR pipeline) is not built yet.
 
 ## Why it matters
 
@@ -18,15 +18,15 @@ Today styles resolve mostly at IR-build time (inline > Tailwind > CSS rules > UA
 
 | Piece | State |
 |---|---|
-| Selector engine (`style/selector.py`) — descendant/child/adjacent/sibling combinators, compounds, pseudo-classes, specificity | ✅ Shipped |
+| Selector engine (`crates/morph-parser/` CSS side) — descendant/child/adjacent/sibling combinators, compounds, pseudo-classes, specificity | ✅ Shipped |
 | Runtime `:hover` / `:active` / ancestor-hover rules | ✅ Shipped |
 | Builder cascade (inline > Tailwind > CSS rules > defaults) | ✅ Shipped |
-| Cascade resolver (`style/resolver.py`) | ❌ Stub — `# TODO: selector matching + cascade + specificity` |
+| Cascade resolver | ❌ Not built — planned as a Rust stage in the IR pipeline |
 
 ## Planned behavior
 
-```python
-# morph/style/resolver.py (future)
+```rust
+// future: crates/morph-ir or morph-parser cascade resolver
 resolve(element, rules) -> computed_style
 ```
 

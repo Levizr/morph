@@ -10,7 +10,7 @@
 - **Two type modes**:
   - `--type infer` (default) - Analyzes code usage to pick optimal native types
   - `--type strict` - Respects user-declared type annotations
-- **Optimized codegen** - `--optimize` enables escape analysis for stack allocation, unique_ptr/shared_ptr for ownership
+- **Intent-based codegen** - Escape analysis, type widening, and async boundary detection are always on — there is no separate optimize flag
 - **Global runtime includes** - Generates absolute paths to Morph C++ runtime for portable compilation
 
 ## Installation
@@ -39,11 +39,8 @@ let cpp = translate(source, "file.ts", options)?;
 ## Usage (CLI via morphc)
 
 ```bash
-# Default: infer mode, no optimization
+# Default: infer mode, intent-based codegen is always on
 morph app.ts --to cpp
-
-# Explicit infer mode with optimization
-morph app.ts --to cpp --type infer --optimize
 
 # Strict mode (respect user annotations)
 morph app.ts --to cpp --type strict
@@ -114,9 +111,9 @@ src/
 | `object` | `JsObject` |
 | (unannotated) | Inferred from init |
 
-## Optimized Codegen (`--optimize`)
+## Intent-Based Codegen (Always On)
 
-When `--optimize` is enabled, the analyzer performs:
+The analyzer performs escape analysis on every translation — there is no `--optimize` flag to enable it:
 
 1. **Escape Analysis** - Determines if variables escape scope:
    - `None` → Stack allocation

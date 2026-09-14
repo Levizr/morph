@@ -1,5 +1,7 @@
 # Pipeline Deep-Dive
 
+> **Historical document.** This describes the Python pipeline that preceded the current Rust one. See [`docs/dev/gui-pipeline.md`](../docs/dev/gui-pipeline.md) for the current pipeline.
+
 ## End-to-End Flow
 
 ```

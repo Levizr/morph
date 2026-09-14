@@ -2,19 +2,28 @@
 
 **Part of:** [The Story of Morph](index.md)
 
-> This page documents what I'm actively building right now — the Rust rewrite of Morph's Python toolchain. This is living documentation; I update it as decisions are made and work progresses.
+> This page documents the Rust rewrite of Morph's Python toolchain. The rewrite is **done** — Python is removed from the repo and the Rust `morph` binary is the only toolchain. This page is the record of how that happened.
 
-## What's happening
+## What happened
 
-The Python toolchain that compiles `.mx` files into native binaries is being rewritten in Rust. The new binary is called **`morph`** (Morph Compiler) — a single, lightweight binary that replaces the entire Python dependency.
+Morph's toolchain was rewritten from Python to Rust. The CLI is now **`morph`** (Morph Compiler) — a single lightweight Rust binary (`morphc` on crates.io, `cargo install morphc`) that replaced the entire Python dependency. The Python source was removed from the repository in September 2026.
 
-**Why?** Python was the right choice to prove the concept. Now the concept is proven, and compile speed matters. A Rust compiler removes the Python dependency, makes `morph dev` instant, and gives users a single binary to install.
+**Why?** Python was the right choice to prove the concept — it validated parse `.mx` → IR → render natively in days. Once the concept was proven, compile speed mattered. The Rust compiler removes the Python dependency, makes `morph dev` instant, and gives users a single binary to install.
 
-## Intent-Based Codegen & Memory Management (New)
+## What shipped
 
-We're also redesigning the **JS/TS → C++ translator** (`morph-js` crate) to use **intent-based codegen with compile-time escape analysis**:
+- **Rust-only pipeline** — parse (Oxc + lightningcss) → IR → codegen → build, all in-crate under `crates/`
+- **Direct file morphing** — `morph app.ts --to cpp|rust`, intent-based codegen always on
+- **Full CLI** — `new`, `install`, `update`, `dev`, `build`, `run`, `check`, `doctor`, `cache`
+- **Dev mode with hot reload** — in-process compile + loopback TCP push to `morph_devrt`
+- **Published on crates.io** — `cargo install morphc` (workspace: `morph-config`, `morph-parser`, `morph-cache`, `morph-ir`, `morph-codegen`, `morph-build`, `morpher`, `morphc`)
+- **Python removed** — `morph/`, `tests/unit`, `tests/integration`, `pyproject.toml`, the PyPI workflow, and every Python pipeline file are gone. The only Python left is the fixture-test harness under `tests/translate/`, which drives the built `morph` binary.
 
-- **No garbage collector** — instead, static escape analysis determines ownership at compile time
+## Intent-Based Codegen & Memory Management
+
+The **JS/TS → C++ translator** (`crates/morpher`) uses **intent-based codegen with compile-time escape analysis**:
+
+- **No garbage collector** — static escape analysis determines ownership at compile time
 - **`shared_ptr` only where semantically required** — closures, shared mutable refs, async boundaries
 - **Stack allocation for non-escaping locals** — `int`, `std::string`, `std::vector` on stack
 - **`unique_ptr` + move for single-owner escapes** — returns, global storage
@@ -22,14 +31,7 @@ We're also redesigning the **JS/TS → C++ translator** (`morph-js` crate) to us
 - **Template bloat eliminated** — `<format>` only for template literals, not `console.log`
 - **Native types preferred** — `int64_t` not `JsNumber` when usage allows
 
-**Current status (Sept 2026)**: 
-- **Semantic Analyzer implemented** in `crates/morpher/src/codegen/analyzer.rs` — performs escape analysis, type widening, async boundary detection, closure capture detection, integer-range proofs, and comparison tracking
-- **Intent emitter implemented** — uses analysis to emit native types (`int32_t`, `std::string`, `std::vector`), `unique_ptr` + move, `shared_ptr` based on escape analysis
-- **28/28 tests passing** (previously 21/24; fixed 17_async file-scope moves, 18_promises Promise/Result handling, 19_fetch linking, 11_complex OOB + try/finally)
-- **Analyzer integrated** — runs on every translation, produces `AnalysisResult` with escape kinds, widened types, variable info, async function set, and comparison signatures
-- **CLI**: direct file morphing `morph <file> [--to cpp|rust]` (no `translate` subcommand, no optimize flag — intent-based codegen is the only mode)
-
-See [full plan](../../help/js-memory-management-without-gc-and-intent-based-codegen.md).
+This is the only codegen mode — there is no `--optimize` flag; escape analysis runs on every translation.
 
 ## Architecture
 
@@ -37,7 +39,7 @@ See [full plan](../../help/js-memory-management-without-gc-and-intent-based-code
 
 ```
 Before (Python):  .mx → tree-sitter → Python AST → IR → Jinja2 → C++ → g++
-After (Rust):     .mx → Oxc → Typed AST → IR → Tera → C++ → g++/clang++
+After (Rust):     .mx → Oxc → Typed AST → IR → C++ emitter → g++/clang++
 ```
 
 ### Key decisions
@@ -46,116 +48,76 @@ After (Rust):     .mx → Oxc → Typed AST → IR → Tera → C++ → g++/clan
 |----------|--------|-----|
 | JSX/TSX parser | **Oxc** | 3x faster than SWC, arena-allocated, spec-compliant |
 | CSS parser | **lightningcss** | Extremely fast, typed property values, browser-grade |
-| Template engine | **Tera** | Jinja2-compatible syntax, fast runtime compilation |
 | CLI framework | **clap** (derive) | Industry standard, derive macros, completions |
-| Runtime naming | `cpp` / `rust` | Simple, clear |
+| Runtime naming | `cpp` | Simple, clear |
 | Binary name | `morph` | Follows `rustc`, `gcc` convention |
 
 ### Repository structure (single repo)
 
-Everything lives in `levizr/morph` — no separate repos:
-
 ```
 morph/
-├── Cargo.toml              # Rust workspace
+├── Cargo.toml               # Rust workspace
 ├── crates/
-│   ├── morph/             # CLI binary (~10-15MB)
-│   ├── morph-parser/       # Oxc + lightningcss
-│   ├── morph-ir/           # Intermediate Representation
-│   ├── morph-codegen/      # C++ / Rust code generation
-│   ├── morph-build/        # Build system
-│   └── morph-config/       # Config + lock file parsing
+│   ├── morphc/             # CLI binary → `morph`
+│   ├── morph-config/        # Config + lock file parsing
+│   ├── morph-parser/        # Oxc + lightningcss → MxSource
+│   ├── morph-ir/            # Intermediate Representation
+│   ├── morph-codegen/       # C++ / Rust code generation
+│   ├── morph-build/         # Build system, dev rt + IPC
+│   ├── morph-cache/         # Global cache, runtime download
+│   └── morpher/             # TS→C++/Rust translator
 ├── runtime/
-│   ├── cpp/                # C++ runtime source
-│   └── rust/               # Future Rust runtime
-├── versions/               # Version files (release triggers)
-│   ├── morph/
-│   │   └── version.json
-│   └── runtime/
-│       ├── cpp.json
-│       └── rust.json       # future
-└── morph/                  # Current Python (deprecated)
-```
-
-### .morph directory (per-project)
-
-```
-my-app/
-├── src/App.mx
-├── morph.config.json
-├── morph.lock
-└── .morph/
-    ├── runtime/            # Downloaded runtime (from global cache)
-    ├── build/              # Build artifacts
-    └── cache/              # Project-specific cache
-```
-
-### Global cache (`~/.morph/`)
-
-```
-~/.morph/
-├── cache/
-│   └── runtimes/
-│       ├── cpp/
-│       │   ├── v0.1.0/
-│       │   ├── v0.2.0/
-│       │   └── v0.3.0/
-│       └── rust/           # future
-└── index.json
+│   └── cpp/                 # C++ runtime source (release artifact)
+├── versions/                # Version files (release triggers)
+├── tests/                   # translate fixtures + runtime smoke projects
+└── docs/                    # user docs
 ```
 
 ## CLI commands
 
 | Command | What it does |
 |---------|--------------|
-| `morph init [name]` | Create project, scaffold files, prompt to install runtime |
+| `morph <file> [--to cpp\|rust]` | Direct file morphing (.ts/.js) |
+| `morph new [name]` | Scaffold a new .mx or .tsx project |
 | `morph install` | Download runtime from GitHub Releases, cache globally |
-| `morph update --runtime` | Update runtime version, show migration notes |
-| `morph update --self` | Update morph binary |
-| `morph dev` | Start dev mode with hot reload |
+| `morph update [--runtime\|--self]` | Update runtime or morph binary |
+| `morph dev` | Start dev mode with hot reload (loopback TCP) |
 | `morph build` | Compile .mx → native binary |
 | `morph run` | Build + run |
-| `morph check` | Lint .mx files |
-| `morph check --migrate` | Auto-fix deprecated patterns |
-| `morph doctor` | Check system dependencies |
-| `morph translate <file>` | Translate .ts/.js → C++ |
+| `morph check` | Lint .ts/.tsx/.mx files |
+| `morph doctor` | Verify system dependencies |
+| `morph cache` | Manage fetched CSS cache |
 
 ## Version system
 
 ### Two separate versions
 
-- **morph binary** — the CLI tool (e.g., `v0.3.0`)
-- **Runtime** — the C++/Rust runtime source (e.g., `v0.2.0`)
+- **morph binary** — the CLI tool (e.g., `v0.1.0`)
+- **Runtime** — the C++ runtime source (e.g., `v0.1.0`)
 
 ### Version files (release triggers)
 
 ```json
 // versions/runtime/cpp.json
 {
-  "version": "0.3.0",
-  "changelog": "Added signal() support, improved render performance",
+  "version": "0.1.0",
+  "changelog": "Initial C++ runtime release",
   "breaking": false
 }
 ```
 
-Edit the file, push, GitHub Actions builds automatically. No manual trigger needed.
-
-### Compatibility
-
-```
-morph v0.3.0 + runtime v0.2.0 → ✓ Works
-morph v0.3.0 + runtime v0.1.0 → ⚠ Deprecated (update recommended)
-morph v0.3.0 + runtime v0.4.0 → ✗ Incompatible (update morph)
-```
+Edit the file, push — CI builds releases automatically. No manual trigger needed.
 
 ### morph.config.json
 
 ```json
 {
+  "name": "my-app",
   "entry": "src/App.mx",
+  "output": ".morph/output",
   "runtime": {
     "type": "cpp",
-    "version": "0.2.0"
+    "version": "0.1.0"
   },
   "window": {
     "width": 800,
@@ -165,105 +127,41 @@ morph v0.3.0 + runtime v0.4.0 → ✗ Incompatible (update morph)
 }
 ```
 
-## Version file security
-
-The version files live in a public repo. Here's how we prevent bad releases:
-
-### 1. Branch protection
-- `main` branch requires PR review before merge
-- Status checks must pass before merge
-- Only repo owner can merge
-
-### 2. CODEOWNERS
-```
-# .github/CODEOWNERS
-versions/**    @Piyushthelagend
-```
-Any PR touching `versions/` requires explicit approval from the maintainer.
-
-### 3. Version format validation in CI
-```yaml
-- name: Validate version format
-  run: |
-    VERSION=$(jq -r .version versions/runtime/cpp.json)
-    if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-      echo "Invalid semver: $VERSION"
-      exit 1
-    fi
-```
-Invalid version = build fails, no release published.
-
-### 4. Only `main` triggers builds
-```yaml
-on:
-  push:
-    branches: [main]
-    paths: ['versions/**']
-```
-PRs never trigger releases. Only merged code on `main`.
-
-### 5. What if a bad PR merges?
-```
-Bad PR merges → versions/runtime/cpp.json has "version": "999.99.99"
-              → GitHub Actions validates → FAILS (invalid or mismatched tag)
-              → No release published
-              → Fix it, push correct version
-```
-
-### 6. Optional: signed releases
-Sign artifacts with GPG key for production releases. Users verify before installing.
-
-### Worst case
-Invalid version gets a GitHub Release with broken artifacts. But users are protected because:
-- `morph install` checks sha256 hash
-- morph verifies runtime compatibility
-- Bad releases can be deleted manually
-
 ## What stays the same for users
 
 - `.mx` files, CSS, Tailwind — unchanged
 - `morphState`, `morphEffect` — unchanged
-- `morph dev`, `morph build` — same commands, same flags
-- JSON IR wire format — unchanged
-- Dev-mode socket protocol — unchanged
+- `morph dev`, `morph build`, `morph run` — same commands, same flags
+- JSON IR wire format — unchanged (now produced and consumed in-process)
+- Dev-mode hot reload — same UX (now over loopback TCP)
 
-## What changes
+## What changed
 
 - **No Python dependency** — single binary install
-- **Much faster** — Oxc parsing, parallel compilation, no interpreter startup
+- **Much faster** — Oxc parsing, no interpreter startup
 - **Global cache** — never re-download the same runtime version
-- **Better DX** — `morph init` prompts to install, `morph update` handles versions
-- **Version management** — deprecation warnings, migration notes, compatibility checks
+- **Install** — `cargo install morphc` (no `pip install`)
 
-## Justice for morph-legacy
+## The Python toolchain
 
-The Python toolchain served Morph well. It proved the concept, enabled rapid iteration, and made the project possible. When the Rust rewrite ships, the Python code won't be deleted from history — it will be published as **`morph-legacy`** on PyPI for anyone who wants to study it, reference it, or understand how Morph started.
+The Python toolchain served Morph well. It proved the concept, enabled rapid iteration, and made the project possible. When the Rust rewrite shipped, the Python code was removed from the repository together with its tests and PyPI workflow — its job is done, and keeping it around would only confuse contributors.
 
-The Python version was never meant to ship to end users. It was the prototype that became the blueprint. The Rust version is the production tool that honors that work by being everything Python couldn't be: fast, self-contained, and zero-dependency.
-
-> `morph-legacy` will be published as-is, with a README pointing to `morph`. No maintenance, no updates — just preserved history.
+The Python version was never meant to ship to end users. It was the prototype that became the blueprint. The Rust version is the production tool: fast, self-contained, and zero-dependency.
 
 ## Implementation phases
 
-- [x] Phase 1: Foundation (CLI, config, parser, init/install)
+- [x] Phase 1: Foundation (CLI, config, parser, new/install)
 - [x] Phase 2: Parser (Oxc + lightningcss)
-- [x] Phase 3: AST + IR (style registry, Tailwind, IRBuilder — verified vs Python)
-- [x] Phase 4: Codegen (Tera templates, feature flags, node/logic emitters)
-- [x] Phase 5: Build system (platform, g++/clang++ cross-platform, output .morph/output/<clean>)
-- [ ] Phase 6: Dev mode (watch + IPC Unix/TCP — stub, hot reload next)
-- [ ] Phase 7: Polish (check, doctor, CI/CD, distribution)
-
-## Full implementation plan
-
-For the complete technical plan — crate structure, all CLI commands, config files, GitHub Actions workflows, binary distribution, and implementation phases — see the [full rewrite plan](../../help/morphc-rust-rewrite-plan.md) in the help section.
-
-## Intent-Based Codegen & Memory Management (New)
-
-For the strategy on translating JS/TS to optimized C++ using compile-time escape analysis and intent-based codegen (no GC, no template bloat), see the [memory management & intent-based codegen plan](../../help/js-memory-management-without-gc-and-intent-based-codegen.md).
+- [x] Phase 3: AST + IR (style registry, Tailwind, IRBuilder)
+- [x] Phase 4: Codegen (node/logic emitters, feature set)
+- [x] Phase 5: Build system (platform, g++/clang++ cross-platform, output .morph/output)
+- [x] Phase 6: Dev mode (watch + loopback TCP IPC + hot reload)
+- [x] Phase 7: Polish (check, doctor, crates.io distribution)
+- [x] Phase 8: Python removal (delete `morph/`, Python tests, PyPI workflow)
 
 ## Follow the progress
 
-This page will be updated as work progresses. The best way to follow along is watching the repo and checking back here.
+This rewrite is complete. New work — features, the roadmap — lives in the [Future Plans](../future/index.md).
 
 ---
 

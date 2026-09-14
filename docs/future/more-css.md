@@ -8,7 +8,7 @@ Three CSS features with existing scaffolding or a long-standing spot on the road
 
 ## `box-shadow`
 
-**Scaffold exists:** `morph/style/features/shadow.h` declares `BoxShadow` / `ShadowStyle` structs, guarded by `MORPH_FEATURE_SHADOW` — but the header is **never included** by `style.h` and the define is **never emitted** by `feature_set.py`. Purely dormant.
+**Scaffold exists:** `runtime/cpp/style/features/shadow.h` declares `BoxShadow` / `ShadowStyle` structs, guarded by `MORPH_FEATURE_SHADOW` — but the header is **never included** by `style.h` and the define is **never emitted** by the Rust `feature_set.rs` in `morph-codegen`. Purely dormant.
 
 ```cpp
 // style/features/shadow.h (future wiring)
@@ -27,7 +27,7 @@ struct BoxShadow {
 
 ## `outline`
 
-**Scaffold exists:** `morph/style/features/outline.h` declares `OutlineStyle`, guarded by `MORPH_FEATURE_OUTLINE` — same dormancy: not included, not emitted.
+**Scaffold exists:** `runtime/cpp/style/features/outline.h` declares `OutlineStyle`, guarded by `MORPH_FEATURE_OUTLINE` — same dormancy: not included, not emitted.
 
 **Planned behavior:**
 
@@ -42,7 +42,7 @@ Already on the v0.1.0 list. **Planned behavior (CSS 2.1 §8.3.1):**
 - Adjacent vertical margins collapse to the larger of the two
 - Empty elements' top/bottom margins collapse together
 - Collapsing suppressed by padding/border/clearance, or by `overflow: hidden` ancestors
-- Layout-engine change in `morph/layout/` (Python) + `runtime/core/layout.cpp` (C++) — must stay pixel-identical between dev and build modes
+- Layout-engine change in `crates/morph-ir/` (Rust) + `runtime/cpp/core/layout.cpp` (C++) — must stay pixel-identical between dev and build modes
 
 ## Why low priority
 

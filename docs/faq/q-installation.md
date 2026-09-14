@@ -43,9 +43,10 @@ morph doctor
 `morph doctor` checks your toolchain (g++, cmake, pkg-config), graphics libs (GLFW, OpenGL), and text libs (FreeType, HarfBuzz).
 
 ```bash
-morph doctor -y    # auto-install missing packages (Linux only)
 morph doctor -v    # show detailed version info
 ```
+
+> Note: `morph doctor -y` is accepted but auto-install of missing system packages is not implemented yet — it only reports what's missing.
 
 ## From Source (Latest Features)
 

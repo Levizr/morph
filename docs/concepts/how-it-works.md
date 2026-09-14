@@ -9,9 +9,9 @@ src/App.mx  ──►  Oxc Parser  ──►  lightningcss  ──►  IRBuilder
                                                                                    │
                                                            ┌────────────────────────┴──────────────┐
                                                            ▼                                       ▼
-                                                  [Dev: IPC Socket]                          [Build: C++ Codegen]
-                                                  morph_devrt binary                   node_emitter → g++ → binary
-                                                  + logic.so (dlopen)                    TS→C++ (logic) → g++ → logic
+[Dev: IPC loopback TCP]                   [Build: C++ Codegen]
+                                                   morph_devrt binary                   node_emitter → g++ → binary
+                                                   + logic.so (dlopen)                    TS→C++ (logic) → g++ → logic
 ```
 
 ### Step by Step
@@ -24,7 +24,7 @@ src/App.mx  ──►  Oxc Parser  ──►  lightningcss  ──►  IRBuilder
 
 From here, the pipeline splits:
 
-- **Dev mode** — Sends the IR dict over a Unix socket to the pre-compiled `morph_devrt` renderer. Your JS logic is compiled to a `logic.so` shared library loaded via `dlopen`.
+- **Dev mode** — Sends the IR JSON over loopback TCP to the pre-compiled `morph_devrt` renderer. Your JS logic is compiled to a `logic.so` shared library loaded via `dlopen`.
 - **Build mode** — Feeds the IR into Tera C++ code generation, producing `app.cpp` which is compiled with g++/clang++ into a standalone binary.
 
 ## What Gets Compiled
@@ -36,7 +36,7 @@ From here, the pipeline splits:
 - Layout math
 - CSS cascade and Tailwind resolution
 - C++ code generation (Tera templates)
-- TypeScript → C++ translation (morph-js crate)
+- TypeScript → C++ translation (morpher crate)
 
 **C++ handles the runtime:**
 - OpenGL rendering (Flash / Forge backends)

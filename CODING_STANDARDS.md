@@ -179,7 +179,6 @@ use anyhow::Result;
 ///
 /// # Arguments
 /// * `program` - Parsed AST from oxc
-/// * `optimize` - Enable escape analysis
 ///
 /// # Returns
 /// Generated C++ source code as a String.

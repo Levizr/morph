@@ -9,39 +9,27 @@ Where everything lives and which direction the dependencies point. Read this bef
 | Path | What it is |
 |---|---|
 | `crates/` | Rust workspace: the CLI and all translation machinery |
-| `morph/` | Python CLI: GUI pipeline (parser, layout, dev server, build) |
 | `runtime/cpp/` | C++ runtime linked into every app (types, UI, renderers, net) |
-| `tests/` | Python test suites + translate fixtures |
+| `tests/` | Translator fixtures (`tests/translate/`) + full-app smoke projects (`tests/runtime/`) |
 | `docs/` | User docs (`docs/`) and these dev docs (`docs/dev/`) |
-| `help/` | Deep-dive working notes (renderer design, package authoring, testing) |
-| `my-app/` | Sample app (disposition still open — see migration notes) |
+| `help/` | Deep-dive working notes (renderer design, rewrite plans, testing) |
+| `versions/` | Version files (release triggers) |
+| `examples/` | Sample apps (calculator, login, ...) |
 
 ## `crates/` — the Rust workspace
 
 | Crate | Role |
 |---|---|
-| `morpher` | TS→C++ translator: Oxc parse → escape analysis → intent-based emit. Deep dive: [Morpher Internals](morpher-internals.md) |
-| `morphc` | The `morph` binary: `translate`, `build`, `dev`, `run`, `new`, `check` commands |
-| `morph-codegen` | GUI C++ emitter (JSX/IR → translation unit). Currently a thin shim over string-level `translate_js` — see [GUI Pipeline](gui-pipeline.md) |
-| `morph-ir` | GUI intermediate representation (`IRBuilder` — layout fields currently hardcoded `0.0`) |
-| `morph-parser` | `.mx`/TS parsing on the Rust side |
-| `morph-config` | `morph.config.json` / `morph.lock` handling |
-| `morph-cache` | Global cache (`~/.morph/cache/runtimes/`) |
-| `morph-build` | Build orchestration helpers |
+| `morphc` | The `morph` binary — all CLI commands: `new`, `install`, `update`, `dev`, `build`, `run`, `check`, `doctor`, `cache`, plus direct file morphing (`morph <file> --to cpp\|rust`) |
+| `morpher` | TS→C++/Rust translator: Oxc parse → escape analysis → intent-based emit. Deep dive: [Morpher Internals](morpher-internals.md) |
+| `morph-config` | `morph.config.json` / `morph.lock` / version-file handling |
+| `morph-parser` | `.mx`/TS parsing + JSX walker + linting on the Rust side |
+| `morph-ir` | Intermediate representation: `IRBuilder`, style, Tailwind, transforms, serializer |
+| `morph-codegen` | C++ / Rust code emission: node emitter, logic emitter, feature set |
+| `morph-build` | Build orchestration: compilation, dev rt + IPC, platform, UPX, static deps |
+| `morph-cache` | Global cache (`~/.morph/cache/runtimes/`), runtime download, fingerprints |
 
-Dependency direction: `morphc` → `morpher` / `morph-codegen` → `morph-ir` → `morph-parser`. `morph-codegen` does **not** call `morpher` yet — that wiring is the first step of the Python removal sequence.
-
-## `morph/` — the Python CLI
-
-| Module | Role |
-|---|---|
-| `morph/js/codegen.py` | `TSToCppTranslator` — the full JS→C++ translator GUI builds use |
-| `morph/layout/engine.py` | Measure + layout pass; writes real `x/y/w/h` |
-| `morph/dev/` | Dev server: watches, recompiles `logic.<hash>.so`, pushes over IPC |
-| `morph/cli/` | `cmd_build.py`, `cmd_dev.py`, `cmd_run.py`, ... |
-| `morph/jsx_walker.py`, `morph/ir/` | JSX → IR (props, events, effects, full surface) |
-| `morph/style/` | Selector engine + (partial) cascade |
-| `morph/pkg/` | `morph pkg` package CLI (downloaded, not compiled — see [Packages](../future/packages.md)) |
+Dependency direction: `morphc` → `morpher` / `morph-codegen` → `morph-ir` → `morph-parser`; `morph-build` and `morph-cache` support the CLI. There is no Python anywhere in the pipeline — the entire toolchain is Rust.
 
 ## `runtime/cpp/` — the C++ runtime
 
@@ -51,12 +39,14 @@ Header-heavy, linked into every binary. Full tour: [Runtime Layout](runtime-layo
 
 | Path | Runs against |
 |---|---|
-| `tests/translate/` | The Rust binary: 21 fixtures (`.ts` → `.cpp` → compile → run, output must match Node) + 4 regression tests |
-| `tests/unit/`, `tests/integration/` | Python `morph.*` directly (14 suites) — the reason Python can't be deleted yet |
+| `tests/translate/` | The Rust `morph` binary: fixtures (`.ts` → `.cpp` → compile → run, output must match Node.js) + regression/intent tests, via `python3 -m pytest tests/translate -v` |
+| `tests/runtime/` | Full-app smoke projects (`.mx` apps with configs) exercised by `morph new`/`build`/`dev` |
 | `tests/translate/fixtures/*.cpp` | Gitignored build artifacts — never commit these |
+
+The only Python in the repo is the translator's test harness (`tests/translate/*.py`) — it drives the built binary, it is not part of the toolchain.
 
 ## `help/` vs `docs/` vs `docs/dev/`
 
 - `docs/` — user documentation, rendered at `morph.levizr.com/docs`. Promises.
 - `docs/dev/` — this section, rendered at `morph.levizr.com/dev/docs`. Internals.
-- `help/` — working notes and design docs (renderer internals, package authoring, test setup). Raw material: promote finished thinking into `docs/` or `docs/dev/`, don't link users here.
+- `help/` — working notes and design docs (renderer internals, rewrite plans, test setup). Raw material: promote finished thinking into `docs/` or `docs/dev/`, don't link users here. Anything describing the Python toolchain is historical.

@@ -57,7 +57,7 @@ The `setStatus()` and `setData()` functions are generated wrappers that update t
 
 ## Clipboard
 
-Native code (and `<input>` copy/paste) uses the GLFW-backed clipboard API from `morph/runtime/core/clipboard.h`:
+Native code (and `<input>` copy/paste) uses the GLFW-backed clipboard API from `runtime/cpp/core/clipboard.h`:
 
 ```cpp
 #include "clipboard.h"

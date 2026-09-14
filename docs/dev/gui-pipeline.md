@@ -1,49 +1,53 @@
-# GUI Pipeline: Python vs Rust
+# GUI Pipeline
 
 **Part of:** [Dev Docs](overview.md)
 
-The single most important internals page for contributors: which parts of `morph build` / `dev` / `run` each CLI owns, what breaks if you assume otherwise, and the exact sequence that ends with Python deleted. (User-facing summary: [What Still Needs the Python CLI](../guides/migration.md#what-still-needs-the-python-cli).)
+How `morph build` / `morph run` / `morph dev` turn an `.mx` source file into a native windowed binary. Everything here is Rust — there is no Python in the pipeline.
 
-## Build flow ownership
+## Build flow
 
 ```
 .mx source
    │
    ▼
-┌──────────────┐   Python morph/jsx_walker.py + morph/ir/  ✅ full surface
-│ Parse + IR   │   Rust morph-ir IRBuilder                ⚠️ drops props/events/effects,
-   │               keys; x/y/w/h hardcoded 0.0
-   ▼
-┌──────────────┐   Python morph/layout/engine.py          ✅ measure + layout pass
-│ Layout       │   Rust                                   ❌ missing entirely
+┌──────────────┐   morph_parser: Oxc + lightningcss → JSX walker → MxSource
+│ Parse + CSS  │   (imports, components, state, effects, CSS rules + keyframes)
    │
    ▼
-┌──────────────┐   Python morph/js/codegen.py             ✅ full translator
-│ JS → C++     │   Rust morph-codegen translate_js        ❌ string-level shim;
-   │               morpher never called; premain JS
-   │               emitted verbatim (won't compile)
-   ▼
-┌──────────────┐   both sides shell out to g++/CMake      ✅ same compilers
-│ Compile      │
+┌──────────────┐   morph_ir::IRBuilder: MxSource + CSS → IRWindow/IRNode trees
+│ IR           │   (style resolution, Tailwind utilities, transforms)
    │
    ▼
-native binary
+┌──────────────┐   morph_codegen: node_emitter + logic_emitter + feature_set
+│ Codegen      │   → app.cpp + _morph_state.h (only used runtime features)
+   │
+   ▼
+┌──────────────┐   morph_build: g++/clang++ (C++23), fingerprinting,
+│ Compile      │   --static / UPX post-processing
+   │
+   ▼
+.morph/output/<app>   native binary
 ```
 
-## Dev flow ownership
+All three stages run in-process in the `morph` binary. The compiler pipeline crates see:
 
-Python `morph dev`: watches sources → rebuilds IR → emits logic TU → compiles `logic.<hash>.so` → pushes over IPC (Unix socket / TCP) → running app `dlopen`s it live. Full hot reload.
+| Stage | Crate/entry point |
+|---|---|
+| Parse + CSS + JSX walk | `morph-parser` (`parse_mx_str`, `parse_css`, JSX walker) |
+| IR build | `morph-ir::builder::IRBuilder` |
+| Emit C++ | `morph-codegen::node_emitter` / `logic_emitter` / `feature_set` |
+| Compile + link | `morph-build` (`Compiler`, `BuildOptions`, `build_project`) |
+| Runtime linkage | `morph-cache` (`download_runtime`, `link_runtime_to_project`) |
+| Config | `morph-config` (output dir, window, build flags) |
 
-Rust `morph dev`: verifies IR and stops (`crates/morphc/src/commands/dev.rs:118-119`). No logic-TU emit, no `.so` compile, no IPC push. The window opens; nothing hot-reloads.
+## Dev flow
 
-## The removal sequence
+`morph dev` runs the same in-process pipeline, then:
 
-Order matters — each step is verifiable before the next begins:
+1. Ensures the runtime is installed and builds `morph_devrt` (the prebuilt dev renderer) via CMake if its source hash changed
+2. Launches `morph_devrt`, which announces its IPC address
+3. Watches source dirs with `notify` (100ms debounce)
+4. On change: parse → CSS → IR → emit + compile the logic library → serialize IR → push over **loopback TCP** (`127.0.0.1:39573`, ephemeral fallback on collision) to `morph_devrt`
+5. The running window swaps the IR document and rewires logic without restarting (hot reload)
 
-1. **Wire morpher into `morph-codegen` in strict mode.** GUI logic translated by the real translator instead of the shim. Verify: GUI fixture outputs unchanged.
-2. **Parity harness.** Translate GUI snippets through both `TSToCppTranslator` and morpher-strict, diff. The harness *is* the definition of done for step 1 — no harness, no claim of parity.
-3. **Port the layout engine.** Measure + layout pass in Rust, real `x/y/w/h` in IR. Verify: sample apps render identically (screenshot diff).
-4. **Port dev hot-reload.** Logic-TU emit + `.so` compile + IPC push in `dev.rs`.
-5. **Delete Python**: remove `morph/`, `pyproject.toml`, `python-publish.yml`, port or drop `tests/unit` + `tests/integration`, wire a Rust release workflow. Smoke-test `new` → `dev` → `build --static` → run before merging.
-
-Until step 5 lands: **file morphing → Rust, `.mx` projects → Python.** Any PR that assumes otherwise will fail in ways no test catches (mispositioned widgets, untranslated logic) — which is exactly why the harness comes before the deletion.
+The hot-reload "logic" is compiled per-change (`g++ -shared`) so the window, GL context, and layout tree stay alive.

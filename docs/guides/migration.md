@@ -2,7 +2,7 @@
 
 This guide helps you migrate from the legacy Python-based `morph` CLI to the new Rust-based `morph`.
 
-> **Migration is in progress, not finished.** Direct file morphing (`morph app.ts --to cpp`) is fully owned by Rust, but GUI application builds still need the Python CLI for parts of the pipeline. See [What Still Needs the Python CLI](#what-still-needs-the-python-cli) before uninstalling anything.
+> **Migration complete.** The Rust `morph` binary owns the entire pipeline — direct file morphing and `.mx` project builds. Python was removed from the repository in September 2026. There is nothing to keep installed.
 
 ## Quick Command Mapping
 
@@ -17,7 +17,6 @@ This guide helps you migrate from the legacy Python-based `morph` CLI to the new
 | `morph cache` | `morph cache` | Same |
 | `morph translate file.ts` | `morph file.ts` | Direct file morphing, no subcommand |
 | `morph translate file.ts --to cpp` | `morph file.ts --to cpp` | New flag: `--to` |
-| `morph pkg add` | *(not yet)* | Package manager in development |
 
 ## Installation Changes
 
@@ -119,7 +118,7 @@ morph new . --width 1024 --height 768 --ext mx -y
 # Python: watched via inotify + custom Python watcher
 morph dev
 
-# Rust: 100ms debounce, notify crate, Unix/TCP socket
+# Rust: 100ms debounce, notify crate, loopback TCP IPC
 morph dev
 morph dev --entry src/App.mx
 ```
@@ -171,7 +170,7 @@ Run `morph check` for lint-only pass.
 - Still auto-built via CMake on first `morph dev`
 - Source hash tracking in `.morph/hash/dev.fingerprint`
 - Rebuilds when runtime source changes
-- IPC: Unix socket `.morph/dev.sock` (Linux/macOS), TCP `127.0.0.1:3000` (Windows)
+- IPC: loopback TCP `127.0.0.1:39573` (ephemeral fallback on collision)
 
 ## File Structure Changes
 
@@ -233,36 +232,26 @@ my-app/
 - [ ] Update CI to install the `morph` binary via `cargo install morphc`
 - [ ] Replace `morph translate` with `morph file.ts --to cpp`
 - [ ] Replace `morph init` with `morph new`
-- [ ] Remove Python from build environment (direct file morphing only — keep it for `.mx` project builds, see above)
+- [ ] Remove any Python toolchain from your build environment — it is not needed (the Rust binary is self-contained)
 - [ ] Test dev mode: `morph dev`
 - [ ] Test build: `morph build --static`
 - [ ] Verify binary runs on clean machine
 
 ## What Still Needs the Python CLI
 
-The `morph/` Python package is still present in the repo on purpose. The Rust CLI owns direct file morphing end to end, but the GUI application pipeline is split — removing Python today would silently break project builds (mispositioned widgets, untranslated logic, no hot reload) with no failing test to catch it.
+**Nothing.** The Rust `morph` binary owns the entire pipeline — direct file morphing *and* `.mx` project builds. Python was removed from the repository in September 2026. The only Python left is the fixture-test harness under `tests/translate/`, which drives the built `morph` binary.
 
-| Area | Rust status | Python still needed | Why |
-|---|---|---|---|
-| Direct file morph (`morph app.ts`) | ✅ Complete (`morpher`, `--type`) | No | Covered by 28 fixtures + intent tests, outputs match Node.js |
-| GUI layout engine | ❌ Missing | **Yes** — `morph/layout/engine.py` | Measure + layout pass writes real `x/y/w/h`; Rust `IRBuilder` hardcodes `0.0`, so every widget would pile at the origin |
-| JS logic inside GUI builds | ❌ Not wired | **Yes** — `morph/js/codegen.py` | `morph build` never calls `morpher`; `morph-codegen` has only a string-level `translate_js` shim and emits `premain` bodies as raw JS verbatim (won't compile) |
-| Dev hot reload | ❌ Stub | **Yes** — `morph/dev/` | Rust `dev` verifies IR and stops: no logic-TU emit, no `.so` compile, no IPC push (`dev.rs:118-119`); Python compiles `logic.<hash>.so` and `dlopen`s it live |
-| Props / events / effects | ⚠️ Partial | **Yes** | Rust drops `onChange`/`onFocus`/keys, `effect_decls`, `global_vars`, `function_declarations`; Python `jsx_walker` + `IRBuilder` handle the full surface |
-| PyPI distribution | ❌ Rust-only | **Yes** — `python-publish.yml` | `levizr-morph` releases still ship from Python; no Rust release workflow exists yet |
-| Unit / integration tests | ❌ Unported | **Yes** — `tests/unit`, `tests/integration` | 14 suites import `morph.*` directly; only the translate suite runs on the Rust binary |
-
-The rule of thumb: **file morphing → Rust; `morph build` / `morph run` / `morph dev` on `.mx` projects → keep Python installed** until the parity harness (translating GUI snippets through both translators and diffing) and the layout-engine port land. That sequence is tracked in [What Morph Is Building Right Now](../roadmap/under-construction.md).
+| Area | Rust status |
+|---|---|
+| Direct file morph (`morph app.ts`) | ✅ Complete (`morpher`), outputs match Node.js |
+| Parse → IR → codegen → build for `.mx` projects | ✅ All in-crate (`morph-parser` → `morph-ir` → `morph-codegen` → `morph-build`) |
+| Dev hot reload | ✅ `morph dev` — in-process compile + loopback TCP push to `morph_devrt` |
+| CLI / distribution | ✅ `morphc` on crates.io — `cargo install morphc` |
+| Tests | ✅ `cargo test --workspace` + `tests/translate` fixtures drive the Rust binary |
 
 ## Rollback
 
-If you need the Python toolchain:
-
-```bash
-pip install levizr-morph==0.0.6  # last Python release
-```
-
-The Python version is published as `morph-legacy` on PyPI for reference.
+There is no separate Python toolchain to roll back to. If you need an older behavior, run an older `morphc` release (`cargo install morphc --version ...`).
 
 ## Getting Help
 

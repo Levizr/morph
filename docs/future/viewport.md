@@ -21,7 +21,7 @@ The runtime scaffold already exists — the parser/builder wiring is what's miss
 
 ### Runtime: `ViewportNode` + `MorphViewportDriver`
 
-`morph/runtime/viewport/viewport_node.h` declares a `ViewportNode : public MorphNode` that owns a `MorphViewportDriver*`. The driver is an interface (`viewport_driver.h`) with these callbacks:
+`runtime/cpp/viewport/viewport_node.h` declares a `ViewportNode : public MorphNode` that owns a `MorphViewportDriver*`. The driver is an interface (`viewport_driver.h`) with these callbacks:
 
 ```cpp
 struct ViewportContext {
@@ -82,9 +82,9 @@ The compiler emits `ViewportNode* vp = new ViewportNode(new MyViewportDriver());
 |---|---|
 | `ViewportNode` class | ✅ Declared (`runtime/viewport/viewport_node.h` + `runtime/ui/` copy) |
 | `MorphViewportDriver` interface + `ViewportContext` | ✅ Declared (`viewport_driver.h`) |
-| `IRViewport` IR dataclass | ✅ Declared (`morph/ir/node.py:96`) |
-| Codegen `_emit_viewport()` | ✅ Present (`node_emitter.py:1058`) — emits `new ViewportNode(new <driver_class>())` |
-| Feature gate `"viewport"` + header include | ✅ In `feature_set.py` |
+| `IRViewport` IR struct | ✅ Declared (`crates/morph-ir/src/node.rs`) |
+| Codegen viewport emitter | ✅ Present in `crates/morph-codegen/` — emits `new ViewportNode(new <driver_class>())` |
+| Feature gate `"viewport"` + header include | ✅ In `crates/morph-codegen/src/feature_set.rs` |
 | JSX parsing (`jsx_walker.py`) | ❌ Nothing — tags parse generically, no viewport special-casing |
 | IR building (`ir/builder.py`) | ❌ Only `morph-window` is special-cased |
 | `morph check` tag registry | ❌ `SUPPORTED_TAGS` has no viewport → would flag `mx-tag` |

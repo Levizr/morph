@@ -1,5 +1,7 @@
 # Testing Guide
 
+> **Historical document.** The Python test suites (`tests/unit`, `tests/integration`) have been removed. See [`docs/guides/testing.md`](../docs/guides/testing.md) and [`tests/translate/`](../tests/translate/) for current test information.
+
 ## Running Tests
 
 ```bash

@@ -26,7 +26,7 @@ Everything on Morph's roadmap, documented in detail. Each feature page covers wh
 | Hidden classes, compositor-safe properties | [Performance](performance.md) | Low | — |
 | Full Rust runtime (`--lang rust`, cross-language interop) | [Rust Support](rust.md) | High | — |
 | Vulkan / Metal / DirectX backends (pluggable graphics) | [Graphics APIs](graphics-api.md) | High | — |
-| Rust compiler (SWC/Oxc) + native CLI, Python removed | [Rust Compiler](compiler.md) | High | Rust runtime (optional) |
+| Rust compiler (SWC/Oxc) + native CLI, Python removed | [Rust Compiler](compiler.md) | ✅ Shipped (Sept 2026) | — |
 
 **Status meanings:** `production` — shipped and stable · `beta` — shipped, known bugs · `development` — under active construction · `future` — planned, not built yet.
 

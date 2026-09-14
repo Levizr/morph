@@ -44,7 +44,7 @@ renderdoc .morph/output/my-app
 | Symptom | Fix |
 |---|---|
 | Blank window | Switch `renderer` to `"flash"` in config (Forge is beta) |
-| Hot reload stuck | `rm .morph/dev.sock && morph dev` |
+| Hot reload stuck | Kill stale `morph_devrt` processes and restart `morph dev` |
 | Text missing | `morph doctor -y`, check `build.system_freetype` |
 | Linker errors | Add libs to `native.libraries` in config |
 

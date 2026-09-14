@@ -18,10 +18,10 @@ No browser. No Electron. No WebView. Just a lightweight native binary.
 <br/>
 
 [![License](https://img.shields.io/badge/license-Apache-7c6af5?style=flat-square?logo=apache)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.10+-1dc98a?style=flat-square&logo=python&logoColor=white)](https://python.org)
+[![Rust](https://img.shields.io/badge/Rust-1.85+-f74c00?style=flat-square&logo=rust&logoColor=white)](https://rust-lang.org)
 [![C++](https://img.shields.io/badge/C++-23-4da6ff?style=flat-square&logo=cplusplus&logoColor=white)](https://isocpp.org)
 [![OpenGL](https://img.shields.io/badge/OpenGL-3.3-f06449?style=flat-square)](https://opengl.org)
-[![Version](https://img.shields.io/badge/version-0.0.6-7c6af5?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-0.1.0-7c6af5?style=flat-square)]()
 
 <br/>
 
@@ -89,7 +89,7 @@ Morph is a great fit when you need:
 - A project where you want HTML/CSS for layout but don't want the overhead of a browser engine
 - A learning project to explore how compilers, renderers, and UI frameworks work under the hood
 
-Morph may **not** be the right choice yet if you need a battle-tested production framework — it's still in early development (v0.0.6).
+Morph may **not** be the right choice yet if you need a battle-tested production framework — it's still in early development (v0.1.0).
 
 ---
 
@@ -97,14 +97,15 @@ Morph may **not** be the right choice yet if you need a battle-tested production
 
 **1. Install**
 ```bash
-pip install levizr-morph
+cargo install morphc
 morph doctor          # verify system dependencies
 ```
 
 **2. Create a project**
 ```bash
-morph init my-app
+morph new my-app
 cd my-app
+morph install         # downloads the C++ runtime
 ```
 
 **3. Start dev mode**
@@ -116,8 +117,8 @@ A native window opens. Edit `src/App.mx` — the window updates instantly withou
 
 **4. Build for production**
 ```bash
-morph run         # builds and runs the production binary
-morph run --static   # link everything into a single self-contained file
+morph run           # builds and runs the production binary
+morph run --static  # link everything into a single self-contained file
 ```
 
 For full details, see the [Getting Started guide](docs/getting-started/quick-start.md).
@@ -147,9 +148,9 @@ morph dev
 
 Morph is a **compiler**, not an interpreter. Your source files never ship — only the compiled binary does.
 
-You write `.mx` files using JSX-like syntax and CSS. Morph's Python-based compiler parses your code, builds an intermediate representation, runs layout calculations, and generates C++ code. That C++ is compiled into a native binary using OpenGL for rendering — no browser, no runtime dependencies, no garbage collector.
+You write `.mx` files using JSX-like syntax and CSS. Morph's **Rust-based compiler** parses your code, builds an intermediate representation (IR), and generates C++ code. That C++ is compiled into a native binary using OpenGL for rendering — no browser, no runtime dependencies, no garbage collector.
 
-In **dev mode**, the compiler sends updates over a Unix socket to a pre-built renderer, so changes appear instantly. In **build mode**, it produces a standalone binary.
+In **dev mode**, the compiler sends updates over a loopback socket to a pre-built renderer (`morph_devrt`), so changes appear instantly. In **build mode**, it produces a standalone binary.
 
 To dive deeper, see:
 - [Architecture overview](docs/concepts/architecture.md)
@@ -158,11 +159,11 @@ To dive deeper, see:
 
 ---
 
-## Current Status (v0.0.6)
+## Current Status (v0.1.0)
 
 Morph is in **early development** and actively being built. Here's where things stand:
 
-**Working:** CSS parsing, Tailwind, flexbox, layout engine, image rendering, event system, scrollbars, hover/active states, CSS transitions and animations, transforms, DevTools panel, reactive state (`morphState`), effects, async/await, coroutine task scheduler, `fetch()` API, TypeScript-to-C++ compiler, dual renderers (Flash and Forge), compositor thread, and more.
+**Working:** fully Rust-native CLI (`morph`), CSS parsing, Tailwind, flexbox, layout engine, image rendering, event system, scrollbars, hover/active states, CSS transitions and animations, transforms, DevTools panel, reactive state (`morphState`), effects, async/await, coroutine task scheduler, `fetch()` API, TypeScript-to-C++ translator (Oxc + `morpher`), native C++ interop, dual renderers (Flash and Forge), compositor thread, dev-mode hot reload over loopback IPC, and more.
 
 **Needs help — great places to contribute:**
 
@@ -200,7 +201,7 @@ my-app/
 ├── cpp/                  ← optional custom C++ nodes
 ├── assets/               ← fonts, textures, etc.
 ├── morph.config.json     ← project config
-└── dist/
+└── .morph/output/
     └── app               ← compiled binary
 ```
 
@@ -212,8 +213,8 @@ See [Project Structure](docs/getting-started/project-structure.md) and [Configur
 
 | | Linux | macOS | Windows |
 |---|---|---|---|
-| Python | 3.10+ | 3.10+ | 3.10+ |
-| Compiler | g++ 11+ (C++23) | clang++ 13+ | MSVC / MinGW |
+| Rust | 1.85+ | 1.85+ | 1.85+ |
+| Compiler | g++ 14+ (C++23) | clang++ 13+ | MSVC / MinGW |
 | OpenGL | 3.3+ | 3.3+ | 3.3+ |
 | GLFW | `apt install libglfw3-dev` | `brew install glfw` | bundled |
 | FreeType / HarfBuzz | `libfreetype-dev` `libharfbuzz-dev` | `brew install freetype harfbuzz` | bundled |
@@ -238,8 +239,8 @@ Contributions are very welcome — whether it's code, docs, bug reports, or idea
 ```bash
 git clone https://github.com/levizr/morph
 cd morph
-pip install -e ".[dev]"
-morph doctor
+cargo build --workspace
+target/debug/morph doctor
 ```
 
 Please read the [Contributing Guide](CONTRIBUTING.md) before submitting a pull request. We ask that you:
@@ -247,7 +248,7 @@ Please read the [Contributing Guide](CONTRIBUTING.md) before submitting a pull r
 - Open an issue first for large features so we can align on design
 - Keep PRs focused — one feature or fix per PR
 - Add or update tests when possible
-- Run `python -m pytest tests/ -v` before submitting
+- Run `cargo test --workspace` before submitting
 
 ---
 
@@ -279,6 +280,6 @@ Apache — see [LICENSE](LICENSE).
 
 <div align="center">
 <br/>
-Built with C++ and Python &nbsp;·&nbsp; Rendered with OpenGL &nbsp;·&nbsp; No browser required
+Built with Rust and C++ &nbsp;·&nbsp; Rendered with OpenGL &nbsp;·&nbsp; No browser required
 <br/><br/>
 </div>

@@ -1,5 +1,7 @@
 # Troubleshooting Guide
 
+> **Historical document.** Python-era setup instructions. Use `morph doctor` to verify the current (Rust) toolchain, and see [`docs/getting-started/installation.md`](../docs/getting-started/installation.md).
+
 ## Common Issues
 
 ### `morph build` — Compilation errors

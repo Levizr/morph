@@ -10,7 +10,7 @@ The roadmap above is a plan, not a wall. Real-world needs get priority; whole pa
 
 - **Email us:** [`suggestions.morph@levizr.com`](mailto:suggestions.morph@levizr.com) — the simplest route. One paragraph is enough: *what you're building, what's missing, and what you tried instead.*
 - **Open an issue / PR:** the repo lives at [github.com/Levizr/morph](https://github.com/Levizr/morph) — see [Contributing](../../CONTRIBUTING.md)
-- **Contribute** — if you're up for it, code is welcome. Morph is Python + C++ with a tree-sitter compiler; a working patch on an issue beats a hundred wishlist emails. Start with the `good first issue` label
+- **Contribute** — if you're up for it, code is welcome. Morph is a Rust toolchain generating C++ via Oxc; a working patch on an issue beats a hundred wishlist emails. Start with the `good first issue` label
 - **Just talk about it** — even a half-formed idea is useful. Describe the pain; we'll figure out the shape.
 
 ## What happens next

@@ -1,5 +1,5 @@
 """
-Tests for Rust-based TS → C++ translation (crates/morph-js).
+Tests for Rust-based TS → C++ translation (crates/morpher).
 
 For each fixture in tests/translate/fixtures/*.ts:
   1. Translate via `morph` binary (Rust TSToCppTranslator)

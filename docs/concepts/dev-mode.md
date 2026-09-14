@@ -5,15 +5,15 @@
 ## What Happens
 
 ```
-File save  →  File watcher  →  Pipeline  →  IR dict  →  Unix socket  →  morph_devrt
+File save  →  File watcher  →  Pipeline  →  IR JSON  →  loopback TCP  →  morph_devrt
                                                    │
                                JS logic  →  logic.<hash>.so  →  dlopen + rewire
 ```
 
 1. **File watcher** detects a change in your `.mx`, `.css`, or `.ts` files (100ms debounce)
 2. **Pipeline** re-runs: Oxc parse, lightningcss, build IR, layout, serialize
-3. **JS logic** is translated to C++ via morph-js, compiled to `logic.<hash>.so` with g++/clang++ (configured via `build.dev_cxx` in `morph.config.json`), and loaded via `dlopen`
-4. **IR dict** is sent over a Unix socket (`.morph/dev.sock` on Linux/macOS, `127.0.0.1:3000` on Windows) to `morph_devrt`
+3. **JS logic** is translated to C++ via morpher, compiled to `logic.<hash>.so` with g++/clang++ (configured via `build.dev_cxx` in `morph.config.json`), and loaded via `dlopen`
+4. **IR JSON** is sent over loopback TCP (`127.0.0.1:39573`, ephemeral fallback on collision) to `morph_devrt`
 5. **Window** swaps the node tree and re-wires signals — no restart needed
 
 ## Starting Dev Mode
@@ -25,7 +25,7 @@ morph dev
 This will:
 1. Ensure runtime is installed (downloads from GitHub if missing)
 2. Build the dev runtime binary (`morph_devrt`) via CMake if it doesn't exist
-3. Start the Unix socket server
+3. Launch `morph_devrt`
 4. Launch the native window
 5. Watch for file changes
 
@@ -43,7 +43,7 @@ The window never closes. Only the content inside it changes.
 
 `morph_devrt` is a pre-compiled C++ binary that:
 - Opens a GLFW window
-- Listens on a Unix socket (`.morph/dev.sock` on Linux/macOS, TCP `127.0.0.1:3000` on Windows)
+- Listens on loopback TCP (`127.0.0.1:39573`, ephemeral fallback)
 - Receives IR JSON and builds a node tree
 - Handles events, layout, and OpenGL rendering
 - Supports DevTools (F12)
@@ -76,5 +76,5 @@ See the [DevTools](../devtools/index.md) section for details on each tab.
 
 - **Wayland issues** — If the window doesn't open, try: `GDK_BACKEND=x11 morph dev`
 - **Slow reload** — Check if your CSS files are large or if you have many Tailwind classes
-- **Socket errors** — Delete `.morph/dev.sock` and restart
+- **Socket errors** — Make sure `morph_devrt` is running; `kill` any stale processes and restart `morph dev`
 - **Binary missing** — Run `morph doctor` to verify cmake, g++, and make are installed

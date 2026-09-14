@@ -2,18 +2,18 @@
 
 **Part of:** [Dev Docs](overview.md)
 
-This section is not user documentation. The [main docs](../index.md) teach you how to *use* Morph; these pages explain how Morph *works* — for contributors and the deeply curious. If you want to fix a bug, extend morpher, port the layout engine, or just understand what happens between `morph build` and a native binary, start here.
+This section is not user documentation. The [main docs](../index.md) teach you how to *use* Morph; these pages explain how Morph *works* — for contributors and the deeply curious. If you want to fix a bug, extend morpher, or just understand what happens between `morph build` and a native binary, start here.
 
-## The two pipelines
+## The pipeline
 
-Morph has two translation pipelines, and confusing them is the #1 source of wasted contributor effort:
+Everything is Rust. The `morph` binary compiles `.mx` / `.tsx` / `.ts` through the workspace crates (parse → IR → codegen → build) and drives direct file morphing (`.ts` → C++/Rust) through `morpher`.
 
-| Pipeline | Input | Owner | Output |
-|---|---|---|---|
-| **Direct file morph** | `app.ts` / `.mx` logic | Rust (`morpher` crate) | Native C++ (`--type infer`/`strict`) |
-| **GUI project build** | `.mx` app (`morph build`/`dev`/`run`) | Python CLI (`morph/`) + Rust shell | Windowed native binary |
+| Input | Path |
+|---|---|
+| **Direct file morph** | `app.ts` `--to cpp\|rust` → `morpher` crate |
+| **GUI project build** | `.mx` app (`morph build`/`dev`/`run`) → full workspace pipeline |
 
-Direct file morphing is fully Rust-owned and covered by fixtures. GUI builds are split — Python still owns the layout engine, dev hot-reload, and full JS translation. The complete map of who owns what is in [GUI Pipeline: Python vs Rust](gui-pipeline.md).
+The complete flow is in [GUI Pipeline](gui-pipeline.md).
 
 ## Where to start, by goal
 
@@ -22,7 +22,7 @@ Direct file morphing is fully Rust-owned and covered by fixtures. GUI builds are
 | Contribute code (setup, conventions, PRs) | [Contributing](contributing.md) + [`CONTRIBUTING.md`](../../CONTRIBUTING.md) |
 | Orient in the repo | [Repo Map](repo-map.md) |
 | Extend the TS→C++ translator | [Morpher Internals](morpher-internals.md), then [Intent-Based Codegen](../guides/intent-based-codegen.md) |
-| Work on GUI builds or the Rust port | [GUI Pipeline: Python vs Rust](gui-pipeline.md) |
+| Work on the GUI build / dev pipeline | [GUI Pipeline](gui-pipeline.md) |
 | Add a runtime helper or type | [Runtime Layout](runtime-layout.md) |
 | Write or fix documentation | [Docs System](docs-system.md) |
 

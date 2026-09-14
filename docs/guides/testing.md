@@ -2,7 +2,7 @@
 
 How we test Morph itself, and how you can test apps built with it.
 
-## Testing the Translator (24/24 Fixture Suite)
+## Testing the Translator (Fixture Suite)
 
 The JS/TS → C++ translator is covered by fixture tests in `tests/translate/`:
 
@@ -58,7 +58,7 @@ cargo test --workspace
 
 # Single crate
 cargo test -p morph-ir
-cargo test -p morph-js
+cargo test -p morpher
 cargo test -p morph-parser
 ```
 

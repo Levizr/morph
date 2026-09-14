@@ -1,5 +1,7 @@
 # Development Guide
 
+> **Historical document.** Python was removed from the repository in September 2026. See [`docs/dev/contributing.md`](../docs/dev/contributing.md) and [`CONTRIBUTING.md`](../CONTRIBUTING.md) for current setup and conventions.
+
 ## Setup
 
 ```bash

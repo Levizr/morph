@@ -1,5 +1,7 @@
 # Morph Rust Rewrite Plan
 
+> **Historical document.** The Rust rewrite is complete — Python is removed and `morphc` is published on crates.io. See [`docs/story/working-on-morphc.md`](../docs/story/working-on-morphc.md) for the outcome.
+
 ## Naming: `morphc` (Morph Compiler)
 
 - Binary: `morphc`, Crate: `morph-compiler`

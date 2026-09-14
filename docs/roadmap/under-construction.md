@@ -8,7 +8,7 @@ The Rust `morph` binary owns direct file morphing (`morph app.ts --to cpp`, `--t
 
 ## Keyed List Rendering
 
-`{items.map(item => <JSX/>)}` is compiled into a keyed `ListContainer` (`morph/runtime/ui/morph_list.h`) with runtime reconciliation — unchanged keys are reused, new keys create nodes, missing keys are removed. This is the newest feature: wiring lives in `node_emitter.py` / `logic_emitter.py`, and the usage guide is in [List Rendering](../elements/lists.md).
+`{items.map(item => <JSX/>)}` is compiled into a keyed `ListContainer` (`runtime/cpp/ui/morph_list.h`) with runtime reconciliation — unchanged keys are reused, new keys create nodes, missing keys are removed. This is the newest feature: wiring lives in `crates/morph-codegen/` (`node_emitter.rs` / `logic_emitter.rs`), and the usage guide is in [List Rendering](../elements/lists.md).
 
 **Status:** New / shipping in the current dev cycle. Conditions, text bindings, and item-level updates are in place; keyed reuse across insert/remove/reorder is the area most likely to still have edge cases.
 
@@ -21,7 +21,7 @@ The compile-time TS→C++ translator (`TSToCppTranslator`) is being extended to 
 - `.length` semantics — cast to a JS number so string-concat and `JsValue` conversions stay unambiguous
 - Extra `JsString`/`JsNumber` overloads to keep codegen output compiling cleanly
 
-**Status:** Actively expanding. The runtime type layer (`JsValue`, `JsArray`, `JsString`, `JsNumber`, `JsObject`) grows alongside it in `morph/runtime/types/`.
+**Status:** Actively expanding. The runtime type layer (`JsValue`, `JsArray`, `JsString`, `JsNumber`, `JsObject`) grows alongside it in `runtime/cpp/types/`.
 
 ## Forge Renderer (Retained Tile Compositor)
 
@@ -35,7 +35,7 @@ The `forge` renderer is **beta / buggy**. Damage tracking + retained FBO are shi
 
 ## CSS Cascade Resolver
 
-The selector engine (`morph/style/selector.py`) parses descendant / child (`>`) / adjacent (`+`) / sibling (`~`) combinators, compounds, pseudo-classes, and specificity. Runtime `:hover` / `:active` and ancestor-hover rules work. The **full cascade** — merging all matched rules by specificity and origin into a final computed style — is still being built out.
+The selector engine (`crates/morph-parser/`, CSS side) parses descendant / child (`>`) / adjacent (`+`) / sibling (`~`) combinators, compounds, pseudo-classes, and specificity. Runtime `:hover` / `:active` and ancestor-hover rules work. The **full cascade** — merging all matched rules by specificity and origin into a final computed style — is still being built out.
 
 **Status:** Partial. Parse + specificity exist; full rule-merging cascade in progress.
 
@@ -47,7 +47,7 @@ The selector engine (`morph/style/selector.py`) parses descendant / child (`>`) 
 
 ## Multi-Window Navigation
 
-`windowConfig` and `<morph-window>` already create windows, and `WindowManager` tracks them (`morph/runtime/core/window_manager.h`). The manager's `open()` and `navigate()` methods are still stubs — showing/hiding windows and page navigation across windows is not wired up yet.
+`windowConfig` and `<morph-window>` already create windows, and `WindowManager` tracks them (`runtime/cpp/core/window_manager.h`). The manager's `open()` and `navigate()` methods are still stubs — showing/hiding windows and page navigation across windows is not wired up yet.
 
 **Status:** Scaffolded, not yet functional.
 

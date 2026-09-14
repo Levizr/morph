@@ -1,5 +1,7 @@
 # Morph — Architecture
 
+> **Historical document.** Parts of this describe the Python pipeline that was removed in September 2026. See [`docs/concepts/architecture.md`](../docs/concepts/architecture.md) for the current architecture.
+
 ## Pipeline
 
 ```
