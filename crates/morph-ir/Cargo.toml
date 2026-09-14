@@ -3,13 +3,15 @@ name = "morph-ir"
 version = "0.1.0"
 edition = "2021"
 description = "Morph Intermediate Representation"
+license = "Apache-2.0"
+repository = "https://github.com/Levizr/morph"
 
 [dependencies]
 anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-morph-parser = { path = "../morph-parser" }
-morpher = { path = "../morpher" }
+morph-parser = { path = "../morph-parser", version = "0.1.0" }
+morpher = { path = "../morpher", version = "0.1.0" }
 oxc_allocator = { workspace = true }
 oxc_ast = { workspace = true }
 oxc_parser = { workspace = true }

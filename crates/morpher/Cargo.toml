@@ -2,6 +2,9 @@
 name = "morpher"
 version = "0.1.0"
 edition = "2024"
+description = "Morph TypeScript → C++ / Rust translator (Oxc-based)"
+license = "Apache-2.0"
+repository = "https://github.com/Levizr/morph"
 
 [dependencies]
 anyhow = { workspace = true }
@@ -16,7 +19,7 @@ oxc_span = { workspace = true }
 oxc_diagnostics = { workspace = true }
 oxc_syntax = { workspace = true }
 strsim = { workspace = true }
-morph-parser = { path = "../morph-parser" }
+morph-parser = { path = "../morph-parser", version = "0.1.0" }
 
 [lints]
 workspace = true

@@ -12,13 +12,13 @@ name = "morph"
 path = "src/main.rs"
 
 [dependencies]
-morph-config = { path = "../morph-config" }
-morph-cache = { path = "../morph-cache" }
-morph-parser = { path = "../morph-parser" }
-morph-ir = { path = "../morph-ir" }
-morph-codegen = { path = "../morph-codegen" }
-morph-build = { path = "../morph-build" }
-morpher = { path = "../morpher" }
+morph-config = { path = "../morph-config", version = "0.1.0" }
+morph-cache = { path = "../morph-cache", version = "0.1.0" }
+morph-parser = { path = "../morph-parser", version = "0.1.0" }
+morph-ir = { path = "../morph-ir", version = "0.1.0" }
+morph-codegen = { path = "../morph-codegen", version = "0.1.0" }
+morph-build = { path = "../morph-build", version = "0.1.0" }
+morpher = { path = "../morpher", version = "0.1.0" }
 clap = { workspace = true }
 anyhow = { workspace = true }
 serde = { workspace = true }

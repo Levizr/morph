@@ -3,6 +3,8 @@ name = "morph-parser"
 version = "0.1.0"
 edition = "2021"
 description = "Morph parser via Oxc + lightningcss"
+license = "Apache-2.0"
+repository = "https://github.com/Levizr/morph"
 
 [dependencies]
 anyhow = { workspace = true }

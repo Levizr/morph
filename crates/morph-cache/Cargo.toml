@@ -3,9 +3,11 @@ name = "morph-cache"
 version = "0.1.0"
 edition = "2021"
 description = "Global cache management for morphc"
+license = "Apache-2.0"
+repository = "https://github.com/Levizr/morph"
 
 [dependencies]
-morph-config = { path = "../morph-config" }
+morph-config = { path = "../morph-config", version = "0.1.0" }
 anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

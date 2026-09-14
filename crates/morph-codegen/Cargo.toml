@@ -3,17 +3,19 @@ name = "morph-codegen"
 version = "0.1.0"
 edition = "2021"
 description = "Morph C++ / Rust code generation"
+license = "Apache-2.0"
+repository = "https://github.com/Levizr/morph"
 
 [dependencies]
 anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tera = { workspace = true }
-morph-ir = { path = "../morph-ir" }
-morpher = { path = "../morpher" }
+morph-ir = { path = "../morph-ir", version = "0.1.0" }
+morpher = { path = "../morpher", version = "0.1.0" }
 
 [dev-dependencies]
-morph-parser = { path = "../morph-parser" }
+morph-parser = { path = "../morph-parser", version = "0.1.0" }
 
 [lints]
 workspace = true

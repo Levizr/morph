@@ -3,6 +3,8 @@ name = "morph-config"
 version = "0.1.0"
 edition = "2021"
 description = "Morph project configuration parsing"
+license = "Apache-2.0"
+repository = "https://github.com/Levizr/morph"
 
 [dependencies]
 serde = { workspace = true }
