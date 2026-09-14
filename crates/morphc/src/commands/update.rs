@@ -256,7 +256,12 @@ fn download_and_install(url: &str) -> Result<()> {
     let morph_bin = walkdir::WalkDir::new(&tmp_dir)
         .into_iter()
         .filter_map(|e| e.ok())
-        .find(|e| e.file_name() == "morph" || e.file_name() == "morphc")
+        .find(|e| {
+            let name = e.file_name();
+            ["morph", "morphc", "morph.exe", "morphc.exe"]
+                .iter()
+                .any(|n| name == *n)
+        })
         .map(|e| e.path().to_path_buf());
 
     if let Some(bin) = morph_bin {

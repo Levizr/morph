@@ -1,0 +1,179 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths: ["versions/**"]
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: "What to release"
+        required: true
+        type: choice
+        options: [morphc, runtime, both]
+      version:
+        description: "Version (e.g. 0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  # ── Detect which version files changed ──────────────────────────────
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      morphc_changed: ${{ steps.check.outputs.morphc_changed }}
+      runtime_changed: ${{ steps.check.outputs.runtime_changed }}
+      morphc_version: ${{ steps.check.outputs.morphc_version }}
+      runtime_version: ${{ steps.check.outputs.runtime_version }}
+      morphc_changelog: ${{ steps.check.outputs.morphc_changelog }}
+      runtime_changelog: ${{ steps.check.outputs.runtime_changelog }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check version changes
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TYPE="${{ inputs.release_type }}"
+            VER="${{ inputs.version }}"
+            if [[ "$TYPE" == "morphc" || "$TYPE" == "both" ]]; then
+              echo "morphc_changed=true" >> $GITHUB_OUTPUT
+              echo "morphc_version=$VER" >> $GITHUB_OUTPUT
+              echo "morphc_changelog=Manual release v$VER" >> $GITHUB_OUTPUT
+            fi
+            if [[ "$TYPE" == "runtime" || "$TYPE" == "both" ]]; then
+              echo "runtime_changed=true" >> $GITHUB_OUTPUT
+              echo "runtime_version=$VER" >> $GITHUB_OUTPUT
+              echo "runtime_changelog=Manual release v$VER" >> $GITHUB_OUTPUT
+            fi
+            exit 0
+          fi
+
+          CHANGED=$(git diff --name-only HEAD~1 HEAD)
+          echo "$CHANGED"
+
+          if echo "$CHANGED" | grep -q "versions/morphc/version.json"; then
+            echo "morphc_changed=true" >> $GITHUB_OUTPUT
+            echo "morphc_version=$(python3 -c 'import json; print(json.load(open("versions/morphc/version.json"))["version"])')" >> $GITHUB_OUTPUT
+            echo "morphc_changelog=$(python3 -c 'import json; print(json.load(open("versions/morphc/version.json"))["changelog"])')" >> $GITHUB_OUTPUT
+          fi
+
+          if echo "$CHANGED" | grep -q "versions/runtime/cpp.json"; then
+            echo "runtime_changed=true" >> $GITHUB_OUTPUT
+            echo "runtime_version=$(python3 -c 'import json; print(json.load(open("versions/runtime/cpp.json"))["version"])')" >> $GITHUB_OUTPUT
+            echo "runtime_changelog=$(python3 -c 'import json; print(json.load(open("versions/runtime/cpp.json"))["changelog"])')" >> $GITHUB_OUTPUT
+          fi
+
+  # ── Build morphc binary per platform ────────────────────────────────
+  build-morphc:
+    needs: detect
+    if: needs.detect.outputs.morphc_changed == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            platform: linux-x64
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            platform: linux-arm64
+            cross: true
+          - target: x86_64-apple-darwin
+            os: macos-13
+            platform: macos-x64
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            platform: macos-arm64
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            platform: windows-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools
+        if: matrix.cross
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+      - name: Build
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: cargo build --release --target ${{ matrix.target }} -p morphc
+
+      - name: Package (unix)
+        if: runner.os != 'Windows'
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar czf ../../../morph-${{ matrix.platform }}.tar.gz morph
+          cd ../../..
+
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar czf ../../../morph-${{ matrix.platform }}.tar.gz morph.exe
+          cd ../../..
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: morph-${{ matrix.platform }}
+          path: morph-*.tar.gz
+
+  # ── Publish morphc release (collect all artifacts) ─────────────────
+  publish-morphc:
+    needs: [detect, build-morphc]
+    if: needs.build-morphc.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect assets
+        run: |
+          ls -la artifacts/*/
+          cp artifacts/morph-*/*.tar.gz .
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "v${{ needs.detect.outputs.morphc_version }}" \
+            morph-*.tar.gz \
+            --title "morphc v${{ needs.detect.outputs.morphc_version }}" \
+            --notes "${{ needs.detect.outputs.morphc_changelog }}"
+
+  # ── Package and release C++ runtime ────────────────────────────────
+  publish-runtime:
+    needs: detect
+    if: needs.detect.outputs.runtime_changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Package runtime
+        run: |
+          tar czf morph-runtime-cpp-v${{ needs.detect.outputs.runtime_version }}.tar.gz \
+            -C runtime/cpp .
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "runtime-cpp-v${{ needs.detect.outputs.runtime_version }}" \
+            morph-runtime-cpp-v${{ needs.detect.outputs.runtime_version }}.tar.gz \
+            --title "C++ Runtime v${{ needs.detect.outputs.runtime_version }}" \
+            --notes "${{ needs.detect.outputs.runtime_changelog }}"
