@@ -26,13 +26,15 @@
         "file": "getting-started/installation",
         "status": "production",
         "author": "PIYUSH",
-        "description": "How to install Morph on Linux with zero runtime: the requirements (Python 3.10+, a C++23 toolchain) and every step to set up OpenGL, GLFW, and your first native build.",
+        "description": "How to install Morph on Linux with zero runtime: no Python or Node.js — the one-line curl installer or cargo install morphc, a C++23 toolchain, and every step to set up OpenGL, GLFW, and your first native build.",
         "keywords": [
           "install morph linux",
+          "install morph",
           "morph requirements",
           "morph toolchain setup",
           "morph g++ cmake",
-          "install morph"
+          "curl install morph",
+          "cargo install morphc"
         ],
         "lastUpdated": "2026-09-05",
         "publishedAt": "2026-08-18",
@@ -45,11 +47,11 @@
         "file": "getting-started/quick-start",
         "status": "production",
         "author": "PIYUSH",
-        "description": "How to create your first Morph app in minutes: run morph init, write an .mx file, and run morph dev to see a native OpenGL window on screen from the terminal.",
+        "description": "How to create your first Morph app in minutes: run morph new, write an .mx file, and run morph dev to see a native OpenGL window on screen from the terminal.",
         "keywords": [
           "morph quick start",
           "create first morph app",
-          "morph init example",
+          "morph new example",
           "morph hello world",
           "morph dev first run"
         ],
@@ -206,11 +208,11 @@
         "file": "concepts/how-it-works",
         "status": "production",
         "author": "PIYUSH",
-        "description": "How Morph works under the hood: the source to binary pipeline — tree-sitter parsing, IR building, layout, and C++ codegen that links into a single native binary.",
+        "description": "How Morph works under the hood: the source to binary pipeline — Oxc parsing, IR building, layout, and C++ codegen that links into a single native binary.",
         "keywords": [
           "how morph compiles mx",
           "morph compiler pipeline",
-          "morph tree-sitter IR codegen",
+          "morph oxc IR codegen",
           "morph source to binary",
           "how morph works"
         ],
@@ -868,12 +870,12 @@
         "file": "cli/commands",
         "status": "production",
         "author": "PIYUSH",
-        "description": "Every Morph CLI command: morph init, morph dev, morph build, morph run, morph check, and how global flags make development and building easier.",
+        "description": "Every Morph CLI command: morph new, morph install, morph dev, morph build, morph run, morph check, morph update, and how global flags make development and building easier.",
         "keywords": [
           "morph cli commands",
-          "morph dev build run",
-          "morph init command",
-          "morph check command",
+          "morph new install dev build run",
+          "morph dev command",
+          "morph update command",
           "morph command reference"
         ],
         "lastUpdated": "2026-09-08",
@@ -1831,13 +1833,14 @@
         "file": "faq/q-installation",
         "status": "production",
         "author": "PIYUSH",
-        "description": "How to install Morph: single binary via cargo install, system requirements, verify with morph doctor, no Python or Node.js needed.",
+        "description": "How to install Morph: one-line curl installer or single binary via cargo install, system requirements, verify with morph doctor, no Python or Node.js needed.",
         "keywords": [
           "install morph",
           "morph installation",
           "morph requirements",
           "morph doctor",
-          "cargo install morph"
+          "cargo install morphc",
+          "curl install morph"
         ],
         "lastUpdated": "2026-09-05",
         "publishedAt": "2026-09-05",
