@@ -1433,6 +1433,7 @@ dependencies = [
  "hex",
  "morph-config",
  "reqwest",
+ "semver",
  "serde",
  "serde_json",
  "sha2",

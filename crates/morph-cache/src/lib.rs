@@ -18,12 +18,13 @@ pub fn global_runtime_version_dir(runtime_type: &str, version: &str) -> Result<P
     Ok(global_runtimes_dir()?.join(runtime_type).join(format!("v{}", version)))
 }
 
-/// Check if a runtime version is cached globally
+/// Check if a runtime version is cached globally. The cached runtime is only
+/// considered usable when its manifest records exactly the requested type and
+/// version (an unknown/unmarked directory is never trusted for a pinned version).
 pub fn is_runtime_cached(runtime_type: &str, version: &str) -> bool {
-    if let Ok(dir) = global_runtime_version_dir(runtime_type, version) {
-        dir.join("manifest.json").exists() || dir.join("include").exists()
-    } else {
-        false
+    match global_runtime_version_dir(runtime_type, version) {
+        Ok(dir) => read_runtime_manifest(&dir, runtime_type).is_some_and(|v| v == version),
+        Err(_) => false,
     }
 }
 
@@ -52,7 +53,10 @@ pub fn sha256_bytes(bytes: &[u8]) -> String {
     hex::encode(h.finalize())
 }
 
-/// Download runtime from GitHub Releases
+/// Download runtime from GitHub Releases, resolving in order:
+///   1. global cache `~/.morph/cache/runtimes/{type}/v{version}/` (version-verified)
+///   2. a *matching-version* nearby local `runtime/{type}/` (dev)
+///   3. GitHub Release tarball for the exact version
 pub fn download_runtime(runtime_type: &str, version: &str) -> Result<PathBuf> {
     let cached_dir = global_runtime_version_dir(runtime_type, version)?;
 
@@ -61,12 +65,23 @@ pub fn download_runtime(runtime_type: &str, version: &str) -> Result<PathBuf> {
         return Ok(cached_dir);
     }
 
-    // Try local runtime/ directory first (for development)
-    let local_runtime = find_local_runtime(runtime_type);
-    if let Some(local) = local_runtime {
-        println!("  ℹ Using local runtime from {}", local.display());
-        cache_local_runtime(&local, &cached_dir, runtime_type, version)?;
-        return Ok(cached_dir);
+    // Nearby local runtime — only when its version marker matches exactly.
+    if let Some((local, local_version)) = find_local_runtime(runtime_type) {
+        if local_version == version {
+            println!(
+                "  ℹ Using local runtime {} (v{})",
+                local.display(),
+                local_version
+            );
+            cache_local_runtime(&local, &cached_dir, runtime_type, version)?;
+            return Ok(cached_dir);
+        }
+        println!(
+            "  ℹ Found local runtime {} (v{}) but project needs v{} — skipping",
+            local.display(),
+            local_version,
+            version
+        );
     }
 
     // Download from GitHub
@@ -113,7 +128,10 @@ fn chrono_string() -> String {
         .unwrap_or_default()
 }
 
-fn find_local_runtime(runtime_type: &str) -> Option<PathBuf> {
+/// Find a nearby local `runtime/{type}/` directory that carries a version marker
+/// (manifest.json). Returns the runtime path together with its declared version.
+/// Only marked runtimes are eligible so a mismatched local copy is never used.
+fn find_local_runtime(runtime_type: &str) -> Option<(PathBuf, String)> {
     let mut candidates: Vec<PathBuf> = vec![
         PathBuf::from(format!("runtime/{}", runtime_type)),
         PathBuf::from(format!("../runtime/{}", runtime_type)),
@@ -130,10 +148,6 @@ fn find_local_runtime(runtime_type: &str) -> Option<PathBuf> {
         }
     }
 
-    // Development fallback: playground absolute path
-    candidates.push(PathBuf::from(format!("/home/piyush/My_Projects/playground/morph/runtime/{}", runtime_type)));
-    candidates.push(PathBuf::from(format!("/home/piyush/My_Projects/morph/runtime/{}", runtime_type)));
-
     // Check ancestors of current dir (up to 4 levels)
     if let Ok(cwd) = std::env::current_dir() {
         let mut cur = cwd.clone();
@@ -148,11 +162,27 @@ fn find_local_runtime(runtime_type: &str) -> Option<PathBuf> {
     }
 
     for p in candidates {
-        if p.join("morph_api.h").exists() || p.join("include").exists() || p.exists() && p.is_dir() && std::fs::read_dir(&p).map(|mut d| d.next().is_some()).unwrap_or(false) {
-            return Some(p);
+        if p.is_dir() {
+            if let Some(version) = read_runtime_manifest(&p, runtime_type) {
+                return Some((p, version));
+            }
         }
     }
     None
+}
+
+/// Read `manifest.json` from a runtime dir and return its version when the
+/// recorded type matches `runtime_type`.
+fn read_runtime_manifest(dir: &Path, runtime_type: &str) -> Option<String> {
+    let content = std::fs::read_to_string(dir.join("manifest.json")).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&content).ok()?;
+    let ty = json.get("runtime_type").and_then(|v| v.as_str())?;
+    let version = json.get("version").and_then(|v| v.as_str())?;
+    if ty == runtime_type && !version.is_empty() {
+        Some(version.to_string())
+    } else {
+        None
+    }
 }
 
 fn cache_local_runtime(src: &Path, dest: &Path, runtime_type: &str, version: &str) -> Result<()> {
@@ -200,7 +230,7 @@ fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<()> {
 fn download_bytes(url: &str) -> Result<Vec<u8>> {
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(60))
-        .user_agent("morphc/0.1.0")
+        .user_agent(format!("morphc/{}", env!("CARGO_PKG_VERSION")))
         .build()?;
 
     let resp = client.get(url).send()?;
@@ -250,22 +280,61 @@ pub fn link_runtime_to_project(
     Ok(project_runtime)
 }
 
-/// Fetch latest version from GitHub via versions/ files or API
+/// Fetch the latest published `{runtime_type}` runtime version. Reads the local
+/// `versions/runtime/{type}.json` when present (repo/dev use), otherwise falls
+/// back to the GitHub Releases API filtered by `runtime-{type}-v` tags, picking
+/// the highest semver.
 pub fn fetch_latest_runtime_version(runtime_type: &str) -> Result<String> {
-    // First try local versions file
     let local_version_file = PathBuf::from(format!("versions/runtime/{}.json", runtime_type));
     if local_version_file.exists() {
         let vf = VersionFile::from_file(&local_version_file)?;
         return Ok(vf.version);
     }
 
-    // Try GitHub API (placeholder — not yet implemented)
-    let _url = format!(
-        "https://api.github.com/repos/Levizr/morph/releases/tags/runtime-{}-v{}",
-        runtime_type, "latest"
-    );
-    // For now, fallback to reading morph-config default
-    anyhow::bail!("could not determine latest version for {}", runtime_type)
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .user_agent(format!("morphc/{}", env!("CARGO_PKG_VERSION")))
+        .build()?;
+
+    let resp = client
+        .get("https://api.github.com/repos/Levizr/morph/releases")
+        .header("Accept", "application/vnd.github.v3+json")
+        .send()?;
+
+    if !resp.status().is_success() {
+        anyhow::bail!("GitHub API returned HTTP {}", resp.status());
+    }
+
+    let releases: serde_json::Value = resp.json()?;
+    let prefix = format!("runtime-{}-v", runtime_type);
+    let mut versions: Vec<semver::Version> = releases
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|rel| rel.get("tag_name").and_then(|t| t.as_str()))
+        .filter_map(|tag| {
+            let v = tag.strip_prefix(&prefix)?;
+            semver::Version::parse(v).ok()
+        })
+        .collect();
+
+    versions.sort();
+
+    versions
+        .pop()
+        .map(|v| v.to_string())
+        .with_context(|| format!("no published releases for runtime {}", runtime_type))
+}
+
+/// Version of the runtime currently linked into a project (`<dir>/runtime`),
+/// read from its manifest marker. `None` when unlinked or unmarked.
+pub fn project_runtime_version(project_morph_dir: &Path) -> Option<String> {
+    let runtime = project_morph_dir.join("runtime");
+    if !runtime.is_dir() {
+        return None;
+    }
+    read_runtime_manifest(&runtime, "cpp")
+        .or_else(|| read_runtime_manifest(&runtime, "rust"))
 }
 
 /// Check if project has runtime installed

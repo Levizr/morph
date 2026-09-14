@@ -131,7 +131,9 @@ fn check_version_compatibility(runtime_version: &str) {
     }
 }
 
-/// Helper: ensure runtime is installed for dev/build commands
+/// Helper: ensure runtime is installed for dev/build commands. Verifies the
+/// project-linked runtime version matches morph.config.json, relinking from the
+/// global cache when stale, and installing only if it is already cached.
 pub fn ensure_runtime(project_dir: &Path) -> Result<PathBuf> {
     let config_path = project_dir.join("morph.config.json");
     if !config_path.exists() {
@@ -140,30 +142,31 @@ pub fn ensure_runtime(project_dir: &Path) -> Result<PathBuf> {
     let config = MorphConfig::from_file(&config_path)?;
     let morph_dir = project_dir.join(".morph");
     let project_runtime = morph_dir.join("runtime");
+    let (runtime_type, version) = (&config.runtime.runtime_type, &config.runtime.version);
 
-    if !morph_cache::is_project_runtime_installed(&morph_dir) {
-        let cached = morph_cache::global_runtime_version_dir(
-            &config.runtime.runtime_type,
-            &config.runtime.version,
-        )?;
-        if cached.exists() {
-            crate::logger::log_info("Runtime not linked, linking from cache...");
-            morph_cache::link_runtime_to_project(
-                &config.runtime.runtime_type,
-                &config.runtime.version,
-                &morph_dir,
-            )?;
+    // Already linked with the exact version the config pins?
+    if let Some(linked_version) = morph_cache::project_runtime_version(&morph_dir) {
+        if &linked_version == version {
+            check_version_compatibility(version);
             return Ok(project_runtime);
         }
-        anyhow::bail!(
-            "Runtime {} v{} not installed. Run `morph install` first.",
-            config.runtime.runtime_type,
-            config.runtime.version
-        );
+        crate::logger::log_info(&format!(
+            "Linked runtime v{} does not match config v{} — relinking...",
+            linked_version, version
+        ));
+    } else {
+        crate::logger::log_info("Runtime not linked, linking from cache...");
     }
 
-    // Check compatibility
-    check_version_compatibility(&config.runtime.version);
+    if morph_cache::is_runtime_cached(runtime_type, version) {
+        morph_cache::link_runtime_to_project(runtime_type, version, &morph_dir)?;
+        check_version_compatibility(version);
+        return Ok(project_runtime);
+    }
 
-    Ok(project_runtime)
+    anyhow::bail!(
+        "Runtime {} v{} not installed. Run `morph install` first.",
+        runtime_type,
+        version
+    );
 }

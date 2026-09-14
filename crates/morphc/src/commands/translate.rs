@@ -202,7 +202,6 @@ fn find_global_runtime() -> Option<std::path::PathBuf> {
         cwd.join("../runtime").join("cpp"),
         cwd.join("../../runtime").join("cpp"),
         std::path::PathBuf::from("runtime/cpp"),
-        std::path::PathBuf::from("/home/piyush/My_Projects/morph/runtime/cpp"),
     ];
     for p in local_candidates {
         if is_valid(&p) {

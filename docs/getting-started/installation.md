@@ -37,6 +37,19 @@ Use MSVC (Visual Studio 2022+) or MinGW with C++23 support. GLFW, FreeType, and 
 
 ### Stable Release (Recommended)
 
+One-line installer (auto-detects your platform and installs the latest prebuilt binary):
+
+```bash
+curl -fsSL https://morph.levizr.com/install.sh | sh
+```
+
+- Detects Linux (x64/arm64), macOS (Apple Silicon), and Windows (x64).
+- Installs `morph` to `~/.local/bin` and prints PATH setup if needed.
+- Pin an exact version with `MORPH_VERSION=1.2.3` or change the install dir with `MORPH_INSTALL_DIR=/path/to/bin`.
+- If no prebuilt binary exists for your platform (e.g. Intel Macs), the script prints Cargo/source instructions instead.
+
+If you prefer Rust's package manager:
+
 ```bash
 cargo install morphc
 ```
@@ -45,7 +58,7 @@ This downloads and compiles the Rust binary. First run takes 1-2 minutes; subseq
 
 ### Prebuilt Binaries
 
-Prebuilt `morph` binaries are published for Linux (x64/arm64), macOS (arm64), and Windows (x64) on the [Releases page](https://github.com/Levizr/morph/releases). Intel Macs have no prebuilt binary — use `cargo install morphc` there.
+Download `morph-<os>-<arch>.tar.gz` from the [Releases page](https://github.com/Levizr/morph/releases) and put the `morph` binary on your `PATH`. Assemblies: Linux (x64/arm64), macOS (arm64), Windows (x64). Intel Macs have no prebuilt binary — use `cargo install morphc` there.
 
 ### From Source (Latest Features)
 

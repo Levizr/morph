@@ -291,12 +291,8 @@ fn download_and_install(url: &str) -> Result<()> {
 }
 
 fn get_latest_runtime_version(runtime_type: &str) -> Result<String> {
-    let local = PathBuf::from(format!("versions/runtime/{}.json", runtime_type));
-    if local.exists() {
-        let vf = VersionFile::from_file(&local)?;
-        return Ok(vf.version);
-    }
-    anyhow::bail!("no version file for runtime {}", runtime_type)
+    morph_cache::fetch_latest_runtime_version(runtime_type)
+        .with_context(|| format!("could not determine latest runtime version for {}", runtime_type))
 }
 
 fn get_latest_morphc_version() -> Result<String> {
@@ -307,20 +303,28 @@ fn get_latest_morphc_version() -> Result<String> {
     }
 
     let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
+        .timeout(std::time::Duration::from_secs(10))
         .user_agent(format!("morphc/{}", env!("CARGO_PKG_VERSION")))
         .build()?;
 
     let resp = client
-        .get("https://api.github.com/repos/Levizr/morph/releases/latest")
+        .get("https://api.github.com/repos/Levizr/morph/releases")
         .header("Accept", "application/vnd.github.v3+json")
         .send();
 
     if let Ok(r) = resp {
         if r.status().is_success() {
             if let Ok(json) = r.json::<serde_json::Value>() {
-                if let Some(tag) = json.get("tag_name").and_then(|v| v.as_str()) {
-                    return Ok(tag.trim_start_matches('v').to_string());
+                let mut versions: Vec<semver::Version> = json
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|rel| rel.get("tag_name").and_then(|t| t.as_str()))
+                    .filter_map(|tag| tag.strip_prefix('v').and_then(|v| semver::Version::parse(v).ok()))
+                    .collect();
+                versions.sort();
+                if let Some(v) = versions.pop() {
+                    return Ok(v.to_string());
                 }
             }
         }

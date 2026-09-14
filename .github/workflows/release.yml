@@ -135,6 +135,8 @@ jobs:
     if: needs.build-morphc.result == 'success'
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -150,7 +152,7 @@ jobs:
         run: |
           gh release create "v${{ needs.detect.outputs.morphc_version }}" \
             --repo Levizr/morph \
-            morph-*.tar.gz \
+            morph-*.tar.gz install.sh \
             --title "morphc v${{ needs.detect.outputs.morphc_version }}" \
             --notes "${{ needs.detect.outputs.morphc_changelog }}"
 

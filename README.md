@@ -97,6 +97,12 @@ Morph may **not** be the right choice yet if you need a battle-tested production
 
 **1. Install**
 ```bash
+curl -fsSL https://morph.levizr.com/install.sh | sh
+morph doctor          # verify system dependencies
+```
+
+Or via Cargo:
+```bash
 cargo install morphc
 morph doctor          # verify system dependencies
 ```

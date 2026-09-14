@@ -319,4 +319,14 @@ mod tests {
             serde_json::from_str(&serde_json::to_string(&cfg).unwrap()).unwrap();
         assert_eq!(roundtrip.type_mode, "strict");
     }
+
+    #[test]
+    fn default_config_serializes_runtime_block() {
+        let json = MorphConfig::default().to_json_pretty().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["runtime"]["type"], "cpp");
+        assert_eq!(parsed["runtime"]["version"], "0.1.0");
+        let roundtrip = MorphConfig::from_str(&json).unwrap();
+        assert_eq!(roundtrip.runtime.version, "0.1.0");
+    }
 }
