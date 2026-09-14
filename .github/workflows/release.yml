@@ -149,6 +149,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create "v${{ needs.detect.outputs.morphc_version }}" \
+            --repo Levizr/morph \
             morph-*.tar.gz \
             --title "morphc v${{ needs.detect.outputs.morphc_version }}" \
             --notes "${{ needs.detect.outputs.morphc_changelog }}"
@@ -171,6 +172,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create "runtime-cpp-v${{ needs.detect.outputs.runtime_version }}" \
+            --repo Levizr/morph \
             morph-runtime-cpp-v${{ needs.detect.outputs.runtime_version }}.tar.gz \
             --title "C++ Runtime v${{ needs.detect.outputs.runtime_version }}" \
             --notes "${{ needs.detect.outputs.runtime_changelog }}"
