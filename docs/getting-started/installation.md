@@ -43,6 +43,10 @@ cargo install morphc
 
 This downloads and compiles the Rust binary. First run takes 1-2 minutes; subsequent runs are instant.
 
+### Prebuilt Binaries
+
+Prebuilt `morph` binaries are published for Linux (x64/arm64), macOS (arm64), and Windows (x64) on the [Releases page](https://github.com/Levizr/morph/releases). Intel Macs have no prebuilt binary — use `cargo install morphc` there.
+
 ### From Source (Latest Features)
 
 ```bash

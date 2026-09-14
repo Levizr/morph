@@ -101,6 +101,8 @@ cargo install morphc
 morph doctor          # verify system dependencies
 ```
 
+Prebuilt binaries are published for Linux (x64/arm64), macOS (arm64), and Windows (x64) on the [Releases page](https://github.com/Levizr/morph/releases). On **Intel Macs** there is no prebuilt binary — install with `cargo install morphc` instead.
+
 **2. Create a project**
 ```bash
 morph new my-app
