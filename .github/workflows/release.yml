@@ -84,9 +84,6 @@ jobs:
             os: ubuntu-latest
             platform: linux-arm64
             cross: true
-          - target: x86_64-apple-darwin
-            os: macos-13
-            platform: macos-x64
           - target: aarch64-apple-darwin
             os: macos-latest
             platform: macos-arm64
