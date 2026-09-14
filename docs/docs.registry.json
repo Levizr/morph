@@ -36,7 +36,7 @@
           "curl install morph",
           "cargo install morphc"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-14",
         "publishedAt": "2026-08-18",
         "priority": 0.9,
         "changefreq": "weekly"
@@ -66,7 +66,7 @@
         "file": "getting-started/configuration",
         "status": "production",
         "author": "PIYUSH",
-        "description": "How to configure a Morph project: edit morph.config.json to set the entry file, window title and size, renderer, CSS, and compiler build options in one place.",
+        "description": "How to configure a Morph project: edit morph.config.json to set the entry file, window title and size, renderer, types (infer or strict), CSS, and compiler build options in one place.",
         "keywords": [
           "morph.config.json",
           "morph project config",
@@ -74,7 +74,7 @@
           "morph build options",
           "morph config reference"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-11",
         "publishedAt": "2026-08-19",
         "priority": 0.9,
         "changefreq": "weekly"
@@ -135,7 +135,7 @@
           "morph valgrind",
           "morph sanitizers"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-14",
         "publishedAt": "2026-09-05",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -153,7 +153,7 @@
           "morphc to morph",
           "morph upgrade guide"
         ],
-        "lastUpdated": "2026-09-08",
+        "lastUpdated": "2026-09-14",
         "publishedAt": "2026-09-05",
         "priority": 0.8,
         "changefreq": "monthly"
@@ -184,7 +184,7 @@
         "file": "guides/testing",
         "status": "production",
         "author": "PIYUSH",
-        "description": "How to test Morph apps and the translator: 24 fixture tests, cargo unit tests, lint-first workflow, logic unit tests, golden-output tests, CI example, and writing new fixtures.",
+        "description": "How to test Morph apps and the translator: the fixture suite in tests/translate/, cargo unit tests, lint-first workflow, logic unit tests, golden-output tests, CI example, and writing new fixtures.",
         "keywords": [
           "morph testing",
           "morph fixture tests",
@@ -192,7 +192,7 @@
           "morph cargo test",
           "morph CI"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-14",
         "publishedAt": "2026-09-05",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -216,7 +216,7 @@
           "morph source to binary",
           "how morph works"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-14",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -227,7 +227,7 @@
         "file": "concepts/dev-mode",
         "status": "production",
         "author": "PIYUSH",
-        "description": "How Morph dev mode works: morph dev keeps a live native window open, recompiles only your JS logic, and hot-swaps it over a socket without restarting the app.",
+        "description": "How Morph dev mode works: morph dev keeps a live native window open, recompiles only your JS logic, and hot-swaps it over loopback TCP without restarting the app.",
         "keywords": [
           "morph dev mode hot reload",
           "morph live preview",
@@ -235,7 +235,7 @@
           "morph dev without restart",
           "how morph dev works"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-14",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -273,7 +273,7 @@
           "morph crate structure",
           "morph version system"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-14",
         "publishedAt": "2026-09-05",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -497,7 +497,7 @@
           "morph js runtime",
           "morph translator coverage"
         ],
-        "lastUpdated": "2026-09-08",
+        "lastUpdated": "2026-09-10",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -554,7 +554,7 @@
           "morph promises",
           "morph http request"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-10",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -573,7 +573,7 @@
           "JsArray",
           "JsObject value"
         ],
-        "lastUpdated": "2026-09-08",
+        "lastUpdated": "2026-09-09",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -592,7 +592,7 @@
           "morph zero overhead types",
           "morph native performance"
         ],
-        "lastUpdated": "2026-09-08",
+        "lastUpdated": "2026-09-10",
         "publishedAt": "2026-08-21",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -611,7 +611,7 @@
           "morph comparison coercion",
           "morph js_cmp helpers"
         ],
-        "lastUpdated": "2026-09-08",
+        "lastUpdated": "2026-09-09",
         "publishedAt": "2026-09-08",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -635,7 +635,7 @@
           "morph native cpp",
           "morph ffi free cpp"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-14",
         "publishedAt": "2026-08-18",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -692,7 +692,7 @@
           "morph trusted annotations",
           "morph native types"
         ],
-        "lastUpdated": "2026-09-09",
+        "lastUpdated": "2026-09-10",
         "publishedAt": "2026-09-05",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -878,7 +878,7 @@
           "morph update command",
           "morph command reference"
         ],
-        "lastUpdated": "2026-09-08",
+        "lastUpdated": "2026-09-14",
         "publishedAt": "2026-08-19",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -980,7 +980,7 @@
           "morph current work",
           "morph roadmap now"
         ],
-        "lastUpdated": "2026-09-08",
+        "lastUpdated": "2026-09-14",
         "publishedAt": "2026-08-18",
         "priority": 0.7,
         "changefreq": "weekly"
@@ -1022,7 +1022,7 @@
           "morph 2d 3d element",
           "morph embedded canvas"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-14",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -1097,7 +1097,7 @@
           "morph window navigation",
           "morph window handles"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-14",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -1133,7 +1133,7 @@
           "morph css inheritance",
           "morph css cascade model"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-14",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -1151,7 +1151,7 @@
           "morph c++ translator",
           "morph js feature coverage"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-14",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -1188,7 +1188,7 @@
           "morph margin collapse",
           "morph more css properties"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-14",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -1243,7 +1243,7 @@
           "morph cross-platform",
           "morph platform roadmap"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-14",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -1354,7 +1354,7 @@
           "morph cross-language interop",
           "morph second runtime"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-14",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -1379,19 +1379,19 @@
         "changefreq": "monthly"
       },
       {
-        "title": "Morph Rust Compiler & Native CLI (Planned)",
+        "title": "Morph Rust Compiler & Native CLI (Shipped)",
         "slug": "future/compiler",
         "file": "future/compiler",
-        "status": "future",
+        "status": "production",
         "author": "PIYUSH",
-        "description": "A Rust compiler (SWC/Oxc) and native CLI planned for Morph: removing Python from the build for a faster morphc toolchain.",
+        "description": "Morph's Rust compiler and native CLI, shipped September 2026: Oxc parsing, lightningcss, the full Rust CLI (morphc), intent-based codegen, and Python removed from the repository.",
         "keywords": [
           "morph rust compiler",
-          "morph morphc swc oxc",
+          "morphc oxc lightningcss",
           "morph native cli",
-          "morph remove python build"
+          "morph python removed"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-14",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -1409,7 +1409,7 @@
           "morph feedback",
           "morph roadmap ideas"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-14",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -1842,7 +1842,7 @@
           "cargo install morphc",
           "curl install morph"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-14",
         "publishedAt": "2026-09-05",
         "priority": 0.9,
         "changefreq": "weekly"
@@ -1853,7 +1853,7 @@
         "file": "faq/q-cli-commands",
         "status": "production",
         "author": "PIYUSH",
-        "description": "What are the new morph CLI commands: direct file morphing (morph app.ts --to cpp), project commands (new, dev, build, run), version system, and migration from Python morph.",
+        "description": "What are the new morph CLI commands: direct file morphing (morph app.ts --to cpp), project commands (new, install, dev, build, run, update, check, doctor), version system, and migration from Python morph.",
         "keywords": [
           "morph commands",
           "morph cli",
@@ -1861,7 +1861,7 @@
           "morph file morphing",
           "morph version system"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-14",
         "publishedAt": "2026-09-05",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -1903,7 +1903,7 @@
           "morph valgrind",
           "morph sanitizers"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-14",
         "publishedAt": "2026-09-05",
         "priority": 0.7,
         "changefreq": "monthly"
