@@ -142,10 +142,39 @@ int doubleIt(int x) { return x * 2; }   // zero plumbing, always
 
 ## 7. Events: Static Channels, Zero String Lookup
 
-- One `morph::Channel` static per event binding inside its module namespace (`evt_<name>()`).
-- `frame.events` maps event name → C++ accessor expression at IR build time.
-- Codegen lowers `.emit()` and `.on()` directly to the accessor — **strings vanish from all emit sites**.
-- `morph::channel_registry()` and `clear_channels()` kept **only for dev-mode rewire** (dev server needs to re-register subscriptions on hot reload). Production builds can strip the registry entirely.
+### Current (shipped — string-based registry)
+Today the compiler emits a string channel ID (`evt:<module path>::<name>`) and uses a global `std::map<std::string, Channel>` registry:
+
+```cpp
+// Current generated output (has runtime overhead)
+morph::channel("evt:/home/user/project/src/components/ShopStore.mx::clearCart").on([](const JsValue& __ch_0) { ... });
+morph::channel("evt:/home/user/project/src/components/ShopStore.mx::clearCart").emit(JsObject{{"cart", ...}});
+```
+
+Every `.emit()` and `.on()` pays: mutex lock + `std::map` string lookup + listener vector copy. The absolute path literals also bloat the binary.
+
+### Planned: Namespace-Static Channels (Zero String Lookup)
+The compiler will emit one `Channel` static per event binding inside its module namespace:
+
+```cpp
+// Generated for src/components/ShopStore.mx exporting `clearCart`
+namespace morph_mods {
+namespace components {
+namespace shopstore {
+    static morph::Channel& evt_clearCart() { static morph::Channel c; return c; }
+}}}
+```
+
+Then codegen lowers `.emit()`/`.on()` directly to the accessor — **strings vanish from all emit sites**:
+
+```cpp
+// Future generated output (zero string lookup)
+components::shopstore::evt_clearCart().emit(JsObject{{"cart", components::shopstore::shared_cart().get()}});
+components::shopstore::evt_clearCart().on([](const JsValue& __ch_0) { __st_inst1_qty.set(0); });
+```
+
+- **Cost:** only the listener-list lock inside `emit` (inherent to pub/sub). No registry mutex, no string map, no string compares.
+- `morph::channel_registry()` and `clear_channels()` kept **only for dev-mode rewire** (dev server re-registers subscriptions on hot reload). Production builds can strip the registry entirely.
 
 ---
 
@@ -185,6 +214,141 @@ int doubleIt(int x) { return x * 2; }   // zero plumbing, always
 | Dev-chosen integer `mid` (vs compiler ordinal) | Deferred | `mid` string is the primary form; integer ordinals for untagged |
 | `morph_gen.h` devtools integration | Deferred | Header already the discovery surface; IDE indexing later |
 | Registry deletion (prod builds) | Deferred | Keep dev registry for rewire; prod strip is a separate pass |
+
+---
+
+## 10. FAQ
+
+### Why `mid`? Why not just let native code call `setState()` directly?
+
+The old syntax you're imagining — a bare `setState()` callable from anywhere — only works if there's exactly one instance of that component in the entire app. But Morph components are reusable: you can render `<Counter />` three times on one screen, and each has its own independent `count`. A bare `setState()` has no way to know *which* instance it should target.
+
+`mid` solves this by making instance identity **explicit and opt-in**:
+
+```tsx
+<Counter mid="hero" />        // opt in: this instance is addressable
+<Counter />                    // opt out: purely local, no native access
+```
+
+```cpp
+// native.cpp — only works for instances that opted in
+components::counter::set_count(components::counter::MID_HERO, 0);
+```
+
+If you don't need native code to poke a specific instance, don't add `mid` — the component stays purely self-contained. This is the "pay for what you use" principle: no overhead, no registry, no lifetime bugs for components that don't need cross-instance access.
+
+The alternative (a global registry you query by component name + instance index) introduces exactly the problems `mid` avoids: implicit lifetime coupling, silent writes to dead instances, and a hidden global that makes testing and reasoning about code harder.
+
+### Why did we remove string-based identity (`morphShared("cart", 0)`) in favor of namespace-based identity?
+
+The string-key API was a global mutable map with no owner:
+
+```tsx
+// Old (removed)
+morphShared("cart", 0)    // string key = global namespace
+```
+
+**Problems with string keys:**
+
+| Problem | String Keys | Namespace Identity |
+|---|---|---|
+| **Collision detection** | Runtime (first write wins silently) | **Compile-time hard error** |
+| **Refactor safety** | Rename key → silent bug everywhere | Rename binding → compiler points at every use |
+| **IDE support** | None (string is opaque) | **Full autocomplete, go-to-definition** |
+| **Cross-team coordination** | Must agree on string keys out-of-band | File path *is* the contract; no coordination needed |
+| **Native C++ mapping** | String → lookup at runtime | Direct static accessor, zero lookup |
+
+With namespace identity, the module system does the work:
+
+```tsx
+// src/cart.ts
+export const [count, setCount] = morphShared(0)
+```
+
+```tsx
+// Any other file — import IS the registry
+import { count, setCount } from './cart'
+```
+
+The compiler knows exactly which `count` you mean because the import path is the identity. Two files can both declare `count` — they're different stores because their module paths differ. Importing the same name from two modules = **hard error** forcing you to rename (`import { count as cartCount }`).
+
+This is why the old API was removed entirely (`mx-api-removed` lint): it encouraged patterns that don't scale, and the replacement is strictly better in every dimension.
+
+### Why `morphShared` at module scope instead of `useShared()` inside components like React hooks?
+
+React's `useShared` (or `useContext`) couples shared state to the component tree — the provider must be an ancestor. Morph's `morphShared` at module scope is **decoupled from the tree**:
+
+```tsx
+// Theme store — no provider needed, no tree coupling
+// src/themeStore.ts
+export const [theme, setTheme] = morphShared<'light' | 'dark'>('light')
+```
+
+```tsx
+// Any component, anywhere in the tree, just imports
+import { theme, setTheme } from './themeStore'
+```
+
+**Benefits of module-scope:**
+
+- **No provider nesting** — shared state doesn't force you to wrap your app in `<ThemeProvider><AuthProvider><CartProvider>…`
+- **No re-render cascades** — reading `theme` subscribes *only that component*; writing `setTheme` notifies *only subscribers*. React context re-renders all consumers on any value change.
+- **Works outside components** — native code, background threads, timers, event handlers can all read/write via the same `morph_gen.h` accessors. No "must be inside a component" restriction.
+- **Testable in isolation** — import the store in a unit test, call `setTheme('dark')`, assert behavior. No need to render a provider tree.
+
+The trade-off: you must export the binding (`export const …`) and the linter enforces module scope (`mx-shared-scope`). This is intentional: it makes shared state **explicitly opt-in and discoverable**, not an implicit side effect of rendering.
+
+### Why is `mid` literal-only (`mid="hero"`) and not dynamic (`mid={id}`)?
+
+`mid` resolves to a **build-time integer constant**. The compiler generates:
+
+If you need dynamic instance addressing (e.g., user-created widgets), use a `morphShared` map keyed by user-provided IDs instead — that's what the shared store is for. `mid` is for **statically known, developer-chosen** instances.
+
+### Why are we replacing string-based event channels (`morph::channel("evt:...")`) with namespace-based static channels?
+
+The current string-based system has real per-emit overhead that never goes away:
+
+```cpp
+// Current: every emit/subscribe pays this cost
+morph::channel("evt:/home/user/project/src/components/ShopStore.mx::clearCart").on(...);
+```
+
+**Per-emit cost of strings:**
+1. `channel_registry_mutex()` lock + unlock
+2. `std::map<std::string, Channel>` lookup (tree walk + string compares)
+3. `Channel::emit`: second mutex + heap vector copy of listeners
+
+Compare `Signal::set`: **one** mutex + notify. Events pay roughly 2× the synchronization of state writes, plus a string-keyed map lookup — on *every* emission and every `.on()` registration.
+
+The fix is exactly what you'd expect: **the channel ID only needs to exist at build time**. The compiler already knows every event statically (`event_bindings` per module), so it generates one `Channel` object per event as a namespace static — the same pattern shared signals already use:
+
+```cpp
+// Generated — one static per event, same pattern as shared signals
+namespace morph_mods { namespace components { namespace shopstore {
+static morph::Channel& evt_clearCart() { static morph::Channel c; return c; }
+}}}
+```
+
+Then emit/subscribe become direct calls. Remaining cost: only the listener-list lock inside `emit`, which is inherent to pub/sub. And the absolute-path literals no longer bloat the binary at every emit site.
+
+This is the same pattern we already use for shared signals — we're just applying it to events too.
+
+### Why letters only in `mid`? Why no digits?
+
+Two reasons:
+
+1. **Readability at a distance:** `mid="hero"` reads like a name; `mid="item1"` reads like a database key. The namespace already encodes structure — `components::counter::MID_HERO` is self-explanatory.
+2. **Sanitization ambiguity:** `item1` + `item12` → what's the lowered form? `item1` vs `item12` are distinct, but `item_1` vs `item1` collides in unpredictable ways. Banning digits makes the lowered form 1:1 with the source.
+
+If you need multiple similar instances, use descriptive names: `heroPrimary`, `heroSecondary`, `fives`, `tens`, etc. The compiler will catch duplicates.
+
+### What happens if I delete a component file that has a `mid` tag?
+
+Any native code using that `MID_*` constant will fail to compile — the constant disappears from `morph_gen.h`. This is **intentional**: it forces you to update native code when the UI contract changes, instead of silently calling into dead instances (the bug class `mid` was designed to eliminate).
+
+### Can I use `mid` on a component rendered inside a `.map()`?
+
+**Hard error.** List items currently share one state slot per template (documented limitation). Allowing `mid` there would imply per-instance identity that doesn't exist. When per-item state lands, `mid` on list items will use the item's `key` as the sub-address (`MID_HERO::key`), not a positional index.
 
 ---
 
