@@ -36,33 +36,46 @@ pub(crate) fn translate_js<S: std::hash::BuildHasher>(
         };
         s = inner;
     }
-    // Generic state var replacement
+    // Generic state var replacement (identifiers only — never inside
+    // `"..."` / `'...'` literals, so inlined prop text like
+    // "shared cart" survives substitution of the `cart` store).
     for (from, to) in state_map {
         // Replace "setX(" with map value
-        if s.contains(from) {
-            let mut res = String::new();
+        if !from.is_empty() && s.contains(from) {
+            let mut res = String::with_capacity(s.len());
             let mut i = 0;
-            while let Some(pos) = s[i..].find(from) {
-                let start = i + pos;
-                let end = start + from.len();
-                let before_ok = start == 0 || {
-                    let b = s.as_bytes()[start - 1];
-                    !b.is_ascii_alphanumeric() && b != b'_'
-                };
-                let after_ok = end >= s.len() || {
-                    let b = s.as_bytes()[end];
-                    !b.is_ascii_alphanumeric() && b != b'_'
-                };
-                let already = start >= 4 && &s[start - 4..start] == "__st";
-                if before_ok && after_ok && !already {
-                    res.push_str(&s[i..start]);
-                    res.push_str(to);
-                } else {
+            while i < s.len() {
+                let b = s.as_bytes()[i];
+                if b == b'"' || b == b'\'' {
+                    let end = js_skip_string(&s, i);
                     res.push_str(&s[i..end]);
+                    i = end;
+                    continue;
                 }
-                i = end;
+                if s[i..].starts_with(from) {
+                    let start = i;
+                    let end = start + from.len();
+                    let before_ok = start == 0 || {
+                        let b = s.as_bytes()[start - 1];
+                        !b.is_ascii_alphanumeric() && b != b'_'
+                    };
+                    let after_ok = end >= s.len() || {
+                        let b = s.as_bytes()[end];
+                        !b.is_ascii_alphanumeric() && b != b'_'
+                    };
+                    let already = start >= 4 && &s[start - 4..start] == "__st";
+                    if before_ok && after_ok && !already {
+                        res.push_str(to);
+                    } else {
+                        res.push_str(&s[start..end]);
+                    }
+                    i = end;
+                    continue;
+                }
+                let ch_len = s[i..].chars().next().map_or(1, char::len_utf8);
+                res.push_str(&s[i..i + ch_len]);
+                i += ch_len;
             }
-            res.push_str(&s[i..]);
             s = res;
         }
     }
@@ -466,6 +479,9 @@ pub fn emit_node_with_state(
         } else {
             lines.push(format!("TextNode* {} = new TextNode(\"\");", node.node_id));
         }
+        // Runtime type drives inline grouping, inline width, and paint
+        // order (the dev deserializer sets it too — keep both paths equal).
+        lines.push(format!("{}{}->type = \"{}\";", indent, node.node_id, node.node_type));
         lines.push(format!("{}{}->x = {};", indent, node.node_id, fmt(node.x)));
         lines.push(format!("{}{}->y = {};", indent, node.node_id, fmt(node.y)));
         lines.push(format!("{}{}->w = {};", indent, node.node_id, fmt(node.w)));
@@ -1712,5 +1728,40 @@ fn raw_prop_to_enum(prop: &str) -> Option<&'static str> {
         "top" => Some("Top"),
         "transform" => Some("Transform"),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn cart_map() -> HashMap<String, String> {
+        let mut m = HashMap::new();
+        m.insert("cart".to_string(), "morph_mods::cartstore::shared_cart().get()".to_string());
+        m.insert(
+            "setCart".to_string(),
+            "morph_mods::cartstore::shared_cart().set".to_string(),
+        );
+        m
+    }
+
+    #[test]
+    fn state_substitution_skips_string_literals() {
+        // Inlined prop text mentioning a store name must survive: only real
+        // code identifiers are substituted.
+        let out = translate_js(
+            "(\"Reusable components, shared cart, zero providers\")",
+            &cart_map(),
+        );
+        assert!(out.contains("shared cart"), "{out}");
+        assert!(!out.contains("shared_cart"), "{out}");
+    }
+
+    #[test]
+    fn state_substitution_still_rewrites_code() {
+        let out = translate_js("(setCart(cart + 1))", &cart_map());
+        assert!(out.contains("morph_mods::cartstore::shared_cart().set"), "{out}");
+        assert!(out.contains("morph_mods::cartstore::shared_cart().get()"), "{out}");
     }
 }

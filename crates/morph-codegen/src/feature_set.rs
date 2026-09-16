@@ -144,8 +144,12 @@ impl FeatureSet {
                 }
             }
             for node in Self::walk(&win.nodes) {
-                if node.node_type == "__text__" {
+                if node.node_type == "__text__" || node.node_type == "__expr__" {
                     self.features.insert("text".into());
+                    // Inline text flow is core behavior, not an optional
+                    // feature: mixed static/dynamic runs must group on one
+                    // line even when no CSS rule uses `display: inline`.
+                    self.features.insert("inline".into());
                 }
                 if node.node_type == "button" {
                     self.features.insert("button".into());

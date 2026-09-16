@@ -149,6 +149,11 @@ public:
     std::vector<MorphNode*> children;
     bool focused = false;
     bool m_colorInherited = false;
+    // False when this text run shares its line with other text runs: the
+    // renderer then uses one content-independent (em-box) baseline for all
+    // of them instead of optically centering each run's own ink (which puts
+    // siblings like "Cheers: " and "0" on slightly different baselines).
+    bool m_centerInk = true;
     std::string type = "div";
 
     // Scroll state (always present — zero overhead when unused)
@@ -350,6 +355,7 @@ public:
 
     virtual float contentWidth(Renderer* r);
     virtual bool isWhitespaceOnly() const { return false; }
+    virtual bool isTextRun() const { return false; }
     MorphNode* hitTest(float ex, float ey);
     // Recursive hit test carrying the inverse accumulated transform
     // (nullptr when no transform is compiled, else the identity for the

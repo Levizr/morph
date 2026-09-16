@@ -18,6 +18,7 @@ public:
         TextAlign align;
         float fontSize;
         std::string fontWeight;
+        bool centerInk = true;
     };
     std::vector<TextOp> m_textOps;
 
@@ -35,6 +36,8 @@ public:
             if (!std::isspace((unsigned char)text[i])) return false;
         return true;
     }
+
+    bool isTextRun() const override { return true; }
 
     void recordDisplayList(Renderer& r) override {
         m_displayList.clear();
@@ -59,6 +62,7 @@ public:
             top.align = TextAlign::Left;
             top.fontSize = _effFontSize();
             top.fontWeight = _effFontWeight();
+            top.centerInk = m_centerInk;
             m_textOps.push_back(top);
             py += lh;
         }
@@ -79,7 +83,7 @@ public:
                 effectiveColor = src ? src->style.color : parent->style.color;
             }
             r.drawText(top.text, top.x, top.y, effectiveColor, top.align,
-                       top.fontSize, top.fontWeight);
+                       top.fontSize, top.fontWeight, top.centerInk);
         }
         for (auto* child : paintOrder())
             child->executeDisplayList(r);

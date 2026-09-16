@@ -420,7 +420,8 @@ public:
     void drawText(const std::string &text, float x, float y,
                   float color[4], TextAlign align,
                   float fontSize,
-                  const std::string &fontWeight) override;
+                  const std::string &fontWeight,
+                  bool centerInk = true) override;
 #endif
 
     void drawTexture(unsigned int tex, float x, float y, float w, float h,

@@ -21,7 +21,8 @@ public:
                           float x, float y, float color[4],
                           TextAlign align = TextAlign::Left,
                           float fontSize = 16,
-                          const std::string& fontWeight = "normal") {}
+                          const std::string& fontWeight = "normal",
+                          bool centerInk = true) {}
     virtual float measureTextWidth(const std::string& text,
                                     float fontSize,
                                     const std::string& fontWeight = "normal") { return 0; }

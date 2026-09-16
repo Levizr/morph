@@ -547,7 +547,8 @@ float GLRenderer::measureTextWidth(const std::string &text, float fontSize,
 void GLRenderer::drawText(const std::string &text, float x, float y,
                           float color[4], TextAlign align,
                           float fontSize,
-                          const std::string &fontWeight)
+                          const std::string &fontWeight,
+                          bool centerInk)
 {
     if (text.empty() || fontSize < 1)
         return;
@@ -604,7 +605,10 @@ void GLRenderer::drawText(const std::string &text, float x, float y,
     }
 
     float penY = std::round(y + m_scrollY + fontSize);
-    if (haveInk)
+    // Optical centering aligns each run's own ink — right for a lone run,
+    // wrong for runs sharing a line (siblings would each get their own
+    // baseline). Shared-line runs use the content-independent em baseline.
+    if (centerInk && haveInk)
         penY = std::round(y + m_scrollY + fontSize * 1.4f * 0.5f
                           - (inkTop + inkBottom) * 0.5f);
 

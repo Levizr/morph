@@ -646,6 +646,20 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                     items[i].h = 0.0f;
                 }
             }
+            // Runs sharing a line share one baseline: more than one visible
+            // text run disables per-run optical centering (each run's own
+            // ink box would put siblings on slightly different baselines).
+            // Solo runs keep optical centering. Reset every pass since
+            // group membership changes with content.
+            int textRuns = 0;
+            for (size_t i = (size_t)firstVis; i <= (size_t)lastVis; i++) {
+                if (!items[i].ws && items[i].node->isTextRun()) {
+                    textRuns++;
+                }
+            }
+            for (auto* c : currentInline) {
+                c->m_centerInk = (textRuns <= 1);
+            }
 
             float lineX = cx;
             float lineY = curY;
