@@ -583,6 +583,7 @@ public:
         fto.color[2] = col[2]; fto.color[3] = col[3];
         fto.color[3] *= fn.opacity;   // group opacity, like TextNode
         fto.align = 0;                // TextAlign::Left
+        fto.centerInk = 1;            // input text is always a solo run
         fto.fontSize = m_fsCache;
         fto.fontWeight = (m_fwCache == "bold" || m_fwCache == "700" ||
                           m_fwCache == "800" || m_fwCache == "900") ? 1 : 0;

@@ -199,6 +199,7 @@ public:
             // product of every ancestor's opacity (own opacity is 1 on text).
             fto.color[3] *= fn.opacity;
             fto.align = (uint8_t)top.align;
+            fto.centerInk = top.centerInk ? (uint8_t)1 : (uint8_t)0;
             fto.fontSize = top.fontSize;
             fto.fontWeight = (top.fontWeight == "bold" || top.fontWeight == "700" || top.fontWeight == "800" || top.fontWeight == "900") ? (uint8_t)1 : (uint8_t)0;
             frame.textOps.push_back(fto);

@@ -691,7 +691,8 @@ void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx,
         float ty = to.y + node.animOffsetY;
         m_renderer.drawText(to.text, tx, ty, const_cast<float *>(to.color),
                             (TextAlign)to.align, to.fontSize,
-                            to.fontWeight ? "bold" : "normal");
+                            to.fontWeight ? "bold" : "normal",
+                            to.centerInk != 0);
     }
     if (inputClip)
         m_renderer.endClip();

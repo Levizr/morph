@@ -131,6 +131,7 @@ struct FlatTextOp {
     uint8_t align;      // 0=left, 1=center, 2=right
     float fontSize;
     uint8_t fontWeight; // 0=normal, 1=bold
+    uint8_t centerInk;  // 0=shared-line em baseline, 1=optical per-run
 };
 
 // ── Event struct for animation completion feedback ──
