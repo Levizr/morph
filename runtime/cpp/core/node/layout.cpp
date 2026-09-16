@@ -728,7 +728,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 
         for (auto* c : normal) {
             if (c->style.display == "inline" || c->style.display == "inline-block"
-                || c->type == "__text__") {
+                || c->type == "__text__" || c->type == "__expr__") {
                 currentInline.push_back(c);
             } else {
                 flushInline();

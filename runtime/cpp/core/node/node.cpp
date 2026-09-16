@@ -129,7 +129,7 @@ float MorphNode::contentWidth(Renderer* r) {
         float totalInline = 0.0f;
         for (auto* c : children) {
             if (c->style.display == "inline" || c->style.display == "inline-block"
-                || c->type == "__text__") {
+                || c->type == "__text__" || c->type == "__expr__") {
                 float cw = c->contentWidth(r);
                 if (cw > 0.0f)
                     totalInline += cw + c->style.margin[3] + c->style.margin[1];

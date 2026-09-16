@@ -38,7 +38,7 @@ void MorphNode::ensurePaintOrder() {
         } else {
             bool isInline = (c->style.display == "inline" ||
                              c->style.display == "inline-block" ||
-                             c->type == "__text__");
+                             c->type == "__text__" || c->type == "__expr__");
             if (isInline)
                 inlineFlow.push_back(c);
             else
