@@ -181,6 +181,13 @@ impl Compiler {
         }
         cmd.push("-ffunction-sections".into());
         cmd.push("-fdata-sections".into());
+        // Generated output dir FIRST: user `#include "morph_api.h"` must
+        // resolve to the per-project generated header, which shadows the
+        // runtime base header by include order (and re-includes the same
+        // runtime subpaths explicitly, so it is a strict superset).
+        if let Some(out_dir) = source_path.parent() {
+            cmd.push(format!("-I{}", out_dir.display()));
+        }
         // Include runtime headers
         cmd.push(format!("-I{}", runtime_dir.display()));
         cmd.push(format!("-I{}", runtime_dir.join("include").display()));

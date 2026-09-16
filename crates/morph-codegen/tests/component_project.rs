@@ -66,27 +66,36 @@ fn component_project_resolves_lints_builds_and_emits() {
     }
     assert!(!subscriptions.is_empty());
 
-    // C++ emit: per-instance signals, the channel subscription, and the
-    // function-prop adapter all reach the generated translation unit.
+    // C++ emit: per-instance signals, the static channel subscription,
+    // and the function-prop adapter all reach the generated translation
+    // unit — with zero string channel lookups in app.cpp.
     let out_dir =
         std::env::temp_dir().join(format!("morph_component_project_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&out_dir);
     morph_codegen::CppEmitter::new(&windows).emit(&out_dir).expect("emit component-test C++");
     let app_cpp = std::fs::read_to_string(out_dir.join("app.cpp")).expect("read app.cpp");
+    let api_h = std::fs::read_to_string(out_dir.join("morph_api.h")).expect("read morph_api.h");
     assert!(app_cpp.contains("__st_inst0_count"), "missing inst0 signal");
     assert!(app_cpp.contains("__st_inst1_count"), "missing inst1 signal");
-    assert!(app_cpp.contains(&format!("namespace {shared_ns} {{")), "missing shared namespace");
+    assert!(app_cpp.contains("#include \"morph_api.h\""), "missing api include");
     assert!(
         app_cpp.contains(&format!("morph_mods::{shared_ns}::{shared_accessor}().get()")),
         "missing qualified shared read"
     );
-    assert!(app_cpp.contains("Store.mx::resetEvent"), "missing channel subscription");
-    for (channel, body) in &subscriptions {
+    assert!(
+        api_h.contains(&format!("namespace {shared_ns} {{")),
+        "missing shared namespace in header"
+    );
+    assert!(!app_cpp.contains("morph::channel(\"evt:"), "string lookup in app.cpp");
+    for (_, body) in &subscriptions {
         assert!(
-            app_cpp.contains(&format!("morph::channel(\"{channel}\").on({body});")),
-            "missing paired subscription"
+            app_cpp.contains(&format!("evt_resetEvent().on({body});")),
+            "missing lowered subscription"
         );
     }
+    assert!(api_h.contains("inline morph::Channel& evt_resetEvent()"), "missing channel static");
+    assert!(api_h.contains("inline void emit_resetEvent("), "missing emit wrapper");
+    assert!(api_h.contains("inline void notify_resetEvent()"), "missing notify wrapper");
     let _ = std::fs::remove_dir_all(&out_dir);
 
     // Dev logic TU: the qualified shared accessor matches builder premain, and

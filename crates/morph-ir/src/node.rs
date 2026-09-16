@@ -92,6 +92,15 @@ pub struct IRWindow {
     pub effect_decls: Vec<HashMap<String, String>>,
     /// morphShared declarations, one entry per declaration site.
     pub shared_vars: Vec<HashMap<String, String>>,
+    /// morphEvent declarations, one entry per visible event binding:
+    /// `key` (module path + name identity), `ns` (module namespace),
+    /// `accessor` (`evt_<name>`), `event` (source name), `channel`
+    /// (legacy string id, dev-TU only), `module` (display path for
+    /// header mapping comments). The build TU emits one static
+    /// `Channel` per entry and lowers string channel references to
+    /// the accessor; the dev TU keeps the string registry.
+    #[serde(default)]
+    pub event_decls: Vec<HashMap<String, String>>,
     /// Event subscriptions: `channel` + `body` (a `[](const JsValue&)`
     /// listener). Emitters subscribe at startup.
     pub channel_subs: Vec<HashMap<String, String>>,

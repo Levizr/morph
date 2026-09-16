@@ -1615,11 +1615,11 @@
         "file": "future/state-events-native-interop",
         "status": "development",
         "author": "PIYUSH",
-        "description": "Complete architecture for Morph's reactive system (state, events, effects) and native C++ interop: module-path identity, namespaced C++ emission, morph_gen.h contract, mid addressing, decision tree for native.cpp.",
+        "description": "Complete architecture for Morph's reactive system (state, events, effects) and native C++ interop: module-path identity, namespaced C++ emission, morph_api.h contract, mid addressing, decision tree for native.cpp.",
         "keywords": [
           "morph state events native",
           "morph_mods namespace",
-          "morph_gen header",
+          "morph_api header",
           "mid instance descriptor"
         ],
         "lastUpdated": "2026-09-16",

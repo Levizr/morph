@@ -847,7 +847,7 @@ fn strip_static_function(cpp: &str) -> String {
 
 /// Extract `ret name(params);` from transpiled C++ (mirrors
 /// `extract_function_decl`). Returns None for globals, lambdas and `main`.
-fn extract_function_decl(cpp: &str) -> Option<String> {
+pub(crate) fn extract_function_decl(cpp: &str) -> Option<String> {
     let mut text = cpp.trim().to_string();
     if text.is_empty() {
         return None;
@@ -1026,7 +1026,7 @@ pub fn generate_state_header(windows: &[IRWindow], premain: &[String], dev_mode:
     lines.join("\n")
 }
 
-fn fn_name(decl: &str) -> Option<String> {
+pub(crate) fn fn_name(decl: &str) -> Option<String> {
     let paren = decl.find('(')?;
     let before = decl[..paren].trim_end();
     let name: String = before

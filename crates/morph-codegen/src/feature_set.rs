@@ -353,6 +353,7 @@ mod tests {
             shared_vars: Vec::new(),
             effect_decls: Vec::new(),
             cpp_imports: Vec::new(),
+            event_decls: Vec::new(),
             channel_subs: Vec::new(),
             keyframes: std::collections::HashMap::new(),
         };

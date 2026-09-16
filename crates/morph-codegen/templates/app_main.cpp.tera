@@ -12,6 +12,11 @@
 #include "core/renderer.h"
 #include "reactivity/channel.h"
 #include "style/style.h"
+// Per-project native contract (signal/channel definitions + wrappers for
+// user C++). Included before user code: definitions live in the header so
+// user functions see declarations before use. Resolves to the generated
+// output-dir header, which shadows the runtime base by include order.
+#include "morph_api.h"
 {% for header in headers %}
 #include "{{ header }}"
 {% endfor %}
@@ -63,22 +68,6 @@ inline void setColor(float rgba[4], const std::string& c) {
 {% endif %}{% endfor %}
 
 {% endif %}
-{% if shared_decls %}
-// ── morphShared signals (app-global, keyed) ──
-{% for s in shared_decls %}
-{% if s.ns %}
-namespace morph_mods {
-namespace {{ s.ns }} {
-{% endif %}
-static morph::Signal<{{ s.type }}>& {{ s.accessor }}() { static morph::Signal<{{ s.type }}> s({{ s.init }}); return s; }
-{% if s.ns %}
-}
-}
-{% endif %}
-{% endfor %}
-
-{% endif %}
-
 {% if premain_code %}
 {{ premain_code }}
 

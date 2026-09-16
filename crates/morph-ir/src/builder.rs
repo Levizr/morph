@@ -209,6 +209,7 @@ impl IRBuilder {
             // Legacy single-file path: no shared store or channels (use
             // `build_with_graph`).
             shared_vars: Vec::new(),
+            event_decls: Vec::new(),
             channel_subs: Vec::new(),
             cpp_imports: source
                 .cpp_imports
@@ -414,6 +415,7 @@ impl IRBuilder {
             reactive_consts: ctx.const_names.clone(),
             effect_decls: ctx.effects.clone(),
             shared_vars: ctx.shared_entries.clone(),
+            event_decls: ctx.event_entries.clone(),
             channel_subs: ctx.channels.clone(),
             cpp_imports,
             keyframes: self.convert_keyframes(css_keyframes),
@@ -760,6 +762,7 @@ impl IRBuilder {
         }
         for eb in &module.event_bindings {
             frame.events.insert(eb.name.clone(), event_channel_id(module_path, &eb.name));
+            Self::register_event(module_path, &ns, &eb.name, ctx);
             seeded.insert(eb.name.clone());
         }
         // Named imports of directly-imported modules expose their bindings.
@@ -845,6 +848,7 @@ impl IRBuilder {
                                 module_path.display()
                             );
                         }
+                        Self::register_event(target_path, &target_ns, &eb.name, ctx);
                     }
                 }
             }
@@ -874,6 +878,23 @@ impl IRBuilder {
         m.insert("setter".into(), setter.to_string());
         if !ctx.shared_entries.iter().any(|e| e.get("key") == m.get("key")) {
             ctx.shared_entries.push(m);
+        }
+    }
+
+    /// Register one event binding's C++ emission metadata, deduped by its
+    /// identity key (module path + event name). The build TU emits one
+    /// static `Channel` per entry and lowers string channel references
+    /// to the namespace accessor.
+    fn register_event(module_path: &Path, ns: &str, name: &str, ctx: &mut BuilderCtx) {
+        let mut m = HashMap::new();
+        m.insert("key".into(), binding_identity(module_path, name));
+        m.insert("ns".into(), ns.to_string());
+        m.insert("accessor".into(), event_channel_accessor(name));
+        m.insert("event".into(), name.to_string());
+        m.insert("channel".into(), event_channel_id(module_path, name));
+        m.insert("module".into(), module_path.display().to_string());
+        if !ctx.event_entries.iter().any(|e| e.get("key") == m.get("key")) {
+            ctx.event_entries.push(m);
         }
     }
 
@@ -1741,6 +1762,7 @@ struct BuilderCtx<'a> {
     logs: Vec<String>,
     modules_emitted: HashSet<PathBuf>,
     shared_entries: Vec<HashMap<String, String>>,
+    event_entries: Vec<HashMap<String, String>>,
 }
 
 impl<'a> BuilderCtx<'a> {
@@ -1758,6 +1780,7 @@ impl<'a> BuilderCtx<'a> {
             logs: Vec::new(),
             modules_emitted: HashSet::new(),
             shared_entries: Vec::new(),
+            event_entries: Vec::new(),
         }
     }
 }
@@ -2138,7 +2161,19 @@ fn shared_binding_type(type_arg: &Option<String>, init: &str) -> String {
     infer_state_type(init).unwrap_or_else(|| "auto".to_string())
 }
 
+/// C++ identifier of a module's event channel accessor function. Lives
+/// inside the module namespace, so only event names within one file
+/// must differ.
+fn event_channel_accessor(name: &str) -> String {
+    let safe: String =
+        name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect();
+    let safe = if safe.is_empty() { "evt".to_string() } else { safe };
+    format!("evt_{safe}")
+}
+
 /// Runtime channel id of an event binding: `evt:<module path>:<name>`.
+/// Used by the dev TU string registry only; the build TU lowers every
+/// reference to the namespace accessor.
 fn event_channel_id(module: &Path, name: &str) -> String {
     format!("evt:{}::{name}", module.display())
 }

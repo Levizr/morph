@@ -64,6 +64,10 @@ impl IRSerializer {
             Value::Array(w.shared_vars.iter().map(string_map).collect()),
         );
         out.insert(
+            "event_decls".to_string(),
+            Value::Array(w.event_decls.iter().map(string_map).collect()),
+        );
+        out.insert(
             "channel_subs".to_string(),
             Value::Array(w.channel_subs.iter().map(string_map).collect()),
         );

@@ -45,29 +45,50 @@ impl<'a> CppEmitter<'a> {
             }
         }
 
-        let mut shared_decls = Vec::new();
+        // Event declarations for static channel emission + morph_api.h.
+        // Deduped by identity key (module path + event name).
+        let mut event_decls: Vec<std::collections::HashMap<String, String>> = Vec::new();
         {
             let mut seen_keys = std::collections::HashSet::new();
             for w in self.windows {
-                for sv in &w.shared_vars {
-                    let key = sv.get("key").cloned().unwrap_or_default();
+                for ev in &w.event_decls {
+                    let key = ev.get("key").cloned().unwrap_or_default();
                     if key.is_empty() || !seen_keys.insert(key.clone()) {
                         continue;
                     }
-                    let accessor = sv.get("accessor").cloned().unwrap_or_default();
-                    let ty = sv.get("type").cloned().unwrap_or_else(|| "auto".into());
-                    let init_raw = sv.get("init").cloned().unwrap_or_else(|| "0".into());
-                    let init = clean_shared_init(&init_raw, &ty);
-                    shared_decls.push(serde_json::json!({
-                        "key": key,
-                        "ns": sv.get("ns").cloned().unwrap_or_default(),
-                        "accessor": accessor,
-                        "type": ty,
-                        "init": init
-                    }));
+                    if ev.get("accessor").map_or(true, |a| a.is_empty()) {
+                        continue;
+                    }
+                    event_decls.push(ev.clone());
                 }
             }
         }
+        // Legacy string channel id → namespace accessor expression. The
+        // builder still emits `morph::channel("<id>")` placeholders (shared
+        // with the dev TU); the build TU lowers every occurrence to the
+        // static accessor so no string lookup survives in app.cpp.
+        // Entries are (raw id, `morph::channel("<escaped>")` needle, expr).
+        let channel_lower: Vec<(String, String, String)> = event_decls
+            .iter()
+            .map(|ev| {
+                let raw = ev.get("channel").cloned().unwrap_or_default();
+                let escaped = raw.replace('\\', "\\\\").replace('"', "\\\"");
+                let expr = event_expr(
+                    ev.get("ns").map_or("", String::as_str),
+                    ev.get("accessor").map_or("", String::as_str),
+                );
+                (raw, format!("morph::channel(\"{escaped}\")"), expr)
+            })
+            .collect();
+        let lower_channels = |src: String| -> String {
+            let mut out = src;
+            for (_, needle, expr) in &channel_lower {
+                if out.contains(needle.as_str()) {
+                    out = out.replace(needle.as_str(), expr);
+                }
+            }
+            out
+        };
 
         // Window code via node_emitter (with state map for generic transpilation)
         let mut window_code_parts = Vec::new();
@@ -161,10 +182,19 @@ impl<'a> CppEmitter<'a> {
                 if channel.is_empty() || body.is_empty() {
                     continue;
                 }
-                let escaped = channel.replace('\\', "\\\\").replace('"', "\\\"");
-                code.push_str(&format!("    morph::channel(\"{escaped}\").on({body});\n"));
+                // Prefer the static namespace accessor; hand-built IR
+                // without event decls falls back to the string registry.
+                let target = channel_lower
+                    .iter()
+                    .find(|(raw, _, _)| raw == channel)
+                    .map(|(_, _, expr)| expr.clone())
+                    .unwrap_or_else(|| {
+                        let escaped = channel.replace('\\', "\\\\").replace('"', "\\\"");
+                        format!("morph::channel(\"{escaped}\")")
+                    });
+                code.push_str(&format!("    {target}.on({body});\n"));
             }
-            window_code_parts.push(code);
+            window_code_parts.push(lower_channels(code));
         }
         let window_code = window_code_parts.join("\n");
 
@@ -245,13 +275,15 @@ impl<'a> CppEmitter<'a> {
         extra_headers.sort();
         extra_headers.dedup();
 
-        // Premain code (functions like doLogin, logout)
-        let premain_code = self
-            .windows
-            .iter()
-            .flat_map(|w| w.premain_functions.clone())
-            .collect::<Vec<_>>()
-            .join("\n\n");
+        // Premain code (functions like doLogin, logout). Event emit
+        // placeholders lower to static accessors like window code.
+        let premain_code = lower_channels(
+            self.windows
+                .iter()
+                .flat_map(|w| w.premain_functions.clone())
+                .collect::<Vec<_>>()
+                .join("\n\n"),
+        );
 
         // Native mode: user C++ imports via `import "./file.cpp"`
         // Native mode: user C++ imports via `import "./file.cpp"`
@@ -284,7 +316,6 @@ impl<'a> CppEmitter<'a> {
         ctx.insert("dev_mode", &false);
         ctx.insert("premain_code", &premain_code);
         ctx.insert("state_decls", &state_decls);
-        ctx.insert("shared_decls", &shared_decls);
         ctx.insert("native_mode", &native_mode);
         ctx.insert("cpp_includes", &cpp_includes);
 
@@ -292,6 +323,12 @@ impl<'a> CppEmitter<'a> {
             .unwrap_or_else(|e| format!("// Tera error: {e}\n{TEMPLATE}"));
 
         std::fs::write(output_dir.join("app.cpp"), rendered)?;
+
+        // Per-project native contract: signal/channel definitions +
+        // wrappers for user C++. Always generated (not just native mode)
+        // so `#include "morph_api.h"` in app.cpp never dangles.
+        let api_header = generate_morph_api_header(self.windows, &premain_code, &event_decls);
+        std::fs::write(output_dir.join("morph_api.h"), api_header)?;
 
         // Generate _morph_state.h for native mode (signals + JSX wrappers + function decls)
         if native_mode {
@@ -352,6 +389,161 @@ fn shared_expr(ns: &str, accessor: &str) -> String {
     }
 }
 
+/// Fully-qualified event channel accessor call. Mirrors `shared_expr`.
+fn event_expr(ns: &str, accessor: &str) -> String {
+    if ns.is_empty() {
+        format!("{accessor}()")
+    } else {
+        format!("morph_mods::{ns}::{accessor}()")
+    }
+}
+
+/// Names of functions defined in premain, so generated wrappers never
+/// redefine a user function (same rule as `_morph_state.h`).
+fn premain_names(premain_code: &str) -> std::collections::HashSet<String> {
+    premain_code
+        .split("\n\n")
+        .filter_map(logic_emitter::extract_function_decl)
+        .filter_map(|decl| logic_emitter::fn_name(&decl))
+        .collect()
+}
+
+/// Build the per-project `morph_api.h`: the native developer's contract.
+/// Inline signal/channel definitions live here (not in `app.cpp`) so user
+/// C++ included at the top of `app.cpp` sees declarations before use, and
+/// `inline` keeps them safe across translation units. `app.cpp` complexity
+/// is irrelevant; this header's DX is sacred: thin wrappers + mapping
+/// comments, zero string plumbing.
+fn generate_morph_api_header(
+    windows: &[IRWindow],
+    premain_code: &str,
+    event_decls: &[std::collections::HashMap<String, String>],
+) -> String {
+    let mut lines = vec![
+        "#pragma once".to_string(),
+        "// Generated by Morph — do not edit. This is the native developer's".to_string(),
+        "// contract: include it from user C++ (`#include \"morph_api.h\"`) and".to_string(),
+        "// call the accessors/wrappers below. Never read app.cpp.".to_string(),
+        // Runtime base, spelled explicitly (never `#include "morph_api.h"`:
+        // this file SHADOWS the runtime header by include order).
+        "#include \"types/js_value.h\"".to_string(),
+        "#include \"types/js_object.h\"".to_string(),
+        "#include \"reactivity/signal.h\"".to_string(),
+        "#include \"reactivity/channel.h\"".to_string(),
+        String::new(),
+    ];
+    let taken = premain_names(premain_code);
+    // (namespace, lines) groups preserving first-seen order.
+    let mut blocks: Vec<(String, Vec<String>)> = Vec::new();
+    let mut block_by_ns: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    let mut push_entry = |ns: &str, entry_lines: Vec<String>| {
+        if ns.is_empty() {
+            // Global-scope entries are spliced inline at the end; collect
+            // them under a sentinel and flush after namespaced blocks.
+            if let Some(&idx) = block_by_ns.get("") {
+                blocks[idx].1.extend(entry_lines);
+            } else {
+                block_by_ns.insert(String::new(), blocks.len());
+                blocks.push((String::new(), entry_lines));
+            }
+            return;
+        }
+        if let Some(&idx) = block_by_ns.get(ns) {
+            blocks[idx].1.extend(entry_lines);
+        } else {
+            block_by_ns.insert(ns.to_string(), blocks.len());
+            blocks.push((ns.to_string(), entry_lines));
+        }
+    };
+
+    // Shared stores: definition + get_/set_ wrappers.
+    {
+        let mut seen_keys = std::collections::HashSet::new();
+        for w in windows {
+            for sv in &w.shared_vars {
+                let key = sv.get("key").map_or("", String::as_str);
+                let accessor = sv.get("accessor").map_or("", String::as_str);
+                let getter = sv.get("getter").map_or("", String::as_str);
+                let setter = sv.get("setter").map_or("", String::as_str);
+                if key.is_empty() || accessor.is_empty() || !seen_keys.insert(key.to_string()) {
+                    continue;
+                }
+                let init_raw = sv.get("init").map_or("0", String::as_str);
+                let mut ty = sv.get("type").map_or("auto", String::as_str).to_string();
+                if ty == "auto" {
+                    ty = infer_cpp_type(init_raw);
+                }
+                if ty == "auto" || getter.is_empty() {
+                    continue;
+                }
+                let init = clean_shared_init(init_raw, &ty);
+                let ns = sv.get("ns").map_or("", String::as_str);
+                let module = sv.get("key").map_or("", String::as_str);
+                let mut entry = vec![
+                    format!("// {getter} ({module})"),
+                    format!(
+                        "inline morph::Signal<{ty}>& {accessor}() {{ static morph::Signal<{ty}> s({init}); return s; }}"
+                    ),
+                ];
+                if !taken.contains(getter) {
+                    entry.push(format!("inline {ty} {getter}() {{ return {accessor}().get(); }}"));
+                }
+                if !setter.is_empty() && !taken.contains(setter) {
+                    entry.push(format!("inline void {setter}({ty} v) {{ {accessor}().set(v); }}"));
+                }
+                push_entry(ns, entry);
+            }
+        }
+    }
+
+    // Events: channel definition + emit_/notify_ wrappers.
+    {
+        for ev in event_decls {
+            let accessor = ev.get("accessor").map_or("", String::as_str);
+            let name = ev.get("event").map_or("", String::as_str);
+            if accessor.is_empty() || name.is_empty() {
+                continue;
+            }
+            let ns = ev.get("ns").map_or("", String::as_str);
+            let module = ev.get("module").map_or("", String::as_str);
+            let mut entry = vec![
+                format!("// {name} ({module})"),
+                format!(
+                    "inline morph::Channel& {accessor}() {{ static morph::Channel c; return c; }}"
+                ),
+            ];
+            let emit_fn = format!("emit_{name}");
+            let notify_fn = format!("notify_{name}");
+            if !taken.contains(emit_fn.as_str()) {
+                entry.push(format!(
+                    "inline void {emit_fn}(const JsValue& payload) {{ {accessor}().emit(payload); }}"
+                ));
+            }
+            if !taken.contains(notify_fn.as_str()) {
+                entry.push(format!(
+                    "inline void {notify_fn}() {{ {accessor}().emit(JsObject{{}}); }}"
+                ));
+            }
+            push_entry(ns, entry);
+        }
+    }
+
+    for (ns, member_lines) in blocks {
+        if ns.is_empty() {
+            lines.extend(member_lines);
+            continue;
+        }
+        lines.push("namespace morph_mods {".to_string());
+        lines.push(format!("namespace {ns} {{"));
+        lines.extend(member_lines);
+        lines.push("}".to_string());
+        lines.push("}".to_string());
+    }
+    lines.push(String::new());
+    lines.join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -398,6 +590,7 @@ mod tests {
                 .collect(),
             ],
             channel_subs: Vec::new(),
+            event_decls: Vec::new(),
             cpp_imports: Vec::new(),
             keyframes: std::collections::HashMap::new(),
         }
@@ -444,7 +637,14 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         CppEmitter::new(&windows).emit(&dir).unwrap();
         let app = std::fs::read_to_string(dir.join("app.cpp")).unwrap();
-        assert!(app.contains("static morph::Signal<int>& shared_cart_count()"), "accessor emitted");
+        let api = std::fs::read_to_string(dir.join("morph_api.h")).unwrap();
+        assert!(app.contains("#include \"morph_api.h\""), "api header included: {app}");
+        assert!(
+            api.contains("inline morph::Signal<int>& shared_cart_count()"),
+            "accessor emitted in header: {api}"
+        );
+        assert!(api.contains("inline int count()"), "getter wrapper: {api}");
+        assert!(api.contains("inline void setCount(int v)"), "setter wrapper: {api}");
         assert!(app.contains("shared_cart_count().get()"), "reactive read mapped: {app}");
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -456,12 +656,72 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         CppEmitter::new(&windows).emit(&dir).unwrap();
         let app = std::fs::read_to_string(dir.join("app.cpp")).unwrap();
-        assert!(app.contains("namespace morph_mods {"), "module namespace: {app}");
-        assert!(app.contains("namespace cart_12345678 {"), "store namespace: {app}");
+        let api = std::fs::read_to_string(dir.join("morph_api.h")).unwrap();
+        assert!(api.contains("namespace morph_mods {"), "module namespace: {api}");
+        assert!(api.contains("namespace cart_12345678 {"), "store namespace: {api}");
         assert!(
             app.contains("morph_mods::cart_12345678::shared_cart_count().get()"),
             "qualified read: {app}"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn event_window() -> IRWindow {
+        use std::collections::HashMap;
+        let mut ev = HashMap::new();
+        ev.insert("key".to_string(), "/proj/src/Store.mx::resetEvent".to_string());
+        ev.insert("ns".to_string(), "store_abc123".to_string());
+        ev.insert("accessor".to_string(), "evt_resetEvent".to_string());
+        ev.insert("event".to_string(), "resetEvent".to_string());
+        ev.insert("channel".to_string(), "evt:/proj/src/Store.mx::resetEvent".to_string());
+        ev.insert("module".to_string(), "/proj/src/Store.mx".to_string());
+        let mut sub = HashMap::new();
+        sub.insert("channel".to_string(), "evt:/proj/src/Store.mx::resetEvent".to_string());
+        sub.insert(
+            "body".to_string(),
+            "[](const JsValue& __ch_0) { __st_inst0_count.set(0); }".to_string(),
+        );
+        IRWindow {
+            window_id: "main".to_string(),
+            title: "Test".to_string(),
+            width: 800,
+            height: 600,
+            visible: true,
+            renderer: "flash".to_string(),
+            premain_functions: vec![
+                "morph::channel(\"evt:/proj/src/Store.mx::resetEvent\").emit(JsObject{});"
+                    .to_string(),
+            ],
+            event_decls: vec![ev],
+            channel_subs: vec![sub],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn static_event_channels_replace_string_registry() {
+        let windows = vec![event_window()];
+        let dir = std::env::temp_dir().join(format!("morph_evt_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        CppEmitter::new(&windows).emit(&dir).unwrap();
+        let app = std::fs::read_to_string(dir.join("app.cpp")).unwrap();
+        let api = std::fs::read_to_string(dir.join("morph_api.h")).unwrap();
+        assert!(!app.contains("morph::channel(\"evt:"), "no string lookup in app.cpp: {app}");
+        assert!(
+            app.contains("morph_mods::store_abc123::evt_resetEvent().emit(JsObject{});"),
+            "emit lowered: {app}"
+        );
+        assert!(
+            app.contains("morph_mods::store_abc123::evt_resetEvent().on([](const JsValue& __ch_0)"),
+            "subscribe lowered: {app}"
+        );
+        assert!(
+            api.contains("inline morph::Channel& evt_resetEvent()"),
+            "channel static in header: {api}"
+        );
+        assert!(api.contains("inline void emit_resetEvent("), "emit wrapper: {api}");
+        assert!(api.contains("inline void notify_resetEvent()"), "notify wrapper: {api}");
+        assert!(api.contains("// resetEvent (/proj/src/Store.mx)"), "mapping comment: {api}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -1,6 +1,8 @@
 # Morph State, Events & Native C++ Interop — Complete Design Record
 
-**Status:** `development` · **Priority:** high · **Shipped parts:** namespaced `morphShared` / `morphEvent`, strict TS-only gates, per-module C++ namespaces, `morph_gen.h` generation
+**Status:** `development` · **Priority:** high · **Shipped parts:** namespaced `morphShared` / `morphEvent`, strict TS-only gates, per-module C++ namespaces, static event channels, `morph_api.h` generation
+
+> **DX contract:** `app.cpp` may be as complex as the compiler needs — nobody writes it by hand. `native.cpp` (what the user writes) and `morph_api.h` (what the user includes) are sacred: short namespaces, thin wrappers, mapping comments, zero string plumbing. Every implementation choice below is judged by user-side DX first.
 
 > This page documents the complete architecture for Morph's reactive system (state, events, effects) and native C++ interop, as finalized through design review. Syntax and internal APIs shown here are implemented — behavior changes would be a breaking release.
 
@@ -61,9 +63,11 @@ namespace shopstore {      // stem: "shopstore" (lowercased from ShopStore.mx)
 
 ---
 
-## 4. `morph_gen.h` — The Native Developer's Contract
+## 4. `morph_api.h` — The Native Developer's Contract
 
-Single generated header, included by user `native.cpp`. It is **the** discovery surface: a C++ developer writes native code against this header without ever reading `app.cpp`.
+Single generated header per project (written to the build output dir next to `app.cpp`), included by user `native.cpp`. It is **the** discovery surface: a C++ developer writes native code against this header without ever reading `app.cpp`.
+
+Name note: the runtime ships a base header also called `morph_api.h` (JS value types, `Signal<T>`, node/event/task primitives). The generated per-project header **shadows it by include order** (output dir is searched first) and re-includes the same runtime subpaths explicitly, so it is a strict superset: everything the base header provides plus this project's accessors, wrappers, and `MID_*` constants. User code keeps writing `#include "morph_api.h"` — one include, full API.
 
 ### Contents
 - Shared state accessors + thin setter/notify wrappers:
@@ -94,7 +98,7 @@ Single generated header, included by user `native.cpp`. It is **the** discovery 
 
 ### Shared state (read/write)
 ```cpp
-#include "morph_gen.h"
+#include "morph_api.h"
 
 void resetCart() {
     components::shop::shopstore::set_cart(0);           // thin wrapper → shared_cart().set(0)
@@ -142,39 +146,41 @@ int doubleIt(int x) { return x * 2; }   // zero plumbing, always
 
 ## 7. Events: Static Channels, Zero String Lookup
 
-### Current (shipped — string-based registry)
-Today the compiler emits a string channel ID (`evt:<module path>::<name>`) and uses a global `std::map<std::string, Channel>` registry:
+### Before (string-based registry)
+The compiler used to emit a string channel ID (`evt:<module path>::<name>`) and a global `std::map<std::string, Channel>` registry at every emit site:
 
 ```cpp
-// Current generated output (has runtime overhead)
+// Old generated output (had runtime overhead)
 morph::channel("evt:/home/user/project/src/components/ShopStore.mx::clearCart").on([](const JsValue& __ch_0) { ... });
 morph::channel("evt:/home/user/project/src/components/ShopStore.mx::clearCart").emit(JsObject{{"cart", ...}});
 ```
 
-Every `.emit()` and `.on()` pays: mutex lock + `std::map` string lookup + listener vector copy. The absolute path literals also bloat the binary.
+Every `.emit()` and `.on()` paid: mutex lock + `std::map` string lookup + listener vector copy. The absolute path literals also bloated the binary.
 
-### Planned: Namespace-Static Channels (Zero String Lookup)
-The compiler will emit one `Channel` static per event binding inside its module namespace:
+### Shipped: Namespace-Static Channels (Zero String Lookup)
+The generated `morph_api.h` defines one `Channel` per event binding as an `inline` accessor inside its module namespace (definitions live in the header so user code included earlier in `app.cpp` sees them; `inline` keeps them TU-safe):
 
 ```cpp
-// Generated for src/components/ShopStore.mx exporting `clearCart`
+// Generated morph_api.h for src/components/ShopStore.mx exporting `clearCart`
 namespace morph_mods {
-namespace components {
-namespace shopstore {
-    static morph::Channel& evt_clearCart() { static morph::Channel c; return c; }
-}}}
+namespace store_shopstore_1a2b3c4d {
+inline morph::Channel& evt_clearCart() { static morph::Channel c; return c; }
+// User DX wrappers in the same header:
+inline void emit_clearCart(const JsValue& p) { evt_clearCart().emit(p); }
+inline void notify_clearCart() { evt_clearCart().emit(JsObject{}); }
+}}
 ```
 
-Then codegen lowers `.emit()`/`.on()` directly to the accessor — **strings vanish from all emit sites**:
+The build TU lowers every `morph::channel("<id>")` at emit/subscribe sites to the accessor — **strings vanish from all emit sites**:
 
 ```cpp
-// Future generated output (zero string lookup)
-components::shopstore::evt_clearCart().emit(JsObject{{"cart", components::shopstore::shared_cart().get()}});
-components::shopstore::evt_clearCart().on([](const JsValue& __ch_0) { __st_inst1_qty.set(0); });
+// Shipped generated output (zero string lookup)
+morph_mods::store_shopstore_1a2b3c4d::evt_clearCart().emit(JsObject{{"cart", morph_mods::store_shopstore_1a2b3c4d::shared_cart().get()}});
+morph_mods::store_shopstore_1a2b3c4d::evt_clearCart().on([](const JsValue& __ch_0) { __st_inst1_qty.set(0); });
 ```
 
 - **Cost:** only the listener-list lock inside `emit` (inherent to pub/sub). No registry mutex, no string map, no string compares.
-- `morph::channel_registry()` and `clear_channels()` kept **only for dev-mode rewire** (dev server re-registers subscriptions on hot reload). Production builds can strip the registry entirely.
+- `morph::channel_registry()` and `clear_channels()` are kept **only for the dev TU** (`morph dev` re-registers subscriptions on hot reload via `morph_logic_rewire`). Production builds never touch the registry.
 
 ---
 
@@ -199,10 +205,10 @@ components::shopstore::evt_clearCart().on([](const JsValue& __ch_0) { __st_inst1
 | `morphShared` namespaced, `morphEvent` namespaced | ✅ Shipped | `morph_mods::<path>::shared_<name>()`, `evt_<name>()` |
 | Strict TS-only sources (`.ts`/`.tsx`/`.mx`) | ✅ Shipped | `.js`/`.jsx` rejected at parse |
 | `mid` parser + dedupe + codegen constants | 🔧 In progress | Parser collects, codegen emits constants + indexed accessors |
-| Static event channels (no string registry) | 🔧 In progress | Channel statics in namespace, `frame.events` → accessors |
-| `morph_gen.h` generation | 🔧 In progress | Shared/event accessors + `mid` constants + thin wrappers |
+| Static event channels (no string registry) | ✅ Shipped (build) | Channel statics in namespace; build TU lowers `morph::channel("<id>")` → accessor; dev TU keeps registry for rewire |
+| `morph_api.h` generation | ✅ Shipped | Shared/event accessors + thin wrappers + mapping comments (`MID_*` lands with `mid`) |
 | Naming-rule linter (`mx-naming`) | 📋 Planned | `morph check` enforces lowercasing + collision |
-| `morph_gen.h` in `native-cpp.md` | 📋 Planned | Rewrite with decision tree + examples |
+| `morph_api.h` in `native-cpp.md` | 📋 Planned | Rewrite with decision tree + examples |
 
 ---
 
@@ -212,7 +218,7 @@ components::shopstore::evt_clearCart().on([](const JsValue& __ch_0) { __st_inst1
 |---|---|---|
 | Per-item state in `.map` + `mid` on list items | Deferred | Requires dynamic per-item storage; current limitation documented |
 | Dev-chosen integer `mid` (vs compiler ordinal) | Deferred | `mid` string is the primary form; integer ordinals for untagged |
-| `morph_gen.h` devtools integration | Deferred | Header already the discovery surface; IDE indexing later |
+| `morph_api.h` devtools integration | Deferred | Header already the discovery surface; IDE indexing later |
 | Registry deletion (prod builds) | Deferred | Keep dev registry for rewire; prod strip is a separate pass |
 
 ---
@@ -293,7 +299,7 @@ import { theme, setTheme } from './themeStore'
 
 - **No provider nesting** — shared state doesn't force you to wrap your app in `<ThemeProvider><AuthProvider><CartProvider>…`
 - **No re-render cascades** — reading `theme` subscribes *only that component*; writing `setTheme` notifies *only subscribers*. React context re-renders all consumers on any value change.
-- **Works outside components** — native code, background threads, timers, event handlers can all read/write via the same `morph_gen.h` accessors. No "must be inside a component" restriction.
+- **Works outside components** — native code, background threads, timers, event handlers can all read/write via the same `morph_api.h` accessors. No "must be inside a component" restriction.
 - **Testable in isolation** — import the store in a unit test, call `setTheme('dark')`, assert behavior. No need to render a provider tree.
 
 The trade-off: you must export the binding (`export const …`) and the linter enforces module scope (`mx-shared-scope`). This is intentional: it makes shared state **explicitly opt-in and discoverable**, not an implicit side effect of rendering.
@@ -344,7 +350,7 @@ If you need multiple similar instances, use descriptive names: `heroPrimary`, `h
 
 ### What happens if I delete a component file that has a `mid` tag?
 
-Any native code using that `MID_*` constant will fail to compile — the constant disappears from `morph_gen.h`. This is **intentional**: it forces you to update native code when the UI contract changes, instead of silently calling into dead instances (the bug class `mid` was designed to eliminate).
+Any native code using that `MID_*` constant will fail to compile — the constant disappears from `morph_api.h`. This is **intentional**: it forces you to update native code when the UI contract changes, instead of silently calling into dead instances (the bug class `mid` was designed to eliminate).
 
 ### Why `mid`? Is this really the best approach?
 
@@ -377,6 +383,9 @@ This is the best design we've found given the constraints (zero runtime strings,
 | 2026-09-16 | `mid` on lists = hard error | Per-item state not implemented; positional `::N` rots on reorder |
 | 2026-09-16 | Indexed accessors + bitmask, no registry/templates | Same unmount safety, zero templates/maps/heap; plain C semantics |
 | 2026-09-16 | Static `Channel` per event in namespace | Eliminates string-keyed registry lock + lookup on every emit |
+| 2026-09-16 | Generated header named `morph_api.h` (shadows runtime base by include order) | One include for user code; generated header re-includes runtime subpaths explicitly so it is a strict superset |
+| 2026-09-16 | Signal/channel definitions live in `morph_api.h` as `inline`, `app.cpp` just includes it | Fixes declaration-before-use for user code included at top of `app.cpp`; TU-safe; `app.cpp` complexity is fine, user DX is sacred |
+| 2026-09-16 | `-I<output dir>` before `-I<runtime>` | User `.cpp` `#include "morph_api.h"` resolves to the generated project header |
 
 ---
 
