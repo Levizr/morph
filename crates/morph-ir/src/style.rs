@@ -85,6 +85,8 @@ impl IRStyle {
 
     /// True when no meaningful style delta has been applied for a pseudo
     /// (hover/active) bucket, i.e. every field is still at its default.
+    // Exact equality is intentional change/dirty detection.
+    #[allow(clippy::float_cmp)]
     pub fn is_empty_style(&self) -> bool {
         self.bg_color == [0.0, 0.0, 0.0, 0.0]
             && self.color == [0.0, 0.0, 0.0, 1.0]

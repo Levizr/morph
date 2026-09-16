@@ -8,7 +8,7 @@ pub struct RustEmitter<'a> {
 }
 
 impl<'a> RustEmitter<'a> {
-    pub fn new(windows: &'a [IRWindow]) -> Self {
+    pub const fn new(windows: &'a [IRWindow]) -> Self {
         Self { windows }
     }
 

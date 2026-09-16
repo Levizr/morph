@@ -35,19 +35,23 @@ fn asset_name() -> Option<&'static str> {
     None
 }
 
-fn exe_name() -> &'static str {
-    if cfg!(target_os = "windows") { "upx.exe" } else { "upx" }
+const fn exe_name() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "upx.exe"
+    } else {
+        "upx"
+    }
 }
 
 fn cache_dir() -> PathBuf {
     if cfg!(target_os = "windows") {
-        let base =
-            std::env::var("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("~"));
+        let base = std::env::var("LOCALAPPDATA").map_or_else(|_| PathBuf::from("~"), PathBuf::from);
         return base.join("morph").join("upx");
     }
-    let base = std::env::var("XDG_CACHE_HOME").map(PathBuf::from).unwrap_or_else(|_| {
-        std::env::var("HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("~/.cache"))
-    });
+    let base = std::env::var("XDG_CACHE_HOME").map_or_else(
+        |_| std::env::var("HOME").map_or_else(|_| PathBuf::from("~/.cache"), PathBuf::from),
+        PathBuf::from,
+    );
     base.join("morph").join("upx")
 }
 
@@ -56,12 +60,12 @@ fn find_in_cache(cache: &Path, version: &str) -> Option<PathBuf> {
     let mut stack = vec![cache.to_path_buf()];
     while let Some(dir) = stack.pop() {
         let entries = std::fs::read_dir(&dir).ok()?;
-        for entry in entries.filter_map(|e| e.ok()) {
+        for entry in entries.filter_map(std::result::Result::ok) {
             let path = entry.path();
             if path.is_dir() {
                 stack.push(path);
             } else if path.file_name().and_then(|n| n.to_str()) == Some(exe)
-                && path.to_string_lossy().contains(&format!("upx-{}", version))
+                && path.to_string_lossy().contains(&format!("upx-{version}"))
             {
                 return Some(path);
             }
@@ -75,9 +79,9 @@ fn download(asset: &str, version: &str, silent: bool) -> Result<Option<PathBuf>>
     let cache = cache_dir();
     std::fs::create_dir_all(&cache)?;
     let exe = exe_name();
-    let pkg = cache.join(format!("upx-{}-{}", version, asset));
+    let pkg = cache.join(format!("upx-{version}-{asset}"));
     if !silent {
-        eprintln!("  … Downloading UPX {} ({}) ...", version, asset);
+        eprintln!("  … Downloading UPX {version} ({asset}) ...");
     }
     let status = std::process::Command::new("curl")
         .args(["-fsSL", "--retry", "2", "-o"])
@@ -86,7 +90,7 @@ fn download(asset: &str, version: &str, silent: bool) -> Result<Option<PathBuf>>
         .status()
         .with_context(|| "UPX download needs `curl` on PATH")?;
     if !status.success() {
-        anyhow::bail!("UPX download failed: {}", url);
+        anyhow::bail!("UPX download failed: {url}");
     }
     // System tar (incl. Windows bsdtar) extracts both .zip and .tar.xz.
     let status = std::process::Command::new("tar")
@@ -99,10 +103,10 @@ fn download(asset: &str, version: &str, silent: bool) -> Result<Option<PathBuf>>
     if !status.success() {
         anyhow::bail!("UPX extraction failed");
     }
-    let mut stack = vec![cache.clone()];
+    let mut stack = vec![cache];
     while let Some(dir) = stack.pop() {
         let entries = std::fs::read_dir(&dir)?;
-        for entry in entries.filter_map(|e| e.ok()) {
+        for entry in entries.filter_map(std::result::Result::ok) {
             let path = entry.path();
             if path.is_dir() {
                 stack.push(path);
@@ -123,7 +127,7 @@ pub fn ensure_upx(version: Option<&str>, silent: bool) -> Option<PathBuf> {
     if let Some(v) = version {
         if !v.is_empty() {
             if !silent {
-                eprintln!("  … UPX: using pinned version {} from config/--upx-version", v);
+                eprintln!("  … UPX: using pinned version {v} from config/--upx-version");
             }
             let cache = cache_dir();
             if let Some(hit) = find_in_cache(&cache, v) {
@@ -163,16 +167,14 @@ pub fn compress(binary_path: &Path, upx_bin: &Path) -> bool {
             false
         }
         Err(e) => {
-            eprintln!("  ⚠ UPX failed to run: {}", e);
+            eprintln!("  ⚠ UPX failed to run: {e}");
             false
         }
     }
 }
 
 fn path_has(bin: &str) -> bool {
-    std::env::var("PATH")
-        .map(|p| std::env::split_paths(&p).any(|d| d.join(bin).exists()))
-        .unwrap_or(false)
+    std::env::var("PATH").is_ok_and(|p| std::env::split_paths(&p).any(|d| d.join(bin).exists()))
 }
 
 #[cfg(test)]

@@ -1,0 +1,14 @@
+import { cart, setCart, clearCart } from './ShopStore.mx'
+
+export function CartBar() {
+  function clear() {
+    setCart(0)
+    clearCart.emit({ cart: cart })
+  }
+  return (
+    <div className="cartbar">
+      <text>Cart total: ${cart}</text>
+      <button onClick={() => clear()}>Clear cart</button>
+    </div>
+  )
+}

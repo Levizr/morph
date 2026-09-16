@@ -86,12 +86,8 @@ pub fn translate_to_cpp(
         )));
     }
 
-    let mut translator = CppTranslator::new(
-        source,
-        options.indent,
-        options.type_mode,
-        options.runtime_path.clone(),
-    );
+    let mut translator =
+        CppTranslator::new(source, options.indent, options.type_mode, options.runtime_path.clone());
     apply_ambient_state(&mut translator, &options);
     let code = translator.translate_program(&ret.program);
     Ok(code)
@@ -117,12 +113,8 @@ pub fn translate_snippet_to_cpp(
             msgs.join("; ")
         )));
     }
-    let mut translator = CppTranslator::new(
-        source,
-        options.indent,
-        options.type_mode,
-        options.runtime_path.clone(),
-    );
+    let mut translator =
+        CppTranslator::new(source, options.indent, options.type_mode, options.runtime_path.clone());
     apply_ambient_state(&mut translator, &options);
     Ok(translator.translate_program(&ret.program))
 }

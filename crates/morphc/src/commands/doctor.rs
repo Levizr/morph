@@ -1,7 +1,7 @@
 use anyhow::Result;
 use colored::Colorize;
 
-pub fn run(verbose: bool, _yes: bool) -> Result<()> {
+pub(crate) fn run(verbose: bool, _yes: bool) -> Result<()> {
     crate::logger::log_banner("Morph Doctor — System Check");
 
     crate::logger::log_step("Required tools");
@@ -12,52 +12,30 @@ pub fn run(verbose: bool, _yes: bool) -> Result<()> {
         if !ok && *name == "g++" {
             all_ok = false;
         }
-        let status = if *ok {
-            "✓".green().bold().to_string()
-        } else {
-            "✗".red().bold().to_string()
-        };
+        let status =
+            if *ok { "✓".green().bold().to_string() } else { "✗".red().bold().to_string() };
         let ver = if verbose && !version.is_empty() {
             format!("  {}", version.dimmed())
         } else if !version.is_empty() {
-            format!(
-                "  {}",
-                version.lines().next().unwrap_or("").dimmed()
-            )
+            format!("  {}", version.lines().next().unwrap_or("").dimmed())
         } else {
-            "".to_string()
+            String::new()
         };
-        println!(
-            "      {} {:<14}{}",
-            status,
-            name.bold(),
-            ver
-        );
+        println!("      {} {:<14}{}", status, name.bold(), ver);
     }
 
     crate::logger::log_step("Optional libraries");
-    for (name, bin) in [
-        ("GLFW", "glfw"),
-        ("FreeType", "freetype-config"),
-        ("HarfBuzz", "harfbuzz"),
-    ] {
+    for (name, bin) in [("GLFW", "glfw"), ("FreeType", "freetype-config"), ("HarfBuzz", "harfbuzz")]
+    {
         let found = which(bin);
-        let status = if found {
-            "✓".green().bold().to_string()
-        } else {
-            "○".dimmed().to_string()
-        };
+        let status =
+            if found { "✓".green().bold().to_string() } else { "○".dimmed().to_string() };
         let ver = if found {
             format!("  {}", "found".dimmed())
         } else {
             format!("  {}", "(optional)".dimmed())
         };
-        println!(
-            "      {} {:<14}{}",
-            status,
-            name.bold(),
-            ver
-        );
+        println!("      {} {:<14}{}", status, name.bold(), ver);
     }
 
     println!();
@@ -77,9 +55,5 @@ pub fn run(verbose: bool, _yes: bool) -> Result<()> {
 }
 
 fn which(bin: &str) -> bool {
-    std::process::Command::new("which")
-        .arg(bin)
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    std::process::Command::new("which").arg(bin).output().is_ok_and(|o| o.status.success())
 }

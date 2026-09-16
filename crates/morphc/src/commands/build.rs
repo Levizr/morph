@@ -2,7 +2,10 @@ use anyhow::Result;
 use colored::Colorize;
 use std::path::{Path, PathBuf};
 
-pub fn run(
+// Long build pipeline: parse → IR → codegen → compile.
+// Function kept whole to preserve step ordering.
+#[allow(clippy::too_many_lines)]
+pub(crate) fn run(
     entry: Option<String>,
     output: Option<String>,
     static_: bool,
@@ -20,9 +23,9 @@ pub fn run(
     }
 
     let config = morph_config::MorphConfig::from_file(&config_path)?;
-    let entry = entry.unwrap_or(config.entry.clone());
-    let output_raw = output.unwrap_or(config.output.clone());
-    let type_mode = type_mode.unwrap_or(config.type_mode.clone());
+    let entry = entry.unwrap_or_else(|| config.entry.clone());
+    let output_raw = output.unwrap_or_else(|| config.output.clone());
+    let type_mode = type_mode.unwrap_or_else(|| config.type_mode.clone());
     let type_mode: morpher::TypeMode = type_mode.parse().map_err(|e: String| anyhow::anyhow!(e))?;
     // Clean app name for binary (spaces/special → _)
     let clean_name = morph_config::clean_app_name(&config.name);
@@ -81,9 +84,19 @@ pub fn run(
     }
 
     let source = std::fs::read_to_string(&entry_path)?;
-    let parsed = morph_parser::parse_mx_str(&source, &entry)?;
+    let _parsed = morph_parser::parse_mx_str(&source, &entry)?;
+    // Transitive .mx component graph: missing imports are hard errors.
+    let graph = morph_parser::resolve_graph(&entry_path, &cwd).inspect_err(|_e| {
+        pb.finish_and_clear();
+    })?;
+    let entry_mod = graph.entry_module().ok_or_else(|| {
+        pb.finish_and_clear();
+        anyhow::anyhow!("component graph has no entry module")
+    })?;
+    // Use the graph's entry source so transitive parsing stays consistent.
+    let parsed = &entry_mod.source;
     pb.finish_and_clear();
-    crate::logger::log_success(&format!("Parsed {}", entry));
+    crate::logger::log_success(&format!("Parsed {} ({} module(s))", entry, graph.len()));
 
     // Report what we found
     if let Some(ref wc) = parsed.window_config {
@@ -96,59 +109,70 @@ pub fn run(
 
     // ── Build IR (Phase 3: morph-ir builder) ──
     let pb = crate::logger::spinner("Building IR...");
-    // Collect CSS rules from imports
+    // Collect CSS rules from every module in the component graph.
     let mut css_rules: Vec<(String, morph_parser::CssRule)> = Vec::new();
-    let mut css_keyframes: std::collections::HashMap<String, Vec<morph_parser::CssKeyframe>> = std::collections::HashMap::new();
+    let mut css_keyframes: std::collections::HashMap<String, Vec<morph_parser::CssKeyframe>> =
+        std::collections::HashMap::new();
     let mut remote_css: Vec<(String, String)> = Vec::new();
     let css_fetcher =
         morph_build::css_fetch::CssFetcher::new(cwd.join(".morph").join("css-cache")).silent();
-    for imp in &parsed.imports {
-        if let morph_parser::MxImportKind::CssUrl { url } = &imp.kind {
-            // Remote stylesheets are fetched once into .morph/css-cache
-            // (fonts alongside them, URLs rewritten local); a failed fetch
-            // warns and continues without it, like a browser offline.
-            match css_fetcher.fetch_with_fonts(url) {
-                Some(text) if !text.is_empty() => {
-                    if let Ok(data) = morph_parser::parse_css(&text) {
-                        css_rules.extend(data.rules);
-                        for (k, v) in data.keyframes {
-                            css_keyframes.entry(k).or_default().extend(v);
+    for mod_path in graph.all_paths() {
+        let Some(resolved) = graph.get(mod_path) else {
+            continue;
+        };
+        for imp in &resolved.source.imports {
+            if let morph_parser::MxImportKind::CssUrl { url } = &imp.kind {
+                // Remote stylesheets are fetched once into .morph/css-cache
+                // (fonts alongside them, URLs rewritten local); a failed fetch
+                // warns and continues without it, like a browser offline.
+                match css_fetcher.fetch_with_fonts(url) {
+                    Some(text) if !text.is_empty() => {
+                        if let Ok(data) = morph_parser::parse_css(&text) {
+                            css_rules.extend(data.rules);
+                            for (k, v) in data.keyframes {
+                                css_keyframes.entry(k).or_default().extend(v);
+                            }
+                            remote_css.push((url.clone(), text));
                         }
-                        remote_css.push((url.clone(), text));
+                    }
+                    _ => {
+                        crate::logger::log_dim(&format!("Remote CSS unavailable, skipping: {url}"))
                     }
                 }
-                _ => crate::logger::log_dim(&format!("Remote CSS unavailable, skipping: {}", url)),
             }
-        }
-        if let morph_parser::MxImportKind::CssLocal { path } = &imp.kind {
-            let candidates = [
-                entry_path.parent().map(|p| p.join(path)).unwrap_or_else(|| cwd.join(path)),
-                cwd.join(path),
-            ];
-            for cand in &candidates {
-                if cand.exists() {
-                    if let Ok(text) = std::fs::read_to_string(cand) {
-                        if let Ok(data) = morph_parser::parse_css(&text) {
-                            css_rules.extend(data.rules);                            for (k, v) in data.keyframes { css_keyframes.entry(k).or_default().extend(v); }
+            if let morph_parser::MxImportKind::CssLocal { path } = &imp.kind {
+                let candidates = [resolved.dir.join(path), cwd.join(path)];
+                for cand in &candidates {
+                    if cand.exists() {
+                        if let Ok(text) = std::fs::read_to_string(cand) {
+                            if let Ok(data) = morph_parser::parse_css(&text) {
+                                css_rules.extend(data.rules);
+                                for (k, v) in data.keyframes {
+                                    css_keyframes.entry(k).or_default().extend(v);
+                                }
+                            }
                         }
+                        break;
                     }
-                    break;
                 }
             }
         }
     }
     let builder = morph_ir::IRBuilder::new().with_type_mode(type_mode);
-    let windows = builder.build(&parsed, &css_rules, &css_keyframes);
+    let windows =
+        builder.build_with_graph(&graph, &css_rules, &css_keyframes).inspect_err(|_e| {
+            pb.finish_and_clear();
+        })?;
     pb.finish_and_clear();
     crate::logger::log_success(&format!("IR built — {} window(s)", windows.len()));
 
     // ── Generate C++ ──
     let output_dir = cwd.join(&output_raw);
     // Ensure output is treated as directory (clean name handles file case)
-    let output_dir = if output_raw.ends_with('/') || std::path::Path::new(&output_raw).extension().is_none() {
+    let output_dir = if output_raw.ends_with('/') || Path::new(&output_raw).extension().is_none() {
         output_dir
     } else {
-        output_dir.parent().map(|p| p.to_path_buf()).unwrap_or(output_dir)
+        output_dir.parent().map(Path::to_path_buf).unwrap_or(output_dir)
     };
     let pb = crate::logger::spinner("Generating C++...");
     let emitter = morph_codegen::CppEmitter::new(&windows);
@@ -157,25 +181,24 @@ pub fn run(
     crate::logger::log_success(&format!("C++ generated → {}", output_dir.display()));
 
     // ── Translate companion TypeScript files into linkable fragments ──
-    // Entry-referenced .ts plus src/**/*.ts, each translated in the
+    // Graph-referenced .ts plus src/**/*.ts, each translated in the
     // configured type mode and compiled+linked below. Failures here are
     // hard errors: silently dropping app logic would miscompile the app.
-    let fragment_inputs = collect_typescript_sources(&cwd, &entry_path, &parsed.imports)?;
+    let fragment_inputs = collect_typescript_sources(&cwd, &graph)?;
     let mut extra_sources: Vec<PathBuf> = Vec::new();
     if !fragment_inputs.is_empty() {
         let pb = crate::logger::spinner("Translating TypeScript...");
         let mut used_names: std::collections::HashSet<String> = std::collections::HashSet::new();
         for (ts_path, ts_source) in &fragment_inputs {
             let filename = ts_path.file_name().and_then(|n| n.to_str()).unwrap_or("file.ts");
-            let mut options = morpher::TranslateOptions::default();
-            options.type_mode = type_mode;
+            let mut options = morpher::TranslateOptions { type_mode, ..Default::default() };
             let code = morpher::translate_fragment(ts_source, filename, options)
                 .map_err(|e| anyhow::anyhow!("translating {}: {}", ts_path.display(), e))?;
             let stem = ts_path.file_stem().and_then(|s| s.to_str()).unwrap_or("fragment");
-            let mut out_name = format!("{}.ts.cpp", stem);
+            let mut out_name = format!("{stem}.ts.cpp");
             let mut counter = 2;
             while !used_names.insert(out_name.clone()) {
-                out_name = format!("{}_{}.ts.cpp", stem, counter);
+                out_name = format!("{stem}_{counter}.ts.cpp");
                 counter += 1;
             }
             let out_path = output_dir.join(&out_name);
@@ -191,10 +214,10 @@ pub fn run(
 
     // ── Compile (skip when nothing changed, like cargo run) ──
     // Compiler override: config build.cxx, then MORPH_CXX, then platform default.
-    let cxx_override = if !config.build.cxx.is_empty() {
-        Some(config.build.cxx.clone())
-    } else {
+    let cxx_override = if config.build.cxx.is_empty() {
         std::env::var("MORPH_CXX").ok().filter(|v| !v.is_empty())
+    } else {
+        Some(config.build.cxx.clone())
     };
     // Find runtime dir (for headers)
     let runtime_dir = morph_build::find_runtime_dir(&cwd);
@@ -204,52 +227,64 @@ pub fn run(
 
     // A build is "fresh" (cargo-style) only when every input fingerprint is
     // unchanged AND the binary already exists. On any change we rebuild.
+    // ── Fingerprinting: include all transitive modules + CSS + TS ──
     let config_text = std::fs::read_to_string(&config_path).unwrap_or_default();
     let runtime_hash = morph_cache::hash_tree(&runtime_dir);
     let mut owned_inputs: Vec<(String, String)> = vec![
         ("morph.config.json".to_string(), config_text),
-        ("entry".to_string(), source.clone()),
+        ("entry".to_string(), source),
         ("runtime".to_string(), runtime_hash),
         ("static".to_string(), static_.to_string()),
     ];
-    let entry_parent = entry_path.parent().unwrap_or(cwd.as_path());
-    for imp in &parsed.imports {
-        let path = match &imp.kind {
-            morph_parser::MxImportKind::CssLocal { path } => path,
-            morph_parser::MxImportKind::Component { path, .. } => path,
-            morph_parser::MxImportKind::CppLocal { path, .. } => path,
-            morph_parser::MxImportKind::CssUrl { .. } => continue,
+    // All transitive modules in the component graph.
+    for module_path in graph.all_paths() {
+        let text = std::fs::read_to_string(module_path).unwrap_or_default();
+        owned_inputs.push((module_path.display().to_string(), text));
+    }
+    // Local CSS / C++ imports referenced from any graph module.
+    for mod_path in graph.all_paths() {
+        let Some(resolved) = graph.get(mod_path) else {
+            continue;
         };
-        let candidates = [
-            entry_parent.join(path),
-            cwd.join(path),
-        ];
-        let text = if let Some(cand) = candidates.iter().find(|c| c.exists()) {
-            std::fs::read_to_string(cand).unwrap_or_default()
-        } else {
-            String::new()
-        };
-        owned_inputs.push((path.clone(), text));
+        for imp in &resolved.source.imports {
+            // Module sources are already fingerprinted above; skip to avoid dupes.
+            if imp.kind.is_module_source() {
+                continue;
+            }
+            let path = match &imp.kind {
+                morph_parser::MxImportKind::CssLocal { path }
+                | morph_parser::MxImportKind::Component { path, .. }
+                | morph_parser::MxImportKind::CppLocal { path, .. } => path,
+                morph_parser::MxImportKind::CssUrl { .. } => continue,
+            };
+            let candidates = [resolved.dir.join(path), cwd.join(path)];
+            let text = candidates
+                .iter()
+                .find(|c| c.exists())
+                .map_or_else(String::new, |cand| std::fs::read_to_string(cand).unwrap_or_default());
+            owned_inputs.push((path.clone(), text));
+        }
     }
     for (ts_path, ts_source) in &fragment_inputs {
         owned_inputs.push((format!("ts:{}", ts_path.display()), ts_source.clone()));
     }
     for (url, text) in &remote_css {
-        owned_inputs.push((format!("css:{}", url), text.clone()));
+        owned_inputs.push((format!("css:{url}"), text.clone()));
     }
-    let fingerprint_inputs: Vec<(&str, &str)> = owned_inputs
-        .iter()
-        .map(|(p, c)| (p.as_str(), c.as_str()))
-        .collect();
+    let fingerprint_inputs: Vec<(&str, &str)> =
+        owned_inputs.iter().map(|(p, c)| (p.as_str(), c.as_str())).collect();
     let fingerprint = morph_cache::fingerprint_inputs(&fingerprint_inputs);
     let stored = morph_cache::read_stored_fingerprint(&cwd, &clean_name);
     if stored.as_deref() == Some(fingerprint.as_str()) && binary_path.exists() {
-        crate::logger::log_success(&format!("Up to date — nothing to compile ({})", binary_path.display()));
+        crate::logger::log_success(&format!(
+            "Up to date — nothing to compile ({})",
+            binary_path.display()
+        ));
         println!();
         return Ok(binary_path);
     }
 
-    let pb = crate::logger::spinner(&format!("Compiling with {}...", compiler_name));
+    let pb = crate::logger::spinner(&format!("Compiling with {compiler_name}..."));
     // Feature defines for flex, etc.
     let mut fs = morph_codegen::feature_set::FeatureSet::new();
     fs.scan(&windows);
@@ -277,7 +312,7 @@ pub fn run(
     ) {
         pb.finish_and_clear();
         // On failure we STOP and do not run any stale binary.
-        crate::logger::log_error(&format!("Compile failed: {}", e));
+        crate::logger::log_error(&format!("Compile failed: {e}"));
         crate::logger::log_error("Fix the error above, then re-run `morph run`/`morph build`.");
         anyhow::bail!("build failed");
     }
@@ -298,10 +333,7 @@ pub fn run(
         if let Some(upx_bin) = morph_build::upx::ensure_upx(upx_version.as_deref(), true) {
             crate::logger::log_step("Compressing binary with UPX ...");
             if morph_build::upx::compress(&binary_path, &upx_bin) {
-                crate::logger::log_success(&format!(
-                    "UPX compressed → {}",
-                    binary_path.display()
-                ));
+                crate::logger::log_success(&format!("UPX compressed → {}", binary_path.display()));
             }
         } else {
             crate::logger::log_dim("UPX not available, skipping compression");
@@ -312,59 +344,71 @@ pub fn run(
     Ok(binary_path)
 }
 
-/// Collect companion TypeScript sources: `.ts` Component imports plus
-/// every `*.ts` under the entry directory (excluding the entry itself,
-/// ambient `*.d.ts` declarations, generated output, and tooling dirs).
-/// Returns canonical paths with contents in stable order. Anything
-/// unreadable or unlisted-but-required is a hard error: silently dropping
-/// app logic would miscompile the app.
+/// Collect companion TypeScript sources: `.ts` Component imports from every
+/// module in the graph plus every `*.ts`/`*.tsx` under the entry directory
+/// (excluding the entry itself, ambient `*.d.ts` declarations, generated
+/// output, and tooling dirs). Returns canonical paths with contents in
+/// stable order. Anything unreadable or unlisted-but-required is a hard
+/// error: silently dropping app logic would miscompile the app.
 fn collect_typescript_sources(
     cwd: &Path,
-    entry_path: &Path,
-    imports: &[morph_parser::MxImport],
-) -> anyhow::Result<Vec<(std::path::PathBuf, String)>> {
+    graph: &morph_parser::ModuleGraph,
+) -> Result<Vec<(PathBuf, String)>> {
     let mut found: Vec<PathBuf> = Vec::new();
-    let mut seen: std::collections::HashSet<std::path::PathBuf> = std::collections::HashSet::new();
-    let mut push_candidate = |path: std::path::PathBuf| {
+    let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+    let mut push_candidate = |path: PathBuf| {
         let canonical = path.canonicalize().unwrap_or(path);
         if seen.insert(canonical.clone()) {
             found.push(canonical);
         }
     };
-    let entry_parent = entry_path.parent().unwrap_or(cwd);
-    for imp in imports {
-        if let morph_parser::MxImportKind::Component { path, .. } = &imp.kind {
-            if path.ends_with(".ts") && !path.ends_with(".tsx") {
-                let mut located = false;
-                for base in [entry_parent, cwd] {
-                    let candidate = base.join(path);
-                    if candidate.is_file() {
-                        push_candidate(candidate);
-                        located = true;
-                        break;
-                    }
+    let entry_parent = graph.entry.parent().map_or_else(|| cwd.to_path_buf(), Path::to_path_buf);
+    for mod_path in graph.all_paths() {
+        let Some(resolved) = graph.get(mod_path) else {
+            continue;
+        };
+        for imp in &resolved.source.imports {
+            if !(imp.kind.is_ts() || imp.kind.is_tsx()) {
+                continue;
+            }
+            let Some(path) = imp.kind.path() else {
+                continue;
+            };
+            let mut located = false;
+            for base in [&resolved.dir, cwd] {
+                let candidate = base.join(path);
+                if candidate.is_file() {
+                    push_candidate(candidate);
+                    located = true;
+                    break;
                 }
-                if !located {
-                    anyhow::bail!("TypeScript import not found: {}", path);
-                }
+            }
+            if !located {
+                anyhow::bail!("TypeScript import not found: {path}");
             }
         }
     }
     let src_dir = cwd.join("src");
-    for search_root in [entry_parent, src_dir.as_path()] {
+    for search_root in [entry_parent.as_path(), src_dir.as_path()] {
         if !search_root.is_dir() {
             continue;
         }
-        for entry in walkdir::WalkDir::new(search_root).into_iter().filter_map(|e| e.ok()) {
+        for entry in
+            walkdir::WalkDir::new(search_root).into_iter().filter_map(std::result::Result::ok)
+        {
             let path = entry.path();
             if !path.is_file() {
                 continue;
             }
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if !name.ends_with(".ts") || name.ends_with(".tsx") || name.ends_with(".d.ts") {
+            let ext_is = |want: &str| {
+                Path::new(name).extension().is_some_and(|ext| ext.eq_ignore_ascii_case(want))
+            };
+            let is_typescript = (ext_is("ts") && !ext_is("tsx")) || ext_is("tsx");
+            if !is_typescript || name.to_ascii_lowercase().ends_with(".d.ts") {
                 continue;
             }
-            if name.ends_with(".ts.cpp") {
+            if name.to_ascii_lowercase().ends_with(".ts.cpp") {
                 continue;
             }
             let under_tooling = path.components().any(|component| {
@@ -381,7 +425,7 @@ fn collect_typescript_sources(
     }
     let mut sources = Vec::new();
     for path in found {
-        if path == entry_path {
+        if path == graph.entry {
             continue;
         }
         let text = std::fs::read_to_string(&path).map_err(|e| {
@@ -405,35 +449,38 @@ mod tests {
         root
     }
 
+    fn test_graph(root: &Path, entry: &Path) -> morph_parser::ModuleGraph {
+        morph_parser::resolve_graph(entry, root).unwrap()
+    }
+
     #[test]
-    fn collects_companion_ts_sources() {
+    fn collects_companion_typescript_sources() {
         let root = scratch_project("collect");
         std::fs::write(root.join("src/App.mx"), "<body/>").unwrap();
         std::fs::write(root.join("src/util.ts"), "export const x = 1;\n").unwrap();
+        std::fs::write(root.join("src/widget.tsx"), "export const y = 2;\n").unwrap();
         std::fs::write(root.join("src/env.d.ts"), "declare const y: number;\n").unwrap();
         let entry = root.join("src/App.mx");
-        let found = collect_typescript_sources(&root, &entry, &[]).unwrap();
+        let graph = test_graph(&root, &entry);
+        let found = collect_typescript_sources(&root, &graph).unwrap();
         let names: Vec<String> = found
             .iter()
             .map(|(path, _)| path.file_name().unwrap().to_string_lossy().to_string())
             .collect();
-        assert_eq!(names, vec!["util.ts".to_string()]);
+        assert_eq!(names, vec!["util.ts".to_string(), "widget.tsx".to_string()]);
         let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
-    fn missing_component_import_is_hard_error() {
+    fn missing_typescript_import_is_hard_error() {
         let root = scratch_project("missing");
-        std::fs::write(root.join("src/App.mx"), "<body/>").unwrap();
         let entry = root.join("src/App.mx");
-        let imports = vec![morph_parser::MxImport {
-            kind: morph_parser::MxImportKind::Component {
-                path: "missing.ts".to_string(),
-                specifiers: Vec::new(),
-            },
-            style: "import".to_string(),
-        }];
-        let err = collect_typescript_sources(&root, &entry, &imports).unwrap_err();
+        std::fs::write(
+            &entry,
+            "import Missing from './missing.ts'\nexport default function App() { return <div/> }",
+        )
+        .unwrap();
+        let err = morph_parser::resolve_graph(&entry, &root).unwrap_err();
         assert!(err.to_string().contains("missing.ts"));
         let _ = std::fs::remove_dir_all(&root);
     }

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use colored::Colorize;
 
-pub fn run() -> Result<()> {
+pub(crate) fn run() -> Result<()> {
     crate::logger::log_banner("Morph Cache — Management");
 
     let morph_cache = std::env::current_dir()?.join(".morph/cache");
@@ -13,10 +13,7 @@ pub fn run() -> Result<()> {
         crate::logger::log_key("Size", &format_bytes(size));
 
         let confirm = dialoguer::Confirm::new()
-            .with_prompt(format!(
-                "  {} Clear project cache?",
-                "→".blue().bold()
-            ))
+            .with_prompt(format!("  {} Clear project cache?", "→".blue().bold()))
             .default(false)
             .interact()?;
 
@@ -52,16 +49,16 @@ pub fn run() -> Result<()> {
 fn dir_size(path: &std::path::Path) -> u64 {
     walkdir::WalkDir::new(path)
         .into_iter()
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .filter_map(|e| e.metadata().ok())
-        .filter(|m| m.is_file())
+        .filter(std::fs::Metadata::is_file)
         .map(|m| m.len())
         .sum()
 }
 
 fn format_bytes(bytes: u64) -> String {
     if bytes < 1024 {
-        format!("{} B", bytes)
+        format!("{bytes} B")
     } else if bytes < 1024 * 1024 {
         format!("{:.1} KB", bytes as f64 / 1024.0)
     } else if bytes < 1024 * 1024 * 1024 {

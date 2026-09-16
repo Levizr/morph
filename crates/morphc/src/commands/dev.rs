@@ -4,11 +4,14 @@ use notify::{Event, EventKind, RecursiveMode, Watcher};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::{Duration, Instant};
 
-/// Watched source extensions (mirrors `morph/dev/watcher.py`).
-const WATCH_EXTS: &[&str] = &["mx", "html", "css", "js"];
+use morph_parser::{resolve_graph, ModuleGraph};
+
+/// Watched extensions: strict Morph/TS sources plus markup/style assets.
+/// JS-family files are intentionally excluded.
+const WATCH_EXTS: &[&str] = &["mx", "ts", "tsx", "html", "css"];
 /// Trailing-edge debounce: fire once the editor goes quiet this long.
 const DEBOUNCE: Duration = Duration::from_millis(300);
 /// Settle wait: file content hash stable across polls (mirrors `_wait_settle`).
@@ -17,7 +20,7 @@ const SETTLE_POLL: Duration = Duration::from_millis(50);
 /// How long to wait for the runtime's socket announcement / connection.
 const IPC_TIMEOUT: Duration = Duration::from_secs(30);
 
-pub fn run(entry: Option<String>) -> Result<()> {
+pub(crate) fn run(entry: Option<String>) -> Result<()> {
     let cwd = std::env::current_dir()?;
     let config_path = cwd.join("morph.config.json");
 
@@ -71,6 +74,10 @@ pub fn run(entry: Option<String>) -> Result<()> {
         }
     }
 
+    crate::logger::log_step("Parsing component graph");
+    let graph = resolve_graph(&cwd.join(&entry_file), &cwd)
+        .with_context(|| format!("resolving component graph from {entry_file}"))?;
+
     let mut cmd = Session {
         cwd: cwd.clone(),
         entry: entry_file.clone(),
@@ -87,6 +94,7 @@ pub fn run(entry: Option<String>) -> Result<()> {
         },
         logic: morph_build::logic::LogicSession::default(),
         file_hashes: HashMap::new(),
+        graph,
     };
 
     crate::logger::log_step("Launching dev runtime");
@@ -95,8 +103,23 @@ pub fn run(entry: Option<String>) -> Result<()> {
     reload(&mut cmd, &mut client, Path::new(""));
 
     crate::logger::log_dim("Ready — watching for changes (Ctrl+C to stop)");
-    let watch_dir = cwd.join(&entry_file).parent().map_or_else(|| cwd.clone(), Path::to_path_buf);
-    crate::logger::log_key("Watching", &watch_dir.display().to_string());
+    // Watch every directory containing a transitive module so edits to
+    // nested components trigger reloads even outside the entry folder.
+    let mut watch_dirs: Vec<PathBuf> =
+        cmd.graph.all_paths().filter_map(|p| p.parent().map(Path::to_path_buf)).collect();
+    watch_dirs.push(cwd.join(&entry_file).parent().map_or_else(|| cwd.clone(), Path::to_path_buf));
+    watch_dirs.sort();
+    watch_dirs.dedup();
+    // Drop nested dirs already covered by a watched ancestor.
+    let mut roots: Vec<PathBuf> = Vec::new();
+    for dir in watch_dirs {
+        if !roots.iter().any(|r| dir.starts_with(r)) {
+            roots.push(dir);
+        }
+    }
+    for root in &roots {
+        crate::logger::log_key("Watching", &root.display().to_string());
+    }
     let (watch_tx, watch_rx) = channel::<PathBuf>();
     let mut watcher = notify::recommended_watcher(move |res: Result<Event, _>| {
         if let Ok(event) = res {
@@ -108,7 +131,9 @@ pub fn run(entry: Option<String>) -> Result<()> {
             }
         }
     })?;
-    watcher.watch(&watch_dir, RecursiveMode::Recursive)?;
+    for root in &roots {
+        watcher.watch(root, RecursiveMode::Recursive)?;
+    }
 
     watch_loop(&mut child, &mut cmd, &mut client, &watch_rx)?;
     kill_child(&mut child);
@@ -179,6 +204,7 @@ struct Session {
     native: morph_build::NativeFlags,
     logic: morph_build::logic::LogicSession,
     file_hashes: HashMap<PathBuf, String>,
+    graph: ModuleGraph,
 }
 
 /// Hot-reload logic compiler: `build.dev_cxx` → `MORPH_DEV_CXX` → default.
@@ -216,10 +242,20 @@ fn is_relevant(event: &Event) -> bool {
     if !matches!(event.kind, EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)) {
         return false;
     }
-    event
-        .paths
-        .iter()
-        .any(|p| p.extension().and_then(|e| e.to_str()).is_some_and(|e| WATCH_EXTS.contains(&e)))
+    event.paths.iter().any(|path| is_watched_path(path))
+}
+
+fn is_watched_path(path: &Path) -> bool {
+    path.extension().and_then(|e| e.to_str()).is_some_and(|e| WATCH_EXTS.contains(&e))
+}
+
+/// Changed module sources require the import graph to be re-resolved before
+/// rebuilding; asset-only changes reuse the existing graph.
+fn should_reresolve_graph(changed: &Path) -> bool {
+    changed
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(morph_config::is_supported_source_ext)
 }
 
 /// Stream a child pipe to the console, forwarding the socket announcement.
@@ -292,6 +328,13 @@ fn wait_settle(path: &Path) {
 /// Full reload: parse → CSS → IR → serialize → push. Errors are reported
 /// to the terminal and the in-app DevTools panel; watching continues.
 fn reload(cmd: &mut Session, client: &mut morph_build::ipc::IpcClient, changed: &Path) {
+    // If a changed module source belongs to the strict source set, re-resolve
+    // the graph before rebuilding.
+    if should_reresolve_graph(changed) {
+        if let Ok(graph) = resolve_graph(&cmd.cwd.join(&cmd.entry), &cmd.cwd) {
+            cmd.graph = graph;
+        }
+    }
     if !changed.as_os_str().is_empty() {
         let rel = changed.strip_prefix(&cmd.cwd).unwrap_or(changed).display().to_string();
         wait_settle(changed);
@@ -381,13 +424,14 @@ fn push_windows(
 
 /// Parse the entry, resolve CSS and build the IR windows.
 fn build_windows(cmd: &Session) -> Result<Vec<morph_ir::IRWindow>> {
+    let graph = &cmd.graph;
+    let entry_mod = graph
+        .entry_module()
+        .ok_or_else(|| anyhow::anyhow!("component graph has no entry module"))?;
     let entry_path = cmd.cwd.join(&cmd.entry);
-    let source = std::fs::read_to_string(&entry_path)
-        .with_context(|| format!("reading {}", entry_path.display()))?;
-    let parsed = morph_parser::parse_mx_str(&source, &cmd.entry)?;
-    let (css_rules, css_keyframes) = collect_css(&cmd.cwd, &entry_path, &parsed.imports);
+    let (css_rules, css_keyframes) = collect_css(&cmd.cwd, &entry_path, &entry_mod.source.imports);
     let builder = morph_ir::IRBuilder::new().with_type_mode(cmd.type_mode);
-    let windows = builder.build(&parsed, &css_rules, &css_keyframes);
+    let windows = builder.build_with_graph(&cmd.graph, &css_rules, &css_keyframes)?;
     if windows.is_empty() {
         anyhow::bail!("Build failed — no windows in {}", cmd.entry);
     }
@@ -440,4 +484,27 @@ fn collect_css(cwd: &Path, entry_path: &Path, imports: &[morph_parser::MxImport]
         }
     }
     (css_rules, css_keyframes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn watched_paths_include_typescript_and_exclude_javascript() {
+        for path in ["App.mx", "store.ts", "Badge.tsx", "app.css"] {
+            assert!(is_watched_path(Path::new(path)), "{path}");
+        }
+        assert!(!is_watched_path(Path::new("app.js")));
+    }
+
+    #[test]
+    fn only_module_sources_reresolve_the_graph() {
+        for path in ["App.mx", "store.ts", "Badge.tsx"] {
+            assert!(should_reresolve_graph(Path::new(path)), "{path}");
+        }
+        for path in ["app.css", "app.js"] {
+            assert!(!should_reresolve_graph(Path::new(path)), "{path}");
+        }
+    }
 }

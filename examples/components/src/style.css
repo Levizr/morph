@@ -1,0 +1,35 @@
+.hero {
+  padding: 24px;
+  background-color: #eef2ff;
+}
+
+.hero-title {
+  font-size: 28px;
+  font-weight: bold;
+}
+
+.hero-subtitle {
+  font-size: 16px;
+}
+
+.grid {
+  display: flex;
+  flex-direction: row;
+  gap: 12px;
+  padding: 12px;
+}
+
+.card {
+  padding: 12px;
+  background-color: #ffffff;
+}
+
+.card-title {
+  font-size: 18px;
+  font-weight: bold;
+}
+
+.cartbar {
+  padding: 12px;
+  background-color: #ecfdf5;
+}

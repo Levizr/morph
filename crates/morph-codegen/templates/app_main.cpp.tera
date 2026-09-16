@@ -10,6 +10,7 @@
 #include "core/window_manager.h"
 #include "core/window.h"
 #include "core/renderer.h"
+#include "reactivity/channel.h"
 #include "style/style.h"
 {% for header in headers %}
 #include "{{ header }}"
@@ -60,6 +61,21 @@ inline void setColor(float rgba[4], const std::string& c) {
 {% if native_mode %}morph::Signal<{{ s.type }}> {{ s.signal_name }}({{ s.init }});
 {% else %}static morph::Signal<{{ s.type }}> {{ s.signal_name }}({{ s.init }});
 {% endif %}{% endfor %}
+
+{% endif %}
+{% if shared_decls %}
+// ── morphShared signals (app-global, keyed) ──
+{% for s in shared_decls %}
+{% if s.ns %}
+namespace morph_mods {
+namespace {{ s.ns }} {
+{% endif %}
+static morph::Signal<{{ s.type }}>& {{ s.accessor }}() { static morph::Signal<{{ s.type }}> s({{ s.init }}); return s; }
+{% if s.ns %}
+}
+}
+{% endif %}
+{% endfor %}
 
 {% endif %}
 

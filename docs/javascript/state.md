@@ -79,6 +79,40 @@ const [count, setCount] = morphState(0)    // inferred as number
 const [open, setOpen] = morphState(true)   // inferred as boolean
 ```
 
+## Shared module state
+
+Use `morphShared` for state shared across components. Export the binding from
+a `.mx`/`.ts`/`.tsx` module, then import its getter/setter wherever it is
+used:
+
+```tsx
+// cart.ts
+import { morphShared } from 'morph'
+
+export const [count, setCount] = morphShared<number>(0)
+```
+
+```tsx
+// CartBadge.tsx
+import { count } from './cart'
+
+export function CartBadge() {
+  return <text>{count}</text>
+}
+```
+
+The store identity is the exporting module plus the binding name. The same
+getter in another file is a different store, while importing the same local
+name from two modules is an ambiguity error. Shared bindings must be declared
+at module scope and exported.
+
+### Rules
+
+- Declare `morphShared` at module scope and export it (`mx-shared-scope`).
+- Call it as `morphShared<T>(initialValue)`.
+- Import the exported getter/setter names exactly.
+- Every use of a binding must agree on its type.
+
 ## State in JSX Expressions
 
 Use state values anywhere in JSX:

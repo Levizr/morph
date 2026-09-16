@@ -15,7 +15,7 @@ pub fn global_runtimes_dir() -> Result<PathBuf> {
 }
 
 pub fn global_runtime_version_dir(runtime_type: &str, version: &str) -> Result<PathBuf> {
-    Ok(global_runtimes_dir()?.join(runtime_type).join(format!("v{}", version)))
+    Ok(global_runtimes_dir()?.join(runtime_type).join(format!("v{version}")))
 }
 
 /// Check if a runtime version is cached globally. The cached runtime is only
@@ -68,11 +68,7 @@ pub fn download_runtime(runtime_type: &str, version: &str) -> Result<PathBuf> {
     // Nearby local runtime — only when its version marker matches exactly.
     if let Some((local, local_version)) = find_local_runtime(runtime_type) {
         if local_version == version {
-            println!(
-                "  ℹ Using local runtime {} (v{})",
-                local.display(),
-                local_version
-            );
+            println!("  ℹ Using local runtime {} (v{})", local.display(), local_version);
             cache_local_runtime(&local, &cached_dir, runtime_type, version)?;
             return Ok(cached_dir);
         }
@@ -86,18 +82,21 @@ pub fn download_runtime(runtime_type: &str, version: &str) -> Result<PathBuf> {
 
     // Download from GitHub
     let url = format!(
-        "https://github.com/Levizr/morph/releases/download/runtime-{}-v{}/morph-runtime-{}-v{}.tar.gz",
-        runtime_type, version, runtime_type, version
+        "https://github.com/Levizr/morph/releases/download/runtime-{runtime_type}-v{version}/morph-runtime-{runtime_type}-v{version}.tar.gz"
     );
 
-    println!("  Downloading {} v{} from GitHub...", runtime_type, version);
-    println!("  URL: {}", url);
+    println!("  Downloading {runtime_type} v{version} from GitHub...");
+    println!("  URL: {url}");
 
-    let bytes = download_bytes(&url).with_context(|| format!("failed to download runtime {} v{} — check that release exists or use a local runtime/", runtime_type, version))?;
+    let bytes = download_bytes(&url).with_context(|| {
+        format!(
+            "failed to download runtime {runtime_type} v{version} — check that release exists or use a local runtime/"
+        )
+    })?;
 
     // Verify not HTML error page
     if bytes.starts_with(b"<!DOCTYPE") || bytes.starts_with(b"<html") {
-        anyhow::bail!("download returned HTML (release not found): {}", url);
+        anyhow::bail!("download returned HTML (release not found): {url}");
     }
 
     std::fs::create_dir_all(&cached_dir)?;
@@ -111,10 +110,7 @@ pub fn download_runtime(runtime_type: &str, version: &str) -> Result<PathBuf> {
         size: bytes.len() as u64,
         cached_at: chrono_string(),
     };
-    std::fs::write(
-        cached_dir.join("manifest.json"),
-        serde_json::to_string_pretty(&manifest)?,
-    )?;
+    std::fs::write(cached_dir.join("manifest.json"), serde_json::to_string_pretty(&manifest)?)?;
 
     println!("  ✓ Cached to {}", cached_dir.display());
     Ok(cached_dir)
@@ -133,26 +129,26 @@ fn chrono_string() -> String {
 /// Only marked runtimes are eligible so a mismatched local copy is never used.
 fn find_local_runtime(runtime_type: &str) -> Option<(PathBuf, String)> {
     let mut candidates: Vec<PathBuf> = vec![
-        PathBuf::from(format!("runtime/{}", runtime_type)),
-        PathBuf::from(format!("../runtime/{}", runtime_type)),
-        PathBuf::from(format!("../../runtime/{}", runtime_type)),
-        PathBuf::from(format!("morph/runtime/{}", runtime_type)),
+        PathBuf::from(format!("runtime/{runtime_type}")),
+        PathBuf::from(format!("../runtime/{runtime_type}")),
+        PathBuf::from(format!("../../runtime/{runtime_type}")),
+        PathBuf::from(format!("morph/runtime/{runtime_type}")),
     ];
 
     // Check executable-relative path (for installed binary)
     if let Ok(exe) = std::env::current_exe() {
         if let Some(exe_dir) = exe.parent() {
-            candidates.push(exe_dir.join(format!("../runtime/{}", runtime_type)));
-            candidates.push(exe_dir.join(format!("../../runtime/{}", runtime_type)));
-            candidates.push(exe_dir.join(format!("../../../runtime/{}", runtime_type)));
+            candidates.push(exe_dir.join(format!("../runtime/{runtime_type}")));
+            candidates.push(exe_dir.join(format!("../../runtime/{runtime_type}")));
+            candidates.push(exe_dir.join(format!("../../../runtime/{runtime_type}")));
         }
     }
 
     // Check ancestors of current dir (up to 4 levels)
     if let Ok(cwd) = std::env::current_dir() {
-        let mut cur = cwd.clone();
+        let mut cur = cwd;
         for _ in 0..4 {
-            candidates.push(cur.join(format!("runtime/{}", runtime_type)));
+            candidates.push(cur.join(format!("runtime/{runtime_type}")));
             if let Some(parent) = cur.parent() {
                 cur = parent.to_path_buf();
             } else {
@@ -196,7 +192,7 @@ fn cache_local_runtime(src: &Path, dest: &Path, runtime_type: &str, version: &st
     // Check if we actually copied something
     if !dest.exists() || std::fs::read_dir(dest)?.next().is_none() {
         // Create stub if local runtime is empty/missing
-        std::fs::write(dest.join("README.md"), format!("# Morph Runtime {} v{} (stub)\n\nLocal runtime not yet populated. This is a placeholder.\n", runtime_type, version))?;
+        std::fs::write(dest.join("README.md"), format!("# Morph Runtime {runtime_type} v{version} (stub)\n\nLocal runtime not yet populated. This is a placeholder.\n"))?;
     }
 
     let manifest = RuntimeManifest {
@@ -285,7 +281,7 @@ pub fn link_runtime_to_project(
 /// back to the GitHub Releases API filtered by `runtime-{type}-v` tags, picking
 /// the highest semver.
 pub fn fetch_latest_runtime_version(runtime_type: &str) -> Result<String> {
-    let local_version_file = PathBuf::from(format!("versions/runtime/{}.json", runtime_type));
+    let local_version_file = PathBuf::from(format!("versions/runtime/{runtime_type}.json"));
     if local_version_file.exists() {
         let vf = VersionFile::from_file(&local_version_file)?;
         return Ok(vf.version);
@@ -306,7 +302,7 @@ pub fn fetch_latest_runtime_version(runtime_type: &str) -> Result<String> {
     }
 
     let releases: serde_json::Value = resp.json()?;
-    let prefix = format!("runtime-{}-v", runtime_type);
+    let prefix = format!("runtime-{runtime_type}-v");
     let mut versions: Vec<semver::Version> = releases
         .as_array()
         .into_iter()
@@ -323,7 +319,7 @@ pub fn fetch_latest_runtime_version(runtime_type: &str) -> Result<String> {
     versions
         .pop()
         .map(|v| v.to_string())
-        .with_context(|| format!("no published releases for runtime {}", runtime_type))
+        .with_context(|| format!("no published releases for runtime {runtime_type}"))
 }
 
 /// Version of the runtime currently linked into a project (`<dir>/runtime`),
@@ -333,14 +329,17 @@ pub fn project_runtime_version(project_morph_dir: &Path) -> Option<String> {
     if !runtime.is_dir() {
         return None;
     }
-    read_runtime_manifest(&runtime, "cpp")
-        .or_else(|| read_runtime_manifest(&runtime, "rust"))
+    read_runtime_manifest(&runtime, "cpp").or_else(|| read_runtime_manifest(&runtime, "rust"))
 }
 
 /// Check if project has runtime installed
 pub fn is_project_runtime_installed(project_morph_dir: &Path) -> bool {
     let runtime = project_morph_dir.join("runtime");
-    runtime.exists() && (runtime.join("manifest.json").exists() || runtime.join("include").exists() || runtime.join("morph_api.h").exists() || std::fs::read_dir(&runtime).map(|mut d| d.next().is_some()).unwrap_or(false))
+    runtime.exists()
+        && (runtime.join("manifest.json").exists()
+            || runtime.join("include").exists()
+            || runtime.join("morph_api.h").exists()
+            || std::fs::read_dir(&runtime).is_ok_and(|mut d| d.next().is_some()))
 }
 
 /// Hash all files under `dir` (relative path + content). Returns an empty
@@ -388,14 +387,13 @@ pub fn sha256_string(s: &str) -> String {
 }
 
 /// Compose a fingerprint over a set of (relative_path, content) inputs.
+///
 /// The hashes are fed through a final digest so file additions/removals and
 /// ordering changes are reflected. `inputs` earlier in the slice must map to
 /// distinct paths; content may be empty for files that were deleted.
 pub fn fingerprint_inputs(inputs: &[(&str, &str)]) -> String {
-    let mut entries: Vec<String> = inputs
-        .iter()
-        .map(|(p, c)| format!("{}:{}\n", p, sha256_string(c)))
-        .collect();
+    let mut entries: Vec<String> =
+        inputs.iter().map(|(p, c)| format!("{}:{}\n", p, sha256_string(c))).collect();
     entries.sort();
     sha256_string(&entries.join(""))
 }
@@ -403,7 +401,7 @@ pub fn fingerprint_inputs(inputs: &[(&str, &str)]) -> String {
 /// Read the previously stored fingerprint for `binary_name`, if any.
 pub fn read_stored_fingerprint(cwd: &Path, binary_name: &str) -> Option<String> {
     let dir = project_hash_dir(cwd);
-    let file = dir.join(format!("{}.fingerprint", binary_name));
+    let file = dir.join(format!("{binary_name}.fingerprint"));
     std::fs::read_to_string(&file).ok().map(|s| s.trim().to_string())
 }
 
@@ -411,7 +409,7 @@ pub fn read_stored_fingerprint(cwd: &Path, binary_name: &str) -> Option<String> 
 pub fn write_stored_fingerprint(cwd: &Path, binary_name: &str, fingerprint: &str) -> Result<()> {
     let dir = project_hash_dir(cwd);
     std::fs::create_dir_all(&dir)?;
-    std::fs::write(dir.join(format!("{}.fingerprint", binary_name)), fingerprint)?;
+    std::fs::write(dir.join(format!("{binary_name}.fingerprint")), fingerprint)?;
     Ok(())
 }
 
@@ -436,5 +434,3 @@ pub fn write_lock_file(
     std::fs::write(&path, serde_json::to_string_pretty(&lock)?)?;
     Ok(())
 }
-
-

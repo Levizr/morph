@@ -48,7 +48,7 @@ fn which(bin: &str) -> bool {
             if dir.join(bin).exists() {
                 return true;
             }
-            if is_windows() && dir.join(format!("{}.exe", bin)).exists() {
+            if is_windows() && dir.join(format!("{bin}.exe")).exists() {
                 return true;
             }
         }
@@ -94,10 +94,7 @@ impl Compiler {
             if which(&c) {
                 c
             } else {
-                eprintln!(
-                    "  ⚠ configured compiler '{}' not found — falling back to '{}'",
-                    c, default
-                );
+                eprintln!("  ⚠ configured compiler '{c}' not found — falling back to '{default}'");
                 default
             }
         } else {
@@ -107,7 +104,7 @@ impl Compiler {
     }
 
     /// Suppress printing of the raw compiler command line.
-    pub fn silent(mut self) -> Self {
+    pub const fn silent(mut self) -> Self {
         self.silent = true;
         self
     }
@@ -227,9 +224,8 @@ impl Compiler {
             archives = resolve_static_archives(&self.gpp, opts, self.silent)?;
             let ft = archives.get("freetype");
             let hb = archives.get("harfbuzz");
-            let glfw = archives
-                .get("glfw")
-                .with_context(|| "static build is missing the GLFW archive")?;
+            let glfw =
+                archives.get("glfw").with_context(|| "static build is missing the GLFW archive")?;
             let mut static_libs = vec![glfw.archive.display().to_string()];
             if let Some(ft) = ft {
                 static_libs.push(ft.archive.display().to_string());
@@ -239,7 +235,7 @@ impl Compiler {
                     static_libs.extend(
                         ["-lbz2", "-lz", "-lpng16", "-lbrotlidec", "-lbrotlicommon"]
                             .iter()
-                            .map(|s| s.to_string()),
+                            .map(ToString::to_string),
                     );
                 }
             }
@@ -248,18 +244,41 @@ impl Compiler {
             }
             let dynamic: Vec<String> = if is_macos() {
                 vec![
-                    "-framework", "Cocoa", "-framework", "OpenGL", "-framework", "IOKit",
-                    "-framework", "CoreVideo", "-lpthread",
+                    "-framework",
+                    "Cocoa",
+                    "-framework",
+                    "OpenGL",
+                    "-framework",
+                    "IOKit",
+                    "-framework",
+                    "CoreVideo",
+                    "-lpthread",
                 ]
             } else if is_windows() {
                 vec![
-                    "-lopengl32", "-lgdi32", "-lshell32", "-luser32", "-lcomdlg32",
-                    "-lole32", "-lsetupapi", "-lws2_32", "-lpthread", "-lm",
+                    "-lopengl32",
+                    "-lgdi32",
+                    "-lshell32",
+                    "-luser32",
+                    "-lcomdlg32",
+                    "-lole32",
+                    "-lsetupapi",
+                    "-lws2_32",
+                    "-lpthread",
+                    "-lm",
                 ]
             } else {
                 let mut d = vec![
-                    "-lGL", "-lX11", "-lXrandr", "-lXinerama", "-lXcursor", "-lXi",
-                    "-lrt", "-lpthread", "-ldl", "-lm",
+                    "-lGL",
+                    "-lX11",
+                    "-lXrandr",
+                    "-lXinerama",
+                    "-lXcursor",
+                    "-lXi",
+                    "-lrt",
+                    "-lpthread",
+                    "-ldl",
+                    "-lm",
                 ];
                 if opts.wayland {
                     // GLFW Wayland backend: EGL + wayland-client/xkbcommon
@@ -332,15 +351,15 @@ impl Compiler {
 
         // Feature defines
         for d in defines {
-            cmd.push(format!("-D{}", d));
+            cmd.push(format!("-D{d}"));
         }
 
         // FreeType/HarfBuzz: self-built static prefixes contribute only their
         // include dir (the archive itself is already on the link line);
         // otherwise pkg-config as usual, with the same fallbacks as Python
         // (`-lfreetype` / `-lharfbuzz` + system include roots).
-        let ft_self = archives.get("freetype").map(|d| d.self_built).unwrap_or(false);
-        let hb_self = archives.get("harfbuzz").map(|d| d.self_built).unwrap_or(false);
+        let ft_self = archives.get("freetype").is_some_and(|d| d.self_built);
+        let hb_self = archives.get("harfbuzz").is_some_and(|d| d.self_built);
         if ft_self {
             if let Some(dir) = archives.get("freetype").and_then(|d| d.include_dir.clone()) {
                 cmd.push(format!("-I{}", dir.display()));
@@ -352,10 +371,10 @@ impl Compiler {
                     cmd.push("-lfreetype".into());
                 }
                 if !have_cflags {
-                    cmd.extend(system_include_dirs().iter().map(|d| format!("-I{}/freetype2", d)));
+                    cmd.extend(system_include_dirs().iter().map(|d| format!("-I{d}/freetype2")));
                 }
             } else if !have_cflags {
-                cmd.extend(system_include_dirs().iter().map(|d| format!("-I{}/freetype2", d)));
+                cmd.extend(system_include_dirs().iter().map(|d| format!("-I{d}/freetype2")));
             }
         }
         if hb_self {
@@ -369,12 +388,12 @@ impl Compiler {
                     cmd.push("-lharfbuzz".into());
                 }
                 if !have_cflags {
-                    cmd.extend(system_include_dirs().iter().map(|d| format!("-I{}/harfbuzz", d)));
+                    cmd.extend(system_include_dirs().iter().map(|d| format!("-I{d}/harfbuzz")));
                 }
             } else if !have_cflags {
                 // Static system archive: the archive is already on the link
                 // line, only the headers still need a fallback path.
-                cmd.extend(system_include_dirs().iter().map(|d| format!("-I{}/harfbuzz", d)));
+                cmd.extend(system_include_dirs().iter().map(|d| format!("-I{d}/harfbuzz")));
             }
         }
 
@@ -393,7 +412,7 @@ impl Compiler {
         }
         for lib in &opts.native.libraries {
             if !lib.is_empty() {
-                cmd.push(format!("-l{}", lib));
+                cmd.push(format!("-l{lib}"));
             }
         }
         cmd.extend(opts.native.cflags.iter().cloned());
@@ -409,7 +428,7 @@ impl Compiler {
             .with_context(|| format!("failed to execute compiler: {}", cmd[0]))?;
 
         if !status.success() {
-            anyhow::bail!("compilation failed with status: {}", status);
+            anyhow::bail!("compilation failed with status: {status}");
         }
         Ok(())
     }
@@ -437,7 +456,7 @@ fn get_version(bin: &str, arg: &str) -> String {
         .output()
         .ok()
         .and_then(|o| String::from_utf8(o.stdout).ok())
-        .and_then(|s| s.lines().next().map(|l| l.to_string()))
+        .and_then(|s| s.lines().next().map(ToString::to_string))
         .unwrap_or_default()
 }
 
@@ -473,8 +492,7 @@ fn system_include_dirs() -> Vec<&'static str> {
 /// overridable wholesale via `MORPH_STATIC_CFLAGS`. Returns (opt, extras).
 fn static_size_flags(gpp: &str) -> (String, Vec<String>) {
     if let Ok(override_flags) = std::env::var("MORPH_STATIC_CFLAGS") {
-        let extras: Vec<String> =
-            override_flags.split_whitespace().map(str::to_string).collect();
+        let extras: Vec<String> = override_flags.split_whitespace().map(str::to_string).collect();
         return (String::new(), extras);
     }
     let mut extras = vec!["-s".to_string()];
@@ -537,7 +555,7 @@ fn resolve_one(
     match deps.build(key) {
         Ok(built) => {
             info.insert(key.to_string(), built);
-            return Ok(());
+            Ok(())
         }
         Err(e) => {
             // Fall back to a system archive if the source build failed.
@@ -559,7 +577,7 @@ fn resolve_one(
                 );
                 return Ok(());
             }
-            return Err(e);
+            Err(e)
         }
     }
 }
@@ -570,9 +588,7 @@ fn static_lib_dirs(gpp: &str) -> Vec<PathBuf> {
         dirs.extend(std::env::split_paths(&env));
     }
     if is_macos() {
-        dirs.extend(
-            ["/opt/homebrew/lib", "/usr/local/lib", "/usr/lib"].iter().map(PathBuf::from),
-        );
+        dirs.extend(["/opt/homebrew/lib", "/usr/local/lib", "/usr/lib"].iter().map(PathBuf::from));
     } else if is_windows() {
         // MinGW static archives live alongside the compiler install.
         if let Some(exe) = path_which(gpp) {
@@ -632,7 +648,7 @@ fn path_which(bin: &str) -> Option<PathBuf> {
                 return Some(cand);
             }
             if is_windows() {
-                let exe = dir.join(format!("{}.exe", bin));
+                let exe = dir.join(format!("{bin}.exe"));
                 if exe.is_file() {
                     return Some(exe);
                 }

@@ -7,8 +7,8 @@ pub mod string_methods;
 pub mod type_resolver;
 
 pub use analyzer::{
-    AnalysisResult, DefSite, EscapeAnalyzer, EscapeKind, NarrowSplit, StmtSite, UsageKind,
-    VarInfo, WidenedType,
+    AnalysisResult, DefSite, EscapeAnalyzer, EscapeKind, NarrowSplit, StmtSite, UsageKind, VarInfo,
+    WidenedType,
 };
 pub use cpp::CppTranslator;
 pub use js_comparison::{

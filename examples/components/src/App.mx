@@ -1,0 +1,23 @@
+import { morphState } from 'morph'
+import Hero from './components/Hero.mx'
+import { ProductCard } from './components/ProductCard.mx'
+import { CartBar } from './components/CartBar.mx'
+import './style.css'
+
+export const windowConfig = { title: "Components Demo", width: 900, height: 700 }
+
+export default function App() {
+  const [lastAdded, setLastAdded] = morphState("nothing yet")
+  return (
+    <body>
+      <Hero title="Morph Shop" subtitle="Reusable components, shared cart, zero providers" />
+      <div className="grid">
+        <ProductCard name="Drift Keyboard" price={129} onAdd={(name) => setLastAdded(name)} />
+        <ProductCard name="Photon Mouse" price={79} onAdd={(name) => setLastAdded(name)} />
+        <ProductCard name="Echo Headset" price={199} onAdd={(name) => setLastAdded(name)} />
+      </div>
+      <CartBar />
+      <text>Last added: {lastAdded}</text>
+    </body>
+  )
+}

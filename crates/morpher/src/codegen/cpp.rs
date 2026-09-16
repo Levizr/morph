@@ -773,20 +773,13 @@ impl<'a> CppTranslator<'a> {
                 if let Expression::CallExpression(call) = &awaited.argument {
                     if let Expression::Identifier(callee) = &call.callee {
                         if callee.name.as_str() == "fetch" && self.uses_response_api(name) {
-                            self.ctx.needed.insert(
-                                "\"../../runtime/cpp/net/net.h\"".to_string(),
-                            );
-                            let args: Vec<String> = call
-                                .arguments
-                                .iter()
-                                .map(|a| self.emit_argument(a))
-                                .collect();
-                            self.ctx.var_types.insert(
-                                name.to_string(),
-                                "morph::net::Response".to_string(),
-                            );
-                            let prefix =
-                                if self.ctx.indent_level == 0 { "static " } else { "" };
+                            self.ctx.needed.insert("\"../../runtime/cpp/net/net.h\"".to_string());
+                            let args: Vec<String> =
+                                call.arguments.iter().map(|a| self.emit_argument(a)).collect();
+                            self.ctx
+                                .var_types
+                                .insert(name.to_string(), "morph::net::Response".to_string());
+                            let prefix = if self.ctx.indent_level == 0 { "static " } else { "" };
                             return Some(format!(
                                 "{}{}morph::net::Response {} = co_await morph::net::fetch_response({});",
                                 self.indent(),
@@ -3002,9 +2995,13 @@ impl<'a> CppTranslator<'a> {
             Expression::StaticMemberExpression(member) => {
                 if member.property.name.as_str() == "length" {
                     OperandClass::Integer
-                } else if matches!(member.property.name.as_str(), "status") && Self::is_response_obj(&member.object, &self.ctx.var_types) {
+                } else if matches!(member.property.name.as_str(), "status")
+                    && Self::is_response_obj(&member.object, &self.ctx.var_types)
+                {
                     OperandClass::Integer
-                } else if matches!(member.property.name.as_str(), "statusText") && Self::is_response_obj(&member.object, &self.ctx.var_types) {
+                } else if matches!(member.property.name.as_str(), "statusText")
+                    && Self::is_response_obj(&member.object, &self.ctx.var_types)
+                {
                     OperandClass::Text
                 } else {
                     OperandClass::Other

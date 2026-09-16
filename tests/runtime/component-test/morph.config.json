@@ -1,0 +1,11 @@
+{
+  "name": "component-test",
+  "entry": "src/App.mx",
+  "window": {
+    "width": 800,
+    "height": 600,
+    "title": "Morph component test"
+  },
+  "dependencies": {},
+  "cpp_sources": []
+}

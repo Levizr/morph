@@ -3,12 +3,12 @@ use colored::Colorize;
 use morph_config::MorphConfig;
 use std::path::{Path, PathBuf};
 
-pub fn run() -> Result<()> {
+pub(crate) fn run() -> Result<()> {
     let cwd = std::env::current_dir()?;
     run_with_dir(&cwd)
 }
 
-pub fn run_with_dir(project_dir: &Path) -> Result<()> {
+pub(crate) fn run_with_dir(project_dir: &Path) -> Result<()> {
     let config_path = project_dir.join("morph.config.json");
     let morph_dir = project_dir.join(".morph");
 
@@ -45,11 +45,10 @@ pub fn run_with_dir(project_dir: &Path) -> Result<()> {
             version.dimmed()
         ));
         let pb = crate::logger::spinner("Downloading runtime...");
-        morph_cache::download_runtime(runtime_type, version)
-            .with_context(|| {
-                pb.finish_and_clear();
-                format!("failed to install runtime {} v{}", runtime_type, version)
-            })?;
+        morph_cache::download_runtime(runtime_type, version).with_context(|| {
+            pb.finish_and_clear();
+            format!("failed to install runtime {runtime_type} v{version}")
+        })?;
         pb.finish_and_clear();
         crate::logger::log_success("Download complete");
     }
@@ -57,8 +56,7 @@ pub fn run_with_dir(project_dir: &Path) -> Result<()> {
     // Link to project .morph/runtime
     crate::logger::log_step("Linking runtime to project");
     std::fs::create_dir_all(&morph_dir)?;
-    let project_runtime =
-        morph_cache::link_runtime_to_project(runtime_type, version, &morph_dir)?;
+    let project_runtime = morph_cache::link_runtime_to_project(runtime_type, version, &morph_dir)?;
 
     crate::logger::log_success(&format!(
         "Linked to {}",
@@ -70,10 +68,7 @@ pub fn run_with_dir(project_dir: &Path) -> Result<()> {
     let sha = if cached_dir.join("manifest.json").exists() {
         let m: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(cached_dir.join("manifest.json"))?)?;
-        m.get("sha256")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown")
-            .to_string()
+        m.get("sha256").and_then(|v| v.as_str()).unwrap_or("unknown").to_string()
     } else {
         "unknown".to_string()
     };
@@ -87,11 +82,7 @@ pub fn run_with_dir(project_dir: &Path) -> Result<()> {
         runtime_type.cyan(),
         version.green().bold()
     ));
-    println!(
-        "\n    {} {}",
-        "→".dimmed(),
-        "morph dev".cyan().bold()
-    );
+    println!("\n    {} {}", "→".dimmed(), "morph dev".cyan().bold());
     println!();
 
     // Check compatibility warning
@@ -106,8 +97,7 @@ fn check_version_compatibility(runtime_version: &str) {
     match compat {
         crate::versions::Compatibility::Deprecated => {
             crate::logger::log_warn(&format!(
-                "Runtime v{} is deprecated for morphc v{}",
-                runtime_version, morphc_version
+                "Runtime v{runtime_version} is deprecated for morphc v{morphc_version}"
             ));
             crate::logger::log_bullet(&format!(
                 "Run {} to update.",
@@ -117,8 +107,7 @@ fn check_version_compatibility(runtime_version: &str) {
         }
         crate::versions::Compatibility::Incompatible => {
             crate::logger::log_error(&format!(
-                "Runtime v{} is incompatible with morphc v{}",
-                runtime_version, morphc_version
+                "Runtime v{runtime_version} is incompatible with morphc v{morphc_version}"
             ));
             crate::logger::log_bullet(&format!(
                 "Run {} or {}.",
@@ -134,7 +123,7 @@ fn check_version_compatibility(runtime_version: &str) {
 /// Helper: ensure runtime is installed for dev/build commands. Verifies the
 /// project-linked runtime version matches morph.config.json, relinking from the
 /// global cache when stale, and installing only if it is already cached.
-pub fn ensure_runtime(project_dir: &Path) -> Result<PathBuf> {
+pub(crate) fn ensure_runtime(project_dir: &Path) -> Result<PathBuf> {
     let config_path = project_dir.join("morph.config.json");
     if !config_path.exists() {
         anyhow::bail!("morph.config.json not found. Run `morph new` first.");
@@ -151,8 +140,7 @@ pub fn ensure_runtime(project_dir: &Path) -> Result<PathBuf> {
             return Ok(project_runtime);
         }
         crate::logger::log_info(&format!(
-            "Linked runtime v{} does not match config v{} — relinking...",
-            linked_version, version
+            "Linked runtime v{linked_version} does not match config v{version} — relinking..."
         ));
     } else {
         crate::logger::log_info("Runtime not linked, linking from cache...");
@@ -164,9 +152,5 @@ pub fn ensure_runtime(project_dir: &Path) -> Result<PathBuf> {
         return Ok(project_runtime);
     }
 
-    anyhow::bail!(
-        "Runtime {} v{} not installed. Run `morph install` first.",
-        runtime_type,
-        version
-    );
+    anyhow::bail!("Runtime {runtime_type} v{version} not installed. Run `morph install` first.");
 }

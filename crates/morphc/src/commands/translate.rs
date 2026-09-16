@@ -1,21 +1,17 @@
 use anyhow::Result;
 use colored::Colorize;
-use std::path::Path;
 use morpher::{TranslateOptions, TypeMode};
+use std::path::Path;
 
-pub fn run(file: String, to: String, type_mode: TypeMode) -> Result<()> {
+pub(crate) fn run(file: String, to: String, type_mode: TypeMode) -> Result<()> {
     let path = Path::new(&file);
     if !path.exists() {
-        anyhow::bail!("file not found: {}", file);
+        anyhow::bail!("file not found: {file}");
     }
 
     let target = normalize_target(&to);
 
-    crate::logger::log_banner(&format!(
-        "Morph — {} → {}",
-        file.cyan(),
-        target.cyan()
-    ));
+    crate::logger::log_banner(&format!("Morph — {} → {}", file.cyan(), target.cyan()));
 
     crate::logger::log_step("Reading file");
     let content = std::fs::read_to_string(path)?;
@@ -24,7 +20,7 @@ pub fn run(file: String, to: String, type_mode: TypeMode) -> Result<()> {
     crate::logger::log_key("Target", &target);
 
     crate::logger::log_step("Parsing");
-    let pb = crate::logger::spinner(&format!("Parsing {} with Oxc...", file));
+    let pb = crate::logger::spinner(&format!("Parsing {file} with Oxc..."));
     let start = std::time::Instant::now();
     // Use morph-js translator (direct oxc -> C++/Rust, fastest, bug-free same as python for cpp)
     let global_runtime = find_global_runtime();
@@ -42,11 +38,14 @@ pub fn run(file: String, to: String, type_mode: TypeMode) -> Result<()> {
                 Ok(rust_code) => ("rs", rust_code),
                 Err(_) => {
                     // Fallback: generate C++ and save as .rs with comment (ensures file exists)
-                    match morpher::translate(&content, &file, options.clone()) {
-                        Ok(cpp) => ("rs", format!("// Translated from {} (fallback C++ in Rust file)\n{}", file, cpp)),
+                    match morpher::translate(&content, &file, options) {
+                        Ok(cpp) => (
+                            "rs",
+                            format!("// Translated from {file} (fallback C++ in Rust file)\n{cpp}"),
+                        ),
                         Err(e) => {
                             pb.finish_and_clear();
-                            anyhow::bail!("translate failed: {}", e);
+                            anyhow::bail!("translate failed: {e}");
                         }
                     }
                 }
@@ -56,7 +55,7 @@ pub fn run(file: String, to: String, type_mode: TypeMode) -> Result<()> {
             Ok(cpp) => ("cpp", cpp),
             Err(e) => {
                 pb.finish_and_clear();
-                anyhow::bail!("translate failed: {}", e);
+                anyhow::bail!("translate failed: {e}");
             }
         },
     };
@@ -77,10 +76,13 @@ pub fn run(file: String, to: String, type_mode: TypeMode) -> Result<()> {
     } else {
         // No global runtime found — tell user
         crate::logger::log_warn("No global runtime found in ~/.morph/cache/runtimes/cpp — generated file will be self-contained");
-        crate::logger::log_bullet("Run `morph install` to cache the runtime, or compile with -I <runtime>/cpp");
+        crate::logger::log_bullet(
+            "Run `morph install` to cache the runtime, or compile with -I <runtime>/cpp",
+        );
     }
     // Always add shim for morph::str / dev_log so the file is workable standalone
-    let needs_str_shim = standalone_code.contains("morph::str") || standalone_code.contains("morph::dev_log");
+    let needs_str_shim =
+        standalone_code.contains("morph::str") || standalone_code.contains("morph::dev_log");
     let has_str_shim = standalone_code.contains("inline std::string str");
     // Don't add shim if js_string_helpers.h is already included (it provides its own morph::str)
     let has_helpers = standalone_code.contains("js_string_helpers.h");
@@ -114,13 +116,13 @@ inline void dev_log_error(auto&& x) { std::cerr << "ERROR: " << str(x) << std::e
 }
 "#;
         if let Some(pos) = standalone_code.find("\n\n") {
-            standalone_code.insert_str(pos + 2, &format!("{}\n", shim));
+            standalone_code.insert_str(pos + 2, &format!("{shim}\n"));
         } else {
-            standalone_code = format!("{}\n{}", shim, standalone_code);
+            standalone_code = format!("{shim}\n{standalone_code}");
         }
         // Ensure iostream is included (for std::cout)
         if !standalone_code.contains("#include <iostream>") {
-            standalone_code = format!("#include <iostream>\n{}", standalone_code);
+            standalone_code = format!("#include <iostream>\n{standalone_code}");
         }
     }
 
@@ -136,11 +138,16 @@ inline void dev_log_error(auto&& x) { std::cerr << "ERROR: " << str(x) << std::e
         }
     }
 
-    if !has_global {
-        crate::logger::log_warn("Generated file is self-contained — compile with `g++ -std=c++23 -O2 file.cpp -o file`");
-    } else {
-        crate::logger::log_bullet(&format!("Using global runtime at {}", global_runtime.unwrap().display()));
+    if has_global {
+        crate::logger::log_bullet(&format!(
+            "Using global runtime at {}",
+            global_runtime.unwrap().display()
+        ));
         crate::logger::log_bullet("Compile with `g++ -std=c++23 file.cpp -I <runtime>/cpp -o file` or just `g++ -std=c++23 file.cpp` if runtime is in default search path");
+    } else {
+        crate::logger::log_warn(
+            "Generated file is self-contained — compile with `g++ -std=c++23 -O2 file.cpp -o file`",
+        );
     }
 
     // Python: base, _ = os.path.splitext(src); out = base + ".cpp"  (same dir, same basename)
@@ -148,9 +155,16 @@ inline void dev_log_error(auto&& x) { std::cerr << "ERROR: " << str(x) << std::e
     let out_path = path.with_extension(ext);
     // Python writes `f.write(cpp); f.write("\n")` => always trailing newline, even if cpp already ends with \n
     // We do the same for exact match
-    let output_with_newline = if standalone_code.ends_with('\n') { standalone_code.clone() } else { format!("{}\n", standalone_code) };
+    let output_with_newline = if standalone_code.ends_with('\n') {
+        standalone_code.clone()
+    } else {
+        format!("{standalone_code}\n")
+    };
     std::fs::write(&out_path, &output_with_newline)?;
-    crate::logger::log_success(&format!("Generated {} code", if target == "rust" { "Rust" } else { "C++" }));
+    crate::logger::log_success(&format!(
+        "Generated {} code",
+        if target == "rust" { "Rust" } else { "C++" }
+    ));
     println!();
     crate::logger::log_key("Output", &out_path.display().to_string());
     crate::logger::log_key("Lines", &format!("{}", code.lines().count()));
@@ -177,7 +191,7 @@ fn normalize_target(to: &str) -> String {
 
 fn find_global_runtime() -> Option<std::path::PathBuf> {
     // Helper to check if a runtime path is valid (has non-empty headers)
-    let is_valid = |p: &std::path::Path| {
+    let is_valid = |p: &Path| {
         let js = p.join("types").join("js_types.h");
         if js.exists() {
             if let Ok(meta) = std::fs::metadata(&js) {
@@ -214,7 +228,7 @@ fn find_global_runtime() -> Option<std::path::PathBuf> {
         if base.exists() {
             if let Ok(entries) = std::fs::read_dir(&base) {
                 let mut candidates: Vec<std::path::PathBuf> = entries
-                    .filter_map(|e| e.ok())
+                    .filter_map(std::result::Result::ok)
                     .map(|e| e.path())
                     .filter(|p| p.is_dir())
                     .collect();
@@ -283,7 +297,7 @@ fn split_static_init(trimmed: &str) -> Option<(Option<String>, String)> {
     }
     let name = left_tokens.last()?.to_string();
     // Basic sanity: name should be identifier (alnum + _)
-    if name.is_empty() || !name.chars().all(|c| c.is_alphanumeric() || c == '_' ) {
+    if name.is_empty() || !name.chars().all(|c| c.is_alphanumeric() || c == '_') {
         return None;
     }
     let type_part = left_tokens[1..left_tokens.len() - 1].join(" ");
@@ -294,22 +308,32 @@ fn split_static_init(trimmed: &str) -> Option<(Option<String>, String)> {
     // Otherwise keep at file scope (auto needs init, and may be used by other functions like testTry)
     if type_part.split_whitespace().any(|tok| tok == "auto") {
         if t.contains("co_await") {
-            let main_stmt = format!("auto {} = {}", name, right);
+            let main_stmt = format!("auto {name} = {right}");
             return Some((None, main_stmt));
-        } else {
-            return None;
         }
+        return None;
     }
-    let header = format!("static {} {};", type_part, name);
-    let main_stmt = format!("{} = {}", name, right);
+    let header = format!("static {type_part} {name};");
+    let main_stmt = format!("{name} = {right}");
     Some((Some(header), main_stmt))
 }
 
 fn is_top_level_executable(trimmed: &str) -> bool {
-    if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with("//") || trimmed.starts_with("/*") {
+    if trimmed.is_empty()
+        || trimmed.starts_with('#')
+        || trimmed.starts_with("//")
+        || trimmed.starts_with("/*")
+    {
         return false;
     }
-    if trimmed.starts_with("class ") || trimmed.starts_with("struct ") || trimmed.starts_with("template") || trimmed.starts_with("namespace") || trimmed.starts_with("enum ") || trimmed.starts_with("using ") || trimmed.starts_with("typedef ") {
+    if trimmed.starts_with("class ")
+        || trimmed.starts_with("struct ")
+        || trimmed.starts_with("template")
+        || trimmed.starts_with("namespace")
+        || trimmed.starts_with("enum ")
+        || trimmed.starts_with("using ")
+        || trimmed.starts_with("typedef ")
+    {
         return false;
     }
     if trimmed.starts_with("inline ") || trimmed.starts_with("constexpr ") {
@@ -322,13 +346,18 @@ fn is_top_level_executable(trimmed: &str) -> bool {
     // Static variable with Call initializer may have side effects (e.g. voidPromise() prints)
     // Move to main to preserve JS top-level execution order: `static T x = f();` -> decl + `x = f();` in main
     // Exclude `auto` (needs init, may be used by other fns like testTry) unless co_await (must move, co_await already handled above)
-    if trimmed.starts_with("static ") && trimmed.contains('=') && trimmed.contains('(') && trimmed.ends_with(';') {
+    if trimmed.starts_with("static ")
+        && trimmed.contains('=')
+        && trimmed.contains('(')
+        && trimmed.ends_with(';')
+    {
         // Skip `auto` types (keep at file scope to avoid breaking cross-function uses)
         let is_auto = trimmed.split_whitespace().any(|tok| tok == "auto");
         if !is_auto {
             if let (Some(eq_pos), Some(paren_pos)) = (trimmed.find('='), trimmed.find('(')) {
                 let bytes = trimmed.as_bytes();
-                let before_ok = eq_pos == 0 || !matches!(bytes[eq_pos.saturating_sub(1)], b'=' | b'!' | b'<' | b'>');
+                let before_ok = eq_pos == 0
+                    || !matches!(bytes[eq_pos.saturating_sub(1)], b'=' | b'!' | b'<' | b'>');
                 let after_ok = eq_pos + 1 >= bytes.len() || bytes[eq_pos + 1] != b'=';
                 if before_ok && after_ok && eq_pos < paren_pos {
                     return true;
@@ -341,7 +370,10 @@ fn is_top_level_executable(trimmed: &str) -> bool {
     if trimmed.ends_with(';') && !trimmed.starts_with("static ") && !trimmed.starts_with("const ") {
         // Check if it looks like a function/method call: contains `(` and `)` before `;`
         if let Some(paren) = trimmed.find('(') {
-            if trimmed[paren..].contains(')') && trimmed[paren..].find(')').unwrap() < trimmed[paren..].find(';').unwrap_or(usize::MAX) {
+            if trimmed[paren..].contains(')')
+                && trimmed[paren..].find(')').unwrap()
+                    < trimmed[paren..].find(';').unwrap_or(usize::MAX)
+            {
                 return true;
             }
         }
@@ -351,7 +383,17 @@ fn is_top_level_executable(trimmed: &str) -> bool {
         return false;
     }
     // Control flow at file scope is executable (for, while, if, try, etc.)
-    if trimmed.starts_with("for (") || trimmed.starts_with("for(") || trimmed.starts_with("while (") || trimmed.starts_with("while(") || trimmed.starts_with("if (") || trimmed.starts_with("if(") || trimmed.starts_with("try ") || trimmed.starts_with("catch ") || trimmed.starts_with("switch ") || trimmed.starts_with("do ") {
+    if trimmed.starts_with("for (")
+        || trimmed.starts_with("for(")
+        || trimmed.starts_with("while (")
+        || trimmed.starts_with("while(")
+        || trimmed.starts_with("if (")
+        || trimmed.starts_with("if(")
+        || trimmed.starts_with("try ")
+        || trimmed.starts_with("catch ")
+        || trimmed.starts_with("switch ")
+        || trimmed.starts_with("do ")
+    {
         return true;
     }
     // Expression statements: contains ; and looks like executable
@@ -360,7 +402,12 @@ fn is_top_level_executable(trimmed: &str) -> bool {
         // This catches `c->increment();`, `arr.push(4);`, `x++;`, `sum += x;`, etc.
         return true;
     }
-    if trimmed.ends_with('{') && (trimmed.contains("for ") || trimmed.contains("while ") || trimmed.contains("if ") || trimmed.contains("try ") ) {
+    if trimmed.ends_with('{')
+        && (trimmed.contains("for ")
+            || trimmed.contains("while ")
+            || trimmed.contains("if ")
+            || trimmed.contains("try "))
+    {
         return true;
     }
     false
@@ -382,7 +429,9 @@ fn should_wrap_in_main(code: &str) -> bool {
             return true;
         }
         brace_depth += open - close;
-        if brace_depth < 0 { brace_depth = 0; }
+        if brace_depth < 0 {
+            brace_depth = 0;
+        }
     }
     false
 }
@@ -459,7 +508,7 @@ fn movable_auto_statics(lines: &[&str]) -> std::collections::HashMap<usize, Stri
     // Depth at each line start
     let mut depths = Vec::with_capacity(lines.len());
     let mut d: i32 = 0;
-    for l in lines.iter() {
+    for l in lines {
         depths.push(d);
         d += l.matches('{').count() as i32 - l.matches('}').count() as i32;
         if d < 0 {
@@ -520,12 +569,7 @@ fn movable_auto_statics(lines: &[&str]) -> std::collections::HashMap<usize, Stri
             break;
         }
     }
-    cands
-        .into_iter()
-        .enumerate()
-        .filter(|(k, _)| safe[*k])
-        .map(|(_, (i, n))| (i, n))
-        .collect()
+    cands.into_iter().enumerate().filter(|(k, _)| safe[*k]).map(|(_, (i, n))| (i, n)).collect()
 }
 
 fn wrap_top_level_in_main(code: &str) -> String {
@@ -556,7 +600,12 @@ fn wrap_top_level_in_main(code: &str) -> String {
             let is_file_scope = brace_depth == 0 && !inside_main;
             if is_file_scope && is_top_level_executable(trimmed) {
                 // Collect this executable and its block if it opens a brace
-                if trimmed.ends_with('{') || trimmed.contains("for (") || trimmed.contains("while (") || trimmed.contains("if (") || trimmed.starts_with("try") {
+                if trimmed.ends_with('{')
+                    || trimmed.contains("for (")
+                    || trimmed.contains("while (")
+                    || trimmed.contains("if (")
+                    || trimmed.starts_with("try")
+                {
                     // Block: collect until matching }
                     let mut block_lines = vec![line.to_string()];
                     let mut depth = open - close;
@@ -569,7 +618,10 @@ fn wrap_top_level_in_main(code: &str) -> String {
                         i += 1;
                     }
                     // Add entire block to inject (with indent)
-                    let block_depth: i32 = block_lines.iter().map(|l| l.matches('{').count() as i32 - l.matches('}').count() as i32).sum();
+                    let block_depth: i32 = block_lines
+                        .iter()
+                        .map(|l| l.matches('{').count() as i32 - l.matches('}').count() as i32)
+                        .sum();
                     for bl in &block_lines {
                         // Remove leading file-scope indent and add main indent
                         to_inject.push(format!("    {}", bl.trim()));
@@ -577,24 +629,22 @@ fn wrap_top_level_in_main(code: &str) -> String {
                     // Update brace_depth for the block we just consumed
                     brace_depth += block_depth;
                     continue;
-                } else {
-                    // Single statement - split static inits to preserve order
-                    if let Some((header_opt, main_stmt)) = split_static_init(trimmed) {
-                        if let Some(h) = header_opt {
-                            header_lines.push(h);
-                        }
-                        to_inject.push(format!("    {}", main_stmt));
-                    } else {
-                        to_inject.push(format!("    {}", trimmed));
-                    }
-                    // Don't add original to header
-                    brace_depth += open - close;
-                    i += 1;
-                    continue;
                 }
-            } else {
-                header_lines.push(line.to_string());
+                // Single statement - split static inits to preserve order
+                if let Some((header_opt, main_stmt)) = split_static_init(trimmed) {
+                    if let Some(h) = header_opt {
+                        header_lines.push(h);
+                    }
+                    to_inject.push(format!("    {main_stmt}"));
+                } else {
+                    to_inject.push(format!("    {trimmed}"));
+                }
+                // Don't add original to header
+                brace_depth += open - close;
+                i += 1;
+                continue;
             }
+            header_lines.push(line.to_string());
             // Update depth and main tracking
             brace_depth += open - close;
             if inside_main {
@@ -603,9 +653,13 @@ fn wrap_top_level_in_main(code: &str) -> String {
                     // Exiting main's outer brace
                     inside_main = false;
                 }
-                if brace_depth < 0 { brace_depth = 0; }
+                if brace_depth < 0 {
+                    brace_depth = 0;
+                }
             }
-            if brace_depth < 0 { brace_depth = 0; }
+            if brace_depth < 0 {
+                brace_depth = 0;
+            }
             i += 1;
         }
         if to_inject.is_empty() {
@@ -629,10 +683,10 @@ fn wrap_top_level_in_main(code: &str) -> String {
             } else if let Some(pos) = out.rfind('}') {
                 out.insert_str(pos, &inject_str);
             } else {
-                out.push_str("\n");
+                out.push('\n');
                 out.push_str(&inject_str);
             }
-            return out;
+            out
         } else {
             // Sync code - inject before return 0 or last }
             if let Some(pos) = out.rfind("    return 0;") {
@@ -640,10 +694,10 @@ fn wrap_top_level_in_main(code: &str) -> String {
             } else if let Some(pos) = out.rfind('}') {
                 out.insert_str(pos, &inject_str);
             } else {
-                out.push_str("\n");
+                out.push('\n');
                 out.push_str(&inject_str);
             }
-            return out;
+            out
         }
     } else {
         // No existing main: create new main with top-level executables
@@ -666,13 +720,18 @@ fn wrap_top_level_in_main(code: &str) -> String {
             if is_file_scope && movable.contains_key(&i) {
                 // Safe to move: drop `static`, keep `auto x = init;` order in main
                 let local = trimmed.strip_prefix("static ").unwrap_or(trimmed);
-                main_body.push(format!("    {}", local));
+                main_body.push(format!("    {local}"));
                 brace_depth += open - close;
                 i += 1;
                 continue;
             }
             if is_file_scope && is_top_level_executable(trimmed) {
-                if trimmed.ends_with('{') || trimmed.starts_with("for ") || trimmed.starts_with("while ") || trimmed.starts_with("if ") || trimmed.starts_with("try ") {
+                if trimmed.ends_with('{')
+                    || trimmed.starts_with("for ")
+                    || trimmed.starts_with("while ")
+                    || trimmed.starts_with("if ")
+                    || trimmed.starts_with("try ")
+                {
                     // Block
                     let mut block_lines = Vec::new();
                     // Collect block
@@ -683,12 +742,17 @@ fn wrap_top_level_in_main(code: &str) -> String {
                         block_lines.push(l.to_string());
                         d += l.matches('{').count() as i32 - l.matches('}').count() as i32;
                         j += 1;
-                        if d == 0 && j > i+1 {
+                        if d == 0 && j > i + 1 {
                             break;
                         }
-                        if j - i > 1000 { break; } // safety
+                        if j - i > 1000 {
+                            break;
+                        } // safety
                     }
-                    let block_depth: i32 = block_lines.iter().map(|l| l.matches('{').count() as i32 - l.matches('}').count() as i32).sum();
+                    let block_depth: i32 = block_lines
+                        .iter()
+                        .map(|l| l.matches('{').count() as i32 - l.matches('}').count() as i32)
+                        .sum();
                     for bl in &block_lines {
                         main_body.push(format!("    {}", bl.trim()));
                     }
@@ -696,25 +760,25 @@ fn wrap_top_level_in_main(code: &str) -> String {
                     brace_depth += block_depth;
                     i = j;
                     continue;
-                } else {
-                    // Split static inits to preserve order (decl in header, assign in main)
-                    if let Some((header_opt, main_stmt)) = split_static_init(trimmed) {
-                        if let Some(h) = header_opt {
-                            header_lines.push(h);
-                        }
-                        main_body.push(format!("    {}", main_stmt));
-                    } else {
-                        main_body.push(format!("    {}", trimmed));
-                    }
-                    brace_depth += open - close;
-                    i += 1;
-                    continue;
                 }
-            } else {
-                header_lines.push(line.to_string());
+                // Split static inits to preserve order (decl in header, assign in main)
+                if let Some((header_opt, main_stmt)) = split_static_init(trimmed) {
+                    if let Some(h) = header_opt {
+                        header_lines.push(h);
+                    }
+                    main_body.push(format!("    {main_stmt}"));
+                } else {
+                    main_body.push(format!("    {trimmed}"));
+                }
                 brace_depth += open - close;
+                i += 1;
+                continue;
             }
-            if brace_depth < 0 { brace_depth = 0; }
+            header_lines.push(line.to_string());
+            brace_depth += open - close;
+            if brace_depth < 0 {
+                brace_depth = 0;
+            }
             i += 1;
         }
         if main_body.is_empty() {
@@ -726,7 +790,7 @@ fn wrap_top_level_in_main(code: &str) -> String {
             out.push_str("\n\nint main() {\n");
             out.push_str("    morph::Task _main_task = [&]() -> morph::Task {\n");
             for line in main_body {
-                out.push_str(&format!("        {}\n", line));
+                out.push_str(&format!("        {line}\n"));
             }
             out.push_str("        co_return;\n");
             out.push_str("    }();\n");
@@ -742,6 +806,6 @@ fn wrap_top_level_in_main(code: &str) -> String {
             }
             out.push_str("    return 0;\n}\n");
         }
-        return out;
+        out
     }
 }

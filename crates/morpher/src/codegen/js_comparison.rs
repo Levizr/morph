@@ -68,9 +68,8 @@ impl OperandClass {
 pub fn cpp_type_to_class(cpp_type: &str) -> OperandClass {
     let mut normalized = cpp_type.trim_start_matches("const ").trim_end_matches('&').trim();
     for wrapper in ["std::shared_ptr<", "std::unique_ptr<"] {
-        if let Some(inner) = normalized
-            .strip_prefix(wrapper)
-            .and_then(|rest| rest.strip_suffix('>'))
+        if let Some(inner) =
+            normalized.strip_prefix(wrapper).and_then(|rest| rest.strip_suffix('>'))
         {
             normalized = inner.trim();
             break;
@@ -1912,21 +1911,9 @@ mod tests {
 
     #[test]
     fn smart_pointer_wrappers_classify_by_inner_type() {
-        assert_eq!(
-            cpp_type_to_class("std::shared_ptr<int64_t>"),
-            OperandClass::Integer
-        );
-        assert_eq!(
-            cpp_type_to_class("std::shared_ptr<JsValue>"),
-            OperandClass::JsValue
-        );
-        assert_eq!(
-            cpp_type_to_class("std::unique_ptr<std::string>"),
-            OperandClass::Text
-        );
-        assert_eq!(
-            cpp_type_to_class("const std::shared_ptr<JsNumber>&"),
-            OperandClass::JsNumber
-        );
+        assert_eq!(cpp_type_to_class("std::shared_ptr<int64_t>"), OperandClass::Integer);
+        assert_eq!(cpp_type_to_class("std::shared_ptr<JsValue>"), OperandClass::JsValue);
+        assert_eq!(cpp_type_to_class("std::unique_ptr<std::string>"), OperandClass::Text);
+        assert_eq!(cpp_type_to_class("const std::shared_ptr<JsNumber>&"), OperandClass::JsNumber);
     }
 }

@@ -21,7 +21,11 @@ pub fn is_linux() -> bool {
 }
 
 pub fn exe_suffix() -> &'static str {
-    if is_windows() { ".exe" } else { "" }
+    if is_windows() {
+        ".exe"
+    } else {
+        ""
+    }
 }
 
 pub fn shared_lib_ext() -> &'static str {
@@ -35,7 +39,11 @@ pub fn shared_lib_ext() -> &'static str {
 }
 
 pub fn shared_lib_flag() -> &'static str {
-    if is_macos() { "-dynamiclib" } else { "-shared" }
+    if is_macos() {
+        "-dynamiclib"
+    } else {
+        "-shared"
+    }
 }
 
 pub fn pick_cpp() -> String {

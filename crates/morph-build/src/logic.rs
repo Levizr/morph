@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
 
-use crate::{Compiler, NativeFlags, shared_lib_ext};
+use crate::{shared_lib_ext, Compiler, NativeFlags};
 
 /// In-memory hot-reload state: last compiled hash and library path.
 #[derive(Debug, Default)]

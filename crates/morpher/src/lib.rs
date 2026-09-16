@@ -90,10 +90,8 @@ fn wrap_fragment_namespace(code: &str, filename: &str) -> String {
         .file_stem()
         .and_then(|stem| stem.to_str())
         .unwrap_or("fragment");
-    let mut namespace: String = stem
-        .chars()
-        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
-        .collect();
+    let mut namespace: String =
+        stem.chars().map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' }).collect();
     if namespace.is_empty() || namespace.chars().next().is_some_and(|ch| ch.is_ascii_digit()) {
         namespace.insert(0, '_');
     }
@@ -156,18 +154,24 @@ mod tests {
 
     #[test]
     fn fragment_wraps_body_in_file_namespace() {
-        let code =
-            translate_fragment("let x = 1;\nconsole.log(x);\n", "app.ts", TranslateOptions::default())
-                .unwrap();
+        let code = translate_fragment(
+            "let x = 1;\nconsole.log(x);\n",
+            "app.ts",
+            TranslateOptions::default(),
+        )
+        .unwrap();
         assert!(code.contains("namespace app_logic {"));
         assert!(code.ends_with("} // namespace app_logic\n"));
     }
 
     #[test]
     fn fragment_keeps_includes_at_top_level() {
-        let code =
-            translate_fragment("let x = 1;\nconsole.log(x);\n", "app.ts", TranslateOptions::default())
-                .unwrap();
+        let code = translate_fragment(
+            "let x = 1;\nconsole.log(x);\n",
+            "app.ts",
+            TranslateOptions::default(),
+        )
+        .unwrap();
         let namespace_at = code.find("namespace app_logic").unwrap();
         for line in code[..namespace_at].lines() {
             let trimmed = line.trim();
@@ -209,7 +213,8 @@ mod tests {
 
     #[test]
     fn snippet_splits_includes_from_body() {
-        let out = translate_snippet("console.log(count);\n", "handler.ts", snippet_options()).unwrap();
+        let out =
+            translate_snippet("console.log(count);\n", "handler.ts", snippet_options()).unwrap();
         assert!(out.includes.contains("#include"));
         assert!(!out.body.contains("#include"));
     }

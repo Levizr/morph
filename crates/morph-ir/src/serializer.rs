@@ -60,6 +60,14 @@ impl IRSerializer {
             Value::Array(w.effect_decls.iter().map(string_map).collect()),
         );
         out.insert(
+            "shared_vars".to_string(),
+            Value::Array(w.shared_vars.iter().map(string_map).collect()),
+        );
+        out.insert(
+            "channel_subs".to_string(),
+            Value::Array(w.channel_subs.iter().map(string_map).collect()),
+        );
+        out.insert(
             "cpp_imports".to_string(),
             Value::Array(w.cpp_imports.iter().map(string_map).collect()),
         );
@@ -362,7 +370,11 @@ impl IRSerializer {
 
 /// Finite float as JSON, mirroring Python's `_clean_inf` (inf/NaN → null).
 fn num(v: f32) -> Value {
-    if v.is_finite() { Value::from(v) } else { Value::Null }
+    if v.is_finite() {
+        Value::from(v)
+    } else {
+        Value::Null
+    }
 }
 
 fn opt_num(v: Option<f32>) -> Value {
@@ -400,6 +412,8 @@ fn length_comp(comp: LengthComp) -> Value {
 
 /// Fallback declared-field set when a keyframe carries no explicit
 /// `declared` list, mirroring Python's `_keyframe_style_dict` fallback.
+// Exact equality is intentional change/dirty detection.
+#[allow(clippy::float_cmp)]
 fn fallback_declared(style: &IRStyle) -> HashSet<&'static str> {
     let mut keep = HashSet::new();
     if style.opacity != 1.0 {

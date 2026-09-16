@@ -5,21 +5,35 @@ use std::collections::HashMap;
 
 pub struct TailwindResolver;
 
+impl Default for TailwindResolver {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TailwindResolver {
-    pub fn new() -> Self { Self }
+    pub const fn new() -> Self {
+        Self
+    }
 
     pub fn resolve(&self, class: &str) -> HashMap<String, String> {
         let mut out = HashMap::new();
         if let Some(mapped) = static_map(class) {
-            for (k, v) in mapped { out.insert(k.to_string(), v.to_string()); }
+            for (k, v) in mapped {
+                out.insert(k.to_string(), v.to_string());
+            }
             return out;
         }
         if let Some(mapped) = resolve_negative(class) {
-            for (k, v) in mapped { out.insert(k.to_string(), v.to_string()); }
+            for (k, v) in mapped {
+                out.insert(k.clone(), v.clone());
+            }
             return out;
         }
         if let Some(pairs) = parse_arbitrary(class) {
-            for (k, v) in pairs { out.insert(k, v); }
+            for (k, v) in pairs {
+                out.insert(k, v);
+            }
             return out;
         }
         out
@@ -36,6 +50,8 @@ impl TailwindResolver {
     }
 }
 
+// Splitting this builder function risks behavior change.
+#[allow(clippy::too_many_lines)]
 fn static_map(class: &str) -> Option<Vec<(&'static str, &'static str)>> {
     Some(match class {
         "absolute" => vec![("position", "absolute")],
@@ -345,9 +361,9 @@ fn resolve_negative(class: &str) -> Option<Vec<(String, String)>> {
     match name {
         "translate-x" => pair("transform", format!("translateX(-{}px)", n * 4)),
         "translate-y" => pair("transform", format!("translateY(-{}px)", n * 4)),
-        "rotate" => pair("transform", format!("rotate(-{}deg)", n)),
-        "skew-x" => pair("transform", format!("skewX(-{}deg)", n)),
-        "skew-y" => pair("transform", format!("skewY(-{}deg)", n)),
+        "rotate" => pair("transform", format!("rotate(-{n}deg)")),
+        "skew-x" => pair("transform", format!("skewX(-{n}deg)")),
+        "skew-y" => pair("transform", format!("skewY(-{n}deg)")),
         _ => None,
     }
 }
@@ -373,13 +389,10 @@ fn parse_arbitrary(class: &str) -> Option<Vec<(String, String)>> {
     {
         return None;
     }
-    let (negated, base) = match prefix.strip_prefix('-') {
-        Some(rest) => (true, rest),
-        None => (false, prefix),
-    };
+    let (negated, base) = prefix.strip_prefix('-').map_or((false, prefix), |rest| (true, rest));
     if let Some(func) = transform_fn(base) {
         let val = if negated { negate_value(value) } else { value.to_string() };
-        return single("transform", &format!("{}({})", func, val));
+        return single("transform", &format!("{func}({val})"));
     }
     if negated {
         return None;
@@ -444,9 +457,9 @@ fn negate_value(value: &str) -> String {
         return rest.to_string();
     }
     if let Some(rest) = v.strip_prefix('+') {
-        return format!("-{}", rest);
+        return format!("-{rest}");
     }
-    format!("-{}", v)
+    format!("-{v}")
 }
 
 #[cfg(test)]
@@ -535,7 +548,7 @@ mod tests {
     #[test]
     fn unknown_and_malformed_classes_resolve_empty() {
         for cls in ["bogus-class", "bg-", "w-[]", "bg-[unclosed", "-z-", "-rotate-", "px-[]"] {
-            assert!(resolved(cls).is_empty(), "{} should resolve empty", cls);
+            assert!(resolved(cls).is_empty(), "{cls} should resolve empty");
         }
     }
 }

@@ -223,8 +223,11 @@ Example:
 | `mx-css-prop` | CSS file property is supported | warning |
 | `mx-css-file-missing` | Imported CSS file exists | error |
 | `mx-import-morph` | Imported name is exported by `morph` | error |
-| `mx-import-missing` | Imported file exists | error |
 | `mx-import-type` | Import is `.css` / `.cpp` / `morph` | warning |
+| `mx-state-scope` | `morphState` is called inside a component body | error |
+| `mx-shared-scope` | `morphShared` is exported at module scope | error |
+| `mx-event-scope` | `morphEvent` is exported at module scope | error |
+| `mx-api-removed` | Removed string-key/shared/event APIs are not used | error |
 | `mx-state-pattern` | `morphState` destructured as `[getter, setter]` | error |
 | `mx-effect-cb` | `morphEffect` first arg is a function | error |
 | `mx-effect-deps` | Effect deps are state variables | warning |

@@ -10,7 +10,7 @@ pub struct IRNode {
     pub style: IRStyle,
     pub hover_style: Option<IRStyle>,
     pub active_style: Option<IRStyle>,
-    pub children: Vec<IRNode>,
+    pub children: Vec<Self>,
     pub events: Vec<IREvent>,
     pub text_content: String,
     pub attrs: HashMap<String, String>,
@@ -20,11 +20,11 @@ pub struct IRNode {
     pub reactive_style: HashMap<String, String>,
     pub class_conditional_effects: Vec<IRConditionalClassEffect>,
     pub condition_expr: String,
-    pub then_nodes: Vec<IRNode>,
-    pub else_nodes: Vec<IRNode>,
+    pub then_nodes: Vec<Self>,
+    pub else_nodes: Vec<Self>,
     pub list_expr: String,
     pub list_key_expr: String,
-    pub item_template: Option<Box<IRNode>>,
+    pub item_template: Option<Box<Self>>,
     pub animations: Vec<IRAnimation>,
     pub hover_animations: Vec<IRAnimation>,
     pub x: f32,
@@ -90,6 +90,11 @@ pub struct IRWindow {
     pub state_vars: Vec<HashMap<String, String>>,
     pub reactive_consts: Vec<String>,
     pub effect_decls: Vec<HashMap<String, String>>,
+    /// morphShared declarations, one entry per declaration site.
+    pub shared_vars: Vec<HashMap<String, String>>,
+    /// Event subscriptions: `channel` + `body` (a `[](const JsValue&)`
+    /// listener). Emitters subscribe at startup.
+    pub channel_subs: Vec<HashMap<String, String>>,
     pub cpp_imports: Vec<HashMap<String, String>>,
     pub keyframes: HashMap<String, Vec<IRKeyframe>>,
 }
@@ -101,8 +106,9 @@ pub struct IREvent {
     pub target: String,
 }
 
-/// A conditional class style effect: when `condition` (a C++ bool expr) is
-/// true, apply `on_styles`; otherwise apply `off_styles` (CSS property → value),
+/// A conditional class style effect: when `condition` (a C++ bool expr) is true,
+///
+/// apply `on_styles`; otherwise apply `off_styles` (CSS property → value),
 /// or reset affected fields to defaults when `off_styles` is empty.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IRConditionalClassEffect {

@@ -3,7 +3,7 @@ use colored::Colorize;
 use morph_config::{MorphConfig, VersionFile};
 use std::path::PathBuf;
 
-pub fn run(runtime: bool, self_update: bool) -> Result<()> {
+pub(crate) fn run(runtime: bool, self_update: bool) -> Result<()> {
     if !runtime && !self_update {
         return run_status();
     }
@@ -32,8 +32,7 @@ fn run_status() -> Result<()> {
 
     let latest_runtime =
         get_latest_runtime_version("cpp").unwrap_or_else(|_| "unknown".to_string());
-    let latest_morphc =
-        get_latest_morphc_version().unwrap_or_else(|_| morphc_version.to_string());
+    let latest_morphc = get_latest_morphc_version().unwrap_or_else(|_| morphc_version.to_string());
 
     crate::logger::log_step("Versions");
     crate::logger::log_version("morphc", morphc_version, &latest_morphc);
@@ -43,7 +42,7 @@ fn run_status() -> Result<()> {
         println!();
         crate::logger::log_info(&format!(
             "New runtime available: {}",
-            format!("v{}", latest_runtime).green().bold()
+            format!("v{latest_runtime}").green().bold()
         ));
         crate::logger::log_bullet(&format!(
             "Run {} to update.",
@@ -55,7 +54,7 @@ fn run_status() -> Result<()> {
         println!();
         crate::logger::log_info(&format!(
             "New morphc available: {}",
-            format!("v{}", latest_morphc).green().bold()
+            format!("v{latest_morphc}").green().bold()
         ));
         crate::logger::log_bullet(&format!(
             "Run {} to update.",
@@ -79,25 +78,30 @@ fn run_runtime_update() -> Result<()> {
     let current = config.runtime.version.clone();
     let runtime_type = config.runtime.runtime_type.clone();
 
-    crate::logger::log_banner(&format!("Morph Update — Runtime {} → {}", current.dimmed(), "latest".cyan()));
+    crate::logger::log_banner(&format!(
+        "Morph Update — Runtime {} → {}",
+        current.dimmed(),
+        "latest".cyan()
+    ));
 
-    let latest = get_latest_runtime_version(&runtime_type)
-        .with_context(|| format!("could not determine latest runtime version for {}", runtime_type))?;
+    let latest = get_latest_runtime_version(&runtime_type).with_context(|| {
+        format!("could not determine latest runtime version for {runtime_type}")
+    })?;
 
     if current == latest {
         crate::logger::log_success(&format!(
             "Runtime already at latest version {}",
-            format!("v{}", current).cyan().bold()
+            format!("v{current}").cyan().bold()
         ));
         println!();
         return Ok(());
     }
 
     crate::logger::log_step("Downloading");
-    crate::logger::log_key("From", &format!("v{}", current));
-    crate::logger::log_key("To", &format!("v{}", latest));
+    crate::logger::log_key("From", &format!("v{current}"));
+    crate::logger::log_key("To", &format!("v{latest}"));
 
-    let pb = crate::logger::spinner(&format!("Downloading runtime v{}...", latest));
+    let pb = crate::logger::spinner(&format!("Downloading runtime v{latest}..."));
     morph_cache::download_runtime(&runtime_type, &latest)?;
     pb.finish_and_clear();
 
@@ -110,8 +114,8 @@ fn run_runtime_update() -> Result<()> {
     crate::logger::log_success(&format!(
         "Updated {} from {} to {}",
         "morph.config.json".dimmed(),
-        format!("v{}", current).dimmed(),
-        format!("v{}", latest).green().bold()
+        format!("v{current}").dimmed(),
+        format!("v{latest}").green().bold()
     ));
 
     // Update morph.lock
@@ -126,10 +130,10 @@ fn run_runtime_update() -> Result<()> {
     crate::logger::log_success("Runtime linked");
 
     // Show migration notes
-    let version_file = PathBuf::from(format!("versions/runtime/{}.json", runtime_type));
+    let version_file = PathBuf::from(format!("versions/runtime/{runtime_type}.json"));
     if version_file.exists() {
         if let Ok(vf) = VersionFile::from_file(&version_file) {
-            crate::logger::log_step(&format!("Migration Notes (v{} → v{})", current, latest));
+            crate::logger::log_step(&format!("Migration Notes (v{current} → v{latest})"));
             crate::logger::divider_thick();
             if vf.breaking {
                 crate::logger::log_warn("Breaking changes!");
@@ -165,15 +169,15 @@ fn run_self_update() -> Result<()> {
     if current == latest {
         crate::logger::log_success(&format!(
             "morphc already at latest version {}",
-            format!("v{}", current).cyan().bold()
+            format!("v{current}").cyan().bold()
         ));
         println!();
         return Ok(());
     }
 
     crate::logger::log_step("Downloading");
-    crate::logger::log_key("From", &format!("v{}", current));
-    crate::logger::log_key("To", &format!("v{}", latest));
+    crate::logger::log_key("From", &format!("v{current}"));
+    crate::logger::log_key("To", &format!("v{latest}"));
 
     let platform = detect_platform();
     let url = format!(
@@ -184,24 +188,22 @@ fn run_self_update() -> Result<()> {
     crate::logger::log_key("Platform", &format!("{}-{}", platform.0, platform.1));
     crate::logger::log_dim(&url);
 
-    let pb = crate::logger::spinner(&format!("Downloading morphc v{}...", latest));
+    let pb = crate::logger::spinner(&format!("Downloading morphc v{latest}..."));
     match download_and_install(&url) {
-        Ok(_) => {
+        Ok(()) => {
             pb.finish_and_clear();
             crate::logger::log_success("Updated! Run `morph --version` to verify.");
         }
         Err(e) => {
             pb.finish_and_clear();
-            crate::logger::log_error(&format!("Self-update failed: {}", e));
+            crate::logger::log_error(&format!("Self-update failed: {e}"));
             println!();
             crate::logger::log_info("Please update manually:");
             crate::logger::log_muted(&format!(
-                "curl -fsSL https://get.morph.dev | sh  # installs v{}",
-                latest
+                "curl -fsSL https://get.morph.dev | sh  # installs v{latest}"
             ));
             crate::logger::log_dim(&format!(
-                "https://github.com/Levizr/morph/releases/tag/v{}",
-                latest
+                "https://github.com/Levizr/morph/releases/tag/v{latest}"
             ));
         }
     }
@@ -210,7 +212,7 @@ fn run_self_update() -> Result<()> {
     Ok(())
 }
 
-fn detect_platform() -> (&'static str, &'static str) {
+const fn detect_platform() -> (&'static str, &'static str) {
     let os = if cfg!(target_os = "linux") {
         "linux"
     } else if cfg!(target_os = "macos") {
@@ -218,11 +220,7 @@ fn detect_platform() -> (&'static str, &'static str) {
     } else {
         "windows"
     };
-    let arch = if cfg!(target_arch = "x86_64") {
-        "x64"
-    } else {
-        "arm64"
-    };
+    let arch = if cfg!(target_arch = "x86_64") { "x64" } else { "arm64" };
     (os, arch)
 }
 
@@ -238,10 +236,8 @@ fn download_and_install(url: &str) -> Result<()> {
     }
     let bytes = resp.bytes()?;
 
-    let tmp = std::env::temp_dir().join(format!(
-        "morph-{}-update.tar.gz",
-        env!("CARGO_PKG_VERSION")
-    ));
+    let tmp =
+        std::env::temp_dir().join(format!("morph-{}-update.tar.gz", env!("CARGO_PKG_VERSION")));
     std::fs::write(&tmp, &bytes)?;
 
     crate::logger::log_success(&format!("Downloaded to {}", tmp.display()));
@@ -255,12 +251,10 @@ fn download_and_install(url: &str) -> Result<()> {
 
     let morph_bin = walkdir::WalkDir::new(&tmp_dir)
         .into_iter()
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .find(|e| {
             let name = e.file_name();
-            ["morph", "morphc", "morph.exe", "morphc.exe"]
-                .iter()
-                .any(|n| name == *n)
+            ["morph", "morphc", "morph.exe", "morphc.exe"].iter().any(|n| name == *n)
         })
         .map(|e| e.path().to_path_buf());
 
@@ -292,7 +286,7 @@ fn download_and_install(url: &str) -> Result<()> {
 
 fn get_latest_runtime_version(runtime_type: &str) -> Result<String> {
     morph_cache::fetch_latest_runtime_version(runtime_type)
-        .with_context(|| format!("could not determine latest runtime version for {}", runtime_type))
+        .with_context(|| format!("could not determine latest runtime version for {runtime_type}"))
 }
 
 fn get_latest_morphc_version() -> Result<String> {
@@ -320,7 +314,9 @@ fn get_latest_morphc_version() -> Result<String> {
                     .into_iter()
                     .flatten()
                     .filter_map(|rel| rel.get("tag_name").and_then(|t| t.as_str()))
-                    .filter_map(|tag| tag.strip_prefix('v').and_then(|v| semver::Version::parse(v).ok()))
+                    .filter_map(|tag| {
+                        tag.strip_prefix('v').and_then(|v| semver::Version::parse(v).ok())
+                    })
                     .collect();
                 versions.sort();
                 if let Some(v) = versions.pop() {

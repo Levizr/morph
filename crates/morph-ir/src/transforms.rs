@@ -132,6 +132,8 @@ fn length_to_component(token: &str) -> Option<LengthComp> {
     s.parse().ok().map(|v| (v, LengthUnit::Px))
 }
 
+// Splitting this builder function risks behavior change.
+#[allow(clippy::too_many_lines)]
 fn build_op(name: &str, args: &[String]) -> Option<TransformOp> {
     let one = |i: usize| -> Option<f32> {
         let v = args.get(i)?;
@@ -288,7 +290,7 @@ fn build_op(name: &str, args: &[String]) -> Option<TransformOp> {
 
 // ── 4x4 Matrix math (column-major, 16 floats) ──────────────────
 
-fn identity() -> [f32; 16] {
+const fn identity() -> [f32; 16] {
     [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
 }
 
@@ -306,7 +308,7 @@ fn multiply(a: [f32; 16], b: [f32; 16]) -> [f32; 16] {
     out
 }
 
-fn translate(x: f32, y: f32, z: f32) -> [f32; 16] {
+const fn translate(x: f32, y: f32, z: f32) -> [f32; 16] {
     let mut m = identity();
     m[12] = x;
     m[13] = y;
@@ -314,7 +316,7 @@ fn translate(x: f32, y: f32, z: f32) -> [f32; 16] {
     m
 }
 
-fn scale(x: f32, y: f32, z: f32) -> [f32; 16] {
+const fn scale(x: f32, y: f32, z: f32) -> [f32; 16] {
     let mut m = identity();
     m[0] = x;
     m[5] = y;
@@ -340,27 +342,27 @@ fn rotate_z(deg: f32) -> [f32; 16] {
     [c, s, 0.0, 0.0, -s, c, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
 }
 
-fn rotate_axis(x: f32, y: f32, z: f32, deg: f32) -> [f32; 16] {
-    let length = (x * x + y * y + z * z).sqrt();
+fn rotate_axis(ax: f32, ay: f32, az: f32, deg: f32) -> [f32; 16] {
+    let length = (ax * ax + ay * ay + az * az).sqrt();
     if length < 1e-12 {
         return identity();
     }
-    let (x, y, z) = (x / length, y / length, z / length);
-    let a = deg.to_radians();
-    let (c, s) = (a.cos(), a.sin());
-    let t = 1.0 - c;
+    let (nx, ny, nz) = (ax / length, ay / length, az / length);
+    let angle = deg.to_radians();
+    let (cos_a, sin_a) = (angle.cos(), angle.sin());
+    let one_minus_cos = 1.0 - cos_a;
     [
-        t * x * x + c,
-        t * x * y + s * z,
-        t * x * z - s * y,
+        one_minus_cos * nx * nx + cos_a,
+        one_minus_cos * nx * ny + sin_a * nz,
+        one_minus_cos * nx * nz - sin_a * ny,
         0.0,
-        t * x * y - s * z,
-        t * y * y + c,
-        t * y * z + s * x,
+        one_minus_cos * nx * ny - sin_a * nz,
+        one_minus_cos * ny * ny + cos_a,
+        one_minus_cos * ny * nz + sin_a * nx,
         0.0,
-        t * x * z + s * y,
-        t * y * z - s * x,
-        t * z * z + c,
+        one_minus_cos * nx * nz + sin_a * ny,
+        one_minus_cos * ny * nz - sin_a * nx,
+        one_minus_cos * nz * nz + cos_a,
         0.0,
         0.0,
         0.0,
@@ -390,19 +392,18 @@ fn perspective(d: f32) -> [f32; 16] {
     m
 }
 
-fn matrix6(a: f32, b: f32, c: f32, d: f32, e: f32, f: f32) -> [f32; 16] {
-    [a, b, 0.0, 0.0, c, d, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, e, f, 0.0, 1.0]
+const fn matrix6(m00: f32, m01: f32, m10: f32, m11: f32, tx: f32, ty: f32) -> [f32; 16] {
+    [m00, m01, 0.0, 0.0, m10, m11, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, tx, ty, 0.0, 1.0]
 }
 
 fn op_composer(op: &TransformOp) -> [f32; 16] {
     match *op {
-        TransformOp::Matrix([a, b, c, d, e, f]) => matrix6(a, b, c, d, e, f),
+        TransformOp::Matrix([m00, m01, m10, m11, tx, ty]) => matrix6(m00, m01, m10, m11, tx, ty),
         TransformOp::Matrix3d(m) => m,
         TransformOp::Perspective(d) => perspective(d),
-        TransformOp::Rotate(deg) => rotate_z(deg),
+        TransformOp::Rotate(deg) | TransformOp::RotateZ(deg) => rotate_z(deg),
         TransformOp::RotateX(deg) => rotate_x(deg),
         TransformOp::RotateY(deg) => rotate_y(deg),
-        TransformOp::RotateZ(deg) => rotate_z(deg),
         TransformOp::Rotate3d(x, y, z, deg) => rotate_axis(x, y, z, deg),
         TransformOp::Scale(x, y) => scale(x, y, 1.0),
         TransformOp::Scale3d(x, y, z) => scale(x, y, z),
@@ -444,21 +445,19 @@ pub fn compose_transform(ops: &[TransformOp], own_w: f32, own_h: f32) -> [f32; 1
 
 // ── transform-origin ───────────────────────────────────────────
 
+type OriginAxis = (f32, bool);
+type OriginPair = (OriginAxis, OriginAxis);
+type TransformOrigin = (OriginPair, Option<(f32, f32)>);
+type AxisParsed = (OriginAxis, Option<f32>);
+
 /// Parse a CSS `transform-origin` value into a raw `((x, is_pct), (y, is_pct))`
 /// pair plus the fraction already resolvable without the element box.
 ///
 /// Resolved is `Some` only when both axes are keywords or percentages;
 /// plain lengths need the element box (unknown at build time) and stay
 /// `None`, leaving the runtime's default center origin.
-pub fn parse_transform_origin(
-    value: &str,
-) -> Option<(((f32, bool), (f32, bool)), Option<(f32, f32)>)> {
-    let parts: Vec<&str> = value.split_whitespace().collect();
-    if parts.is_empty() || parts.len() > 2 {
-        return None;
-    }
-
-    fn axis(token: &str) -> Option<((f32, bool), Option<f32>)> {
+pub fn parse_transform_origin(value: &str) -> Option<TransformOrigin> {
+    fn axis(token: &str) -> Option<AxisParsed> {
         let k = token.trim().to_ascii_lowercase();
         match k.as_str() {
             "left" | "top" => Some(((0.0, false), Some(0.0))),
@@ -474,6 +473,11 @@ pub fn parse_transform_origin(
                 Some(((v, false), None))
             }
         }
+    }
+
+    let parts: Vec<&str> = value.split_whitespace().collect();
+    if parts.is_empty() || parts.len() > 2 {
+        return None;
     }
 
     let (x_raw, x_fx) = axis(parts[0])?;
@@ -585,7 +589,7 @@ mod tests {
             (
                 "translate(10px, -20px) rotate(30deg) scale(1.5, 2) skewX(15deg)",
                 [
-                    1.299038, 0.75, 0.0, 0.0, -0.651924, 1.933013, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
+                    1.299_038, 0.75, 0.0, 0.0, -0.651_924, 1.933_013, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
                     10.0, -20.0, 0.0, 1.0,
                 ],
             ),
@@ -596,8 +600,22 @@ mod tests {
             (
                 "rotate3d(0, 0, 1, 45deg) translateX(-5px)",
                 [
-                    0.707107, 0.707107, 0.0, 0.0, -0.707107, 0.707107, 0.0, 0.0, 0.0, 0.0, 1.0,
-                    0.0, -3.535534, -3.535534, 0.0, 1.0,
+                    std::f32::consts::FRAC_1_SQRT_2,
+                    std::f32::consts::FRAC_1_SQRT_2,
+                    0.0,
+                    0.0,
+                    -std::f32::consts::FRAC_1_SQRT_2,
+                    std::f32::consts::FRAC_1_SQRT_2,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.0,
+                    -3.535_534,
+                    -3.535_534,
+                    0.0,
+                    1.0,
                 ],
             ),
         ];

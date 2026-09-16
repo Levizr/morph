@@ -113,10 +113,9 @@ impl StaticDeps {
             && lto_tools.contains_key("ar")
             && lto_tools.contains_key("ranlib");
         let cache = std::env::var("MORPH_STATIC_CACHE")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| cache_base().join("morph").join("static"));
+            .map_or_else(|_| cache_base().join("morph").join("static"), PathBuf::from);
         let src_dir =
-            std::env::var("MORPH_SRC_DIR").map(PathBuf::from).unwrap_or_else(|_| cache.join("src"));
+            std::env::var("MORPH_SRC_DIR").map_or_else(|_| cache.join("src"), PathBuf::from);
         let manifest = load_manifest(&cache);
         let platform = if cfg!(target_os = "macos") {
             "macos"
@@ -142,7 +141,7 @@ impl StaticDeps {
         }
     }
 
-    pub fn silent(mut self) -> Self {
+    pub const fn silent(mut self) -> Self {
         self.silent = true;
         self
     }
@@ -227,14 +226,14 @@ impl StaticDeps {
 
     fn run(&self, cmd: &[String], step: &str, env_extra: &[(&str, &str)]) -> Result<()> {
         if !self.silent {
-            eprintln!("  … {} ...", step);
+            eprintln!("  … {step} ...");
         }
         let mut c = std::process::Command::new(&cmd[0]);
         c.args(&cmd[1..]);
         for (k, v) in env_extra {
             c.env(k, v);
         }
-        let out = c.output().with_context(|| format!("failed to run {}", step))?;
+        let out = c.output().with_context(|| format!("failed to run {step}"))?;
         if !out.status.success() {
             let combined = format!(
                 "{}{}",
@@ -242,9 +241,9 @@ impl StaticDeps {
                 String::from_utf8_lossy(&out.stderr)
             );
             for line in combined.lines().rev().take(60).collect::<Vec<_>>().into_iter().rev() {
-                eprintln!("    {}", line);
+                eprintln!("    {line}");
             }
-            anyhow::bail!("{} failed", step);
+            anyhow::bail!("{step} failed");
         }
         Ok(())
     }
@@ -268,10 +267,10 @@ impl StaticDeps {
                 .status();
             match status {
                 Ok(st) if st.success() => return Ok(path),
-                Ok(_) => last_err = format!("download failed: {}", url),
-                Err(e) => last_err = format!("curl missing? {}", e),
+                Ok(_) => last_err = format!("download failed: {url}"),
+                Err(e) => last_err = format!("curl missing? {e}"),
             }
-            eprintln!("  ⚠ Download failed ({}): {}", url, last_err);
+            eprintln!("  ⚠ Download failed ({url}): {last_err}");
         }
         anyhow::bail!("Could not obtain {}: {}", s.archive, last_err)
     }
@@ -295,11 +294,9 @@ impl StaticDeps {
             anyhow::bail!("Could not extract {}", tarball.display());
         }
         let mut entries: Vec<PathBuf> = std::fs::read_dir(&dst)?
-            .filter_map(|e| e.ok())
+            .filter_map(std::result::Result::ok)
             .map(|e| e.path())
-            .filter(|p| {
-                !p.file_name().and_then(|n| n.to_str()).map(|n| n.starts_with('.')).unwrap_or(false)
-            })
+            .filter(|p| !p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with('.')))
             .collect();
         entries.sort();
         if entries.len() == 1 {
@@ -314,7 +311,7 @@ impl StaticDeps {
         }
         for (name, var) in [("ar", "CMAKE_AR"), ("ranlib", "CMAKE_RANLIB"), ("nm", "CMAKE_NM")] {
             if let Some(p) = self.lto_tools.get(name) {
-                args.push(format!("-D{}={}", var, p));
+                args.push(format!("-D{var}={p}"));
             }
         }
     }
@@ -395,7 +392,7 @@ impl StaticDeps {
                     let rest = &line[start..];
                     if let (Some(lp), Some(rp)) = (rest.find('('), rest.find(')')) {
                         let args = &rest[lp + 1..rp];
-                        if let Some(name) = args.split(',').nth(1).map(|s| s.trim()) {
+                        if let Some(name) = args.split(',').nth(1).map(str::trim) {
                             if FT_MODULE_KEEP.contains(&name) {
                                 keep.push(line.to_string());
                             }
@@ -526,7 +523,7 @@ impl StaticDeps {
         HB_WANTED_OPTS
             .iter()
             .filter(|(name, _)| opts_file_missing || available.contains(*name))
-            .map(|(name, value)| format!("-D{}={}", name, value))
+            .map(|(name, value)| format!("-D{name}={value}"))
             .collect()
     }
 
@@ -539,8 +536,7 @@ impl StaticDeps {
         let mut opts = self.meson_opts(&src);
         let extra = ["-DHB_MINI", "-ffunction-sections", "-fdata-sections"];
         let ft_args = self.freetype_include_args();
-        let c_args: Vec<String> =
-            extra.iter().map(|s| s.to_string()).chain(ft_args.clone()).collect();
+        let c_args: Vec<String> = extra.iter().map(ToString::to_string).chain(ft_args).collect();
         let cpp_args = c_args.clone();
         if self.lto_ok {
             opts.push("-Db_lto=true".to_string());
@@ -563,7 +559,7 @@ impl StaticDeps {
             vec![("CC".to_string(), self.cc.clone()), ("CXX".to_string(), self.cxx.clone())];
         if !pkg_path.is_empty() {
             let joined = if existing.is_empty() {
-                pkg_path.join(&":")
+                pkg_path.join(":")
             } else {
                 format!("{}:{}", pkg_path.join(":"), existing)
             };
@@ -587,17 +583,17 @@ impl StaticDeps {
 }
 
 fn cache_base() -> PathBuf {
-    std::env::var("XDG_CACHE_HOME").map(PathBuf::from).unwrap_or_else(|_| {
-        std::env::var("HOME")
-            .map(|h| PathBuf::from(h).join(".cache"))
-            .unwrap_or_else(|_| PathBuf::from("~/.cache"))
-    })
+    std::env::var("XDG_CACHE_HOME").map_or_else(
+        |_| {
+            std::env::var("HOME")
+                .map_or_else(|_| PathBuf::from("~/.cache"), |h| PathBuf::from(h).join(".cache"))
+        },
+        PathBuf::from,
+    )
 }
 
 pub fn path_has(bin: &str) -> bool {
-    std::env::var("PATH")
-        .map(|p| std::env::split_paths(&p).any(|d| d.join(bin).exists()))
-        .unwrap_or(false)
+    std::env::var("PATH").is_ok_and(|p| std::env::split_paths(&p).any(|d| d.join(bin).exists()))
 }
 
 fn compiler_pair(gpp: &str) -> (String, String) {
@@ -608,7 +604,7 @@ fn compiler_pair(gpp: &str) -> (String, String) {
     }
     // Handles g++, g++-14, and MinGW x86_64-w64-mingw32-g++.
     if let Some(prefix) = base.strip_suffix("g++") {
-        let ccname = format!("{}gcc", prefix);
+        let ccname = format!("{prefix}gcc");
         return (ccname, base.to_string());
     }
     (String::from("gcc"), base.to_string())
@@ -633,13 +629,13 @@ fn lto_tools(cc: &str, is_clang: bool) -> HashMap<String, String> {
     for name in ["ar", "ranlib", "nm"] {
         let mut found = None;
         if ccbase.contains("gcc") {
-            let cand = ccbase.replacen("gcc", &format!("gcc-{}", name), 1);
+            let cand = ccbase.replacen("gcc", &format!("gcc-{name}"), 1);
             if path_has(&cand) {
                 found = Some(cand);
             }
         }
         if found.is_none() {
-            let cand = format!("gcc-{}", name);
+            let cand = format!("gcc-{name}");
             if path_has(&cand) {
                 found = Some(cand);
             }
@@ -655,7 +651,7 @@ fn find_archive(prefix: &Path, libname: &str) -> Option<PathBuf> {
     let mut stack = vec![prefix.to_path_buf()];
     while let Some(dir) = stack.pop() {
         let entries = std::fs::read_dir(&dir).ok()?;
-        for entry in entries.filter_map(|e| e.ok()) {
+        for entry in entries.filter_map(std::result::Result::ok) {
             let path = entry.path();
             if path.is_dir() {
                 stack.push(path);
@@ -675,7 +671,7 @@ fn find_include(prefix: &Path, name: &str) -> Option<PathBuf> {
     let mut stack = vec![prefix.to_path_buf()];
     while let Some(dir) = stack.pop() {
         let entries = std::fs::read_dir(&dir).ok()?;
-        for entry in entries.filter_map(|e| e.ok()) {
+        for entry in entries.filter_map(std::result::Result::ok) {
             let path = entry.path();
             if path.is_dir() {
                 if path.file_name().and_then(|n| n.to_str()) == Some(name)
@@ -698,7 +694,7 @@ fn pkgconfig_dirs(prefix: &Path) -> Vec<String> {
             Ok(e) => e,
             Err(_) => continue,
         };
-        for entry in entries.filter_map(|e| e.ok()) {
+        for entry in entries.filter_map(std::result::Result::ok) {
             let path = entry.path();
             if path.is_dir() {
                 if path.file_name().and_then(|n| n.to_str()) == Some("pkgconfig") {

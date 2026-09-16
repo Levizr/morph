@@ -10,7 +10,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 
 use super::{append_pkg_config, system_include_dirs};
-use crate::{Compiler, NativeFlags, shared_lib_flag};
+use crate::{shared_lib_flag, Compiler, NativeFlags};
 
 /// Layout-affecting feature defines for the dev logic library.
 ///
@@ -154,11 +154,9 @@ mod tests {
         assert!(flags.contains(&"-DMORPH_FEATURE_DEV".to_string()));
         assert!(flags.contains(&"-DMORPH_FEATURE_TRANSFORM".to_string()));
         assert!(flags.contains(&"-DMORPH_FEATURE_ANIMATION".to_string()));
-        assert!(
-            flags
-                .windows(2)
-                .any(|w| { w[0] == "-I" && w[1] == runtime.join("dev").display().to_string() })
-        );
+        assert!(flags
+            .windows(2)
+            .any(|w| { w[0] == "-I" && w[1] == runtime.join("dev").display().to_string() }));
     }
 
     #[test]

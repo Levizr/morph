@@ -1,0 +1,14 @@
+import { total, setTotal, resetEvent } from './Store.mx'
+
+export function Badge() {
+  function resetCounters() {
+    setTotal(0)
+    resetEvent.emit({ total: total })
+  }
+  return (
+    <div className="badge">
+      <text>Total: {total}</text>
+      <button onClick={() => resetCounters()}>Reset</button>
+    </div>
+  )
+}

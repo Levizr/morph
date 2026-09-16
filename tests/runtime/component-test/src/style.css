@@ -1,0 +1,19 @@
+.hero {
+  padding: 16px;
+  background-color: #eef2ff;
+}
+
+.hero-title {
+  font-size: 24px;
+  font-weight: bold;
+}
+
+.counter {
+  padding: 8px;
+  gap: 8px;
+}
+
+.badge {
+  padding: 8px;
+  background-color: #ecfdf5;
+}

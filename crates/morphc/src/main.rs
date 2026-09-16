@@ -1,19 +1,19 @@
+mod cache;
 mod commands;
 mod logger;
-mod cache;
 mod versions;
 
 use clap::{Parser, Subcommand};
 use colored::Colorize;
-use std::path::PathBuf;
 use morpher::TypeMode;
+use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(
     name = "morphc",
     disable_version_flag = true,
-    about = "Build native OpenGL Applications from HTML, CSS, and JavaScript",
-    long_about = "Morph — Build native OpenGL Applications\n\nCompile strict TypeScript (.ts/.tsx) and Morph (.mx) projects to native OpenGL\nbinaries. No browser. No Electron. No WebView.\n\nMorph only supports strict .ts / .tsx / .mx source. .js and .jsx are rejected.\n\nDirect file morphing (.ts/.js only):\n  morph app.ts              → morph to C++ (default)\n  morph app.ts --to cpp     → morph to C++\n  morph app.ts --to rust    → morph to Rust\n\nProject commands:\n  morph new                 → scaffold a new .mx or .tsx project\n  morph dev                 → start dev mode with hot reload\n  morph build               → compile to production binary\n  morph run                 → build and run\n  morph install             → download runtime sources\n  morph update              → update runtime or morphc\n  morph check               → lint source files\n  morph doctor              → verify system dependencies\n  morph cache               → manage cache"
+    about = "Build native OpenGL Applications from TypeScript, TSX, and Morph sources",
+    long_about = "Morph — Build native OpenGL Applications\n\nCompile strict TypeScript (.ts/.tsx) and Morph (.mx) projects to native OpenGL\nbinaries. No browser. No Electron. No WebView.\n\nMorph only supports strict .ts / .tsx / .mx source. .js and .jsx are rejected.\n\nDirect file morphing (.ts only):\n  morph app.ts              → morph to C++ (default)\n  morph app.ts --to cpp     → morph to C++\n  morph app.ts --to rust    → morph to Rust\n\nProject commands:\n  morph new                 → scaffold a new .mx or .tsx project\n  morph dev                 → start dev mode with hot reload\n  morph build               → compile to production binary\n  morph run                 → build and run\n  morph install             → download runtime sources\n  morph update              → update runtime or morphc\n  morph check               → lint source files\n  morph doctor              → verify system dependencies\n  morph cache               → manage cache"
 )]
 struct Cli {
     /// Show version
@@ -145,10 +145,10 @@ fn main() {
             if args.len() > 1 {
                 let input = &args[1];
                 if !input.starts_with('-') {
-                    if let Some(suggestion) = crate::logger::suggest_command(input) {
+                    if let Some(suggestion) = logger::suggest_command(input) {
                         // Only suggest if it's actually a typo (not exact match)
                         if suggestion != *input {
-                            crate::logger::did_you_mean(input);
+                            logger::did_you_mean(input);
                             std::process::exit(1);
                         }
                     }
@@ -167,39 +167,30 @@ fn main() {
     // ── Top-level file morphing: morph <file> [--to cpp|rust] ──
     if let Some(file) = cli.file {
         if cli.command.is_some() {
-            eprintln!(
-                "\n    {} Cannot use <FILE> and <COMMAND> together.",
-                "error:".red().bold(),
-            );
-            eprintln!(
-                "    {} Use `morph <file> --to cpp` or `morph <command>`.",
-                "hint:".dimmed(),
-            );
+            eprintln!("\n    {} Cannot use <FILE> and <COMMAND> together.", "error:".red().bold());
+            eprintln!("    {} Use `morph <file> --to cpp` or `morph <command>`.", "hint:".dimmed());
             eprintln!();
             std::process::exit(1);
         }
 
-        // Validate: only .ts / .js for direct morphing
-        // .tsx/.jsx/.mx use morph build / morph run instead
+        // Validate: direct file morphing accepts strict TypeScript only.
+        // .tsx/.jsx/.mx use morph build / morph run instead.
         let ext = file.extension().and_then(|e| e.to_str()).unwrap_or("");
         let file_str = file.display().to_string();
 
         if ext == "tsx" || ext == "jsx" || ext == "mx" {
+            eprintln!("\n    {} `morph <file>` only works with .ts files.", "error:".red().bold());
             eprintln!(
-                "\n    {} `morph <file>` only works with .ts/.js files.",
-                "error:".red().bold(),
-            );
-            eprintln!(
-                "    {} Use `morph build` or `morph run` for .mx/.tsx/.jsx files.",
+                "    {} Use `morph build` or `morph run` for .mx/.tsx files.",
                 "hint:".dimmed(),
             );
             eprintln!();
             std::process::exit(1);
         }
 
-        if ext != "ts" && ext != "js" {
+        if ext != "ts" {
             // Not a valid morph file — treat as a mistyped command
-            crate::logger::did_you_mean(&file_str);
+            logger::did_you_mean(&file_str);
             std::process::exit(1);
         }
 
@@ -227,17 +218,24 @@ fn main() {
         }
         Some(Commands::Dev { entry }) => commands::dev::run(entry),
         Some(Commands::Build { entry, output, static_, upx, no_upx, upx_version, type_mode }) => {
-            commands::build::run(
-                entry, output, static_, upx, no_upx, false, type_mode, upx_version,
-            )
-            .map(|_| ())
+            commands::build::run(entry, output, static_, upx, no_upx, false, type_mode, upx_version)
+                .map(|_| ())
         }
         Some(Commands::Run {
-            binary, entry, output, static_, upx, no_upx, upx_version, type_mode,
+            binary,
+            entry,
+            output,
+            static_,
+            upx,
+            no_upx,
+            upx_version,
+            type_mode,
         }) => {
             commands::run::run(binary, entry, output, static_, type_mode, upx, no_upx, upx_version)
         }
-        Some(Commands::Check { path, entry, migrate }) => commands::check::run(path, entry, migrate),
+        Some(Commands::Check { path, entry, migrate }) => {
+            commands::check::run(path.as_ref(), entry, migrate)
+        }
         Some(Commands::Doctor { verbose, yes }) => commands::doctor::run(verbose, yes),
         Some(Commands::Cache) => commands::cache::run(),
         None => {
@@ -257,109 +255,115 @@ fn main() {
 }
 
 fn print_welcome() {
-    crate::logger::print_logo();
+    logger::print_logo();
 
     // ── Usage ──
-    crate::logger::log_section("USAGE");
+    logger::log_section("USAGE");
     println!("      {} {} {}", "$".dimmed(), "morph".cyan().bold(), "<command> [options]".dimmed());
-    println!("      {} {} {}", "$".dimmed(), "morph".cyan().bold(), "<file> [--to cpp|rust]".dimmed());
+    println!(
+        "      {} {} {}",
+        "$".dimmed(),
+        "morph".cyan().bold(),
+        "<file> [--to cpp|rust]".dimmed()
+    );
     println!();
 
     // ── Project commands ──
-    crate::logger::log_section("PROJECT");
+    logger::log_section("PROJECT");
     let project_cmds = [
-        ("new",     "Scaffold a new .mx or .tsx project", "◆"),
-        ("install", "Download runtime sources",           "⬇"),
-        ("dev",     "Start dev mode with live hot reload", "⚡"),
-        ("build",   "Compile .ts/.tsx/.mx → native binary", "▣"),
-        ("run",     "Build and run production binary",    "▶"),
-        ("check",   "Lint source files (.ts/.tsx/.mx)",   "✓"),
+        ("new", "Scaffold a new .mx or .tsx project", "◆"),
+        ("install", "Download runtime sources", "⬇"),
+        ("dev", "Start dev mode with live hot reload", "⚡"),
+        ("build", "Compile .ts/.tsx/.mx → native binary", "▣"),
+        ("run", "Build and run production binary", "▶"),
+        ("check", "Lint source files (.ts/.tsx/.mx)", "✓"),
     ];
     for (cmd, desc, icon) in project_cmds {
-        println!(
-            "    {} {:<24} {}",
-            icon.cyan().bold(),
-            cmd.green().bold(),
-            desc.dimmed(),
-        );
+        println!("    {} {:<24} {}", icon.cyan().bold(), cmd.green().bold(), desc.dimmed());
     }
     println!();
 
     // ── Utility commands ──
-    crate::logger::log_section("UTILITIES");
+    logger::log_section("UTILITIES");
     let util_cmds = [
-        ("update",  "Update runtime (--runtime) or morphc (--self)", "↻"),
-        ("doctor",  "Verify system dependencies",                    "♥"),
-        ("cache",   "Clear fetched CSS cache",                       "♻"),
+        ("update", "Update runtime (--runtime) or morphc (--self)", "↻"),
+        ("doctor", "Verify system dependencies", "♥"),
+        ("cache", "Clear fetched CSS cache", "♻"),
     ];
     for (cmd, desc, icon) in util_cmds {
-        println!(
-            "    {} {:<24} {}",
-            icon.cyan().bold(),
-            cmd.green().bold(),
-            desc.dimmed(),
-        );
+        println!("    {} {:<24} {}", icon.cyan().bold(), cmd.green().bold(), desc.dimmed());
     }
     println!();
 
     // ── File morphing ──
-    crate::logger::log_section("FILE MORPHING (.ts/.js only)");
+    logger::log_section("FILE MORPHING (.ts only)");
     println!(
         "    {} {:<24} {}",
         "⇄".cyan().bold(),
         "morph <file>".green().bold(),
-        "Morph .ts/.js → C++ (default)".dimmed(),
+        "Morph .ts → C++ (default)".dimmed(),
     );
     println!(
         "    {} {:<24} {}",
         " ".dimmed(),
         "morph <file> --to rust".green().bold(),
-        "Morph .ts/.js → Rust".dimmed(),
+        "Morph .ts → Rust".dimmed(),
     );
     println!(
         "    {} {:<24} {}",
         " ".dimmed(),
         "morph <file> --to cpp".green().bold(),
-        "Morph .ts/.js → C++ (explicit)".dimmed(),
+        "Morph .ts → C++ (explicit)".dimmed(),
     );
     println!();
     println!(
-        "    {} .tsx/.jsx/.mx files use {} instead.",
+        "    {} .tsx/.mx files use {} instead.",
         "Note:".yellow().bold(),
         "morph build / morph run".cyan(),
     );
     println!();
 
     // ── Options ──
-    crate::logger::log_section("OPTIONS");
-    println!("      {} {:<24} {}", " ".dimmed(), "-h, --help".green().bold(), "Show this help".dimmed());
-    println!("      {} {:<24} {}", " ".dimmed(), "-v, --version".green().bold(), "Show version".dimmed());
-    println!("      {} {:<24} {}", " ".dimmed(), "--to <TARGET>".green().bold(), "Target for file morphing".dimmed());
+    logger::log_section("OPTIONS");
+    println!(
+        "      {} {:<24} {}",
+        " ".dimmed(),
+        "-h, --help".green().bold(),
+        "Show this help".dimmed()
+    );
+    println!(
+        "      {} {:<24} {}",
+        " ".dimmed(),
+        "-v, --version".green().bold(),
+        "Show version".dimmed()
+    );
+    println!(
+        "      {} {:<24} {}",
+        " ".dimmed(),
+        "--to <TARGET>".green().bold(),
+        "Target for file morphing".dimmed()
+    );
     println!();
 
     // ── Quick start ──
-    crate::logger::log_section("QUICK START");
+    logger::log_section("QUICK START");
     println!("      {} {}", "▸".green().bold(), "morph new my-app --yes".cyan().bold());
     println!("      {} {}", "▸".green().bold(), "cd my-app && morph install && morph dev".cyan());
     println!("      {} {}", "▸".green().bold(), "morph app.ts --to cpp".cyan());
     println!();
 
     // ── Features ──
-    crate::logger::log_section("FEATURES");
-    crate::logger::print_features();
+    logger::log_section("FEATURES");
+    logger::print_features();
 
     // ── Footer ──
-    crate::logger::divider();
+    logger::divider();
     println!(
         "    {} {} {}",
         "Run".dimmed(),
         "morph <command> --help".yellow().bold(),
         "for command-specific options".dimmed(),
     );
-    println!(
-        "    {} {}",
-        "Docs:".dimmed(),
-        "https://morph.levizr.com/docs".cyan(),
-    );
+    println!("    {} {}", "Docs:".dimmed(), "https://morph.levizr.com/docs".cyan());
     println!();
 }

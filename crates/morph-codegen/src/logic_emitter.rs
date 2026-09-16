@@ -34,6 +34,7 @@ const LOGIC_PREHEADER: &str = r#"#include <cstdio>
 #include "logic_prelude.h"
 #include "core/node.h"
 #include "reactivity/signal.h"
+#include "reactivity/channel.h"
 #include "core/event.h"
 #include "types/js_value.h"
 #include "ui/image.h"
@@ -82,6 +83,7 @@ const BUILTIN_HEADERS: &[&str] = &[
     "\"logic_prelude.h\"",
     "\"core/node.h\"",
     "\"reactivity/signal.h\"",
+    "\"reactivity/channel.h\"",
     "\"core/event.h\"",
     "\"types/js_value.h\"",
     "\"signal_store.h\"",
@@ -122,6 +124,63 @@ struct AmbientMaps {
     types: HashMap<String, String>,
 }
 
+fn shared_static(accessor: &str) -> String {
+    format!("__{accessor}")
+}
+
+/// Optional per-module namespace in the generated program (`morph_mods::<ns>`).
+/// Absent for hand-built IR (unit tests / legacy), which falls back to the
+/// global-scope emission below.
+fn shared_ns(sv: &HashMap<String, String>) -> String {
+    sv.get("ns").cloned().unwrap_or_default()
+}
+
+/// Fully-qualified accessor call (`morph_mods::<ns>::shared_x()`).
+fn shared_ref(ns: &str, accessor: &str) -> String {
+    if ns.is_empty() {
+        format!("{accessor}()")
+    } else {
+        format!("morph_mods::{ns}::{accessor}()")
+    }
+}
+
+/// Fully-qualified backing signal (`morph_mods::<ns>::__shared_x`).
+fn shared_backing_ref(ns: &str, accessor: &str) -> String {
+    if ns.is_empty() {
+        shared_static(accessor)
+    } else {
+        format!("morph_mods::{ns}::{}", shared_static(accessor))
+    }
+}
+
+/// Emit declarations grouped under their optional `morph_mods::<ns>`
+/// namespaces. Empty namespaces fall back to global scope.
+fn emit_shared_entries(lines: &mut Vec<String>, decls: Vec<(String, String)>) {
+    let mut blocks: Vec<(String, Vec<String>)> = Vec::new();
+    let mut block_by_ns: HashMap<String, usize> = HashMap::new();
+    let mut bare: Vec<String> = Vec::new();
+    for (ns, decl) in decls {
+        if ns.is_empty() {
+            bare.push(decl);
+            continue;
+        }
+        if let Some(&idx) = block_by_ns.get(&ns) {
+            blocks[idx].1.push(decl);
+        } else {
+            block_by_ns.insert(ns.clone(), blocks.len());
+            blocks.push((ns, vec![decl]));
+        }
+    }
+    lines.extend(bare);
+    for (ns, member_lines) in blocks {
+        lines.push("namespace morph_mods {".to_string());
+        lines.push(format!("namespace {ns} {{"));
+        lines.extend(member_lines);
+        lines.push("}".to_string());
+        lines.push("}".to_string());
+    }
+}
+
 fn ambient_maps(windows: &[IRWindow]) -> AmbientMaps {
     let mut vars = HashMap::new();
     let mut types = HashMap::new();
@@ -141,6 +200,25 @@ fn ambient_maps(windows: &[IRWindow]) -> AmbientMaps {
                 if !setter.is_empty() {
                     vars.insert(setter.clone(), format!("__st_{getter}.set"));
                 }
+            }
+        }
+        for sv in &w.shared_vars {
+            let (getter, setter, accessor) = (
+                sv.get("getter").map_or("", String::as_str),
+                sv.get("setter").map_or("", String::as_str),
+                sv.get("accessor").map_or("", String::as_str),
+            );
+            if getter.is_empty() || accessor.is_empty() {
+                continue;
+            }
+            let ns = shared_ns(sv);
+            let read = format!("{}.get()", shared_ref(&ns, accessor));
+            vars.insert(getter.to_string(), read);
+            if !setter.is_empty() {
+                vars.insert(setter.to_string(), format!("{}.set", shared_ref(&ns, accessor)));
+            }
+            if let Some(ty) = sv.get("type").filter(|t| *t != "auto") {
+                types.insert(getter.to_string(), ty.clone());
             }
         }
         for name in &w.reactive_consts {
@@ -663,9 +741,13 @@ fn split_top_level(s: &str) -> Vec<String> {
     parts
 }
 
-/// `__st_*.get()` guard expressions for an effect deps list, when every dep
-/// is a known state var (mirrors `_effect_dep_exprs`).
-fn effect_dep_exprs(deps: &str, state_getters: &HashSet<String>) -> Option<Vec<String>> {
+/// Guard expressions for an effect deps list when every dep is a known
+/// state or shared getter.
+fn effect_dep_exprs(
+    deps: &str,
+    state_getters: &HashSet<String>,
+    shared: &HashMap<String, String>,
+) -> Option<Vec<String>> {
     let deps = deps.trim();
     if deps.is_empty() || deps == "[]" {
         return None;
@@ -676,12 +758,19 @@ fn effect_dep_exprs(deps: &str, state_getters: &HashSet<String>) -> Option<Vec<S
         if token.is_empty() || !seen.insert(token.to_string()) {
             continue;
         }
-        if !state_getters.contains(token) {
+        if let Some(expr) = shared.get(token) {
+            exprs.push(expr.clone());
+        } else if state_getters.contains(token) {
+            exprs.push(format!("__st_{token}.get()"));
+        } else {
             return None;
         }
-        exprs.push(format!("__st_{token}.get()"));
     }
-    if exprs.is_empty() { None } else { Some(exprs) }
+    if exprs.is_empty() {
+        None
+    } else {
+        Some(exprs)
+    }
 }
 
 fn has_input(nodes: &[IRNode]) -> bool {
@@ -824,8 +913,9 @@ const fn is_ident_char(b: u8) -> bool {
 
 /// Build the `_morph_state.h` content for native mode (mirrors
 /// `generate_state_header`): extern signals, JSX state wrappers and JSX
-/// function declarations.
-pub fn generate_state_header(windows: &[IRWindow], premain: &[String]) -> String {
+/// function declarations. Per-instance signals are skipped; shared-store
+/// wrappers use the accessor in build mode, the backing static in dev mode.
+pub fn generate_state_header(windows: &[IRWindow], premain: &[String], dev_mode: bool) -> String {
     let mut lines = vec![
         "#pragma once".to_string(),
         "// Generated by Morph — do not edit".to_string(),
@@ -844,6 +934,9 @@ pub fn generate_state_header(windows: &[IRWindow], premain: &[String]) -> String
     let mut seen_signals = HashSet::new();
     for w in windows {
         for sv in &w.state_vars {
+            if morph_ir::is_instance_slot(sv) {
+                continue;
+            }
             let getter = sv.get("getter").map_or("", String::as_str);
             if getter.is_empty() || !seen_signals.insert(getter.to_string()) {
                 continue;
@@ -870,6 +963,51 @@ pub fn generate_state_header(windows: &[IRWindow], premain: &[String]) -> String
                 lines.push(format!("inline void {setter}({cpp_type} v) {{ {signal}.set(v); }}"));
             }
         }
+        lines.push(String::new());
+    }
+    let mut shared_wrappers = Vec::new();
+    let mut seen_shared = HashSet::new();
+    for w in windows {
+        for sv in &w.shared_vars {
+            let key = sv.get("key").map_or("", String::as_str);
+            let accessor = sv.get("accessor").map_or("", String::as_str);
+            let getter = sv.get("getter").map_or("", String::as_str);
+            let setter = sv.get("setter").map_or("", String::as_str);
+            if key.is_empty() || accessor.is_empty() || getter.is_empty() {
+                continue;
+            }
+            if !seen_shared.insert(key.to_string()) {
+                continue;
+            }
+            let init = sv.get("init").map_or("0", String::as_str);
+            let cpp_type = sv
+                .get("type")
+                .filter(|t| *t != "auto")
+                .cloned()
+                .unwrap_or_else(|| infer_cpp_type(init));
+            let ns = shared_ns(sv);
+            let backing = if dev_mode {
+                shared_backing_ref(&ns, accessor)
+            } else {
+                shared_ref(&ns, accessor)
+            };
+            if !jsx_names.contains(getter) {
+                shared_wrappers.push((
+                    ns.clone(),
+                    format!("inline {cpp_type} {getter}() {{ return {backing}.get(); }}"),
+                ));
+            }
+            if !setter.is_empty() && !jsx_names.contains(setter) {
+                shared_wrappers.push((
+                    ns.clone(),
+                    format!("inline void {setter}({cpp_type} v) {{ {backing}.set(v); }}"),
+                ));
+            }
+        }
+    }
+    if !shared_wrappers.is_empty() {
+        lines.push("// ── morphShared wrappers (app-global keyed stores) ──".to_string());
+        emit_shared_entries(&mut lines, shared_wrappers);
         lines.push(String::new());
     }
     let mut func_decls = Vec::new();
@@ -899,7 +1037,11 @@ fn fn_name(decl: &str) -> Option<String> {
         .chars()
         .rev()
         .collect();
-    if name.is_empty() { None } else { Some(name) }
+    if name.is_empty() {
+        None
+    } else {
+        Some(name)
+    }
 }
 
 /// File-scope signal statics (persist across `morph_logic_init` calls).
@@ -919,7 +1061,7 @@ fn emit_signal_statics(lines: &mut Vec<String>, windows: &[IRWindow], native_mod
                 signal_lines.push(format!("morph::Signal<{cpp_type}> __st_{getter}({cleaned});"));
             } else {
                 signal_lines
-                    .push(format!("static morph::Signal<{cpp_type}> __st_{getter}({cleaned});",));
+                    .push(format!("static morph::Signal<{cpp_type}> __st_{getter}({cleaned});"));
             }
         }
     }
@@ -927,6 +1069,70 @@ fn emit_signal_statics(lines: &mut Vec<String>, windows: &[IRWindow], native_mod
         lines.push(String::new());
         lines.push("// ── morphState signals ──".to_string());
         lines.extend(signal_lines);
+    }
+    let mut seen_keys = HashSet::new();
+    let mut shared_lines: Vec<(String, String)> = Vec::new();
+    for w in windows {
+        for sv in &w.shared_vars {
+            let key = sv.get("key").map_or("", String::as_str);
+            let accessor = sv.get("accessor").map_or("", String::as_str);
+            if key.is_empty() || accessor.is_empty() || !seen_keys.insert(key.to_string()) {
+                continue;
+            }
+            let init = sv.get("init").map_or("0", String::as_str);
+            let cleaned = clean_init(init);
+            let cpp_type = sv
+                .get("type")
+                .filter(|t| *t != "auto")
+                .cloned()
+                .unwrap_or_else(|| infer_cpp_type(init));
+            let ns = shared_ns(sv);
+            let backing = shared_static(accessor);
+            let decl = if native_mode {
+                format!("morph::Signal<{cpp_type}> {backing}({cleaned});")
+            } else {
+                format!("static morph::Signal<{cpp_type}> {backing}({cleaned});")
+            };
+            shared_lines.push((ns, decl));
+        }
+    }
+    if !shared_lines.is_empty() {
+        lines.push(String::new());
+        lines.push("// ── morphShared signals (keyed) ──".to_string());
+        emit_shared_entries(lines, shared_lines);
+    }
+    // Builder premain references shared stores through `{accessor}()`
+    // (the same convention as the build TU), so the dev TU defines those
+    // accessors over the file-scope backing signals above.
+    let mut seen_accessors = HashSet::new();
+    let mut accessor_lines: Vec<(String, String)> = Vec::new();
+    for w in windows {
+        for sv in &w.shared_vars {
+            let (key, accessor) = (
+                sv.get("key").map_or("", String::as_str),
+                sv.get("accessor").map_or("", String::as_str),
+            );
+            if key.is_empty() || accessor.is_empty() || !seen_accessors.insert(key.to_string()) {
+                continue;
+            }
+            let init = sv.get("init").map_or("0", String::as_str);
+            let cpp_type = sv
+                .get("type")
+                .filter(|t| *t != "auto")
+                .cloned()
+                .unwrap_or_else(|| infer_cpp_type(init));
+            let ns = shared_ns(sv);
+            let backing = shared_static(accessor);
+            accessor_lines.push((
+                ns,
+                format!("static morph::Signal<{cpp_type}>& {accessor}() {{ return {backing}; }}"),
+            ));
+        }
+    }
+    if !accessor_lines.is_empty() {
+        lines.push(String::new());
+        lines.push("// ── morphShared accessors (match the build TU) ──".to_string());
+        emit_shared_entries(lines, accessor_lines);
     }
 }
 
@@ -948,16 +1154,22 @@ fn emit_factories(lines: &mut Vec<String>, list_nodes: &[&IRNode], maps: &Ambien
     }
 }
 
-/// `morph_logic_rewire`: wire events + (re)create effects.
+/// `morph_logic_rewire`: wire events + (re)create effects + subscriptions.
 fn emit_rewire(
     all_nodes: &[&IRNode],
     effect_decls: &[&HashMap<String, String>],
     guarded: &HashMap<usize, Vec<String>>,
     maps: &AmbientMaps,
+    channel_subs: &[&HashMap<String, String>],
 ) -> Vec<String> {
     let mut rewire =
         vec!["void morph_logic_rewire(::NodeRegistry& nodes, ::SignalStore& store) {".to_string()];
     rewire.push("    (void)store;".to_string());
+    // Subscriptions re-run on every rewire: clear first so handlers never
+    // stack up across hot reloads.
+    if !channel_subs.is_empty() {
+        rewire.push("    morph::clear_channels();".to_string());
+    }
     rewire.push(String::new());
     let mut wired: HashSet<(String, String)> = HashSet::new();
     for node in all_nodes {
@@ -972,6 +1184,18 @@ fn emit_rewire(
         rewire.extend(effect_lines);
     }
     rewire.push(String::new());
+    for sub in channel_subs {
+        let channel = sub.get("channel").map_or("", String::as_str);
+        let body = sub.get("body").map_or("", String::as_str);
+        if channel.is_empty() || body.is_empty() {
+            continue;
+        }
+        let escaped = channel.replace('\\', "\\\\").replace('"', "\\\"");
+        rewire.push(format!("    morph::channel(\"{escaped}\").on({body});"));
+    }
+    if !channel_subs.is_empty() {
+        rewire.push(String::new());
+    }
     let mut guard_idx = 0;
     for (idx, decl) in effect_decls.iter().enumerate() {
         let deps = decl.get("deps").map_or("", String::as_str);
@@ -1026,6 +1250,29 @@ fn emit_init(
             let cpp_type = infer_cpp_type(init);
             lines.push(format!(
                 "    __st_{getter}.set(store.get_or_create<{cpp_type}>(\"{getter}\", {cleaned}).get());"
+            ));
+        }
+    }
+    let mut seen_shared = HashSet::new();
+    for w in windows {
+        for sv in &w.shared_vars {
+            let key = sv.get("key").map_or("", String::as_str);
+            let accessor = sv.get("accessor").map_or("", String::as_str);
+            if key.is_empty() || accessor.is_empty() || !seen_shared.insert(key.to_string()) {
+                continue;
+            }
+            let init = sv.get("init").map_or("0", String::as_str);
+            let cleaned = clean_init(init);
+            let cpp_type = sv
+                .get("type")
+                .filter(|t| *t != "auto")
+                .cloned()
+                .unwrap_or_else(|| infer_cpp_type(init));
+            let ns = shared_ns(sv);
+            let backing = shared_backing_ref(&ns, accessor);
+            let escaped = key.replace('\\', "\\\\").replace('"', "\\\"");
+            lines.push(format!(
+                "    {backing}.set(store.get_or_create<{cpp_type}>(\"{escaped}\", {cleaned}).get());"
             ));
         }
     }
@@ -1118,7 +1365,7 @@ fn emit_native_block(
             }
         }
     }
-    let state_header = generate_state_header(windows, premain_parts);
+    let state_header = generate_state_header(windows, premain_parts, true);
     lines.push(String::new());
     lines.push("// ── Generated interop declarations (morphState + JSX functions) ──".to_string());
     lines.push(format!("#include \"{STATE_HEADER_NAME}\""));
@@ -1140,11 +1387,32 @@ pub fn emit_logic(windows: &[IRWindow]) -> LogicOutput {
         .filter(|g| !g.is_empty())
         .cloned()
         .collect();
+    let mut shared_guards: HashMap<String, String> = HashMap::new();
+    for w in windows {
+        for sv in &w.shared_vars {
+            let (getter, accessor) = (
+                sv.get("getter").map_or("", String::as_str),
+                sv.get("accessor").map_or("", String::as_str),
+            );
+            if getter.is_empty() || accessor.is_empty() {
+                continue;
+            }
+            let ns = shared_ns(sv);
+            shared_guards
+                .entry(getter.to_string())
+                .or_insert_with(|| format!("{}.get()", shared_ref(&ns, accessor)));
+        }
+    }
 
     let all_nodes: Vec<&IRNode> = windows.iter().flat_map(|w| w.nodes.iter()).collect();
     let mut list_nodes = Vec::new();
     for node in &all_nodes {
         list_nodes.extend(collect_list_nodes(std::slice::from_ref(node)));
+    }
+    // Collect channel_subs for the rewire.
+    let mut channel_subs: Vec<&HashMap<String, String>> = Vec::new();
+    for w in windows {
+        channel_subs.extend(w.channel_subs.iter());
     }
     let native_mode = emit_includes(&mut lines, windows, &list_nodes);
     let premain_parts = collect_premain(windows);
@@ -1178,7 +1446,7 @@ pub fn emit_logic(windows: &[IRWindow]) -> LogicOutput {
     let mut guarded: HashMap<usize, Vec<String>> = HashMap::new();
     for (idx, decl) in effect_decls.iter().enumerate() {
         let deps = decl.get("deps").map_or("", String::as_str);
-        if let Some(exprs) = effect_dep_exprs(deps, &state_getters) {
+        if let Some(exprs) = effect_dep_exprs(deps, &state_getters, &shared_guards) {
             guarded.insert(idx, exprs);
         }
     }
@@ -1195,7 +1463,7 @@ pub fn emit_logic(windows: &[IRWindow]) -> LogicOutput {
     }
 
     // ── morph_logic_rewire ──
-    let rewire = emit_rewire(&all_nodes, &effect_decls, &guarded, &maps);
+    let rewire = emit_rewire(&all_nodes, &effect_decls, &guarded, &maps, &channel_subs);
     let effect_count = rewire.iter().filter(|l| l.contains("__effects[__effect_count++]")).count();
     lines.extend(rewire);
     lines.push(String::new());
@@ -1220,16 +1488,12 @@ mod tests {
     #[test]
     fn logic_output_has_dev_entrypoints() {
         let output = emit_logic(&[]);
-        assert!(
-            output
-                .source
-                .contains("void morph_logic_rewire(::NodeRegistry& nodes, ::SignalStore& store)")
-        );
-        assert!(
-            output
-                .source
-                .contains("void morph_logic_init(::NodeRegistry& nodes, ::SignalStore& store)")
-        );
+        assert!(output
+            .source
+            .contains("void morph_logic_rewire(::NodeRegistry& nodes, ::SignalStore& store)"));
+        assert!(output
+            .source
+            .contains("void morph_logic_init(::NodeRegistry& nodes, ::SignalStore& store)"));
         assert!(output.source.contains("void morph_logic_cleanup()"));
         assert!(output.source.contains("static morph::EffectNode* __effects[1];"));
         assert!(output.state_header.is_none());
@@ -1243,11 +1507,9 @@ mod tests {
         sv.insert("init".to_string(), "['a', 'b']".to_string());
         let window = IRWindow { state_vars: vec![sv], ..Default::default() };
         let output = emit_logic(&[window]);
-        assert!(
-            output
-                .source
-                .contains("static morph::Signal<JsArray> __st_items(JsArray{\"a\", \"b\"});")
-        );
+        assert!(output
+            .source
+            .contains("static morph::Signal<JsArray> __st_items(JsArray{\"a\", \"b\"});"));
         assert!(output.source.contains("store.get_or_create<JsArray>(\"items\""));
     }
 
@@ -1286,6 +1548,106 @@ mod tests {
         let window = IRWindow { nodes: vec![node], state_vars: vec![sv], ..Default::default() };
         let output = emit_logic(&[window]);
         assert!(output.source.contains("n->setText(morph::str(__st_acc.get()));"));
+    }
+
+    fn shared_window() -> IRWindow {
+        let mut sv = HashMap::new();
+        sv.insert("key".to_string(), "cart.count".to_string());
+        sv.insert("accessor".to_string(), "shared_cart_count".to_string());
+        sv.insert("type".to_string(), "int".to_string());
+        sv.insert("init".to_string(), "0".to_string());
+        sv.insert("getter".to_string(), "count".to_string());
+        sv.insert("setter".to_string(), "setCount".to_string());
+        let node = IRNode {
+            node_id: "node_0009".to_string(),
+            node_type: "__expr__".to_string(),
+            reactive_text: "count".to_string(),
+            ..Default::default()
+        };
+        IRWindow { nodes: vec![node], shared_vars: vec![sv], ..Default::default() }
+    }
+
+    fn namespaced_shared_window() -> IRWindow {
+        let mut window = shared_window();
+        window.shared_vars[0].insert("ns".to_string(), "store_deadbeef".to_string());
+        window
+    }
+
+    #[test]
+    fn shared_syncs_from_store_by_key() {
+        let output = emit_logic(&[shared_window()]);
+        assert!(
+            output.source.contains("static morph::Signal<int> __shared_cart_count(0);"),
+            "backing static"
+        );
+        assert!(
+            output.source.contains("store.get_or_create<int>(\"cart.count\", 0)"),
+            "keyed sync: {}",
+            output.source
+        );
+        assert!(
+            output.source.contains("n->setText(morph::str(shared_cart_count().get()));"),
+            "read mapped: {}",
+            output.source
+        );
+    }
+
+    #[test]
+    fn shared_namespace_qualifies_statics_accessors_and_reads() {
+        let output = emit_logic(&[namespaced_shared_window()]);
+        assert!(
+            output.source.contains("namespace morph_mods {\nnamespace store_deadbeef {"),
+            "module namespace: {}",
+            output.source
+        );
+        assert!(
+            output.source.contains(
+                "morph_mods::store_deadbeef::__shared_cart_count.set(store.get_or_create<int>"
+            ),
+            "qualified store sync: {}",
+            output.source
+        );
+        assert!(
+            output.source.contains(
+                "n->setText(morph::str(morph_mods::store_deadbeef::shared_cart_count().get()));"
+            ),
+            "qualified read: {}",
+            output.source
+        );
+    }
+
+    #[test]
+    fn shared_header_wrappers_use_mode_backing() {
+        let windows = vec![shared_window()];
+        let build_h = generate_state_header(&windows, &[], false);
+        assert!(build_h.contains("shared_cart_count().get()"), "{build_h}");
+        assert!(build_h.contains("shared_cart_count().set"), "{build_h}");
+        let dev_h = generate_state_header(&windows, &[], true);
+        assert!(dev_h.contains("__shared_cart_count.get()"), "{dev_h}");
+    }
+
+    #[test]
+    fn shared_header_wrappers_follow_module_namespace() {
+        let windows = vec![namespaced_shared_window()];
+        let build_h = generate_state_header(&windows, &[], false);
+        assert!(
+            build_h.contains("morph_mods::store_deadbeef::shared_cart_count().get()"),
+            "{build_h}"
+        );
+        let dev_h = generate_state_header(&windows, &[], true);
+        assert!(dev_h.contains("morph_mods::store_deadbeef::__shared_cart_count.get()"), "{dev_h}");
+    }
+
+    #[test]
+    fn instance_signals_skipped_in_header() {
+        let mut sv = HashMap::new();
+        sv.insert("getter".to_string(), "inst0_count".to_string());
+        sv.insert("setter".to_string(), "inst0_setCount".to_string());
+        sv.insert("init".to_string(), "0".to_string());
+        sv.insert("instance".to_string(), "1".to_string());
+        let window = IRWindow { state_vars: vec![sv], ..Default::default() };
+        let h = generate_state_header(&[window], &[], false);
+        assert!(!h.contains("inst0_count"), "instance hidden: {h}");
     }
 
     #[test]

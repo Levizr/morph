@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18,9 +19,15 @@ impl Default for WindowConfig {
     }
 }
 
-fn default_width() -> u32 { 800 }
-fn default_height() -> u32 { 600 }
-fn default_title() -> String { "Morph App".to_string() }
+const fn default_width() -> u32 {
+    800
+}
+const fn default_height() -> u32 {
+    600
+}
+fn default_title() -> String {
+    "Morph App".to_string()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuildConfig {
@@ -42,11 +49,21 @@ pub struct BuildConfig {
 
 impl Default for BuildConfig {
     fn default() -> Self {
-        Self { wayland: false, system_freetype: false, upx: true, upx_version: String::new(), cxx: String::new(), dev_cxx: String::new(), cmake: String::new() }
+        Self {
+            wayland: false,
+            system_freetype: false,
+            upx: true,
+            upx_version: String::new(),
+            cxx: String::new(),
+            dev_cxx: String::new(),
+            cmake: String::new(),
+        }
     }
 }
 
-fn default_true() -> bool { true }
+const fn default_true() -> bool {
+    true
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeConfig {
@@ -63,8 +80,12 @@ impl Default for RuntimeConfig {
     }
 }
 
-fn default_runtime_type() -> String { "cpp".to_string() }
-fn default_runtime_version() -> String { "0.1.0".to_string() }
+fn default_runtime_type() -> String {
+    "cpp".to_string()
+}
+fn default_runtime_version() -> String {
+    "0.1.0".to_string()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct NativeConfig {
@@ -118,18 +139,24 @@ pub struct MorphConfig {
     pub runtime: RuntimeConfig,
 }
 
-fn default_name() -> String { "my-app".to_string() }
-fn default_entry() -> String { "src/App.mx".to_string() }
-fn default_output() -> String { ".morph/output".to_string() }
-fn default_type_mode() -> String { "infer".to_string() }
+fn default_name() -> String {
+    "my-app".to_string()
+}
+fn default_entry() -> String {
+    "src/App.mx".to_string()
+}
+fn default_output() -> String {
+    ".morph/output".to_string()
+}
+fn default_type_mode() -> String {
+    "infer".to_string()
+}
 
 pub fn clean_app_name(name: &str) -> String {
     let mut out = String::with_capacity(name.len());
     for ch in name.chars() {
         if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
             out.push(ch);
-        } else if ch.is_whitespace() {
-            out.push('_');
         } else {
             out.push('_');
         }
@@ -139,7 +166,9 @@ pub fn clean_app_name(name: &str) -> String {
     let mut prev_us = false;
     for ch in out.chars() {
         if ch == '_' {
-            if !prev_us { cleaned.push('_'); }
+            if !prev_us {
+                cleaned.push('_');
+            }
             prev_us = true;
         } else {
             cleaned.push(ch);
@@ -147,7 +176,11 @@ pub fn clean_app_name(name: &str) -> String {
         }
     }
     let cleaned = cleaned.trim_matches('_').to_string();
-    if cleaned.is_empty() { "app".to_string() } else { cleaned }
+    if cleaned.is_empty() {
+        "app".to_string()
+    } else {
+        cleaned
+    }
 }
 
 /// Source extensions a project entry/scan may use (strict TS/TSX + Morph's .mx).
@@ -163,7 +196,7 @@ pub fn is_disallowed_js_ext(ext: &str) -> bool {
 
 /// Validate a file path's extension as a morph source entry. Returns a hard-error
 /// message when the extension is disallowed, or `None` when it is supported.
-pub fn validate_entry_ext(path: &std::path::Path) -> Result<(), String> {
+pub fn validate_entry_ext(path: &Path) -> Result<(), String> {
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
     if is_supported_source_ext(ext) {
         return Ok(());
@@ -182,7 +215,9 @@ pub fn validate_entry_ext(path: &std::path::Path) -> Result<(), String> {
     ))
 }
 
-fn default_renderer() -> String { "flash".to_string() }
+fn default_renderer() -> String {
+    "flash".to_string()
+}
 
 impl Default for MorphConfig {
     fn default() -> Self {
@@ -193,8 +228,8 @@ impl Default for MorphConfig {
             window: WindowConfig::default(),
             renderer: default_renderer(),
             type_mode: default_type_mode(),
-            dependencies: Default::default(),
-            cpp_sources: Default::default(),
+            dependencies: HashMap::default(),
+            cpp_sources: Vec::default(),
             native: NativeConfig::default(),
             node_bridge: false,
             build: BuildConfig::default(),
@@ -213,7 +248,7 @@ impl MorphConfig {
         Ok(cfg)
     }
 
-    pub fn from_str(s: &str) -> Result<Self> {
+    pub fn parse_str(s: &str) -> Result<Self> {
         Ok(serde_json::from_str(s)?)
     }
 
@@ -232,7 +267,10 @@ impl MorphConfig {
         semver::Version::parse(&self.runtime.version)
             .with_context(|| format!("invalid runtime version: {}", self.runtime.version))?;
         if self.runtime.runtime_type != "cpp" && self.runtime.runtime_type != "rust" {
-            anyhow::bail!("runtime.type must be 'cpp' or 'rust', got '{}'", self.runtime.runtime_type);
+            anyhow::bail!(
+                "runtime.type must be 'cpp' or 'rust', got '{}'",
+                self.runtime.runtime_type
+            );
         }
         Ok(())
     }
@@ -253,7 +291,7 @@ impl VersionFile {
         Ok(serde_json::from_str(&content)?)
     }
 
-    pub fn from_str(s: &str) -> Result<Self> {
+    pub fn parse_str(s: &str) -> Result<Self> {
         Ok(serde_json::from_str(s)?)
     }
 }
@@ -291,7 +329,7 @@ mod tests {
     #[test]
     fn parse_minimal_config() {
         let json = r#"{"name":"test-app"}"#;
-        let cfg = MorphConfig::from_str(json).unwrap();
+        let cfg = MorphConfig::parse_str(json).unwrap();
         assert_eq!(cfg.name, "test-app");
         assert_eq!(cfg.entry, "src/App.mx");
         assert_eq!(cfg.runtime.runtime_type, "cpp");
@@ -306,14 +344,14 @@ mod tests {
             "runtime": {"type": "cpp", "version": "0.2.0"},
             "window": {"width": 1024, "height": 768, "title": "Hello"}
         }"#;
-        let cfg = MorphConfig::from_str(json).unwrap();
+        let cfg = MorphConfig::parse_str(json).unwrap();
         assert_eq!(cfg.runtime.version, "0.2.0");
         assert_eq!(cfg.window.width, 1024);
     }
 
     #[test]
     fn parse_types_mode() {
-        let cfg = MorphConfig::from_str(r#"{"types":"strict"}"#).unwrap();
+        let cfg = MorphConfig::parse_str(r#"{"types":"strict"}"#).unwrap();
         assert_eq!(cfg.type_mode, "strict");
         let roundtrip: MorphConfig =
             serde_json::from_str(&serde_json::to_string(&cfg).unwrap()).unwrap();
@@ -326,7 +364,7 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed["runtime"]["type"], "cpp");
         assert_eq!(parsed["runtime"]["version"], "0.1.0");
-        let roundtrip = MorphConfig::from_str(&json).unwrap();
+        let roundtrip = MorphConfig::parse_str(&json).unwrap();
         assert_eq!(roundtrip.runtime.version, "0.1.0");
     }
 }

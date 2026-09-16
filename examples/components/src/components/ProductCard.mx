@@ -1,0 +1,19 @@
+import { morphState } from 'morph'
+import { cart, setCart, clearCart } from './ShopStore.mx'
+
+export function ProductCard(props: { name: string, price: number, onAdd: (name: string) => void }) {
+  const [qty, setQty] = morphState(0)
+  clearCart.on(() => setQty(0))
+  function add() {
+    setQty(qty + 1)
+    setCart(cart + props.price)
+    props.onAdd(props.name)
+  }
+  return (
+    <div className="card">
+      <text className="card-title">{props.name}</text>
+      <text>${props.price} in cart: {qty}</text>
+      <button onClick={() => add()}>Add to cart</button>
+    </div>
+  )
+}

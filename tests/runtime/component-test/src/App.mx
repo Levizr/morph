@@ -1,0 +1,27 @@
+import { morphState } from 'morph'
+import Hero from './components/Hero.mx'
+import { Counter } from './components/Counter.mx'
+import { Badge } from './components/Badge.mx'
+import { total, setTotal } from './components/Store.mx'
+import './style.css'
+
+export const windowConfig = { title: "Component Test", width: 800, height: 600 }
+
+function announce(next: number) {
+  console.log(next)
+}
+
+export default function App() {
+  const [last, setLast] = morphState(0)
+  return (
+    <body>
+      <Hero title="Components work" />
+      <Counter label="Ones" step={1} onStep={(next) => setLast(next)} />
+      <Counter label="Fives" step={5} onStep={announce} />
+      <Badge />
+      <text>Last step: {last}</text>
+      <text>Shared total: {total}</text>
+      <button onClick={() => setTotal(total + 1)}>Bump shared</button>
+    </body>
+  )
+}

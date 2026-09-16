@@ -1,0 +1,12 @@
+import { morphState } from 'morph'
+
+export default function Hero(props: { title: string }) {
+  const [count, setCount] = morphState(0)
+  return (
+    <div className="hero">
+      <text className="hero-title">{props.title}</text>
+      <text>Clicks: {count}</text>
+      <button onClick={() => setCount(count + 1)}>Cheer</button>
+    </div>
+  )
+}

@@ -2,20 +2,19 @@ use anyhow::{bail, Result};
 use std::path::Path;
 
 pub(crate) mod ast_types;
-pub(crate) mod js_walker;
 mod css_parser;
+pub(crate) mod js_walker;
 pub mod linter;
+pub mod resolve;
 
 pub use ast_types::*;
 pub use linter::{check as lint_check, lint};
+pub use resolve::{resolve_graph, resolve_import_path, ModuleGraph, ResolvedModule};
 
 /// Parse an .mx file (which is TSX) and return a structured representation.
 pub fn parse_mx_file(path: &Path) -> Result<MxSource> {
     let source = std::fs::read_to_string(path)?;
-    let filename = path
-        .file_name()
-        .map(|f| f.to_string_lossy().to_string())
-        .unwrap_or_default();
+    let filename = path.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
     parse_mx_str(&source, &filename)
 }
 
@@ -30,7 +29,7 @@ pub fn parse_mx_str(source: &str, filename: &str) -> Result<MxSource> {
         bail!("Parser panicked on {filename}");
     }
     if !ret.diagnostics.is_empty() {
-        let msgs: Vec<String> = ret.diagnostics.iter().map(|d| d.to_string()).collect();
+        let msgs: Vec<String> = ret.diagnostics.iter().map(ToString::to_string).collect();
         bail!("Parse errors in {filename}: {}", msgs.join("; "));
     }
 
@@ -45,6 +44,8 @@ pub fn parse_mx_str(source: &str, filename: &str) -> Result<MxSource> {
         imports: walker.imports,
         window_config: walker.window_config,
         components: walker.components,
+        shared_bindings: walker.shared_bindings,
+        event_bindings: walker.event_bindings,
         state_vars: walker.state_vars,
         effects: walker.effects,
         inner_functions: walker.inner_functions,
@@ -57,6 +58,6 @@ pub fn parse_mx_str(source: &str, filename: &str) -> Result<MxSource> {
 }
 
 /// Parse external CSS text into style rules + `@keyframes`.
-pub fn parse_css(source: &str) -> Result<ast_types::CssData> {
+pub fn parse_css(source: &str) -> Result<CssData> {
     css_parser::parse_css(source)
 }

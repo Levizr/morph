@@ -358,6 +358,26 @@
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
+      },
+      {
+        "title": "How to Build Reusable Components in Morph",
+        "slug": "elements/components",
+        "file": "elements/components",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "How to build reusable .mx components in Morph: import components, pass props including functions, per-instance state, exported morphShared module stores, and morphEvent messaging.",
+        "keywords": [
+          "morph components",
+          "morph reusable components",
+          "morph props",
+          "morphShared",
+          "morphEvent",
+          "morph component state"
+        ],
+        "lastUpdated": "2026-09-15",
+        "publishedAt": "2026-09-15",
+        "priority": 0.8,
+        "changefreq": "weekly"
       }
     ]
   },
@@ -615,6 +635,181 @@
         "publishedAt": "2026-09-08",
         "priority": 0.8,
         "changefreq": "weekly"
+      }
+    ]
+  },
+  {
+    "category": "API Reference",
+    "items": [
+      {
+        "title": "Morph API Reference Overview",
+        "slug": "api/overview",
+        "file": "api/overview",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Overview of all Morph APIs: morphState, morphShared, morphEvent, morphEffect, scope rules, and the module-path identity model.",
+        "keywords": [
+          "morph api reference",
+          "morphState morphShared morphEvent",
+          "morph api overview"
+        ],
+        "lastUpdated": "2026-09-16",
+        "publishedAt": "2026-09-16",
+        "priority": "0.9",
+        "changefreq": "monthly"
+      },
+      {
+        "title": "morphState API Reference",
+        "slug": "api/morph-state",
+        "file": "api/morphState",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "morphState API: local per-instance reactive component state, updater forms, typing, and rules.",
+        "keywords": [
+          "morphState api",
+          "morph local state",
+          "morph component state"
+        ],
+        "lastUpdated": "2026-09-16",
+        "publishedAt": "2026-09-16",
+        "priority": "0.9",
+        "changefreq": "monthly"
+      },
+      {
+        "title": "morphShared API Reference",
+        "slug": "api/morph-shared",
+        "file": "api/morphShared",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "morphShared API: module-scoped global shared state across components without providers.",
+        "keywords": [
+          "morphShared api",
+          "morph shared state",
+          "morph global store"
+        ],
+        "lastUpdated": "2026-09-16",
+        "publishedAt": "2026-09-16",
+        "priority": "0.9",
+        "changefreq": "monthly"
+      },
+      {
+        "title": "morphEvent API Reference",
+        "slug": "api/morph-event",
+        "file": "api/morphEvent",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "morphEvent API: typed fire-and-forget event channels with emit and on.",
+        "keywords": [
+          "morphEvent api",
+          "morph events",
+          "morph event channels"
+        ],
+        "lastUpdated": "2026-09-16",
+        "publishedAt": "2026-09-16",
+        "priority": "0.9",
+        "changefreq": "monthly"
+      },
+      {
+        "title": "morphEffect API Reference",
+        "slug": "api/morph-effect",
+        "file": "api/morphEffect",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "morphEffect API: side effects with dependencies and cleanup functions.",
+        "keywords": [
+          "morphEffect api",
+          "morph effects",
+          "morph side effects"
+        ],
+        "lastUpdated": "2026-09-16",
+        "publishedAt": "2026-09-16",
+        "priority": "0.9",
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Which Morph API Do I Need",
+        "slug": "api/faq/choosing",
+        "file": "api/faq/choosing",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Which Morph API to use: choosing between morphState, morphShared, morphEvent, and morphEffect with examples.",
+        "keywords": [
+          "which morph api",
+          "morphState vs morphShared",
+          "morphEvent vs shared state"
+        ],
+        "lastUpdated": "2026-09-16",
+        "publishedAt": "2026-09-16",
+        "priority": "0.9",
+        "changefreq": "monthly"
+      },
+      {
+        "title": "morphState FAQ",
+        "slug": "api/faq/morph-state",
+        "file": "api/faq/morphState",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Frequently asked questions about morphState: re-renders, updater forms, hook order, per-instance state.",
+        "keywords": [
+          "morphState faq",
+          "morph state not updating",
+          "morph hooks rules"
+        ],
+        "lastUpdated": "2026-09-16",
+        "publishedAt": "2026-09-16",
+        "priority": "0.9",
+        "changefreq": "monthly"
+      },
+      {
+        "title": "morphShared FAQ",
+        "slug": "api/faq/morph-shared",
+        "file": "api/faq/morphShared",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Frequently asked questions about morphShared: identity, ambiguity errors, subscriptions, store placement.",
+        "keywords": [
+          "morphShared faq",
+          "morph shared state questions",
+          "morph ambiguous import"
+        ],
+        "lastUpdated": "2026-09-16",
+        "publishedAt": "2026-09-16",
+        "priority": "0.9",
+        "changefreq": "monthly"
+      },
+      {
+        "title": "morphEvent FAQ",
+        "slug": "api/faq/morph-event",
+        "file": "api/faq/morphEvent",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Frequently asked questions about morphEvent: events vs state, missed emissions, handler order, top-level on.",
+        "keywords": [
+          "morphEvent faq",
+          "morph events questions",
+          "morph emit on"
+        ],
+        "lastUpdated": "2026-09-16",
+        "publishedAt": "2026-09-16",
+        "priority": "0.9",
+        "changefreq": "monthly"
+      },
+      {
+        "title": "morphEffect FAQ",
+        "slug": "api/faq/morph-effect",
+        "file": "api/faq/morphEffect",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Frequently asked questions about morphEffect: run timing, cleanup, infinite loops, effects vs handlers.",
+        "keywords": [
+          "morphEffect faq",
+          "morph effect loop",
+          "morph effect cleanup"
+        ],
+        "lastUpdated": "2026-09-16",
+        "publishedAt": "2026-09-16",
+        "priority": "0.9",
+        "changefreq": "monthly"
       }
     ]
   },

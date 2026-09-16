@@ -1,0 +1,19 @@
+import { morphState } from 'morph'
+import { total, setTotal, resetEvent } from './Store.mx'
+
+export function Counter(props: { label: string, step: number, onStep: (next: number) => void }) {
+  const [count, setCount] = morphState(0)
+  resetEvent.on(() => setCount(0))
+  function advance() {
+    const next = count + props.step
+    setCount(next)
+    setTotal(total + props.step)
+    props.onStep(next)
+  }
+  return (
+    <div className="counter">
+      <text>{props.label}: {count}</text>
+      <button onClick={() => advance()}>+{props.step}</button>
+    </div>
+  )
+}

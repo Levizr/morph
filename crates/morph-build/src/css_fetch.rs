@@ -19,24 +19,24 @@ pub struct CssFetcher {
 }
 
 impl CssFetcher {
-    pub fn new(cache_dir: PathBuf) -> Self {
+    pub const fn new(cache_dir: PathBuf) -> Self {
         Self { cache_dir, silent: false }
     }
 
-    pub fn silent(mut self) -> Self {
+    pub const fn silent(mut self) -> Self {
         self.silent = true;
         self
     }
 
     fn warn(&self, msg: &str) {
         if !self.silent {
-            eprintln!("  ⚠ {}", msg);
+            eprintln!("  ⚠ {msg}");
         }
     }
 
     fn note(&self, msg: &str) {
         if !self.silent {
-            eprintln!("  … {}", msg);
+            eprintln!("  … {msg}");
         }
     }
 
@@ -47,7 +47,7 @@ impl CssFetcher {
         if let Ok(text) = std::fs::read_to_string(&cached) {
             return Some(text);
         }
-        self.note(&format!("Fetching {}", url));
+        self.note(&format!("Fetching {url}"));
         let bytes = http_get(url, USER_AGENT).ok()?;
         let css = String::from_utf8_lossy(&bytes).into_owned();
         if std::fs::create_dir_all(&self.cache_dir).is_ok() {
@@ -79,8 +79,7 @@ impl CssFetcher {
             .rsplit('.')
             .next()
             .filter(|e| e.len() <= 5 && !e.contains('/'))
-            .map(|e| format!(".{}", e))
-            .unwrap_or_else(|| ".bin".to_string());
+            .map_or_else(|| ".bin".to_string(), |e| format!(".{e}"));
         let path = self.cache_dir.join(format!("{}{}", &md5_hex(url)[..12], ext));
         if path.exists() {
             return Some(path);
@@ -130,9 +129,9 @@ fn http_get(url: &str, user_agent: &str) -> Result<Vec<u8>, String> {
     let out = std::process::Command::new("curl")
         .args(["-fsSL", "--max-time", "10", "-A", user_agent, url])
         .output()
-        .map_err(|e| format!("failed to fetch {} — {}", url, e))?;
+        .map_err(|e| format!("failed to fetch {url} — {e}"))?;
     if !out.status.success() {
-        return Err(format!("failed to fetch {} (curl error)", url));
+        return Err(format!("failed to fetch {url} (curl error)"));
     }
     Ok(out.stdout)
 }
@@ -159,7 +158,7 @@ pub fn md5_hex(input: &str) -> String {
     for (i, slot) in k.iter_mut().enumerate() {
         *slot = ((f64::from(i as u32 + 1).sin().abs() * 4294967296.0) as u64 & 0xffff_ffff) as u32;
     }
-    for chunk in msg.chunks_exact(64) {
+    for chunk in msg.as_chunks::<64>().0 {
         let mut m = [0u32; 16];
         for (i, w) in m.iter_mut().enumerate() {
             *w = u32::from_le_bytes([
@@ -193,7 +192,7 @@ pub fn md5_hex(input: &str) -> String {
     let mut hex = String::with_capacity(32);
     for word in state {
         for byte in word.to_le_bytes() {
-            hex.push_str(&format!("{:02x}", byte));
+            hex.push_str(&format!("{byte:02x}"));
         }
     }
     hex

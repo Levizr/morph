@@ -1,0 +1,12 @@
+import { morphState } from 'morph'
+
+export default function Hero(props: { title: string, subtitle: string }) {
+  const [cheers, setCheers] = morphState(0)
+  return (
+    <div className="hero">
+      <text className="hero-title">{props.title}</text>
+      <text className="hero-subtitle">{props.subtitle}</text>
+      <button onClick={() => setCheers(cheers + 1)}>Cheers: {cheers}</button>
+    </div>
+  )
+}

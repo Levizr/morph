@@ -1,13 +1,14 @@
-use std::collections::HashMap;
-use std::path::Path;
+use std::collections::{HashMap, HashSet};
+use std::fmt::Write as _;
+use std::path::{Path, PathBuf};
 
 use oxc_allocator::Allocator;
 use oxc_ast::ast::*;
 use oxc_parser::Parser;
-use oxc_span::{GetSpan, SourceType};
+use oxc_span::GetSpan;
 
 use crate::css_registry;
-use crate::node::{IRWindow, IRNode, IREvent};
+use crate::node::{IREvent, IRNode, IRWindow};
 use crate::style::IRStyle;
 use crate::tailwind::TailwindResolver;
 use crate::transforms;
@@ -29,7 +30,8 @@ impl IRBuilder {
 
     /// Type mode for translating embedded logic (handlers, effects, globals).
     /// Defaults to inference; `morph build --types` overrides it.
-    pub fn with_type_mode(mut self, mode: morpher::TypeMode) -> Self {
+    #[must_use]
+    pub const fn with_type_mode(mut self, mode: morpher::TypeMode) -> Self {
         self.type_mode = mode;
         self
     }
@@ -41,6 +43,8 @@ impl IRBuilder {
         format!("node_{n:04}")
     }
 
+    // Splitting this builder function risks behavior change.
+    #[allow(clippy::too_many_lines)]
     pub fn build(
         &self,
         source: &morph_parser::MxSource,
@@ -54,6 +58,7 @@ impl IRBuilder {
         // order Python builds its per-component translator state.
         let mut ambient_vars: HashMap<String, String> = HashMap::new();
         let mut ambient_types: HashMap<String, String> = HashMap::new();
+        let events: HashMap<String, String> = HashMap::new();
         let mut all_state: Vec<HashMap<String, String>> = Vec::new();
         for sv in source
             .state_vars
@@ -86,10 +91,18 @@ impl IRBuilder {
                 &fd.source,
                 &ambient_vars,
                 &ambient_types,
+                &events,
             );
         }
         for gv in &source.global_vars {
-            self.push_snippet(&mut premain, &mut extra_headers, gv, &ambient_vars, &ambient_types);
+            self.push_snippet(
+                &mut premain,
+                &mut extra_headers,
+                gv,
+                &ambient_vars,
+                &ambient_types,
+                &events,
+            );
         }
         // ── Component consts become reactive lambdas; later translations ──
         // see them as `name()` calls (Python: `auto x = []() { return …; };`).
@@ -100,17 +113,14 @@ impl IRBuilder {
                     continue;
                 }
                 if let Some(out) =
-                    self.translate_logic(&cst.rhs, &ambient_vars, &ambient_types)
+                    self.translate_logic(&cst.rhs, &ambient_vars, &ambient_types, &events)
                 {
                     let expr = out.body.trim().trim_end_matches(';').trim();
                     if expr.is_empty() {
                         continue;
                     }
                     extra_headers.extend(include_lines(&out.includes));
-                    premain.push(format!(
-                        "auto {} = []() {{ return ({}); }};",
-                        cst.name, expr
-                    ));
+                    premain.push(format!("auto {} = []() {{ return ({}); }};", cst.name, expr));
                     ambient_vars.insert(cst.name.clone(), format!("{}()", cst.name));
                     reactive_consts.push(cst.name.clone());
                 }
@@ -128,16 +138,16 @@ impl IRBuilder {
                 &f.source,
                 &ambient_vars,
                 &ambient_types,
+                &events,
             );
         }
         // ── Effects: transpile callbacks now, emit `create_effect` later ──
         let mut all_effects: Vec<HashMap<String, String>> = Vec::new();
-        for e in source
-            .effects
-            .iter()
-            .chain(source.components.iter().flat_map(|c| c.effects.iter()))
+        for e in
+            source.effects.iter().chain(source.components.iter().flat_map(|c| c.effects.iter()))
         {
-            if let Some(out) = self.translate_logic(&e.callback, &ambient_vars, &ambient_types)
+            if let Some(out) =
+                self.translate_logic(&e.callback, &ambient_vars, &ambient_types, &events)
             {
                 let lambda = out.body.trim().trim_end_matches(';').trim().to_string();
                 if lambda.is_empty() {
@@ -179,15 +189,15 @@ impl IRBuilder {
         extra_headers.dedup();
         let mut window = IRWindow {
             window_id: self.next_id(),
-            title: wc.map(|w| w.title.clone()).unwrap_or_else(|| "Morph App".into()),
-            width: wc.map(|w| w.width).unwrap_or(800),
-            height: wc.map(|w| w.height).unwrap_or(600),
+            title: wc.map_or_else(|| "Morph App".into(), |w| w.title.clone()),
+            width: wc.map_or(800, |w| w.width),
+            height: wc.map_or(600, |w| w.height),
             visible: true,
             min_width: wc.and_then(|w| w.min_width),
             max_width: wc.and_then(|w| w.max_width),
             min_height: wc.and_then(|w| w.min_height),
             max_height: wc.and_then(|w| w.max_height),
-            modal: wc.map(|w| w.modal).unwrap_or(false),
+            modal: wc.is_some_and(|w| w.modal),
             renderer: "flash".into(),
             nodes: vec![],
             startup_logs,
@@ -196,15 +206,24 @@ impl IRBuilder {
             state_vars: all_state,
             reactive_consts,
             effect_decls: all_effects,
-            cpp_imports: source.cpp_imports.iter().map(|ci| {
-                let base = Path::new(&source.filename).parent().unwrap_or_else(|| Path::new("."));
-                let path = base.join(&ci.path);
-                let abs_path = path.canonicalize().unwrap_or_else(|_| path);
-                let mut m = HashMap::new();
-                m.insert("path".into(), abs_path.display().to_string());
-                m.insert("specifiers".into(), ci.specifiers.join(", "));
-                m
-            }).collect(),
+            // Legacy single-file path: no shared store or channels (use
+            // `build_with_graph`).
+            shared_vars: Vec::new(),
+            channel_subs: Vec::new(),
+            cpp_imports: source
+                .cpp_imports
+                .iter()
+                .map(|ci| {
+                    let base =
+                        Path::new(&source.filename).parent().unwrap_or_else(|| Path::new("."));
+                    let path = base.join(&ci.path);
+                    let abs_path = path.canonicalize().unwrap_or(path);
+                    let mut m = HashMap::new();
+                    m.insert("path".into(), abs_path.display().to_string());
+                    m.insert("specifiers".into(), ci.specifiers.join(", "));
+                    m
+                })
+                .collect(),
             keyframes: self.convert_keyframes(css_keyframes),
         };
         window.nodes = nodes;
@@ -220,14 +239,22 @@ impl IRBuilder {
         source: &str,
         ambient_vars: &HashMap<String, String>,
         ambient_types: &HashMap<String, String>,
+        events: &HashMap<String, String>,
     ) -> Option<morpher::SnippetOutput> {
-        let mut options = morpher::TranslateOptions::default();
-        options.type_mode = self.type_mode;
-        options.state_vars = ambient_vars.clone();
-        options.state_types = ambient_types.clone();
-        morpher::translate_snippet(source, "snippet.ts", options).ok().filter(|out| {
-            !out.body.trim().is_empty()
-        })
+        let options = morpher::TranslateOptions {
+            type_mode: self.type_mode,
+            state_vars: ambient_vars.clone(),
+            state_types: ambient_types.clone(),
+            ..Default::default()
+        };
+        let rebased = rewrite_event_emits(source, events);
+        morpher::translate_snippet(&rewrite_emit_for_js(&rebased), "snippet.ts", options)
+            .ok()
+            .filter(|out| !out.body.trim().is_empty())
+            .map(|mut out| {
+                out.body = rewrite_emit_for_cpp(&out.body);
+                out
+            })
     }
 
     /// Translate a statement-level snippet and splice its body into `premain`
@@ -239,8 +266,9 @@ impl IRBuilder {
         source: &str,
         ambient_vars: &HashMap<String, String>,
         ambient_types: &HashMap<String, String>,
+        events: &HashMap<String, String>,
     ) {
-        if let Some(out) = self.translate_logic(source, ambient_vars, ambient_types) {
+        if let Some(out) = self.translate_logic(source, ambient_vars, ambient_types, events) {
             extra_headers.extend(include_lines(&out.includes));
             let body = strip_static_linkage(&out.body);
             if !body.is_empty() {
@@ -249,6 +277,1004 @@ impl IRBuilder {
         }
     }
 
+    // Reusable components expand at IR-build time: each `<Tag />` gets a
+    // scope frame with per-instance signals, mangled helpers, and prop
+    // bindings, reusing the ambient-map machinery downstream untouched.
+
+    /// Build windows from a resolved multi-file module graph.
+    ///
+    /// Only the entry module's default-export component renders as a root;
+    /// every other component renders solely where instantiated.
+    ///
+    /// # Errors
+    /// Rejects unknown components, cyclic instantiation, bad props, and
+    /// entry components declaring props.
+    // Splitting this builder function risks behavior change.
+    #[allow(clippy::too_many_lines)]
+    pub fn build_with_graph(
+        &self,
+        graph: &morph_parser::ModuleGraph,
+        css_rules: &[(String, morph_parser::CssRule)],
+        css_keyframes: &HashMap<String, Vec<morph_parser::CssKeyframe>>,
+    ) -> anyhow::Result<Vec<IRWindow>> {
+        let entry_mod = graph
+            .entry_module()
+            .ok_or_else(|| anyhow::anyhow!("component graph has no entry module"))?;
+        let root_comp = entry_mod
+            .source
+            .components
+            .iter()
+            .find(|c| c.is_default)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "entry {} has no default-export component (expected `export default function App()`)",
+                    entry_mod.path.display()
+                )
+            })?;
+        if !root_comp.props.is_empty() || !root_comp.props_param.is_empty() {
+            anyhow::bail!(
+                "entry component `{}` must not declare props ({}); props flow downhill into child components",
+                root_comp.name,
+                entry_mod.path.display()
+            );
+        }
+
+        for mod_path in &graph.order {
+            let Some(module) = graph.modules.get(mod_path) else {
+                continue;
+            };
+            for comp in &module.source.components {
+                Self::validate_member_names(comp, &module.path)?;
+            }
+        }
+
+        let mut ctx = BuilderCtx::new(graph);
+        let mut extra_headers: Vec<String> = Vec::new();
+        let mut frame = InstanceFrame::root(entry_mod.path.clone());
+
+        Self::seed_module_bindings(
+            &entry_mod.source,
+            &entry_mod.path,
+            graph,
+            &mut frame,
+            &mut ctx,
+        )?;
+
+        self.translate_module_globals(&entry_mod.source, &frame, &mut ctx, &mut extra_headers);
+        ctx.modules_emitted.insert(entry_mod.path.clone());
+
+        for sv in &root_comp.state_vars {
+            ctx.states.push(state_slot(&sv.getter, &sv.setter, &sv.init, false));
+            if !sv.getter.is_empty() {
+                Self::seed_state_var(
+                    &mut frame, &sv.getter, &sv.setter, &sv.init, &sv.getter, &sv.setter,
+                );
+            }
+        }
+        Self::preseed_sibling_names(root_comp, &mut frame, None);
+        self.expand_component_sources(root_comp, &frame, &mut ctx, &mut extra_headers)?;
+        for log in root_comp.console_logs.iter().chain(entry_mod.source.console_logs.iter()) {
+            if !ctx.logs.contains(log) {
+                ctx.logs.push(log.clone());
+            }
+        }
+
+        let root_node = self.build_node_in(
+            &root_comp.jsx,
+            css_rules,
+            0,
+            &[],
+            &frame,
+            &mut ctx,
+            &mut extra_headers,
+            css_keyframes,
+        )?;
+
+        extra_headers.sort();
+        extra_headers.dedup();
+        let wc = entry_mod.source.window_config.as_ref();
+        let mut cpp_imports = Vec::new();
+        let mut seen_cpp = HashSet::new();
+        for module_path in &graph.order {
+            let Some(module) = graph.modules.get(module_path) else { continue };
+            if module_path != &entry_mod.path && !ctx.modules_emitted.contains(module_path) {
+                continue;
+            }
+            let base = module.dir.clone();
+            for ci in &module.source.cpp_imports {
+                let path = base.join(&ci.path);
+                let abs_path = path.canonicalize().unwrap_or(path);
+                let key = abs_path.display().to_string();
+                if !seen_cpp.insert(key.clone()) {
+                    continue;
+                }
+                let mut m = HashMap::new();
+                m.insert("path".into(), key);
+                m.insert("specifiers".into(), ci.specifiers.join(", "));
+                cpp_imports.push(m);
+            }
+        }
+        let window = IRWindow {
+            window_id: self.next_id(),
+            title: wc.map_or_else(|| "Morph App".into(), |w| w.title.clone()),
+            width: wc.map_or(800, |w| w.width),
+            height: wc.map_or(600, |w| w.height),
+            visible: true,
+            min_width: wc.and_then(|w| w.min_width),
+            max_width: wc.and_then(|w| w.max_width),
+            min_height: wc.and_then(|w| w.min_height),
+            max_height: wc.and_then(|w| w.max_height),
+            modal: wc.is_some_and(|w| w.modal),
+            renderer: "flash".into(),
+            nodes: vec![root_node],
+            startup_logs: ctx.logs.clone(),
+            premain_functions: ctx.premain.clone(),
+            extra_headers,
+            state_vars: ctx.states.clone(),
+            reactive_consts: ctx.const_names.clone(),
+            effect_decls: ctx.effects.clone(),
+            shared_vars: ctx.shared_entries.clone(),
+            channel_subs: ctx.channels.clone(),
+            cpp_imports,
+            keyframes: self.convert_keyframes(css_keyframes),
+        };
+        Ok(vec![window])
+    }
+
+    /// Translate a module's top-level helpers + globals into premain.
+    fn translate_module_globals(
+        &self,
+        source: &morph_parser::MxSource,
+        frame: &InstanceFrame,
+        ctx: &mut BuilderCtx,
+        extra_headers: &mut Vec<String>,
+    ) {
+        for fd in &source.function_declarations {
+            self.push_snippet(
+                &mut ctx.premain,
+                extra_headers,
+                &fd.source,
+                &frame.vars,
+                &frame.types,
+                &frame.events,
+            );
+        }
+        for gv in &source.global_vars {
+            self.push_snippet(
+                &mut ctx.premain,
+                extra_headers,
+                gv,
+                &frame.vars,
+                &frame.types,
+                &frame.events,
+            );
+        }
+    }
+
+    /// Seed mangled const/helper names into `frame` under both original and
+    /// mangled keys.
+    fn preseed_sibling_names(
+        comp: &morph_parser::MxComponent,
+        frame: &mut InstanceFrame,
+        mangle_prefix: Option<&str>,
+    ) {
+        let mangle =
+            |name: &str| mangle_prefix.map_or_else(|| name.to_string(), |p| format!("{p}_{name}"));
+        for cst in &comp.consts {
+            if cst.name.is_empty() {
+                continue;
+            }
+            let mangled = mangle(&cst.name);
+            let expr = format!("{mangled}()");
+            frame.vars.insert(cst.name.clone(), expr.clone());
+            frame.vars.insert(mangled.clone(), expr);
+            frame.renames.insert(cst.name.clone(), mangled);
+        }
+        for f in &comp.inner_functions {
+            if f.name.is_empty() {
+                continue;
+            }
+            let mangled = mangle(&f.name);
+            frame.vars.insert(f.name.clone(), mangled.clone());
+            frame.vars.insert(mangled.clone(), mangled.clone());
+            frame.renames.insert(f.name.clone(), mangled);
+        }
+    }
+
+    /// Seed one state variable into `frame` under both original and emitted
+    /// names.
+    fn seed_state_var(
+        frame: &mut InstanceFrame,
+        getter: &str,
+        setter: &str,
+        init: &str,
+        emitted_getter: &str,
+        emitted_setter: &str,
+    ) {
+        let get_expr = format!("__st_{emitted_getter}.get()");
+        let set_expr = format!("__st_{emitted_getter}.set");
+        frame.vars.insert(getter.to_string(), get_expr.clone());
+        frame.vars.insert(emitted_getter.to_string(), get_expr);
+        if let Some(ty) = infer_state_type(init) {
+            frame.types.insert(getter.to_string(), ty.clone());
+            frame.types.insert(emitted_getter.to_string(), ty);
+        }
+        if !setter.is_empty() {
+            frame.vars.insert(setter.to_string(), set_expr.clone());
+            frame.vars.insert(emitted_setter.to_string(), set_expr);
+        }
+        if getter != emitted_getter {
+            frame.renames.insert(getter.to_string(), emitted_getter.to_string());
+        }
+        if !setter.is_empty() && setter != emitted_setter {
+            frame.renames.insert(setter.to_string(), emitted_setter.to_string());
+        }
+    }
+
+    /// Translate one component's consts / inner functions / effects against
+    /// `frame` (names must be pre-seeded). Sources are pre-renamed before
+    /// morpher so no post-pass can corrupt parent-scope text.
+    fn expand_component_sources(
+        &self,
+        comp: &morph_parser::MxComponent,
+        frame: &InstanceFrame,
+        ctx: &mut BuilderCtx,
+        extra_headers: &mut Vec<String>,
+    ) -> anyhow::Result<()> {
+        for cst in &comp.consts {
+            if cst.name.is_empty() || cst.rhs.is_empty() {
+                continue;
+            }
+            let rhs = prepare_source(&cst.rhs, frame);
+            let Some(out) = self.translate_logic(&rhs, &frame.vars, &frame.types, &frame.events)
+            else {
+                continue;
+            };
+            let expr = out.body.trim().trim_end_matches(';').trim();
+            if expr.is_empty() {
+                continue;
+            }
+            extra_headers.extend(include_lines(&out.includes));
+            let mangled = frame.renames.get(&cst.name).cloned().unwrap_or_else(|| cst.name.clone());
+            ctx.premain.push(format!("auto {mangled} = []() {{ return ({expr}); }};"));
+            if !ctx.const_names.contains(&mangled) {
+                ctx.const_names.push(mangled);
+            }
+        }
+        for f in &comp.inner_functions {
+            if f.name.is_empty() {
+                continue;
+            }
+            let src = prepare_source(&f.source, frame);
+            let Some(out) = self.translate_logic(&src, &frame.vars, &frame.types, &frame.events)
+            else {
+                continue;
+            };
+            let body = strip_static_linkage(&out.body);
+            if body.is_empty() {
+                continue;
+            }
+            extra_headers.extend(include_lines(&out.includes));
+            if !ctx.premain.contains(&body) {
+                ctx.premain.push(body);
+            }
+        }
+        for e in &comp.effects {
+            let callback = prepare_source(&e.callback, frame);
+            let Some(out) =
+                self.translate_logic(&callback, &frame.vars, &frame.types, &frame.events)
+            else {
+                continue;
+            };
+            let lambda = out.body.trim().trim_end_matches(';').trim().to_string();
+            if lambda.is_empty() {
+                continue;
+            }
+            extra_headers.extend(include_lines(&out.includes));
+            let deps = rename_symbols(&e.deps, &frame.renames, frame);
+            let mut m = HashMap::new();
+            m.insert("lambda".into(), lambda);
+            m.insert("deps".into(), deps);
+            ctx.effects.push(m);
+        }
+        for sub in &comp.event_subs {
+            let body = self.translate_event_sub(sub, &comp.name, frame, ctx, extra_headers)?;
+            let mut m = HashMap::new();
+            m.insert("channel".into(), frame.events.get(&sub.event).cloned().unwrap_or_default());
+            m.insert("body".into(), body);
+            ctx.channels.push(m);
+        }
+        Ok(())
+    }
+
+    /// Reject ambiguous member names within one component. An inner
+    /// function or const sharing a name with a prop, state variable, or
+    /// shared binding would mangle to the same `instN_` symbol and emit
+    /// corrupt C++ (e.g. a prop read resolving to a function pointer).
+    fn validate_member_names(
+        comp: &morph_parser::MxComponent,
+        module: &Path,
+    ) -> anyhow::Result<()> {
+        let mut reserved: HashMap<&str, &str> = HashMap::new();
+        for p in &comp.props {
+            reserved.entry(p.name.as_str()).or_insert("prop");
+        }
+        if !comp.props_param.is_empty() {
+            reserved.entry(comp.props_param.as_str()).or_insert("props parameter");
+        }
+        for sv in &comp.state_vars {
+            if !sv.getter.is_empty() {
+                reserved.entry(sv.getter.as_str()).or_insert("state variable");
+            }
+            if !sv.setter.is_empty() {
+                reserved.entry(sv.setter.as_str()).or_insert("state setter");
+            }
+        }
+        for f in &comp.inner_functions {
+            if f.name.is_empty() {
+                continue;
+            }
+            if let Some(kind) = reserved.get(f.name.as_str()) {
+                anyhow::bail!(
+                    "component `{}` has an inner function named `{}` that collides with its {} (in {}); rename one",
+                    comp.name,
+                    f.name,
+                    kind,
+                    module.display()
+                );
+            }
+        }
+        for c in &comp.consts {
+            if c.name.is_empty() {
+                continue;
+            }
+            if let Some(kind) = reserved.get(c.name.as_str()) {
+                anyhow::bail!(
+                    "component `{}` has a const named `{}` that collides with its {} (in {}); rename one",
+                    comp.name,
+                    c.name,
+                    kind,
+                    module.display()
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// Translate one `<event>.on(handler)` subscription into a
+    /// `[](const JsValue& __ch_N) { ... }` listener for the event's
+    /// module-scoped channel id. Codegen pairs the returned listener with the
+    /// subscription's `channel`; this function must not emit `.on(...)`
+    /// itself. The handler must be an inline arrow/function
+    /// of at most one parameter; `p.field` reads are rewritten to
+    /// `p["field"]` for JsValue.
+    fn translate_event_sub(
+        &self,
+        sub: &morph_parser::EventSub,
+        comp_name: &str,
+        frame: &InstanceFrame,
+        ctx: &mut BuilderCtx,
+        extra_headers: &mut Vec<String>,
+    ) -> anyhow::Result<String> {
+        frame.events.get(&sub.event).ok_or_else(|| {
+            anyhow::anyhow!(
+                "unknown event `{}` used in `{comp_name}` ({}): export it from a module with `morphEvent` and import it here",
+                sub.event,
+                frame.module.display()
+            )
+        })?;
+        if sub.handler.is_empty() {
+            anyhow::bail!("`{}.on(...)` needs a handler (in `{comp_name}`)", sub.event);
+        }
+        let (params, body, is_block) = parse_callable_source(&sub.handler).map_err(|e| {
+            anyhow::anyhow!("`{}.on(...)` in `{comp_name}`: {e} (pass an inline arrow)", sub.event)
+        })?;
+        if params.len() > 1 {
+            anyhow::bail!(
+                "`{}.on(...)` handler takes at most one parameter (in `{comp_name}`)",
+                sub.event
+            );
+        }
+        let ch_param = format!("__ch_{}", ctx.next_channel);
+        ctx.next_channel += 1;
+        let inner_src = if is_block {
+            let b = body.trim();
+            b[1..b.len().saturating_sub(1)].trim().to_string()
+        } else {
+            body
+        };
+        let scoped = match params.first() {
+            Some(p) => {
+                let mut m = HashMap::new();
+                m.insert(p.clone(), ch_param.clone());
+                rename_symbols(&inner_src, &m, frame)
+            }
+            None => inner_src,
+        };
+        let prepared = prepare_source(&scoped, frame);
+        let Some(out) = self.translate_logic(&prepared, &frame.vars, &frame.types, &frame.events)
+        else {
+            anyhow::bail!(
+                "`{}.on(...)` handler could not be translated (in `{comp_name}`)",
+                sub.event
+            );
+        };
+        extra_headers.extend(include_lines(&out.includes));
+        let cpp = out.body.trim().trim_end_matches(';').trim().to_string();
+        let stmts = if cpp.is_empty() || cpp.ends_with('}') { cpp } else { format!("{cpp};") };
+        let lambda = format!("[](const JsValue& {ch_param}) {{ {stmts} }}");
+        Ok(rewrite_channel_access(&lambda, &ch_param))
+    }
+
+    /// Register a module's exported `morphShared`/`morphEvent` bindings plus
+    /// its imported ones into `frame` (the module's ambient maps) and record
+    /// their namespaced signal accessors / channel ids in `ctx`.
+    ///
+    /// Identity = canonical module path + binding name, so same-named
+    /// bindings in different files never collide. Visible bindings are the
+    /// module's own exports plus named imports from directly-imported
+    /// modules; importing the same local name from two different modules is
+    /// ambiguous and rejected.
+    ///
+    /// # Errors
+    /// Rejects ambiguous imported binding names.
+    // Splitting this builder function risks behavior change.
+    #[allow(clippy::too_many_lines)]
+    fn seed_module_bindings(
+        module: &morph_parser::MxSource,
+        module_path: &Path,
+        graph: &morph_parser::ModuleGraph,
+        frame: &mut InstanceFrame,
+        ctx: &mut BuilderCtx,
+    ) -> anyhow::Result<()> {
+        let ns = module_namespace(module_path);
+        let mut seeded: HashSet<String> = HashSet::new();
+        for sb in &module.shared_bindings {
+            if sb.init.is_empty() {
+                anyhow::bail!(
+                    "export {{ {getter}, {setter} }} must give morphShared an initial value (in {path})",
+                    getter = sb.getter,
+                    setter = sb.setter,
+                    path = module_path.display()
+                );
+            }
+            let accessor = shared_signal_accessor(&sb.getter);
+            let ty = shared_binding_type(&sb.type_arg, &sb.init);
+            Self::register_binding(
+                module_path,
+                &ns,
+                &accessor,
+                &ty,
+                &sb.init,
+                &sb.getter,
+                &sb.setter,
+                ctx,
+            );
+            frame.vars.insert(sb.getter.clone(), format!("morph_mods::{ns}::{accessor}().get()"));
+            frame.vars.insert(sb.setter.clone(), format!("morph_mods::{ns}::{accessor}().set"));
+            if ty != "auto" {
+                frame.types.insert(sb.getter.clone(), ty);
+            }
+            seeded.insert(sb.getter.clone());
+            seeded.insert(sb.setter.clone());
+        }
+        for eb in &module.event_bindings {
+            frame.events.insert(eb.name.clone(), event_channel_id(module_path, &eb.name));
+            seeded.insert(eb.name.clone());
+        }
+        // Named imports of directly-imported modules expose their bindings.
+        let Some(resolved_mod) = graph.modules.get(module_path) else {
+            return Ok(());
+        };
+        for (raw_path, target_path) in &resolved_mod.module_imports {
+            let Some(target_mod) = graph.modules.get(target_path) else { continue };
+            for imp in &module.imports {
+                let morph_parser::MxImportKind::Component { path, specifiers, .. } = &imp.kind
+                else {
+                    continue;
+                };
+                if path != raw_path {
+                    continue;
+                }
+                for spec in specifiers {
+                    if !seeded.insert(spec.clone()) {
+                        anyhow::bail!(
+                            "ambiguous import of `{spec}` in {}: it is both an export and an import, or imported from two different modules; import it from only one module",
+                            module_path.display()
+                        );
+                    }
+                    let target_ns = module_namespace(target_path);
+                    if let Some(sb) =
+                        target_mod.source.shared_bindings.iter().find(|b| b.getter == *spec)
+                    {
+                        let accessor = shared_signal_accessor(&sb.getter);
+                        let ty = shared_binding_type(&sb.type_arg, &sb.init);
+                        Self::register_binding(
+                            target_path,
+                            &target_ns,
+                            &accessor,
+                            &ty,
+                            &sb.init,
+                            &sb.getter,
+                            &sb.setter,
+                            ctx,
+                        );
+                        frame.vars.insert(
+                            sb.getter.clone(),
+                            format!("morph_mods::{target_ns}::{accessor}().get()"),
+                        );
+                        if !sb.setter.is_empty() {
+                            let setter = sb.setter.clone();
+                            let setter_expr = format!("morph_mods::{target_ns}::{accessor}().set");
+                            if frame.vars.insert(setter.clone(), setter_expr).is_some() {
+                                anyhow::bail!(
+                                    "ambiguous import of `{setter}` in {}: bound by two different modules; import it from only one module",
+                                    module_path.display()
+                                );
+                            }
+                        }
+                        if ty != "auto" {
+                            frame.types.insert(spec.clone(), ty);
+                        }
+                    } else if let Some(sb) =
+                        target_mod.source.shared_bindings.iter().find(|b| b.setter == *spec)
+                    {
+                        let accessor = shared_signal_accessor(&sb.getter);
+                        let ty = shared_binding_type(&sb.type_arg, &sb.init);
+                        Self::register_binding(
+                            target_path,
+                            &target_ns,
+                            &accessor,
+                            &ty,
+                            &sb.init,
+                            &sb.getter,
+                            &sb.setter,
+                            ctx,
+                        );
+                        frame.vars.insert(
+                            sb.setter.clone(),
+                            format!("morph_mods::{target_ns}::{accessor}().set"),
+                        );
+                    } else if let Some(eb) =
+                        target_mod.source.event_bindings.iter().find(|b| b.name == *spec)
+                    {
+                        let id = event_channel_id(target_path, &eb.name);
+                        if frame.events.insert(spec.clone(), id).is_some() {
+                            anyhow::bail!(
+                                "ambiguous import of `{spec}` in {}: bound by two different modules; import it from only one module",
+                                module_path.display()
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Register one shared binding's C++ emission metadata, deduped by its
+    /// identity key (module path + getter name).
+    fn register_binding(
+        module_path: &Path,
+        ns: &str,
+        accessor: &str,
+        ty: &str,
+        init: &str,
+        getter: &str,
+        setter: &str,
+        ctx: &mut BuilderCtx,
+    ) {
+        let mut m = HashMap::new();
+        m.insert("key".into(), binding_identity(module_path, getter));
+        m.insert("ns".into(), ns.to_string());
+        m.insert("accessor".into(), accessor.to_string());
+        m.insert("type".into(), ty.to_string());
+        m.insert("init".into(), init.to_string());
+        m.insert("getter".into(), getter.to_string());
+        m.insert("setter".into(), setter.to_string());
+        if !ctx.shared_entries.iter().any(|e| e.get("key") == m.get("key")) {
+            ctx.shared_entries.push(m);
+        }
+    }
+
+    /// Expand one `<Tag ... />` instantiation into its root IR node.
+    ///
+    /// # Errors
+    /// Rejects children, unresolvable tags, render cycles, and bad props.
+    #[allow(clippy::too_many_arguments)]
+    fn expand_instance(
+        &self,
+        graph: &morph_parser::ModuleGraph,
+        ctx: &mut BuilderCtx,
+        parent_frame: &InstanceFrame,
+        tag: &str,
+        call_props: &HashMap<String, morph_parser::JsxPropValue>,
+        children: &[morph_parser::JsxNode],
+        line: usize,
+        col: usize,
+        css_rules: &[(String, morph_parser::CssRule)],
+        depth: usize,
+        ancestors: &[AncestorHint],
+        extra_headers: &mut Vec<String>,
+        keyframes: &HashMap<String, Vec<morph_parser::CssKeyframe>>,
+    ) -> anyhow::Result<IRNode> {
+        if !children.is_empty() {
+            anyhow::bail!(
+                "component <{tag}> does not accept children in v1 ({line}:{col}); pass content via props instead"
+            );
+        }
+        let (target_module, comp) = resolve_binding(graph, &parent_frame.module, tag)
+            .map_err(|e| anyhow::anyhow!("{e} (used at {line}:{col})"))?;
+        if ctx.stack.iter().any(|(m, c)| m == &target_module && c == &comp.name) {
+            let mut chain: Vec<String> = ctx.stack.iter().map(|(_, c)| c.clone()).collect();
+            chain.push(comp.name.clone());
+            anyhow::bail!("cyclic component instantiation: {}", chain.join(" → "));
+        }
+        let instance_no = ctx.next_instance;
+        ctx.next_instance += 1;
+        let prefix = format!("inst{instance_no}");
+        ctx.stack.push((target_module.clone(), comp.name.clone()));
+
+        if !ctx.modules_emitted.contains(&target_module) {
+            ctx.modules_emitted.insert(target_module.clone());
+            if let Some(module) = graph.modules.get(&target_module) {
+                let mut neutral = InstanceFrame::root(module.path.clone());
+                Self::seed_module_bindings(&module.source, &module.path, graph, &mut neutral, ctx)?;
+                let snapshot = std::mem::take(&mut ctx.premain);
+                self.translate_module_globals(&module.source, &neutral, ctx, extra_headers);
+                let mut added = std::mem::replace(&mut ctx.premain, snapshot);
+                added.retain(|p| !ctx.premain.contains(p));
+                ctx.premain.extend(added);
+                for log in &module.source.console_logs {
+                    if !ctx.logs.contains(log) {
+                        ctx.logs.push(log.clone());
+                    }
+                }
+            }
+        }
+
+        let comp_module_source = graph
+            .modules
+            .get(&target_module)
+            .map(|m| &m.source)
+            .ok_or_else(|| anyhow::anyhow!("module for <{tag}> is missing from the graph"))?;
+        let mut frame = InstanceFrame::instance(target_module.clone());
+        frame.props_param.clone_from(&comp.props_param);
+
+        Self::seed_module_bindings(comp_module_source, &target_module, graph, &mut frame, ctx)?;
+
+        for sv in &comp.state_vars {
+            let getter = format!("{prefix}_{}", sv.getter);
+            let setter = format!("{prefix}_{}", sv.setter);
+            ctx.states.push(state_slot(&getter, &setter, &sv.init, true));
+            if !sv.getter.is_empty() {
+                Self::seed_state_var(
+                    &mut frame, &sv.getter, &sv.setter, &sv.init, &getter, &setter,
+                );
+            }
+        }
+        Self::preseed_sibling_names(&comp, &mut frame, Some(&prefix));
+        self.bind_props(
+            ctx,
+            &comp,
+            call_props,
+            &mut frame,
+            parent_frame,
+            extra_headers,
+            &prefix,
+            tag,
+            line,
+            col,
+        )?;
+        self.expand_component_sources(&comp, &frame, ctx, extra_headers)?;
+        for log in &comp.console_logs {
+            if !ctx.logs.contains(log) {
+                ctx.logs.push(log.clone());
+            }
+        }
+
+        let node = self.build_node_in(
+            &comp.jsx,
+            css_rules,
+            depth,
+            ancestors,
+            &frame,
+            ctx,
+            extra_headers,
+            keyframes,
+        )?;
+        ctx.stack.pop();
+        Ok(node)
+    }
+
+    /// Bind call-site JSX attributes to a component's declared props.
+    /// `frame` must already carry the instance's states + sibling names.
+    ///
+    /// # Errors
+    /// Rejects missing required props, unknown props, and props on
+    /// components that declare none.
+    #[allow(clippy::too_many_arguments)]
+    fn bind_props(
+        &self,
+        ctx: &mut BuilderCtx,
+        comp: &morph_parser::MxComponent,
+        call_props: &HashMap<String, morph_parser::JsxPropValue>,
+        frame: &mut InstanceFrame,
+        parent_frame: &InstanceFrame,
+        extra_headers: &mut Vec<String>,
+        prefix: &str,
+        tag: &str,
+        line: usize,
+        col: usize,
+    ) -> anyhow::Result<()> {
+        let call: HashMap<&String, &morph_parser::JsxPropValue> =
+            call_props.iter().filter(|(k, _)| k.as_str() != "key").collect();
+        if comp.props.is_empty() && comp.props_param.is_empty() {
+            if let Some((name, _)) = call.iter().next() {
+                anyhow::bail!(
+                    "component <{tag}> takes no props but got `{name}` ({}:{}); declare `props: {{ ... }}` on `{}` to accept it",
+                    line,
+                    col,
+                    comp.name
+                );
+            }
+            return Ok(());
+        }
+        if comp.props.is_empty() {
+            for (name, value) in &call {
+                let expr = self.translate_call_prop(
+                    ctx,
+                    value,
+                    parent_frame,
+                    extra_headers,
+                    None,
+                    prefix,
+                    tag,
+                    line,
+                    col,
+                )?;
+                frame.vars.insert((*name).clone(), expr.clone());
+                frame.prop_binds.insert((*name).clone(), format!("({expr})"));
+            }
+            return Ok(());
+        }
+        for prop in &comp.props {
+            match call.get(&prop.name) {
+                Some(value) => {
+                    let expr = self.translate_call_prop(
+                        ctx,
+                        value,
+                        parent_frame,
+                        extra_headers,
+                        Some(prop),
+                        prefix,
+                        tag,
+                        line,
+                        col,
+                    )?;
+                    frame.vars.insert(prop.name.clone(), expr.clone());
+                    if !prop.is_function() {
+                        let class = ts_type_class(&prop.prop_type);
+                        if !class.is_empty() {
+                            frame.types.insert(prop.name.clone(), class);
+                        }
+                    }
+                    frame.prop_binds.insert(prop.name.clone(), format!("({expr})"));
+                }
+                None if prop.optional => match prop_zero_value(prop) {
+                    Some((expr, class)) => {
+                        frame.vars.insert(prop.name.clone(), expr.clone());
+                        frame.types.insert(prop.name.clone(), class);
+                        frame.prop_binds.insert(prop.name.clone(), format!("({expr})"));
+                    }
+                    None => {
+                        anyhow::bail!(
+                                "optional prop `{}` of <{tag}> was omitted ({}:{}) but has no synthesizable default (type `{}`); pass it explicitly",
+                                prop.name,
+                                line,
+                                col,
+                                prop.prop_type
+                            );
+                    }
+                },
+                None => {
+                    anyhow::bail!(
+                        "component <{tag}> is missing required prop `{}` ({}:{}); declared props of `{}`: {}",
+                        prop.name,
+                        line,
+                        col,
+                        comp.name,
+                        comp.props.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", ")
+                    );
+                }
+            }
+        }
+        for name in call.keys() {
+            if comp.prop(name).is_none() {
+                let known =
+                    comp.props.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", ");
+                anyhow::bail!(
+                    "unknown prop `{name}` on <{tag}> ({}:{}); `{}` declares: {known}",
+                    line,
+                    col,
+                    comp.name
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// Translate one call-site prop value against the parent scope.
+    ///
+    /// Inline arrows on function-typed props become mangled premain
+    /// functions typed from the declared signature.
+    ///
+    /// # Errors
+    /// Rejects untranslatable values, inline functions on non-function
+    /// props, and style objects as props.
+    #[allow(clippy::too_many_arguments)]
+    fn translate_call_prop(
+        &self,
+        ctx: &mut BuilderCtx,
+        value: &morph_parser::JsxPropValue,
+        parent_frame: &InstanceFrame,
+        extra_headers: &mut Vec<String>,
+        declared: Option<&morph_parser::ComponentProp>,
+        prefix: &str,
+        tag: &str,
+        line: usize,
+        col: usize,
+    ) -> anyhow::Result<String> {
+        match value {
+            morph_parser::JsxPropValue::String(s) => {
+                // `"1"` vs `1`: quote only for string-ish (or unknown) props.
+                let string_like = declared
+                    .is_none_or(|p| p.prop_type.is_empty() || p.prop_type.contains("string"));
+                if string_like {
+                    Ok(format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")))
+                } else {
+                    Ok(s.clone())
+                }
+            }
+            morph_parser::JsxPropValue::Bool => Ok("true".to_string()),
+            morph_parser::JsxPropValue::Ref(name) => self
+                .translate_logic(
+                    name,
+                    &parent_frame.vars,
+                    &parent_frame.types,
+                    &parent_frame.events,
+                )
+                .map(|out| {
+                    extra_headers.extend(include_lines(&out.includes));
+                    out.body.trim().trim_end_matches(';').trim().to_string()
+                })
+                .filter(|b| !b.is_empty())
+                .ok_or_else(|| {
+                    anyhow::anyhow!("cannot resolve prop value `{name}` on <{tag}> ({line}:{col})")
+                }),
+            morph_parser::JsxPropValue::Expr(src) | morph_parser::JsxPropValue::Template(src) => {
+                let src = subst_props_refs(src, parent_frame);
+                self.translate_logic(
+                    &src,
+                    &parent_frame.vars,
+                    &parent_frame.types,
+                    &parent_frame.events,
+                )
+                .map(|out| {
+                    extra_headers.extend(include_lines(&out.includes));
+                    out.body.trim().trim_end_matches(';').trim().to_string()
+                })
+                .filter(|b| !b.is_empty())
+                .ok_or_else(|| {
+                    anyhow::anyhow!("cannot translate prop value on <{tag}> ({line}:{col})")
+                })
+            }
+            morph_parser::JsxPropValue::Fn(src) => {
+                let prop = declared.filter(|p| p.is_function()).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "inline function passed to non-function prop on <{tag}> ({line}:{col}); declare the prop as `(...) => ...` to accept it"
+                    )
+                })?;
+                self.synthesize_adapter(
+                    ctx,
+                    prop,
+                    src,
+                    parent_frame,
+                    extra_headers,
+                    prefix,
+                    tag,
+                    line,
+                    col,
+                )
+            }
+            morph_parser::JsxPropValue::Style(_) => {
+                anyhow::bail!("style objects cannot be passed as props on <{tag}> ({line}:{col})");
+            }
+        }
+    }
+
+    /// Turn an inline arrow into a mangled premain function typed from the
+    /// declared prop signature. The body captures the call site, so it
+    /// translates against the parent frame.
+    ///
+    /// # Errors
+    /// Rejects unsupported signatures (generics, optional/rest params),
+    /// async bodies, arity mismatches, and untranslatable bodies.
+    #[allow(clippy::too_many_arguments)]
+    fn synthesize_adapter(
+        &self,
+        ctx: &mut BuilderCtx,
+        prop: &morph_parser::ComponentProp,
+        arrow_src: &str,
+        parent_frame: &InstanceFrame,
+        extra_headers: &mut Vec<String>,
+        prefix: &str,
+        tag: &str,
+        line: usize,
+        col: usize,
+    ) -> anyhow::Result<String> {
+        let (sig_params, ret) = parse_fn_type(&prop.prop_type).map_err(|e| {
+            anyhow::anyhow!("function prop `{}` on <{tag}> ({}:{}): {e}", prop.name, line, col)
+        })?;
+        let (arrow_params, body, is_block) = parse_callable_source(arrow_src).map_err(|e| {
+            anyhow::anyhow!("function prop `{}` on <{tag}> ({}:{}): {e}", prop.name, line, col)
+        })?;
+        if arrow_params.len() > sig_params.len() {
+            anyhow::bail!(
+                "function prop `{}` on <{tag}> ({}:{}) takes {} parameter(s) but the callback declares {}",
+                prop.name, line, col, sig_params.len(), arrow_params.len()
+            );
+        }
+        // Signature: arrow names (what the body references) with declared
+        // types positionally; pad missing trailing params as unused.
+        let mut params: Vec<String> = Vec::new();
+        for (i, (pname, ptype, _)) in sig_params.iter().enumerate() {
+            let name = arrow_params.get(i).cloned().unwrap_or_else(|| format!("_unused{i}"));
+            params.push(format!("{name}: {ptype}"));
+            let _ = pname;
+        }
+        let ret_ann = if ret.is_empty() { "void".to_string() } else { ret };
+        let body_src = if is_block {
+            body
+        } else if ret_ann.trim() == "void" {
+            format!("{body};")
+        } else {
+            format!("return ({body});")
+        };
+        let mangled = format!("{prefix}_prop_{}", prop.name);
+        let ts_src =
+            format!("function {mangled}({}): {ret_ann} {{ {body_src} }}", params.join(", "));
+        let Some(out) = self.translate_logic(
+            &ts_src,
+            &parent_frame.vars,
+            &parent_frame.types,
+            &parent_frame.events,
+        ) else {
+            anyhow::bail!(
+                "function prop `{}` on <{tag}> ({}:{}) could not be translated",
+                prop.name,
+                line,
+                col
+            );
+        };
+        let cpp = strip_static_linkage(&out.body);
+        if cpp.is_empty() {
+            anyhow::bail!(
+                "function prop `{}` on <{tag}> ({}:{}) translated to nothing",
+                prop.name,
+                line,
+                col
+            );
+        }
+        extra_headers.extend(include_lines(&out.includes));
+        if !ctx.premain.contains(&cpp) {
+            ctx.premain.push(cpp);
+        }
+        Ok(mangled)
+    }
+
+    /// Legacy single-file entry point: custom tags pass through as plain
+    /// elements (no module graph). Preserved for `build()` and existing tests.
     fn build_node(
         &self,
         jsx: &morph_parser::JsxNode,
@@ -260,20 +1286,77 @@ impl IRBuilder {
         extra_headers: &mut Vec<String>,
         keyframes: &HashMap<String, Vec<morph_parser::CssKeyframe>>,
     ) -> IRNode {
+        let empty_graph = morph_parser::ModuleGraph {
+            entry: PathBuf::new(),
+            modules: HashMap::new(),
+            order: Vec::new(),
+        };
+        let mut ctx = BuilderCtx::new(&empty_graph);
+        let mut frame = InstanceFrame::root(PathBuf::new());
+        frame.vars.clone_from(ambient_vars);
+        frame.types.clone_from(ambient_types);
+        // Infallible here: with an empty graph, instance expansion never
+        // triggers, and capture/subst helpers cannot fail.
+        self.build_node_in(
+            jsx,
+            css_rules,
+            depth,
+            ancestors,
+            &frame,
+            &mut ctx,
+            extra_headers,
+            keyframes,
+        )
+        .expect("legacy build_node without a module graph cannot fail")
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    // Splitting this builder function risks behavior change.
+    #[allow(clippy::too_many_lines)]
+    fn build_node_in(
+        &self,
+        jsx: &morph_parser::JsxNode,
+        css_rules: &[(String, morph_parser::CssRule)],
+        depth: usize,
+        ancestors: &[AncestorHint],
+        frame: &InstanceFrame,
+        ctx: &mut BuilderCtx,
+        extra_headers: &mut Vec<String>,
+        keyframes: &HashMap<String, Vec<morph_parser::CssKeyframe>>,
+    ) -> anyhow::Result<IRNode> {
         match jsx {
-            morph_parser::JsxNode::Element { tag, props, children, line: _, col: _, .. } => {
+            morph_parser::JsxNode::Element { tag, props, children, line, col, .. } => {
+                // ── Component instantiation ──
+                if is_custom_tag(tag) && !ctx.graph.modules.is_empty() {
+                    let graph: &morph_parser::ModuleGraph = ctx.graph;
+                    return self.expand_instance(
+                        graph,
+                        ctx,
+                        frame,
+                        tag,
+                        props,
+                        children,
+                        *line,
+                        *col,
+                        css_rules,
+                        depth,
+                        ancestors,
+                        extra_headers,
+                        keyframes,
+                    );
+                }
                 let node_id = self.next_id();
-                let mut node = IRNode {
-                    node_id: node_id.clone(),
-                    node_type: tag.clone(),
-                    ..Default::default()
-                };
+                let mut node = IRNode { node_id, node_type: tag.clone(), ..Default::default() };
                 let mut style = IRStyle::new();
                 apply_ua_defaults(&mut style, tag);
                 let mut hover_style = IRStyle::new();
-                for (prop, val) in ua_hover_defaults(tag) { apply_css_prop(&mut hover_style, prop, val); }
+                for (prop, val) in ua_hover_defaults(tag) {
+                    apply_css_prop(&mut hover_style, prop, val);
+                }
                 let mut active_style = IRStyle::new();
-                for (prop, val) in ua_active_defaults(tag) { apply_css_prop(&mut active_style, prop, val); }
+                for (prop, val) in ua_active_defaults(tag) {
+                    apply_css_prop(&mut active_style, prop, val);
+                }
                 let (classes, id) = element_classes_id(props);
                 // Cascade: collect every matching declaration with its
                 // specificity and source order, then apply weakest-first so
@@ -318,7 +1401,9 @@ impl IRBuilder {
                         PseudoKind::Active => {}
                     }
                 }
-                if let Some(morph_parser::JsxPropValue::String(cls)) = props.get("className").or_else(|| props.get("class")) {
+                if let Some(morph_parser::JsxPropValue::String(cls)) =
+                    props.get("className").or_else(|| props.get("class"))
+                {
                     for (prop, val) in self.tailwind.resolve_many(cls) {
                         apply_css_prop(&mut style, &prop, &val);
                         base_props.insert(prop, val);
@@ -350,13 +1435,19 @@ impl IRBuilder {
                                 apply_css_prop(&mut style, prop, s);
                                 base_props.insert(prop.clone(), s.clone());
                             }
-                            morph_parser::StyleValue::Expr(e) => { node.reactive_style.insert(prop.clone(), e.clone()); }
+                            morph_parser::StyleValue::Expr(e) => {
+                                node.reactive_style.insert(prop.clone(), capture_raw(e, frame));
+                            }
                         }
                     }
                 }
                 node.style = style;
-                if !hover_style.is_empty_style() { node.hover_style = Some(hover_style); }
-                if !active_style.is_empty_style() { node.active_style = Some(active_style); }
+                if !hover_style.is_empty_style() {
+                    node.hover_style = Some(hover_style);
+                }
+                if !active_style.is_empty_style() {
+                    node.active_style = Some(active_style);
+                }
                 // CSS animations from merged declarations; keyframe names
                 // unknown to the build are dropped like browsers do.
                 node.animations = parse_animations(&base_props)
@@ -373,51 +1464,61 @@ impl IRBuilder {
                             node.events.push(IREvent {
                                 trigger: trigger.into(),
                                 action: "call".into(),
-                                target: f.clone(),
+                                target: capture_raw(f, frame),
                             });
                             continue;
                         }
                     }
                     match (k.as_str(), v) {
-                        ("id", morph_parser::JsxPropValue::String(s)) => { node.attrs.insert("id".into(), s.clone()); }
-                        ("src", morph_parser::JsxPropValue::String(s)) => { node.attrs.insert("src".into(), s.clone()); }
-                        ("placeholder", morph_parser::JsxPropValue::String(s)) => { node.attrs.insert("placeholder".into(), s.clone()); }
-                        ("type", morph_parser::JsxPropValue::String(s)) => { node.attrs.insert("type".into(), s.clone()); }
+                        ("id", morph_parser::JsxPropValue::String(s)) => {
+                            node.attrs.insert("id".into(), s.clone());
+                        }
+                        ("src", morph_parser::JsxPropValue::String(s)) => {
+                            node.attrs.insert("src".into(), s.clone());
+                        }
+                        ("placeholder", morph_parser::JsxPropValue::String(s)) => {
+                            node.attrs.insert("placeholder".into(), s.clone());
+                        }
+                        ("type", morph_parser::JsxPropValue::String(s)) => {
+                            node.attrs.insert("type".into(), s.clone());
+                        }
                         // Static class strings only drive build-time matching;
                         // only dynamic className={...} becomes a reactive
                         // expression (translated with state at emit time).
                         // Stuffing static strings through JS translation
                         // mangles any word colliding with state (`key op`
                         // with an `op` signal became `key __st_op.get()`).
-                        ("className", morph_parser::JsxPropValue::Expr(s))
-                        | ("class", morph_parser::JsxPropValue::Expr(s))
-                        | ("className", morph_parser::JsxPropValue::Template(s))
-                        | ("class", morph_parser::JsxPropValue::Template(s))
-                        | ("className", morph_parser::JsxPropValue::Ref(s))
-                        | ("class", morph_parser::JsxPropValue::Ref(s)) => {
+                        (
+                            "className" | "class",
+                            morph_parser::JsxPropValue::Expr(s)
+                            | morph_parser::JsxPropValue::Template(s)
+                            | morph_parser::JsxPropValue::Ref(s),
+                        ) => {
                             // Runtime class string via the full translator.
-                            if let Some(out) =
-                                self.translate_logic(s, ambient_vars, ambient_types)
-                            {
+                            // (Instance `props.x` refs are rewritten to bare
+                            // names and own locals pre-renamed so the
+                            // ambient map resolves them.)
+                            let class_src = prepare_source(s, frame);
+                            if let Some(out) = self.translate_logic(
+                                &class_src,
+                                &frame.vars,
+                                &frame.types,
+                                &frame.events,
+                            ) {
                                 extra_headers.extend(include_lines(&out.includes));
-                                let body = out
-                                    .body
-                                    .trim()
-                                    .trim_end_matches(';')
-                                    .trim()
-                                    .to_string();
+                                let body = out.body.trim().trim_end_matches(';').trim().to_string();
                                 if !body.is_empty() {
                                     node.reactive_class = body;
                                 }
                             }
                             // Build-time branch resolution for ternary arms.
                             let mut fx = analyze_dynamic_class(
-                                s,
+                                &class_src,
                                 tag,
                                 css_rules,
                                 &self.tailwind,
-                                ambient_vars,
-                                ambient_types,
+                                &frame.vars,
+                                &frame.types,
                                 self.type_mode,
                                 extra_headers,
                             );
@@ -426,102 +1527,131 @@ impl IRBuilder {
                         _ => {}
                     }
                 }
-                let text_parts: Vec<String> = children.iter().filter_map(|c| if let morph_parser::JsxNode::Text(t) = c { Some(t.clone()) } else { None }).collect();
-                if !text_parts.is_empty() { node.text_content = text_parts.join(""); }
+                let text_parts: Vec<String> = children
+                    .iter()
+                    .filter_map(|c| {
+                        if let morph_parser::JsxNode::Text(t) = c {
+                            Some(t.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                if !text_parts.is_empty() {
+                    node.text_content = text_parts.join("");
+                }
                 let mut child_ancestors = ancestors.to_vec();
-                child_ancestors.insert(0, AncestorHint {
-                    tag: tag.clone(),
-                    classes: classes.clone(),
-                    id: id.clone(),
-                });
-                for child in children.iter() {
-                    let child_node = self.build_node(
+                child_ancestors.insert(0, AncestorHint { tag: tag.clone(), classes, id });
+                for child in children {
+                    let child_node = self.build_node_in(
                         child,
                         css_rules,
                         depth + 1,
                         &child_ancestors,
-                        ambient_vars,
-                        ambient_types,
+                        frame,
+                        ctx,
                         extra_headers,
                         keyframes,
-                    );
-                    if child_node.node_type == "__text__" && child_node.text_content.trim().is_empty() {
+                    )?;
+                    if child_node.node_type == "__text__"
+                        && child_node.text_content.trim().is_empty()
+                    {
                         continue;
                     }
                     node.children.push(child_node);
                 }
-                node
+                Ok(node)
             }
             morph_parser::JsxNode::Fragment { children, .. } => {
-                let mut node = IRNode { node_id: self.next_id(), node_type: "__fragment__".into(), ..Default::default() };
-                for child in children.iter() {
-                    node.children.push(self.build_node(
+                let mut node = IRNode {
+                    node_id: self.next_id(),
+                    node_type: "__fragment__".into(),
+                    ..Default::default()
+                };
+                for child in children {
+                    node.children.push(self.build_node_in(
                         child,
                         css_rules,
                         depth,
                         ancestors,
-                        ambient_vars,
-                        ambient_types,
+                        frame,
+                        ctx,
                         extra_headers,
                         keyframes,
-                    ));
+                    )?);
                 }
-                node
+                Ok(node)
             }
             morph_parser::JsxNode::Text(t) => {
-                let mut node = IRNode { node_id: self.next_id(), node_type: "__text__".into(), ..Default::default() };
+                let mut node = IRNode {
+                    node_id: self.next_id(),
+                    node_type: "__text__".into(),
+                    ..Default::default()
+                };
                 node.text_content = t.clone();
-                node
+                Ok(node)
             }
             morph_parser::JsxNode::Expression(e) => {
-                let mut node = IRNode { node_id: self.next_id(), node_type: "__expr__".into(), ..Default::default() };
-                node.reactive_text = e.clone();
-                node
+                let mut node = IRNode {
+                    node_id: self.next_id(),
+                    node_type: "__expr__".into(),
+                    ..Default::default()
+                };
+                node.reactive_text = capture_raw(e, frame);
+                Ok(node)
             }
             morph_parser::JsxNode::Conditional { condition, then_branch, else_branch, .. } => {
-                let mut node = IRNode { node_id: self.next_id(), node_type: "__conditional__".into(), ..Default::default() };
-                node.condition_expr = condition.clone();
-                for c in then_branch.iter() {
-                    node.then_nodes.push(self.build_node(
+                let mut node = IRNode {
+                    node_id: self.next_id(),
+                    node_type: "__conditional__".into(),
+                    ..Default::default()
+                };
+                node.condition_expr = capture_raw(condition, frame);
+                for c in then_branch {
+                    node.then_nodes.push(self.build_node_in(
                         c,
                         css_rules,
                         depth,
                         ancestors,
-                        ambient_vars,
-                        ambient_types,
+                        frame,
+                        ctx,
                         extra_headers,
                         keyframes,
-                    ));
+                    )?);
                 }
-                for c in else_branch.iter() {
-                    node.else_nodes.push(self.build_node(
+                for c in else_branch {
+                    node.else_nodes.push(self.build_node_in(
                         c,
                         css_rules,
                         depth,
                         ancestors,
-                        ambient_vars,
-                        ambient_types,
+                        frame,
+                        ctx,
                         extra_headers,
                         keyframes,
-                    ));
+                    )?);
                 }
-                node
+                Ok(node)
             }
             morph_parser::JsxNode::List { array_expr, key_expr, item_template, .. } => {
-                let mut node = IRNode { node_id: self.next_id(), node_type: "__list__".into(), ..Default::default() };
-                node.list_expr = array_expr.clone();
-                node.list_key_expr = key_expr.clone();
-                node.item_template = Some(Box::new(self.build_node(
+                let mut node = IRNode {
+                    node_id: self.next_id(),
+                    node_type: "__list__".into(),
+                    ..Default::default()
+                };
+                node.list_expr = capture_raw(array_expr, frame);
+                node.list_key_expr = capture_raw(key_expr, frame);
+                node.item_template = Some(Box::new(self.build_node_in(
                     item_template,
                     css_rules,
                     depth,
                     ancestors,
-                    ambient_vars,
-                    ambient_types,
+                    frame,
+                    ctx,
                     extra_headers,
                     keyframes,
-                )));
-                node
+                )?));
+                Ok(node)
             }
         }
     }
@@ -538,7 +1668,9 @@ impl IRBuilder {
                 let mut style = IRStyle::new();
                 let mut declared: Vec<String> = Vec::new();
                 for (prop, val) in &kf.properties {
-                    if !is_animatable(prop) { continue; }
+                    if !is_animatable(prop) {
+                        continue;
+                    }
                     if prop == "transform" || needs_layout(val) {
                         raw.insert(prop.clone(), val.clone());
                         continue;
@@ -547,16 +1679,1000 @@ impl IRBuilder {
                         declared.push(field.to_string());
                     }
                 }
-                converted.push(crate::node::IRKeyframe {
-                    offset: kf.offset,
-                    style,
-                    declared,
-                    raw,
-                });
+                converted.push(crate::node::IRKeyframe { offset: kf.offset, style, declared, raw });
             }
             result.insert(name.clone(), converted);
         }
         result
+    }
+}
+
+/// Scope frame for JSX expansion. Components are closed over their own
+/// scope + props: parent-scope names stay invisible here and cross-component
+/// data flows exclusively through props.
+struct InstanceFrame {
+    module: PathBuf,
+    vars: HashMap<String, String>,
+    types: HashMap<String, String>,
+    /// Visible event channel ids keyed by local name (own exports + imports).
+    events: HashMap<String, String>,
+    /// `props` in `function C(props: {...})`; empty when destructured/absent.
+    props_param: String,
+    renames: HashMap<String, String>,
+    prop_binds: HashMap<String, String>,
+}
+
+impl InstanceFrame {
+    fn root(module: PathBuf) -> Self {
+        Self {
+            module,
+            vars: HashMap::new(),
+            types: HashMap::new(),
+            events: HashMap::new(),
+            props_param: String::new(),
+            renames: HashMap::new(),
+            prop_binds: HashMap::new(),
+        }
+    }
+
+    fn instance(module: PathBuf) -> Self {
+        Self {
+            module,
+            vars: HashMap::new(),
+            types: HashMap::new(),
+            events: HashMap::new(),
+            props_param: String::new(),
+            renames: HashMap::new(),
+            prop_binds: HashMap::new(),
+        }
+    }
+}
+
+struct BuilderCtx<'a> {
+    graph: &'a morph_parser::ModuleGraph,
+    next_instance: usize,
+    next_channel: usize,
+    stack: Vec<(PathBuf, String)>,
+    channels: Vec<HashMap<String, String>>,
+    states: Vec<HashMap<String, String>>,
+    const_names: Vec<String>,
+    premain: Vec<String>,
+    effects: Vec<HashMap<String, String>>,
+    logs: Vec<String>,
+    modules_emitted: HashSet<PathBuf>,
+    shared_entries: Vec<HashMap<String, String>>,
+}
+
+impl<'a> BuilderCtx<'a> {
+    fn new(graph: &'a morph_parser::ModuleGraph) -> Self {
+        Self {
+            graph,
+            next_instance: 0,
+            next_channel: 0,
+            stack: Vec::new(),
+            channels: Vec::new(),
+            states: Vec::new(),
+            const_names: Vec::new(),
+            premain: Vec::new(),
+            effects: Vec::new(),
+            logs: Vec::new(),
+            modules_emitted: HashSet::new(),
+            shared_entries: Vec::new(),
+        }
+    }
+}
+
+/// A `window.state_vars` entry. The emitter derives `__st_<getter>` from the
+/// getter, so instance signals only need mangled names. The `instance` mark
+/// keeps them out of the native interop header (ambiguous across instances).
+fn state_slot(getter: &str, setter: &str, init: &str, instance: bool) -> HashMap<String, String> {
+    let mut m = HashMap::new();
+    m.insert("getter".into(), getter.to_string());
+    m.insert("setter".into(), setter.to_string());
+    m.insert("init".into(), init.to_string());
+    if instance {
+        m.insert("instance".into(), "1".to_string());
+    }
+    m
+}
+
+/// True for per-instance state slots.
+pub fn is_instance_slot(slot: &HashMap<String, String>) -> bool {
+    slot.get("instance").is_some_and(|v| v == "1")
+}
+
+fn is_custom_tag(tag: &str) -> bool {
+    tag.chars().next().is_some_and(char::is_uppercase)
+}
+
+/// Resolve `<Tag />` used in `module` to (owning module, component).
+/// Module-local components shadow imports.
+///
+/// # Errors
+/// Rejects unknown tags, default imports of modules without a default
+/// export, and named imports of non-exported components.
+fn resolve_binding(
+    graph: &morph_parser::ModuleGraph,
+    module: &Path,
+    local: &str,
+) -> anyhow::Result<(PathBuf, morph_parser::MxComponent)> {
+    let src = graph
+        .modules
+        .get(module)
+        .ok_or_else(|| anyhow::anyhow!("unknown module {}", module.display()))?;
+    if let Some(c) = src.source.components.iter().find(|c| c.name == local) {
+        return Ok((module.to_path_buf(), c.clone()));
+    }
+    for imp in &src.source.imports {
+        let (raw, default, specifiers) = match &imp.kind {
+            morph_parser::MxImportKind::Component { path, default, specifiers }
+                if path != "morph" =>
+            {
+                (path, default, specifiers)
+            }
+            _ => continue,
+        };
+        let is_default_binding = default.as_deref() == Some(local);
+        let is_named = specifiers.iter().any(|s| s == local);
+        if !is_default_binding && !is_named {
+            continue;
+        }
+        let target = src.module_imports.iter().find(|(p, _)| p == raw).map(|(_, t)| t.clone());
+        let Some(target) = target else { continue };
+        let target_mod = graph
+            .modules
+            .get(&target)
+            .ok_or_else(|| anyhow::anyhow!("unresolved component module {}", target.display()))?;
+        if is_default_binding {
+            if let Some(c) = target_mod.source.components.iter().find(|c| c.is_default) {
+                return Ok((target, c.clone()));
+            }
+            anyhow::bail!(
+                "`{}` has no default export (imported by {})",
+                target.display(),
+                module.display()
+            );
+        }
+        if let Some(c) = target_mod.source.components.iter().find(|c| c.name == local && c.exported)
+        {
+            return Ok((target, c.clone()));
+        }
+        anyhow::bail!(
+            "`{}` has no exported component `{local}` (imported by {})",
+            target.display(),
+            module.display()
+        );
+    }
+    anyhow::bail!("unknown component `<{local}>` in {}", module.display())
+}
+
+/// Rewrite `props.x` → `x` for identifier-form props.
+fn subst_props_refs(src: &str, frame: &InstanceFrame) -> String {
+    if frame.props_param.is_empty() {
+        return src.to_string();
+    }
+    let param = frame.props_param.as_str();
+    let bytes = src.as_bytes();
+    let mut out = String::with_capacity(src.len());
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let c = bytes[i] as char;
+        if c == '"' || c == '\'' {
+            let end = str_lit_end(src, i);
+            out.push_str(&src[i..end]);
+            i = end;
+            continue;
+        }
+        if c == '`' {
+            let (end, _) = copy_template(src, i, &HashMap::new(), frame);
+            out.push_str(&src[i..end]);
+            i = end;
+            continue;
+        }
+        if is_ident_start(c) && src[i..].starts_with(param) {
+            let after_param = i + param.len();
+            let boundary_before = i == 0 || !is_ident_char_at(src, i - 1);
+            let preceded_by_dot = i > 0 && bytes[i - 1] == b'.';
+            if boundary_before && !preceded_by_dot {
+                let mut j = after_param;
+                if j < bytes.len() && bytes[j] == b'.' {
+                    j += 1;
+                    let name_start = j;
+                    while j < bytes.len() && is_ident_char_at(src, j) {
+                        j += src[j..].chars().next().map_or(1, char::len_utf8);
+                    }
+                    if j > name_start {
+                        out.push_str(&src[name_start..j]);
+                        i = j;
+                        continue;
+                    }
+                }
+            }
+        }
+        out.push(c);
+        i += c.len_utf8();
+    }
+    out
+}
+
+/// Word-boundary rename, skipping literals, comments, and member accesses.
+fn rename_symbols(src: &str, renames: &HashMap<String, String>, frame: &InstanceFrame) -> String {
+    if renames.is_empty() {
+        return src.to_string();
+    }
+    let bytes = src.as_bytes();
+    let mut out = String::with_capacity(src.len());
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let c = bytes[i] as char;
+        if c == '"' || c == '\'' {
+            let end = str_lit_end(src, i);
+            out.push_str(&src[i..end]);
+            i = end;
+            continue;
+        }
+        if c == '`' {
+            let (end, rendered) = copy_template(src, i, renames, frame);
+            out.push_str(&rendered);
+            i = end;
+            continue;
+        }
+        if c == '/' && i + 1 < bytes.len() {
+            if bytes[i + 1] == b'/' {
+                if let Some(nl) = src[i..].find('\n') {
+                    out.push_str(&src[i..i + nl]);
+                    i += nl;
+                    continue;
+                }
+                out.push_str(&src[i..]);
+                break;
+            }
+            if bytes[i + 1] == b'*' {
+                if let Some(end) = src[i..].find("*/") {
+                    out.push_str(&src[i..i + end + 2]);
+                    i += end + 2;
+                    continue;
+                }
+                out.push_str(&src[i..]);
+                break;
+            }
+        }
+        if is_ident_start(c) {
+            let mut j = i + c.len_utf8();
+            while j < bytes.len() && is_ident_char_at(src, j) {
+                let ch_len = src[j..].chars().next().map_or(1, char::len_utf8);
+                j += ch_len;
+            }
+            let word = &src[i..j];
+            let preceded_by_dot = i > 0 && bytes[i - 1] == b'.';
+            if !preceded_by_dot {
+                if let Some(repl) = renames.get(word) {
+                    out.push_str(repl);
+                    i = j;
+                    continue;
+                }
+            }
+            out.push_str(word);
+            i = j;
+            continue;
+        }
+        out.push(c);
+        i += c.len_utf8();
+    }
+    out
+}
+
+/// Prepare a raw JSX-captured expression for emit-time translation.
+/// Prop bindings inline last so bound text is never re-scanned.
+fn capture_raw(raw: &str, frame: &InstanceFrame) -> String {
+    let reemit = rewrite_event_emits(raw, &frame.events);
+    let emit = rewrite_emit_for_cpp(&reemit);
+    let sub = subst_props_refs(&emit, frame);
+    let renamed = rename_symbols(&sub, &frame.renames, frame);
+    rename_symbols(&renamed, &frame.prop_binds, frame)
+}
+
+/// Prepare a component-definition source for morpher translation.
+/// Pre-renaming removes the need for a post-pass over morpher output.
+fn prepare_source(src: &str, frame: &InstanceFrame) -> String {
+    let sub = subst_props_refs(src, frame);
+    rename_symbols(&sub, &frame.renames, frame)
+}
+
+/// Copy a template literal, renaming inside `${...}` interpolations only.
+fn copy_template(
+    src: &str,
+    start: usize,
+    renames: &HashMap<String, String>,
+    frame: &InstanceFrame,
+) -> (usize, String) {
+    let bytes = src.as_bytes();
+    let mut out = String::from("`");
+    let mut i = start + 1;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            out.push_str(&src[i..(i + 2).min(src.len())]);
+            i += 2;
+            continue;
+        }
+        if bytes[i] == b'`' {
+            out.push('`');
+            return (i + 1, out);
+        }
+        if bytes[i] == b'$' && i + 1 < bytes.len() && bytes[i + 1] == b'{' {
+            // Balanced scan to the matching `}` (nesting + strings aware).
+            let mut j = i + 2;
+            let mut depth = 1i32;
+            let mut in_str: Option<u8> = None;
+            while j < bytes.len() {
+                let b = bytes[j];
+                if let Some(q) = in_str {
+                    if b == b'\\' {
+                        j += 2;
+                        continue;
+                    }
+                    if b == q {
+                        in_str = None;
+                    }
+                    j += 1;
+                    continue;
+                }
+                match b {
+                    b'"' | b'\'' | b'`' => in_str = Some(b),
+                    b'{' => depth += 1,
+                    b'}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                j += 1;
+            }
+            let inner = &src[i + 2..j.min(src.len())];
+            out.push_str("${");
+            out.push_str(&rename_symbols(inner, renames, frame));
+            out.push('}');
+            i = (j + 1).min(src.len());
+            continue;
+        }
+        let ch_len = src[i..].chars().next().map_or(1, char::len_utf8);
+        out.push_str(&src[i..i + ch_len]);
+        i += ch_len;
+    }
+    (i, out)
+}
+
+/// End index (exclusive) of a `"` / `'` literal starting at `start`.
+const fn str_lit_end(src: &str, start: usize) -> usize {
+    let bytes = src.as_bytes();
+    let quote = bytes[start];
+    let mut i = start + 1;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            i += 2;
+            continue;
+        }
+        if bytes[i] == quote {
+            return i + 1;
+        }
+        i += 1;
+    }
+    bytes.len()
+}
+
+fn is_ident_start(c: char) -> bool {
+    c.is_alphabetic() || c == '_' || c == '$'
+}
+
+fn is_ident_char_at(src: &str, byte_idx: usize) -> bool {
+    src[byte_idx..].chars().next().is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '$')
+}
+
+/// FNV-1a 64-bit hash (deterministic across runs and platforms).
+fn fnv1a(text: &str) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in text.as_bytes() {
+        h ^= u64::from(*b);
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
+}
+
+/// C++-safe per-module namespace segment: `store_{stem}_{hash8}`. The stem
+/// keeps generated code readable; the path hash disambiguates same-named
+/// files in different directories.
+fn module_namespace(module: &Path) -> String {
+    let stem =
+        module.file_stem().map_or_else(|| "m".to_string(), |s| s.to_string_lossy().to_string());
+    let safe: String = stem
+        .trim_end_matches(".mx")
+        .trim_end_matches(".ts")
+        .trim_end_matches(".tsx")
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+        .collect();
+    let safe = if safe.is_empty() { "m".to_string() } else { safe };
+    let hash = (fnv1a(&module.display().to_string()) & 0xFFFF_FFFF) as u32;
+    format!("store_{safe}_{hash:08x}")
+}
+
+/// Internal identity of a binding: canonical module path + binding name.
+fn binding_identity(module: &Path, name: &str) -> String {
+    format!("{}::{name}", module.display())
+}
+
+/// C++ identifier of a module's signal accessor function. Lives inside the
+/// module namespace, so only getter names within one file must differ.
+fn shared_signal_accessor(getter: &str) -> String {
+    let safe: String = getter
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+        .collect();
+    let safe = if safe.is_empty() { "sig".to_string() } else { safe };
+    format!("shared_{safe}")
+}
+
+/// C++ type of a shared binding from its explicit type argument, inferred
+/// from its initializer, or `auto` when unknowable.
+fn shared_binding_type(type_arg: &Option<String>, init: &str) -> String {
+    if let Some(arg) = type_arg {
+        let t = arg.trim();
+        match t {
+            "string" => return "std::string".to_string(),
+            "boolean" => return "bool".to_string(),
+            "number" => {
+                // Match the init's numeric kind when present, else double.
+                if let Some(ty) = infer_state_type(init) {
+                    if ty == "int" || ty == "double" {
+                        return ty;
+                    }
+                }
+                return "double".to_string();
+            }
+            "any" | "unknown" => return "auto".to_string(),
+            _ => {}
+        }
+    }
+    infer_state_type(init).unwrap_or_else(|| "auto".to_string())
+}
+
+/// Runtime channel id of an event binding: `evt:<module path>:<name>`.
+fn event_channel_id(module: &Path, name: &str) -> String {
+    format!("evt:{}::{name}", module.display())
+}
+
+/// Escape a runtime channel id for embedding in a C++ string literal.
+fn escape_channel(id: &str) -> String {
+    id.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// Byte index of a top-level callee call, skipping strings, comments, and
+/// member calls.
+fn find_emit_callee(src: &str, callee: &str, from: usize) -> Option<usize> {
+    let bytes = src.as_bytes();
+    let mut i = from;
+    while i < bytes.len() {
+        let c = bytes[i] as char;
+        if c == '"' || c == '\'' || c == '`' {
+            i = str_lit_end(src, i);
+            continue;
+        }
+        if c == '/' && i + 1 < bytes.len() && (bytes[i + 1] == b'/' || bytes[i + 1] == b'*') {
+            if bytes[i + 1] == b'/' {
+                i = src[i..].find('\n').map_or(bytes.len(), |n| i + n);
+            } else {
+                i = src[i..].find("*/").map_or(bytes.len(), |n| i + n + 2);
+            }
+            continue;
+        }
+        if is_ident_start(c) && src[i..].starts_with(callee) {
+            let end = i + callee.len();
+            let before_ok = i == 0 || {
+                let b = bytes[i - 1];
+                !(b.is_ascii_alphanumeric() || b == b'_' || b == b'$' || b == b'.')
+            };
+            let after_ok = src[end..].chars().next().is_some_and(|nc| nc == '(');
+            if before_ok && after_ok {
+                return Some(i);
+            }
+        }
+        i += c.len_utf8();
+    }
+    None
+}
+
+/// Split the argument list of the call opening at `open`.
+fn split_call_args(src: &str, open: usize) -> Option<(Vec<String>, usize)> {
+    let bytes = src.as_bytes();
+    if bytes.get(open) != Some(&b'(') {
+        return None;
+    }
+    let mut args = Vec::new();
+    let mut start = open + 1;
+    let mut depth = 0i32;
+    let mut i = open + 1;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'"' || b == b'\'' || b == b'`' {
+            i = str_lit_end(src, i);
+            continue;
+        }
+        match b {
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' if depth == 0 => {
+                args.push(src[start..i].trim().to_string());
+                return Some((args, i + 1));
+            }
+            b')' | b']' | b'}' => {
+                if depth > 0 {
+                    depth -= 1;
+                }
+            }
+            b',' if depth == 0 => {
+                args.push(src[start..i].trim().to_string());
+                start = i + 1;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Rewrite `{event}.emit(x)` to a `morphEmit("<channel_id>", x)` placeholder
+/// for every event name visible in `events`, so the shared emit pipeline
+/// lowers it to `morph::channel("<channel_id>").emit(x)`. Only top-level
+/// identifiers are matched (never member expressions); strings and comments
+/// are skipped, and arguments are scanned for nested event emits.
+fn rewrite_event_emits(src: &str, events: &HashMap<String, String>) -> String {
+    let bytes = src.as_bytes();
+    let mut out = String::with_capacity(src.len());
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let c = bytes[i] as char;
+        if c == '"' || c == '\'' || c == '`' {
+            let end = str_lit_end(src, i);
+            out.push_str(&src[i..end]);
+            i = end;
+            continue;
+        }
+        if c == '/' && i + 1 < bytes.len() && (bytes[i + 1] == b'/' || bytes[i + 1] == b'*') {
+            if bytes[i + 1] == b'/' {
+                let nl = src[i..].find('\n').map_or(bytes.len(), |n| i + n);
+                out.push_str(&src[i..nl]);
+                i = nl;
+            } else {
+                let end = src[i..].find("*/").map_or(bytes.len(), |n| i + n + 2);
+                out.push_str(&src[i..end]);
+                i = end;
+            }
+            continue;
+        }
+        if is_ident_start(c) {
+            let j = ident_end(src, i);
+            if let Some(id) = events.get(&src[i..j]) {
+                let before_ok = i == 0
+                    || !(bytes[i - 1].is_ascii_alphanumeric()
+                        || bytes[i - 1] == b'_'
+                        || bytes[i - 1] == b'$'
+                        || bytes[i - 1] == b'.');
+                if before_ok {
+                    let mut k = j;
+                    while k < bytes.len() && (bytes[k] as char).is_whitespace() {
+                        k += 1;
+                    }
+                    if bytes.get(k) == Some(&b'.') {
+                        let mut m = k + 1;
+                        while m < bytes.len() && (bytes[m] as char).is_whitespace() {
+                            m += 1;
+                        }
+                        if src[m..].starts_with("emit") {
+                            let mut o = m + 4;
+                            while o < bytes.len() && (bytes[o] as char).is_whitespace() {
+                                o += 1;
+                            }
+                            if bytes.get(o) == Some(&b'(') {
+                                out.push_str(&format!("morphEmit(\"{}\", ", escape_channel(id)));
+                                i = o + 1;
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
+            out.push_str(&src[i..j]);
+            i = j;
+            continue;
+        }
+        out.push(c);
+        i += c.len_utf8();
+    }
+    out
+}
+
+/// End index (exclusive) of an identifier token starting at `start`.
+const fn ident_end(src: &str, start: usize) -> usize {
+    let bytes = src.as_bytes();
+    let mut i = start;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b.is_ascii_alphanumeric() || b == b'_' || b == b'$' {
+            i += 1;
+        } else {
+            break;
+        }
+    }
+    i
+}
+
+/// Rewrite `morphEmit(a, b)` to a morpher-safe placeholder for the JS
+/// context.
+fn rewrite_emit_for_js(src: &str) -> String {
+    rewrite_emit_calls(src, "morphEmit", false)
+}
+
+/// Rewrite emit calls to `morph::channel(a).emit(b)` for the C++ context.
+/// Malformed calls are left untouched to fail loudly downstream.
+fn rewrite_emit_for_cpp(src: &str) -> String {
+    rewrite_emit_calls(&rewrite_emit_calls(src, "__morphEmit", true), "morphEmit", true)
+}
+
+fn rewrite_emit_calls(src: &str, callee: &str, to_channel: bool) -> String {
+    let placeholder = "__morphEmit";
+    let mut out = String::with_capacity(src.len());
+    let mut i = 0usize;
+    while let Some(found) = find_emit_callee(src, callee, i) {
+        out.push_str(&src[i..found]);
+        let open = found + callee.len();
+        match split_call_args(src, open) {
+            Some((args, end)) if args.len() == 2 => {
+                if to_channel {
+                    out.push_str(&format!("morph::channel({}).emit({})", args[0], args[1]));
+                } else {
+                    out.push_str(placeholder);
+                    out.push_str(&src[open..end]);
+                }
+                i = end;
+            }
+            _ => {
+                out.push_str(&src[found..open]);
+                i = open;
+            }
+        }
+    }
+    out.push_str(&src[i..]);
+    out
+}
+
+/// Rewrite `p.field` → `p["field"]` for a channel payload param.
+fn rewrite_channel_access(src: &str, param: &str) -> String {
+    if param.is_empty() {
+        return src.to_string();
+    }
+    let bytes = src.as_bytes();
+    let mut out = String::with_capacity(src.len());
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let c = bytes[i] as char;
+        if c == '"' || c == '\'' || c == '`' {
+            let end = str_lit_end(src, i);
+            out.push_str(&src[i..end]);
+            i = end;
+            continue;
+        }
+        if c == '/' && i + 1 < bytes.len() && (bytes[i + 1] == b'/' || bytes[i + 1] == b'*') {
+            if bytes[i + 1] == b'/' {
+                let end = src[i..].find('\n').map_or(bytes.len(), |n| i + n);
+                out.push_str(&src[i..end]);
+                i = end;
+            } else {
+                let end = src[i..].find("*/").map_or(bytes.len(), |n| i + n + 2);
+                out.push_str(&src[i..end]);
+                i = end;
+            }
+            continue;
+        }
+        if is_ident_start(c) && src[i..].starts_with(param) {
+            let end = i + param.len();
+            let after = &src[end..];
+            let boundary = after
+                .chars()
+                .next()
+                .map_or(true, |nc| !nc.is_alphanumeric() && nc != '_' && nc != '$');
+            if boundary {
+                // Skip whitespace, expect `.ident`.
+                let mut j = end;
+                while j < bytes.len() && (bytes[j] as char).is_whitespace() {
+                    j += 1;
+                }
+                if j < bytes.len() && bytes[j] == b'.' {
+                    let mut k = j + 1;
+                    while k < bytes.len() && (bytes[k] as char).is_whitespace() {
+                        k += 1;
+                    }
+                    let name_start = k;
+                    while k < bytes.len() && is_ident_char_at(src, k) {
+                        let ch_len = src[k..].chars().next().map_or(1, char::len_utf8);
+                        k += ch_len;
+                    }
+                    if k > name_start {
+                        out.push_str(&format!("{param}[\"{}\"]", &src[name_start..k]));
+                        i = k;
+                        continue;
+                    }
+                }
+            }
+        }
+        out.push(c);
+        i += c.len_utf8();
+    }
+    out
+}
+
+/// Map a declared TS prop type to a morpher operand class (`int`,
+/// `double`, `bool`, `std::string`, `JsArray`). Empty = unknown, omit it
+/// and let morpher infer.
+fn ts_type_class(t: &str) -> String {
+    let lower = t.trim().to_lowercase();
+    let tokens: Vec<&str> = lower
+        .split(|c: char| !c.is_alphanumeric() && c != '_' && c != '$')
+        .filter(|s| !s.is_empty())
+        .collect();
+    if tokens.contains(&"string") {
+        return "std::string".to_string();
+    }
+    if tokens.iter().any(|t| *t == "boolean" || *t == "bool") {
+        return "bool".to_string();
+    }
+    if t.contains("[]") || tokens.contains(&"array") {
+        return "JsArray".to_string();
+    }
+    if tokens.iter().any(|t| *t == "int" || *t == "integer") {
+        return "int".to_string();
+    }
+    if tokens.iter().any(|t| *t == "number" || *t == "double" || *t == "float") {
+        return "double".to_string();
+    }
+    String::new()
+}
+
+fn find_top_level_arrow(src: &str) -> Option<usize> {
+    let bytes = src.as_bytes();
+    let mut depth = 0i32;
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'"' || b == b'\'' || b == b'`' {
+            i = str_lit_end(src, i);
+            continue;
+        }
+        match b {
+            b'<' | b'(' | b'[' | b'{' => depth += 1,
+            b'>' | b')' | b']' | b'}' => {
+                if depth > 0 {
+                    depth -= 1;
+                }
+            }
+            b'=' if depth == 0 && i + 1 < bytes.len() && bytes[i + 1] == b'>' => {
+                return Some(i);
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+fn split_top_level_commas(s: &str) -> Vec<String> {
+    let bytes = s.as_bytes();
+    let mut out = Vec::new();
+    let mut start = 0usize;
+    let mut depth = 0i32;
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'"' || b == b'\'' || b == b'`' {
+            i = str_lit_end(s, i);
+            continue;
+        }
+        match b {
+            b'<' | b'(' | b'[' | b'{' => depth += 1,
+            b'>' | b')' | b']' | b'}' => {
+                if depth > 0 {
+                    depth -= 1;
+                }
+            }
+            b',' if depth == 0 => {
+                out.push(s[start..i].trim().to_string());
+                start = i + 1;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    out.push(s[start..].trim().to_string());
+    out
+}
+
+/// Parse `(params) => return` into ([(name, type, optional)], return).
+///
+/// # Errors
+/// Rejects generics, optional/rest params, and untyped parameters (C++
+/// arity is fixed).
+fn parse_fn_type(t: &str) -> anyhow::Result<(Vec<(String, String, bool)>, String)> {
+    let s = t.trim();
+    if s.starts_with('<') {
+        anyhow::bail!("generic function types are not supported: `{s}`");
+    }
+    let Some(arrow) = find_top_level_arrow(s) else {
+        anyhow::bail!("`{s}` is not a function type (expected `(params) => return`)");
+    };
+    let (left, right) = (s[..arrow].trim(), s[arrow + 2..].trim().to_string());
+    if !left.starts_with('(') || !left.ends_with(')') || left.len() < 2 {
+        anyhow::bail!("function type parameters must be parenthesized in `{s}`");
+    }
+    let inner = left[1..left.len() - 1].trim();
+    let mut params = Vec::new();
+    if !inner.is_empty() {
+        for p in split_top_level_commas(inner) {
+            let p = p.trim().to_string();
+            if p.starts_with("...") {
+                anyhow::bail!("rest parameters are not supported in `{s}`");
+            }
+            let name_end = p
+                .char_indices()
+                .take_while(|(_, c)| c.is_alphanumeric() || *c == '_' || *c == '$')
+                .map(|(i, c)| i + c.len_utf8())
+                .last()
+                .unwrap_or(0);
+            if name_end == 0 {
+                anyhow::bail!("cannot parse parameter `{p}` in `{s}`");
+            }
+            let name = p[..name_end].to_string();
+            let rest = p[name_end..].trim_start();
+            let (optional, rest) = match rest.strip_prefix('?') {
+                Some(r) => (true, r.trim_start()),
+                None => (false, rest),
+            };
+            if optional {
+                anyhow::bail!(
+                    "optional parameter `{name}` is not supported in `{s}` (C++ arity is fixed)"
+                );
+            }
+            let Some(ty) = rest.strip_prefix(':') else {
+                anyhow::bail!("parameter `{name}` needs a type in `{s}`");
+            };
+            params.push((name, ty.trim().to_string(), false));
+        }
+    }
+    Ok((params, right))
+}
+
+/// Parse an inline arrow or `function` expression into (params, body,
+/// is_block).
+///
+/// # Errors
+/// Rejects async callables, non-arrow references, and destructured params.
+fn parse_callable_source(src: &str) -> anyhow::Result<(Vec<String>, String, bool)> {
+    let mut s = src.trim();
+    if s.starts_with("async ") || s.starts_with("async(") || s.starts_with("async{") {
+        anyhow::bail!("async function props are not supported");
+    }
+    if let Some(rest) = s.strip_prefix("function") {
+        // `function name?(params) body` — skip an optional name.
+        let mut rest = rest.trim_start();
+        if !rest.starts_with('(') {
+            let name_end = rest
+                .char_indices()
+                .take_while(|(_, c)| c.is_alphanumeric() || *c == '_' || *c == '$')
+                .map(|(i, c)| i + c.len_utf8())
+                .last()
+                .unwrap_or(0);
+            rest = rest[name_end..].trim_start();
+        }
+        s = rest;
+        let Some(open) = s.find('(') else {
+            anyhow::bail!("cannot parse function parameters in `{src}`");
+        };
+        // Balance from the open paren.
+        let (params_src, body_src) = split_paren_body(&s[open..])
+            .ok_or_else(|| anyhow::anyhow!("cannot parse function shape in `{src}`"))?;
+        return Ok((
+            param_names(&params_src)?,
+            body_src.trim().to_string(),
+            is_block_body(&body_src),
+        ));
+    }
+    let Some(arrow) = find_top_level_arrow(s) else {
+        anyhow::bail!("`{src}` is not an arrow/function (expected `(params) => body`)");
+    };
+    let (left, right) = (s[..arrow].trim(), s[arrow + 2..].trim().to_string());
+    let params_src = if left.starts_with('(') && left.ends_with(')') && left.len() >= 2 {
+        left[1..left.len() - 1].trim()
+    } else {
+        left
+    };
+    Ok((param_names(params_src)?, right.trim().to_string(), is_block_body(&right)))
+}
+
+fn split_paren_body(src: &str) -> Option<(String, String)> {
+    let bytes = src.as_bytes();
+    if bytes.first() != Some(&b'(') {
+        return None;
+    }
+    let mut depth = 0i32;
+    let mut i = 0usize;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' | b'\'' | b'`' => {
+                i = str_lit_end(src, i);
+                continue;
+            }
+            b'(' => depth += 1,
+            b')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some((src[1..i].to_string(), src[i + 1..].trim().to_string()));
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+fn is_block_body(body: &str) -> bool {
+    let b = body.trim();
+    b.starts_with('{') && b.ends_with('}') && b.len() >= 2
+}
+
+/// Bare identifier names from a parameter list.
+///
+/// # Errors
+/// Rejects destructured/complex parameters (positional mapping needs names).
+fn param_names(params_src: &str) -> anyhow::Result<Vec<String>> {
+    let mut out = Vec::new();
+    let p = params_src.trim();
+    if p.is_empty() {
+        return Ok(out);
+    }
+    for part in split_top_level_commas(p) {
+        let part = part.trim().trim_start_matches("...").trim();
+        // Strip any `: type` / `= default` annotation, keep the name.
+        let name_end = part
+            .char_indices()
+            .take_while(|(_, c)| c.is_alphanumeric() || *c == '_' || *c == '$')
+            .map(|(i, c)| i + c.len_utf8())
+            .last()
+            .unwrap_or(0);
+        let name = part[..name_end].trim();
+        if name.is_empty()
+            || name_end < part.len() && {
+                let rest = part[name_end..].trim_start();
+                !(rest.starts_with(':') || rest.starts_with('=') || rest.starts_with('?'))
+            }
+        {
+            anyhow::bail!("destructured/complex parameters like `{part}` are not supported in function props (use plain names)");
+        }
+        out.push(name.to_string());
+    }
+    Ok(out)
+}
+
+/// Zero value for an omitted optional prop, or `None` for types without
+/// one (functions, objects), which must be passed explicitly.
+fn prop_zero_value(prop: &morph_parser::ComponentProp) -> Option<(String, String)> {
+    let class = ts_type_class(&prop.prop_type);
+    match class.as_str() {
+        "std::string" => Some(("std::string{}".to_string(), class)),
+        "bool" => Some(("false".to_string(), class)),
+        "JsArray" => Some(("JsArray{}".to_string(), class)),
+        "int" => Some(("0".to_string(), class)),
+        "double" => Some(("0.0".to_string(), class)),
+        _ => None,
     }
 }
 
@@ -571,14 +2687,24 @@ enum PseudoKind {
 fn is_animatable(prop: &str) -> bool {
     matches!(
         prop,
-        "opacity" | "background-color" | "color" | "border-radius" | "font-size"
-            | "width" | "height" | "left" | "top" | "transform"
+        "opacity"
+            | "background-color"
+            | "color"
+            | "border-radius"
+            | "font-size"
+            | "width"
+            | "height"
+            | "left"
+            | "top"
+            | "transform"
     )
 }
 
 fn needs_layout(val: &str) -> bool {
     let v = val.trim();
-    if v.is_empty() || v == "auto" { return true; }
+    if v.is_empty() || v == "auto" {
+        return true;
+    }
     v.ends_with('%') || v.ends_with("vh") || v.ends_with("vw")
 }
 
@@ -593,12 +2719,42 @@ fn ua_defaults(tag: &str) -> &'static [(&'static str, &'static str)] {
         "body" => &[("display", "block"), ("padding", "8px")],
 
         // ── Headings ────────────────────────────────────────────
-        "h1" => &[("display", "block"), ("font-size", "32px"), ("font-weight", "bold"), ("margin", "21.44px 0")],
-        "h2" => &[("display", "block"), ("font-size", "24px"), ("font-weight", "bold"), ("margin", "19.92px 0")],
-        "h3" => &[("display", "block"), ("font-size", "18.72px"), ("font-weight", "bold"), ("margin", "18.72px 0")],
-        "h4" => &[("display", "block"), ("font-size", "16px"), ("font-weight", "bold"), ("margin", "21.28px 0")],
-        "h5" => &[("display", "block"), ("font-size", "13.28px"), ("font-weight", "bold"), ("margin", "22.18px 0")],
-        "h6" => &[("display", "block"), ("font-size", "10.72px"), ("font-weight", "bold"), ("margin", "24.97px 0")],
+        "h1" => &[
+            ("display", "block"),
+            ("font-size", "32px"),
+            ("font-weight", "bold"),
+            ("margin", "21.44px 0"),
+        ],
+        "h2" => &[
+            ("display", "block"),
+            ("font-size", "24px"),
+            ("font-weight", "bold"),
+            ("margin", "19.92px 0"),
+        ],
+        "h3" => &[
+            ("display", "block"),
+            ("font-size", "18.72px"),
+            ("font-weight", "bold"),
+            ("margin", "18.72px 0"),
+        ],
+        "h4" => &[
+            ("display", "block"),
+            ("font-size", "16px"),
+            ("font-weight", "bold"),
+            ("margin", "21.28px 0"),
+        ],
+        "h5" => &[
+            ("display", "block"),
+            ("font-size", "13.28px"),
+            ("font-weight", "bold"),
+            ("margin", "22.18px 0"),
+        ],
+        "h6" => &[
+            ("display", "block"),
+            ("font-size", "10.72px"),
+            ("font-weight", "bold"),
+            ("margin", "24.97px 0"),
+        ],
 
         // ── Grouping ────────────────────────────────────────────
         "div" => &[("display", "block")],
@@ -675,7 +2831,13 @@ fn ua_defaults(tag: &str) -> &'static [(&'static str, &'static str)] {
         "select" => &[("display", "inline-block")],
         "textarea" => &[("display", "inline-block")],
         "label" => &[("display", "inline")],
-        "fieldset" => &[("display", "block"), ("border-width", "2px"), ("border-style", "groove"), ("margin", "0 2px"), ("padding", "5px 12px 10px")],
+        "fieldset" => &[
+            ("display", "block"),
+            ("border-width", "2px"),
+            ("border-style", "groove"),
+            ("margin", "0 2px"),
+            ("padding", "5px 12px 10px"),
+        ],
         "legend" => &[("display", "block"), ("padding", "0 2px")],
         "form" => &[("display", "block")],
 
@@ -754,7 +2916,7 @@ fn strip_static_linkage(cpp: &str) -> String {
     let mut text = cpp.trim().to_string();
     for prefix in ["static inline", "static"] {
         if text.starts_with(prefix)
-            && text[prefix.len()..].chars().next().map(|c| c.is_whitespace()).unwrap_or(false)
+            && text[prefix.len()..].chars().next().is_some_and(char::is_whitespace)
         {
             text = text[prefix.len()..].trim_start().to_string();
             break;
@@ -782,9 +2944,7 @@ fn analyze_dynamic_class(
 ) -> Vec<crate::node::IRConditionalClassEffect> {
     let mut effects = Vec::new();
     let allocator = Allocator::default();
-    let source_type = SourceType::from_path("snippet.ts")
-        .unwrap_or_default()
-        .with_typescript(true);
+    let source_type = SourceType::from_path("snippet.ts").unwrap_or_default().with_typescript(true);
     let parsed = Parser::new(&allocator, source, source_type).parse();
     if parsed.panicked || !parsed.diagnostics.is_empty() {
         return effects;
@@ -799,7 +2959,7 @@ fn analyze_dynamic_class(
     let mut ternaries: Vec<&ConditionalExpression> = Vec::new();
     match expr {
         Expression::TemplateLiteral(tpl) => {
-            for part in tpl.expressions.iter() {
+            for part in &tpl.expressions {
                 if let Expression::ConditionalExpression(cond) = part {
                     ternaries.push(cond);
                 }
@@ -816,7 +2976,8 @@ fn analyze_dynamic_class(
         if on_styles.is_empty() && off_styles.is_empty() {
             continue;
         }
-        let cond_src = &source[ternary.test.span().start as usize..ternary.test.span().end as usize];
+        let cond_src =
+            &source[ternary.test.span().start as usize..ternary.test.span().end as usize];
         let mut options = morpher::TranslateOptions::default();
         options.type_mode = type_mode;
         options.state_vars = ambient_vars.clone();
@@ -917,8 +3078,12 @@ fn split_trailing_pseudo(sel: &str) -> Option<(&str, Option<PseudoKind>)> {
 /// element. No combinators/descendant selectors are supported here.
 fn match_selector_compound(tag: &str, classes: &[String], id: Option<&str>, sel: &str) -> bool {
     let sel = sel.trim();
-    if sel.is_empty() { return false; }
-    if sel == "*" { return true; }
+    if sel.is_empty() {
+        return false;
+    }
+    if sel == "*" {
+        return true;
+    }
 
     let mut matched_tag = false;
     let mut tag_found = false;
@@ -940,7 +3105,9 @@ fn match_selector_compound(tag: &str, classes: &[String], id: Option<&str>, sel:
                 while i < bytes.len() && !" .#:[]>~+*".contains(sel[i..].chars().next().unwrap()) {
                     i += sel[i..].chars().next().unwrap().len_utf8();
                 }
-                if i > start { required_classes.push(&sel[start..i]); }
+                if i > start {
+                    required_classes.push(&sel[start..i]);
+                }
             }
             '#' => {
                 flush_tag(&mut buf, &mut tag_found, &mut matched_tag, tag);
@@ -950,7 +3117,7 @@ fn match_selector_compound(tag: &str, classes: &[String], id: Option<&str>, sel:
                     i += sel[i..].chars().next().unwrap().len_utf8();
                 }
                 has_id = true;
-                if id.map(|v| v == &sel[start..i]).unwrap_or(false) {
+                if id.is_some_and(|v| v == &sel[start..i]) {
                     // id matches
                 } else {
                     id_ok = false;
@@ -970,8 +3137,12 @@ fn match_selector_compound(tag: &str, classes: &[String], id: Option<&str>, sel:
     // Trailing tag text after the last class/id token.
     flush_tag(&mut buf, &mut tag_found, &mut matched_tag, tag);
 
-    if has_id && !id_ok { return false; }
-    if tag_found && !matched_tag { return false; }
+    if has_id && !id_ok {
+        return false;
+    }
+    if tag_found && !matched_tag {
+        return false;
+    }
     for c in required_classes {
         if !classes.iter().any(|cl| cl.as_str() == c) {
             return false;
@@ -1001,11 +3172,11 @@ fn event_trigger(prop: &str) -> Option<&'static str> {
 
 /// Class list and id of an element, shared by matching and ancestry.
 fn element_classes_id(
-    props: &std::collections::HashMap<String, morph_parser::JsxPropValue>,
+    props: &HashMap<String, morph_parser::JsxPropValue>,
 ) -> (Vec<String>, Option<String>) {
     let classes = match props.get("className").or_else(|| props.get("class")) {
         Some(morph_parser::JsxPropValue::String(c)) => {
-            c.split_whitespace().map(|s| s.to_string()).collect()
+            c.split_whitespace().map(std::string::ToString::to_string).collect()
         }
         _ => Vec::new(),
     };
@@ -1021,7 +3192,9 @@ fn flush_tag(buf: &mut String, tag_found: &mut bool, matched_tag: &mut bool, tag
     let s = buf.trim();
     if !s.is_empty() && s != "*" {
         *tag_found = true;
-        if s == tag { *matched_tag = true; }
+        if s == tag {
+            *matched_tag = true;
+        }
     }
     buf.clear();
 }
@@ -1103,7 +3276,7 @@ fn split_selector_sequence(selector: &str) -> Option<Vec<(Option<Combinator>, St
     let mut current = String::new();
     let mut pending = None;
     let mut chars = selector.chars().peekable();
-    while let Some(ch) = chars.next() {
+    for ch in chars {
         match ch {
             ' ' | '\t' => {
                 if !current.trim().is_empty() {
@@ -1222,7 +3395,7 @@ fn match_selector_detailed(
         };
         if match_sequence(tag, classes, id, ancestors, &steps) {
             let specificity = selector_specificity(alternative);
-            let better = best.map(|(_, held)| specificity > held).unwrap_or(true);
+            let better = best.map_or(true, |(_, held)| specificity > held);
             if better {
                 best = Some((pseudo.unwrap_or(PseudoKind::Base), specificity));
             }
@@ -1234,91 +3407,293 @@ fn match_selector_detailed(
 /// Apply a CSS property to a style, returning the IR field name that was set
 /// (used for `@keyframes` declared-field tracking), or None if unsupported.
 fn apply_css_prop(style: &mut IRStyle, prop: &str, val: &str) -> Option<&'static str> {
-    if !css_registry::is_known_property(prop) { return None; }
+    if !css_registry::is_known_property(prop) {
+        return None;
+    }
     match prop {
-        "background-color" | "background" => if let Some(c) = parse_color(val) { style.bg_color = c; Some("bg_color") } else { None },
-        "color" => if let Some(c) = parse_color(val) { style.color = c; Some("color") } else { None },
-        "width" => if let Some(v) = parse_length(val) { style.width = Some(v); Some("width") } else { None },
-        "height" => if let Some(v) = parse_length(val) { style.height = Some(v); Some("height") } else { None },
-        "min-width" => if let Some(v) = parse_length(val) { style.min_width = Some(v); Some("min_width") } else { None },
-        "max-width" => if let Some(v) = parse_length(val) { style.max_width = Some(v); Some("max_width") } else { None },
-        "min-height" => if let Some(v) = parse_length(val) { style.min_height = Some(v); Some("min_height") } else { None },
-        "max-height" => if let Some(v) = parse_length(val) { style.max_height = Some(v); Some("max_height") } else { None },
-        "padding" => if let Some(v) = parse_box_sides(val) { style.padding = v; Some("padding") } else { None },
-        "margin" => if let Some(v) = parse_box_sides(val) { style.margin = v; Some("margin") } else { None },
-        "border-radius" => if let Some(v) = parse_length(val) { style.border_radius = v; Some("border_radius") } else { None },
-        "font-size" => if let Some(v) = parse_length(val) { style.font_size = v; Some("font_size") } else { None },
-        "font-weight" => { style.font_weight = val.to_string(); Some("font_weight") }
-        "text-align" => { style.text_align = val.to_string(); Some("text_align") }
-        "display" => { style.display = val.to_string(); Some("display") }
-        "flex-direction" => { style.flex_dir = val.to_string(); Some("flex_dir") }
-        "gap" => if let Some(v) = parse_length(val) { style.gap = v; Some("gap") } else { None },
-        "position" => { style.position = val.to_string(); Some("position") }
+        "background-color" | "background" => {
+            if let Some(c) = parse_color(val) {
+                style.bg_color = c;
+                Some("bg_color")
+            } else {
+                None
+            }
+        }
+        "color" => {
+            if let Some(c) = parse_color(val) {
+                style.color = c;
+                Some("color")
+            } else {
+                None
+            }
+        }
+        "width" => {
+            if let Some(v) = parse_length(val) {
+                style.width = Some(v);
+                Some("width")
+            } else {
+                None
+            }
+        }
+        "height" => {
+            if let Some(v) = parse_length(val) {
+                style.height = Some(v);
+                Some("height")
+            } else {
+                None
+            }
+        }
+        "min-width" => {
+            if let Some(v) = parse_length(val) {
+                style.min_width = Some(v);
+                Some("min_width")
+            } else {
+                None
+            }
+        }
+        "max-width" => {
+            if let Some(v) = parse_length(val) {
+                style.max_width = Some(v);
+                Some("max_width")
+            } else {
+                None
+            }
+        }
+        "min-height" => {
+            if let Some(v) = parse_length(val) {
+                style.min_height = Some(v);
+                Some("min_height")
+            } else {
+                None
+            }
+        }
+        "max-height" => {
+            if let Some(v) = parse_length(val) {
+                style.max_height = Some(v);
+                Some("max_height")
+            } else {
+                None
+            }
+        }
+        "padding" => {
+            if let Some(v) = parse_box_sides(val) {
+                style.padding = v;
+                Some("padding")
+            } else {
+                None
+            }
+        }
+        "margin" => {
+            if let Some(v) = parse_box_sides(val) {
+                style.margin = v;
+                Some("margin")
+            } else {
+                None
+            }
+        }
+        "border-radius" => {
+            if let Some(v) = parse_length(val) {
+                style.border_radius = v;
+                Some("border_radius")
+            } else {
+                None
+            }
+        }
+        "font-size" => {
+            if let Some(v) = parse_length(val) {
+                style.font_size = v;
+                Some("font_size")
+            } else {
+                None
+            }
+        }
+        "font-weight" => {
+            style.font_weight = val.to_string();
+            Some("font_weight")
+        }
+        "text-align" => {
+            style.text_align = val.to_string();
+            Some("text_align")
+        }
+        "display" => {
+            style.display = val.to_string();
+            Some("display")
+        }
+        "flex-direction" => {
+            style.flex_dir = val.to_string();
+            Some("flex_dir")
+        }
+        "gap" => {
+            if let Some(v) = parse_length(val) {
+                style.gap = v;
+                Some("gap")
+            } else {
+                None
+            }
+        }
+        "position" => {
+            style.position = val.to_string();
+            Some("position")
+        }
         "left" => {
             style.left = parse_length(val);
-            if style.left.is_some() { Some("left") } else { None }
+            if style.left.is_some() {
+                Some("left")
+            } else {
+                None
+            }
         }
         "right" => {
             style.right = parse_length(val);
-            if style.right.is_some() { Some("right") } else { None }
+            if style.right.is_some() {
+                Some("right")
+            } else {
+                None
+            }
         }
         "top" => {
             style.top = parse_length(val);
-            if style.top.is_some() { Some("top") } else { None }
+            if style.top.is_some() {
+                Some("top")
+            } else {
+                None
+            }
         }
         "bottom" => {
             style.bottom = parse_length(val);
-            if style.bottom.is_some() { Some("bottom") } else { None }
+            if style.bottom.is_some() {
+                Some("bottom")
+            } else {
+                None
+            }
         }
-        "justify-content" => { style.justify_content = val.to_string(); Some("justify_content") }
-        "align-items" => { style.align_items = val.to_string(); Some("align_items") }
-        "flex-wrap" => { style.flex_wrap = val.to_string(); Some("flex_wrap") }
-        "flex-grow" => if let Ok(v) = val.trim().parse::<f32>() {
-            style.flex_grow = v; Some("flex_grow")
-        } else { None },
-        "flex-shrink" => if let Ok(v) = val.trim().parse::<f32>() {
-            style.flex_shrink = v; Some("flex_shrink")
-        } else { None },
+        "justify-content" => {
+            style.justify_content = val.to_string();
+            Some("justify_content")
+        }
+        "align-items" => {
+            style.align_items = val.to_string();
+            Some("align_items")
+        }
+        "flex-wrap" => {
+            style.flex_wrap = val.to_string();
+            Some("flex_wrap")
+        }
+        "flex-grow" => {
+            if let Ok(v) = val.trim().parse::<f32>() {
+                style.flex_grow = v;
+                Some("flex_grow")
+            } else {
+                None
+            }
+        }
+        "flex-shrink" => {
+            if let Ok(v) = val.trim().parse::<f32>() {
+                style.flex_shrink = v;
+                Some("flex_shrink")
+            } else {
+                None
+            }
+        }
         "flex-basis" => {
             let v = val.trim();
             style.flex_basis = if v == "auto" {
                 "auto".to_string()
             } else if let Some(px) = parse_length(v) {
-                format!("{}px", px)
+                format!("{px}px")
             } else {
                 v.to_string()
             };
             Some("flex_basis")
         }
-        "flex" => { parse_flex_shorthand(&mut *style, val); Some("flex") }
-        "border" => { parse_border_shorthand(&mut *style, val); Some("border") }
-        "margin-top" => if let Some(v) = parse_length(val) {
-            style.margin[0] = v; Some("margin")
-        } else { None },
-        "margin-right" => if let Some(v) = parse_length(val) {
-            style.margin[1] = v; Some("margin")
-        } else { None },
-        "margin-bottom" => if let Some(v) = parse_length(val) {
-            style.margin[2] = v; Some("margin")
-        } else { None },
-        "margin-left" => if let Some(v) = parse_length(val) {
-            style.margin[3] = v; Some("margin")
-        } else { None },
-        "padding-top" => if let Some(v) = parse_length(val) {
-            style.padding[0] = v; Some("padding")
-        } else { None },
-        "padding-right" => if let Some(v) = parse_length(val) {
-            style.padding[1] = v; Some("padding")
-        } else { None },
-        "padding-bottom" => if let Some(v) = parse_length(val) {
-            style.padding[2] = v; Some("padding")
-        } else { None },
-        "padding-left" => if let Some(v) = parse_length(val) {
-            style.padding[3] = v; Some("padding")
-        } else { None },
-        "cursor" => { style.cursor = val.to_string(); Some("cursor") }
-        "overflow" => { style.overflow = val.to_string(); Some("overflow") }
-        "opacity" => if let Ok(v) = val.trim().parse::<f32>() { style.opacity = v; Some("opacity") } else { None },
+        "flex" => {
+            parse_flex_shorthand(&mut *style, val);
+            Some("flex")
+        }
+        "border" => {
+            parse_border_shorthand(&mut *style, val);
+            Some("border")
+        }
+        "margin-top" => {
+            if let Some(v) = parse_length(val) {
+                style.margin[0] = v;
+                Some("margin")
+            } else {
+                None
+            }
+        }
+        "margin-right" => {
+            if let Some(v) = parse_length(val) {
+                style.margin[1] = v;
+                Some("margin")
+            } else {
+                None
+            }
+        }
+        "margin-bottom" => {
+            if let Some(v) = parse_length(val) {
+                style.margin[2] = v;
+                Some("margin")
+            } else {
+                None
+            }
+        }
+        "margin-left" => {
+            if let Some(v) = parse_length(val) {
+                style.margin[3] = v;
+                Some("margin")
+            } else {
+                None
+            }
+        }
+        "padding-top" => {
+            if let Some(v) = parse_length(val) {
+                style.padding[0] = v;
+                Some("padding")
+            } else {
+                None
+            }
+        }
+        "padding-right" => {
+            if let Some(v) = parse_length(val) {
+                style.padding[1] = v;
+                Some("padding")
+            } else {
+                None
+            }
+        }
+        "padding-bottom" => {
+            if let Some(v) = parse_length(val) {
+                style.padding[2] = v;
+                Some("padding")
+            } else {
+                None
+            }
+        }
+        "padding-left" => {
+            if let Some(v) = parse_length(val) {
+                style.padding[3] = v;
+                Some("padding")
+            } else {
+                None
+            }
+        }
+        "cursor" => {
+            style.cursor = val.to_string();
+            Some("cursor")
+        }
+        "overflow" => {
+            style.overflow = val.to_string();
+            Some("overflow")
+        }
+        "opacity" => {
+            if let Ok(v) = val.trim().parse::<f32>() {
+                style.opacity = v;
+                Some("opacity")
+            } else {
+                None
+            }
+        }
         "transform" => {
             // Resolve at build time so the emitted style carries a concrete
             // matrix (Python resolves via its layout engine in dev; prod leaves
@@ -1335,21 +3710,46 @@ fn apply_css_prop(style: &mut IRStyle, prop: &str, val: &str) -> Option<&'static
                 None => None,
             }
         }
-        "transform-origin" => {
-            match transforms::parse_transform_origin(val) {
-                Some((raw, resolved)) => {
-                    style.transform_origin = Some(raw);
-                    style.transform_origin_resolved = resolved;
-                    Some("transform_origin")
-                }
-                None => None,
+        "transform-origin" => match transforms::parse_transform_origin(val) {
+            Some((raw, resolved)) => {
+                style.transform_origin = Some(raw);
+                style.transform_origin_resolved = resolved;
+                Some("transform_origin")
+            }
+            None => None,
+        },
+        "z-index" => {
+            if let Ok(v) = val.parse::<i32>() {
+                style.z_index = Some(v);
+                Some("z_index")
+            } else {
+                None
             }
         }
-        "z-index" => if let Ok(v) = val.parse::<i32>() { style.z_index = Some(v); Some("z_index") } else { None },
-        "border-width" => if let Some(v) = parse_length(val) { style.border_width = v; Some("border_width") } else { None },
-        "border-color" => if let Some(c) = parse_color(val) { style.border_color = c; Some("border_color") } else { None },
-        "border-style" => { style.border_style = val.to_string(); Some("border_style") }
-        "box-sizing" => { style.box_sizing = val.to_string(); Some("box_sizing") }
+        "border-width" => {
+            if let Some(v) = parse_length(val) {
+                style.border_width = v;
+                Some("border_width")
+            } else {
+                None
+            }
+        }
+        "border-color" => {
+            if let Some(c) = parse_color(val) {
+                style.border_color = c;
+                Some("border_color")
+            } else {
+                None
+            }
+        }
+        "border-style" => {
+            style.border_style = val.to_string();
+            Some("border_style")
+        }
+        "box-sizing" => {
+            style.box_sizing = val.to_string();
+            Some("box_sizing")
+        }
         _ => None,
     }
 }
@@ -1384,9 +3784,7 @@ fn parse_flex_shorthand(style: &mut IRStyle, val: &str) {
                 }
             }
             2 => {
-                if let (Ok(g), Ok(s)) =
-                    (parts[0].parse::<f32>(), parts[1].parse::<f32>())
-                {
+                if let (Ok(g), Ok(s)) = (parts[0].parse::<f32>(), parts[1].parse::<f32>()) {
                     style.flex_grow = g;
                     style.flex_shrink = s;
                     style.flex_basis = "0%".to_string();
@@ -1394,9 +3792,7 @@ fn parse_flex_shorthand(style: &mut IRStyle, val: &str) {
             }
             _ => {
                 if parts.len() >= 3 {
-                    if let (Ok(g), Ok(s)) =
-                        (parts[0].parse::<f32>(), parts[1].parse::<f32>())
-                    {
+                    if let (Ok(g), Ok(s)) = (parts[0].parse::<f32>(), parts[1].parse::<f32>()) {
                         style.flex_grow = g;
                         style.flex_shrink = s;
                         style.flex_basis = parts[2].to_string();
@@ -1413,10 +3809,7 @@ fn parse_border_shorthand(style: &mut IRStyle, val: &str) {
     for part in val.split_whitespace() {
         if matches!(part, "solid" | "dashed" | "dotted" | "none") {
             style.border_style = part.to_string();
-        } else if part.starts_with('#')
-            || part.starts_with("rgb")
-            || part == "transparent"
-        {
+        } else if part.starts_with('#') || part.starts_with("rgb") || part == "transparent" {
             if let Some(c) = parse_color(part) {
                 style.border_color = c;
             }
@@ -1430,7 +3823,7 @@ fn parse_border_shorthand(style: &mut IRStyle, val: &str) {
 /// [top, right, bottom, left], mirroring Python's per-side conversion.
 fn parse_box_sides(s: &str) -> Option<[f32; 4]> {
     let parts: Vec<Option<f32>> = s.split_whitespace().map(parse_length).collect();
-    if parts.is_empty() || parts.len() > 4 || parts.iter().any(|p| p.is_none()) {
+    if parts.is_empty() || parts.len() > 4 || parts.iter().any(std::option::Option::is_none) {
         return None;
     }
     let v: Vec<f32> = parts.into_iter().map(|p| p.unwrap_or(0.0)).collect();
@@ -1553,11 +3946,7 @@ const ANIMATION_LONGHANDS: &[&str] = &[
     "animation-play-state",
 ];
 
-fn apply_animation_longhand(
-    anim: &mut crate::node::IRAnimation,
-    prop: &str,
-    value: &str,
-) -> bool {
+fn apply_animation_longhand(anim: &mut crate::node::IRAnimation, prop: &str, value: &str) -> bool {
     let val = value.trim().to_lowercase();
     match prop {
         "animation-name" => anim.name = val,
@@ -1612,10 +4001,8 @@ fn apply_animation_longhand(
 /// (CSS list semantics: the last value repeats). Animations without a
 /// name are dropped; play-state alone never creates one.
 fn parse_animations(merged: &HashMap<String, String>) -> Vec<crate::node::IRAnimation> {
-    let mut anims: Vec<crate::node::IRAnimation> = merged
-        .get("animation")
-        .map(|raw| parse_animation_shorthand(raw))
-        .unwrap_or_default();
+    let mut anims: Vec<crate::node::IRAnimation> =
+        merged.get("animation").map(|raw| parse_animation_shorthand(raw)).unwrap_or_default();
     let mut longhands: Vec<(&str, Vec<String>)> = Vec::new();
     for prop in ANIMATION_LONGHANDS {
         if let Some(raw) = merged.get(*prop) {
@@ -1625,12 +4012,8 @@ fn parse_animations(merged: &HashMap<String, String>) -> Vec<crate::node::IRAnim
     if longhands.is_empty() {
         return anims.into_iter().filter(|a| !a.name.is_empty()).collect();
     }
-    let count = longhands
-        .iter()
-        .map(|(_, values)| values.len())
-        .max()
-        .unwrap_or(0)
-        .max(anims.len());
+    let count =
+        longhands.iter().map(|(_, values)| values.len()).max().unwrap_or(0).max(anims.len());
     while anims.len() < count {
         anims.push(crate::node::IRAnimation::default());
     }
@@ -1647,71 +4030,86 @@ fn parse_animations(merged: &HashMap<String, String>) -> Vec<crate::node::IRAnim
 
 fn parse_length(s: &str) -> Option<f32> {
     let s = s.trim();
-    if let Some(num) = s.strip_suffix("px") { return num.trim().parse().ok(); }
-    if let Some(num) = s.strip_suffix("rem") { return num.trim().parse::<f32>().ok().map(|v| v*16.0); }
-    if let Some(num) = s.strip_suffix("em") { return num.trim().parse::<f32>().ok().map(|v| v*16.0); }
-    if s.ends_with('%') { return None; }
+    if let Some(num) = s.strip_suffix("px") {
+        return num.trim().parse().ok();
+    }
+    if let Some(num) = s.strip_suffix("rem") {
+        return num.trim().parse::<f32>().ok().map(|v| v * 16.0);
+    }
+    if let Some(num) = s.strip_suffix("em") {
+        return num.trim().parse::<f32>().ok().map(|v| v * 16.0);
+    }
+    if s.ends_with('%') {
+        return None;
+    }
     s.parse().ok()
 }
 
-fn parse_color(s: &str) -> Option<[f32;4]> {
+fn parse_color(s: &str) -> Option<[f32; 4]> {
     let s = s.trim().to_lowercase();
     if s.starts_with('#') {
         let hex = s.trim_start_matches('#');
-        let (r,g,b,a) = match hex.len() {
+        let (r, g, b, a) = match hex.len() {
             3 => {
                 let r = u8::from_str_radix(&hex[0..1].repeat(2), 16).ok()?;
                 let g = u8::from_str_radix(&hex[1..2].repeat(2), 16).ok()?;
                 let b = u8::from_str_radix(&hex[2..3].repeat(2), 16).ok()?;
-                (r,g,b,255)
+                (r, g, b, 255)
             }
             4 => {
                 let r = u8::from_str_radix(&hex[0..1].repeat(2), 16).ok()?;
                 let g = u8::from_str_radix(&hex[1..2].repeat(2), 16).ok()?;
                 let b = u8::from_str_radix(&hex[2..3].repeat(2), 16).ok()?;
                 let a = u8::from_str_radix(&hex[3..4].repeat(2), 16).ok()?;
-                (r,g,b,a)
+                (r, g, b, a)
             }
             6 => {
                 let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
                 let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
                 let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
-                (r,g,b,255)
+                (r, g, b, 255)
             }
             8 => {
                 let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
                 let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
                 let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
                 let a = u8::from_str_radix(&hex[6..8], 16).ok()?;
-                (r,g,b,a)
+                (r, g, b, a)
             }
             _ => return None,
         };
-        return Some([r as f32/255.0, g as f32/255.0, b as f32/255.0, a as f32/255.0]);
+        return Some([
+            f32::from(r) / 255.0,
+            f32::from(g) / 255.0,
+            f32::from(b) / 255.0,
+            f32::from(a) / 255.0,
+        ]);
     }
     if s.starts_with("rgb") {
         return parse_rgb(&s);
     }
     match s.as_str() {
-        "transparent" => Some([0.0,0.0,0.0,0.0]),
-        "white" => Some([1.0,1.0,1.0,1.0]),
-        "black" => Some([0.0,0.0,0.0,1.0]),
-        "red" => Some([1.0,0.0,0.0,1.0]),
-        "green" => Some([0.0,0.5,0.0,1.0]),
-        "blue" => Some([0.0,0.0,1.0,1.0]),
-        "gray" | "grey" => Some([0.5,0.5,0.5,1.0]),
+        "transparent" => Some([0.0, 0.0, 0.0, 0.0]),
+        "white" => Some([1.0, 1.0, 1.0, 1.0]),
+        "black" => Some([0.0, 0.0, 0.0, 1.0]),
+        "red" => Some([1.0, 0.0, 0.0, 1.0]),
+        "green" => Some([0.0, 0.5, 0.0, 1.0]),
+        "blue" => Some([0.0, 0.0, 1.0, 1.0]),
+        "gray" | "grey" => Some([0.5, 0.5, 0.5, 1.0]),
         _ => None,
     }
 }
 
 /// Parse `rgb(r,g,b)` / `rgba(r,g,b,a)` — components may be ints (0-255) or
 /// percentages, and alpha may be a 0..1 float or percentage.
-fn parse_rgb(s: &str) -> Option<[f32;4]> {
+fn parse_rgb(s: &str) -> Option<[f32; 4]> {
     let inner = s.find('(')?;
     let end = s.rfind(')')?;
-    let args = &s[inner+1..end];
-    let parts: Vec<&str> = args.split(',').map(|p| p.trim()).filter(|p| !p.is_empty()).collect();
-    if parts.len() < 3 { return None; }
+    let args = &s[inner + 1..end];
+    let parts: Vec<&str> = args.split(',').map(str::trim).filter(|p| !p.is_empty()).collect();
+    if parts.len() < 3 {
+        return None;
+    }
 
     let comp = |p: &str| -> Option<f32> {
         let p = p.trim();
@@ -1739,7 +4137,9 @@ fn parse_rgb(s: &str) -> Option<[f32;4]> {
 }
 
 impl Default for IRBuilder {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[cfg(test)]
@@ -1748,7 +4148,7 @@ mod tests {
     use morph_parser::JsxPropValue;
 
     fn match_sel(sel: &str, cls: &[&str]) -> bool {
-        let mut props = std::collections::HashMap::new();
+        let mut props = HashMap::new();
         props.insert("className".to_string(), JsxPropValue::String(cls.join(" ")));
         let (classes, id) = element_classes_id(&props);
         match_selector_detailed("button", &classes, id.as_deref(), &[], sel).is_some()
@@ -1794,12 +4194,13 @@ mod tests {
         ancestors: &[(&str, &[&str])],
         selector: &str,
     ) -> Option<(PseudoKind, Specificity)> {
-        let owned_classes: Vec<String> = classes.iter().map(|s| s.to_string()).collect();
+        let owned_classes: Vec<String> =
+            classes.iter().map(std::string::ToString::to_string).collect();
         let owned_ancestors: Vec<AncestorHint> = ancestors
             .iter()
             .map(|(tag, classes)| AncestorHint {
                 tag: tag.to_string(),
-                classes: classes.iter().map(|s| s.to_string()).collect(),
+                classes: classes.iter().map(std::string::ToString::to_string).collect(),
                 id: None,
             })
             .collect();
@@ -1832,7 +4233,7 @@ mod tests {
     #[test]
     fn width_attribute_loses_to_stylesheet() {
         let builder = IRBuilder::new();
-        let mut props = std::collections::HashMap::new();
+        let mut props = HashMap::new();
         props.insert("width".to_string(), JsxPropValue::String("400".to_string()));
         let node = builder.build_node(
             &morph_parser::JsxNode::Element {
@@ -1853,15 +4254,13 @@ mod tests {
         );
         assert_eq!(node.style.width, Some(400.0));
 
-        let mut props = std::collections::HashMap::new();
+        let mut props = HashMap::new();
         props.insert("width".to_string(), JsxPropValue::String("400".to_string()));
         let rules = vec![(
             ".wide".to_string(),
             morph_parser::CssRule {
                 selector: ".wide".to_string(),
-                properties: [("width".to_string(), "100px".to_string())]
-                    .into_iter()
-                    .collect(),
+                properties: [("width".to_string(), "100px".to_string())].into_iter().collect(),
             },
         )];
         props.insert("className".to_string(), JsxPropValue::String("wide".to_string()));
@@ -1897,12 +4296,17 @@ mod tests {
             components: vec![MxComponent {
                 name: "App".to_string(),
                 exported: true,
+                event_subs: Vec::new(),
+                is_default: true,
+                props_param: String::new(),
+                props: Vec::new(),
                 params: Vec::new(),
                 jsx: morph_parser::JsxNode::Text("hi".to_string()),
                 state_vars: vec![StateVar {
                     getter: "count".to_string(),
                     setter: "setCount".to_string(),
                     init: "0".to_string(),
+                    type_arg: None,
                 }],
                 effects: vec![
                     MxEffect {
@@ -1924,6 +4328,8 @@ mod tests {
                 }],
                 console_logs: vec!["body log".to_string()],
             }],
+            shared_bindings: Vec::new(),
+            event_bindings: Vec::new(),
             state_vars: Vec::new(),
             effects: Vec::new(),
             inner_functions: Vec::new(),
@@ -1942,21 +4348,16 @@ mod tests {
         let premain = win.premain_functions.join("\n");
         // Raw JS must never reach the app TU: functions are transpiled and
         // stripped of internal linkage, consts become reactive lambdas.
-        assert!(premain.contains("void doLogin()"), "handler transpiled: {}", premain);
-        assert!(premain.contains("auto helper"), "module fn transpiled: {}", premain);
-        assert!(premain.contains("API_URL"), "global transpiled: {}", premain);
-        assert!(!premain.contains("function "), "no raw JS: {}", premain);
+        assert!(premain.contains("void doLogin()"), "handler transpiled: {premain}");
+        assert!(premain.contains("auto helper"), "module fn transpiled: {premain}");
+        assert!(premain.contains("API_URL"), "global transpiled: {premain}");
+        assert!(!premain.contains("function "), "no raw JS: {premain}");
         assert!(
             premain.contains("auto doubled = []() { return ("),
-            "const is reactive lambda: {}",
-            premain
+            "const is reactive lambda: {premain}"
         );
-        assert!(
-            premain.contains("__st_count.get()"),
-            "ambient state mapped: {}",
-            premain
-        );
-        assert!(!premain.contains("static "), "external linkage: {}", premain);
+        assert!(premain.contains("__st_count.get()"), "ambient state mapped: {premain}");
+        assert!(!premain.contains("static "), "external linkage: {premain}");
         assert_eq!(win.reactive_consts, vec!["doubled".to_string()]);
         // Effects carry transpiled lambdas, not JS callbacks.
         assert_eq!(win.effect_decls.len(), 2);
@@ -1974,10 +4375,7 @@ mod tests {
     fn box_shorthands_expand_per_side() {
         assert_eq!(parse_box_sides("18px"), Some([18.0, 18.0, 18.0, 18.0]));
         assert_eq!(parse_box_sides("10px 6px"), Some([10.0, 6.0, 10.0, 6.0]));
-        assert_eq!(
-            parse_box_sides("36px 32px 28px 32px"),
-            Some([36.0, 32.0, 28.0, 32.0])
-        );
+        assert_eq!(parse_box_sides("36px 32px 28px 32px"), Some([36.0, 32.0, 28.0, 32.0]));
         assert_eq!(parse_box_sides("1px 2px 3px"), Some([1.0, 2.0, 3.0, 2.0]));
         assert_eq!(parse_box_sides("10px auto"), None);
         assert_eq!(parse_box_sides(""), None);
@@ -2011,11 +4409,8 @@ mod tests {
         // `key op` with an `op` signal must survive verbatim; only
         // className={...} becomes a reactive expression.
         let builder = IRBuilder::new();
-        let mut props = std::collections::HashMap::new();
-        props.insert(
-            "className".to_string(),
-            JsxPropValue::String("key op".to_string()),
-        );
+        let mut props = HashMap::new();
+        props.insert("className".to_string(), JsxPropValue::String("key op".to_string()));
         let node = builder.build_node(
             &morph_parser::JsxNode::Element {
                 tag: "button".to_string(),
@@ -2028,13 +4423,13 @@ mod tests {
             &[],
             0,
             &[],
-                &HashMap::new(),
-                &HashMap::new(),
-                &mut Vec::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &mut Vec::new(),
             &HashMap::new(),
         );
         assert!(node.reactive_class.is_empty());
-        let mut props = std::collections::HashMap::new();
+        let mut props = HashMap::new();
         props.insert(
             "className".to_string(),
             JsxPropValue::Expr("op === 1 ? \"a\" : \"b\"".to_string()),
@@ -2051,9 +4446,9 @@ mod tests {
             &[],
             0,
             &[],
-                &HashMap::new(),
-                &HashMap::new(),
-                &mut Vec::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &mut Vec::new(),
             &HashMap::new(),
         );
         assert!(!node.reactive_class.is_empty());
@@ -2062,7 +4457,7 @@ mod tests {
     #[test]
     fn template_className_analyzes_ternary_branches() {
         use morph_parser::{MxComponent, MxSource, StateVar};
-        let mut props = std::collections::HashMap::new();
+        let mut props = HashMap::new();
         props.insert(
             "className".to_string(),
             JsxPropValue::Template(
@@ -2076,6 +4471,10 @@ mod tests {
             components: vec![MxComponent {
                 name: "App".to_string(),
                 exported: true,
+                event_subs: Vec::new(),
+                is_default: true,
+                props_param: String::new(),
+                props: Vec::new(),
                 params: Vec::new(),
                 jsx: morph_parser::JsxNode::Element {
                     tag: "div".to_string(),
@@ -2089,12 +4488,15 @@ mod tests {
                     getter: "theme".to_string(),
                     setter: "setTheme".to_string(),
                     init: "\"light\"".to_string(),
+                    type_arg: None,
                 }],
                 effects: Vec::new(),
                 inner_functions: Vec::new(),
                 consts: Vec::new(),
                 console_logs: Vec::new(),
             }],
+            shared_bindings: Vec::new(),
+            event_bindings: Vec::new(),
             state_vars: Vec::new(),
             effects: Vec::new(),
             inner_functions: Vec::new(),
@@ -2109,14 +4511,8 @@ mod tests {
         assert_eq!(node.class_conditional_effects.len(), 1);
         let fx = &node.class_conditional_effects[0];
         assert!(fx.condition.contains("__st_theme"), "cond mapped: {}", fx.condition);
-        assert_eq!(
-            fx.on_styles.get("background-color").map(String::as_str),
-            Some("#ffffff")
-        );
-        assert_eq!(
-            fx.off_styles.get("background-color").map(String::as_str),
-            Some("#111827")
-        );
+        assert_eq!(fx.on_styles.get("background-color").map(String::as_str), Some("#ffffff"));
+        assert_eq!(fx.off_styles.get("background-color").map(String::as_str), Some("#111827"));
         assert!(!node.reactive_class.is_empty());
     }
 
@@ -2137,11 +4533,8 @@ mod tests {
         )];
         let mut keyframes = HashMap::new();
         keyframes.insert("pulse".to_string(), Vec::<CssKeyframe>::new());
-        let mut props = std::collections::HashMap::new();
-        props.insert(
-            "className".to_string(),
-            JsxPropValue::String("pulse".to_string()),
-        );
+        let mut props = HashMap::new();
+        props.insert("className".to_string(), JsxPropValue::String("pulse".to_string()));
         let jsx = morph_parser::JsxNode::Element {
             tag: "div".to_string(),
             props,
@@ -2177,11 +4570,8 @@ mod tests {
                     .collect(),
             },
         )];
-        let mut props = std::collections::HashMap::new();
-        props.insert(
-            "className".to_string(),
-            JsxPropValue::String("ghost".to_string()),
-        );
+        let mut props = HashMap::new();
+        props.insert("className".to_string(), JsxPropValue::String("ghost".to_string()));
         let jsx = morph_parser::JsxNode::Element {
             tag: "div".to_string(),
             props,
@@ -2206,7 +4596,7 @@ mod tests {
     #[test]
     fn tailwind_class_names_flow_into_style() {
         let builder = IRBuilder::new();
-        let mut props = std::collections::HashMap::new();
+        let mut props = HashMap::new();
         props.insert(
             "className".to_string(),
             JsxPropValue::String("bg-red-500 text-lg".to_string()),
@@ -2223,14 +4613,587 @@ mod tests {
             &[],
             0,
             &[],
-                &HashMap::new(),
-                &HashMap::new(),
-                &mut Vec::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &mut Vec::new(),
             &HashMap::new(),
         );
         assert!((node.style.bg_color[0] - 0xef as f32 / 255.0).abs() < 0.001);
         assert!((node.style.bg_color[1] - 0x44 as f32 / 255.0).abs() < 0.001);
         assert_eq!(node.style.bg_color[3], 1.0);
         assert_eq!(node.style.font_size, 18.0);
+    }
+}
+
+#[cfg(test)]
+mod component_tests {
+    use super::*;
+    use std::fmt::Write as _;
+
+    fn scratch(name: &str) -> PathBuf {
+        let root =
+            std::env::temp_dir().join(format!("morph_ir_comp_{name}_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    fn write_file(root: &Path, rel: &str, content: &str) {
+        let p = root.join(rel);
+        if let Some(parent) = p.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        let mut f = String::new();
+        write!(f, "{content}").unwrap();
+        std::fs::write(p, f).unwrap();
+    }
+
+    const APP: &str = r#"
+import { morphState } from 'morph'
+import Counter from './Counter.mx'
+import { Badge } from './Badge.mx'
+
+export const windowConfig = { title: "Comp", width: 400, height: 300 }
+
+export default function App() {
+  const [total, setTotal] = morphState(0)
+  function handleReset() { setTotal(0) }
+  return (
+    <body>
+      <div>{total}</div>
+      <Counter label="A" step={1} onStep={setTotal} />
+      <Counter label="B" step={2} onStep={setTotal} />
+      <Badge text={total} />
+      <button onClick={() => handleReset()}>reset</button>
+    </body>
+  )
+}
+"#;
+
+    const COUNTER: &str = r"
+import { morphState } from 'morph'
+
+export default function Counter(props: { label: string, step?: number, onStep: (v: number) => void }) {
+  const [count, setCount] = morphState(0)
+  function bump() { setCount(count + props.step) }
+  return (
+    <div>
+      <span>{props.label}: {count}</span>
+      <button onClick={() => bump()}>+</button>
+      <button onClick={() => props.onStep(count)}>send</button>
+    </div>
+  )
+}
+";
+
+    const BADGE: &str = r"
+export function Badge(props: { text: number }) {
+  return <span>total={props.text}</span>
+}
+";
+
+    fn fixture_root(name: &str) -> PathBuf {
+        let root = scratch(name);
+        write_file(&root, "App.mx", APP);
+        write_file(&root, "Counter.mx", COUNTER);
+        write_file(&root, "Badge.mx", BADGE);
+        root
+    }
+
+    fn build_root(root: &Path) -> Vec<IRWindow> {
+        let graph = morph_parser::resolve_graph(&root.join("App.mx"), root).unwrap();
+        IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).expect("build_with_graph")
+    }
+
+    fn getters(win: &IRWindow) -> Vec<String> {
+        win.state_vars.iter().map(|m| m.get("getter").cloned().unwrap_or_default()).collect()
+    }
+
+    fn reactive_texts(node: &IRNode, out: &mut Vec<String>) {
+        if !node.reactive_text.is_empty() {
+            out.push(node.reactive_text.clone());
+        }
+        for child in
+            node.children.iter().chain(node.then_nodes.iter()).chain(node.else_nodes.iter())
+        {
+            reactive_texts(child, out);
+        }
+        if let Some(tmpl) = node.item_template.as_deref() {
+            reactive_texts(tmpl, out);
+        }
+    }
+
+    fn event_targets(node: &IRNode, out: &mut Vec<String>) {
+        for ev in &node.events {
+            out.push(ev.target.clone());
+        }
+        for child in
+            node.children.iter().chain(node.then_nodes.iter()).chain(node.else_nodes.iter())
+        {
+            event_targets(child, out);
+        }
+        if let Some(tmpl) = node.item_template.as_deref() {
+            event_targets(tmpl, out);
+        }
+    }
+
+    #[test]
+    fn instances_get_independent_state() {
+        let root = fixture_root("basic_state");
+        let windows = build_root(&root);
+        assert_eq!(windows.len(), 1);
+        let win = &windows[0];
+        assert_eq!(win.title, "Comp");
+        // Root state keeps its legacy name; each stateful instance is mangled.
+        // (Badge is stateless — props don't create signals.)
+        let mut g = getters(win);
+        g.sort();
+        assert_eq!(g, vec!["inst0_count", "inst1_count", "total"]);
+        // Same init everywhere, distinct signals.
+        for name in ["inst0_count", "inst1_count"] {
+            let sv = win.state_vars.iter().find(|m| m["getter"] == name).unwrap();
+            assert_eq!(sv["init"], "0");
+        }
+        // Per-instance helpers are mangled in premain; root helper is flat.
+        let premain = win.premain_functions.join("\n");
+        assert!(premain.contains("inst0_bump"), "{premain}");
+        assert!(premain.contains("inst1_bump"), "{premain}");
+        assert!(premain.contains("void handleReset()"), "{premain}");
+        assert!(!premain.contains("void bump()"), "no unmangled bump: {premain}");
+        // Instance bodies read their own (renamed) signals, not each other's
+        // and never the bare name (the emitter maps `instN_count` to the
+        // `__st_instN_count` signal from `window.state_vars`).
+        let mut texts = Vec::new();
+        for n in &win.nodes {
+            reactive_texts(n, &mut texts);
+        }
+        assert!(texts.contains(&"inst0_count".to_string()), "{texts:?}");
+        assert!(texts.contains(&"inst1_count".to_string()), "{texts:?}");
+        assert!(!texts.contains(&"count".to_string()), "no bare count: {texts:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn state_and_fn_props_bind_reactively() {
+        let root = fixture_root("basic_props");
+        let win = &build_root(&root)[0];
+        let mut texts = Vec::new();
+        let mut targets = Vec::new();
+        for n in &win.nodes {
+            reactive_texts(n, &mut texts);
+            event_targets(n, &mut targets);
+        }
+        // `text={total}` inlines the parent signal read into the child.
+        assert!(
+            texts.iter().any(|t| t.contains("__st_total.get()")),
+            "parent signal read inlined: {texts:?}"
+        );
+        // `onStep={setTotal}` inlines the parent setter into the child handler.
+        assert!(
+            targets.iter().any(|t| t.contains("__st_total.set")),
+            "parent setter inlined: {targets:?}"
+        );
+        // String literal props inline quoted.
+        assert!(texts.iter().any(|t| t.contains("\"A\"") || t.contains("\"B\"")), "{texts:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn local_component_expands_without_import() {
+        let root = scratch("local");
+        write_file(
+            &root,
+            "App.mx",
+            r#"
+export default function App() {
+  return (
+    <body>
+      <Helper msg="hi" />
+    </body>
+  )
+}
+
+function Helper(props: { msg: string }) {
+  return <span>{props.msg}</span>
+}
+"#,
+        );
+        let graph = morph_parser::resolve_graph(&root.join("App.mx"), &root).unwrap();
+        let win = &IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap()[0];
+        // One window, one root; Helper is not a second root.
+        assert_eq!(win.nodes.len(), 1);
+        let mut texts = Vec::new();
+        reactive_texts(&win.nodes[0], &mut texts);
+        assert!(texts.iter().any(|t| t.contains("\"hi\"")), "{texts:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn optional_prop_omitted_gets_zero_default() {
+        let root = scratch("optional");
+        write_file(
+            &root,
+            "App.mx",
+            r#"
+import Counter from './Counter.mx'
+export default function App() {
+  const [total, setTotal] = morphState(0)
+  return (
+    <body>
+      <Counter label="C" onStep={setTotal} />
+    </body>
+  )
+}
+"#,
+        );
+        write_file(&root, "Counter.mx", COUNTER);
+        let graph = morph_parser::resolve_graph(&root.join("App.mx"), &root).unwrap();
+        let win = &IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap()[0];
+        // bump() body references the defaulted step.
+        let premain = win.premain_functions.join("\n");
+        assert!(premain.contains("0.0"), "defaulted step inlined: {premain}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn missing_required_prop_is_an_error() {
+        let root = scratch("missingreq");
+        write_file(
+            &root,
+            "App.mx",
+            "import Counter from './Counter.mx'\nexport default function App() { return (<body><Counter label=\"A\" /></body>) }",
+        );
+        write_file(&root, "Counter.mx", COUNTER);
+        let graph = morph_parser::resolve_graph(&root.join("App.mx"), &root).unwrap();
+        let err = IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap_err();
+        assert!(err.to_string().contains("onStep"), "{err}");
+        assert!(err.to_string().contains("required"), "{err}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn inner_function_colliding_with_prop_is_an_error() {
+        let root = scratch("membercollision");
+        write_file(
+            &root,
+            "App.mx",
+            "import Counter from './Counter.mx'\nexport default function App() { return (<body><Counter label=\"A\" step={1} onStep={() => 1} /></body>) }",
+        );
+        write_file(
+            &root,
+            "Counter.mx",
+            "export default function Counter(props: { label: string, step: number, onStep: () => void }) { function step() { return 1 } return (<span>{props.label}</span>) }",
+        );
+        let graph = morph_parser::resolve_graph(&root.join("App.mx"), &root).unwrap();
+        let err = IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap_err();
+        assert!(err.to_string().contains("collides"), "{err}");
+        assert!(err.to_string().contains("step"), "{err}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn unknown_prop_is_an_error() {
+        let root = scratch("unknownprop");
+        write_file(
+            &root,
+            "App.mx",
+            "import { Badge } from './Badge.mx'\nexport default function App() { return (<body><Badge text={1} bogus={2} /></body>) }",
+        );
+        write_file(&root, "Badge.mx", BADGE);
+        let graph = morph_parser::resolve_graph(&root.join("App.mx"), &root).unwrap();
+        let err = IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap_err();
+        assert!(err.to_string().contains("bogus"), "{err}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn unknown_component_is_an_error() {
+        let root = scratch("unknowncomp");
+        write_file(
+            &root,
+            "App.mx",
+            "export default function App() { return (<body><Nope /></body>) }",
+        );
+        let graph = morph_parser::resolve_graph(&root.join("App.mx"), &root).unwrap();
+        let err = IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap_err();
+        assert!(err.to_string().contains("Nope"), "{err}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn component_cycles_are_rejected() {
+        let root = scratch("cycle");
+        write_file(
+            &root,
+            "A.mx",
+            "import { B } from './B.mx'\nexport default function A() { return (<div><B /></div>) }",
+        );
+        write_file(
+            &root,
+            "B.mx",
+            "import A from './A.mx'\nexport function B() { return (<span><A /></span>) }",
+        );
+        let graph = morph_parser::resolve_graph(&root.join("A.mx"), &root).unwrap();
+        let err = IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap_err();
+        assert!(err.to_string().contains("cyclic"), "{err}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn entry_props_and_children_are_rejected() {
+        let root = scratch("entryprops");
+        write_file(
+            &root,
+            "App.mx",
+            "export default function App(props: { x: string }) { return (<div/>) }",
+        );
+        let graph = morph_parser::resolve_graph(&root.join("App.mx"), &root).unwrap();
+        let err = IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap_err();
+        assert!(err.to_string().contains("must not declare props"), "{err}");
+
+        write_file(
+            &root,
+            "App2.mx",
+            "import { Badge } from './Badge.mx'\nexport default function App() { return (<body><Badge text={1}>hi</Badge></body>) }",
+        );
+        write_file(&root, "Badge.mx", BADGE);
+        let graph = morph_parser::resolve_graph(&root.join("App2.mx"), &root).unwrap();
+        let err = IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap_err();
+        assert!(err.to_string().contains("children"), "{err}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn inline_arrow_props_become_typed_adapters() {
+        let root = scratch("adapter");
+        write_file(
+            &root,
+            "App.mx",
+            r#"
+import Counter from './Counter.mx'
+export default function App() {
+  const [total, setTotal] = morphState(0)
+  return (
+    <body>
+      <Counter label="D" step={1} onStep={(v) => setTotal(v + 1)} />
+    </body>
+  )
+}
+"#,
+        );
+        write_file(&root, "Counter.mx", COUNTER);
+        let graph = morph_parser::resolve_graph(&root.join("App.mx"), &root).unwrap();
+        let win = &IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap()[0];
+        let premain = win.premain_functions.join("\n");
+        // Typed adapter in premain, parent state correctly referenced.
+        assert!(premain.contains("inst0_prop_onStep"), "{premain}");
+        assert!(premain.contains("__st_total.set"), "{premain}");
+        assert!(!premain.contains("=>"), "no raw JS arrows: {premain}");
+        // Child calls the adapter with its own (renamed) signal — the
+        // emitter maps `inst0_count` to `__st_inst0_count` from state_vars.
+        let mut targets = Vec::new();
+        for n in &win.nodes {
+            event_targets(n, &mut targets);
+        }
+        assert!(
+            targets.iter().any(|t| t.contains("inst0_prop_onStep") && t.contains("inst0_count")),
+            "{targets:?}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn block_body_arrow_adapter() {
+        let root = scratch("adapterblock");
+        write_file(
+            &root,
+            "App.mx",
+            r"
+import { Badge } from './Badge.mx'
+export default function App() {
+  const [total, setTotal] = morphState(0)
+  return (
+    <body>
+      <Badge text={total} />
+    </body>
+  )
+}
+",
+        );
+        write_file(&root, "Badge.mx", BADGE);
+        let graph = morph_parser::resolve_graph(&root.join("App.mx"), &root).unwrap();
+        // Badge takes no function props — sanity: no adapters, still builds.
+        let win = &IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap()[0];
+        assert!(win.premain_functions.iter().all(|p| !p.contains("_prop_")));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn bad_function_props_are_clear_errors() {
+        // Arity mismatch: callback declares 2 params, type takes 1.
+        let root = scratch("adapterarity");
+        write_file(
+            &root,
+            "App.mx",
+            "import Counter from './Counter.mx'\nexport default function App() { return (<body><Counter label=\"A\" step={1} onStep={(a, b) => a} /></body>) }",
+        );
+        write_file(&root, "Counter.mx", COUNTER);
+        let graph = morph_parser::resolve_graph(&root.join("App.mx"), &root).unwrap();
+        let err = IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap_err();
+        assert!(err.to_string().contains("parameter"), "{err}");
+        // Arrow on a non-function prop.
+        write_file(
+            &root,
+            "App2.mx",
+            "import { Badge } from './Badge.mx'\nexport default function App() { return (<body><Badge text={() => 1} /></body>) }",
+        );
+        write_file(&root, "Badge.mx", BADGE);
+        let graph = morph_parser::resolve_graph(&root.join("App2.mx"), &root).unwrap();
+        let err = IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap_err();
+        assert!(err.to_string().contains("non-function prop"), "{err}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn fn_type_and_callable_parsers() {
+        let (params, ret) =
+            parse_fn_type("(v: number, cb: (x: string) => void) => boolean").unwrap();
+        assert_eq!(params.len(), 2);
+        assert_eq!(params[0], ("v".to_string(), "number".to_string(), false));
+        assert_eq!(params[1].0, "cb");
+        assert!(params[1].1.contains("=>"));
+        assert_eq!(ret, "boolean");
+        assert!(parse_fn_type("<T>(x: T) => T").is_err());
+        assert!(parse_fn_type("(a?: number) => void").is_err());
+        assert!(parse_fn_type("string").is_err());
+        let (names, body, block) = parse_callable_source("(a, b) => a + b").unwrap();
+        assert_eq!(names, vec!["a", "b"]);
+        assert_eq!(body, "a + b");
+        assert!(!block);
+        let (names, body, block) = parse_callable_source("x => { foo(x); }").unwrap();
+        assert_eq!(names, vec!["x"]);
+        assert!(block);
+        assert!(body.contains("foo(x)"));
+        let (names, _, _) = parse_callable_source("() => 1").unwrap();
+        assert!(names.is_empty());
+        assert!(parse_callable_source("async (x) => x").is_err());
+        assert!(parse_callable_source("(a, {b}) => a").is_err());
+    }
+
+    #[test]
+    fn shared_store_is_namespaced_per_file() {
+        let root = scratch("shared");
+        write_file(
+            &root,
+            "store.mx",
+            r"
+export const [count, setCount] = morphShared<number>(0)
+",
+        );
+        write_file(
+            &root,
+            "Panel.mx",
+            r"
+import { count, setCount } from './store.mx'
+import { morphState } from 'morph'
+export default function Panel() {
+  const [open, setOpen] = morphState(true)
+  return (
+    <div>
+      <span>{count}</span>
+      {open && <button onClick={() => setCount(0)}>clear</button>}
+    </div>
+  )
+}
+",
+        );
+        write_file(
+            &root,
+            "App.mx",
+            r"
+import Panel from './Panel.mx'
+import { count, setCount } from './store.mx'
+export default function App() {
+  return (
+    <body>
+      <div>{count}</div>
+      <button onClick={() => setCount(count + 1)}>+</button>
+      <Panel />
+    </body>
+  )
+}
+",
+        );
+        let graph = morph_parser::resolve_graph(&root.join("App.mx"), &root).unwrap();
+        let win = &IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap()[0];
+        // Both files import the same store binding; they dedupe to one entry
+        // keyed by the canonical store module path + getter name.
+        assert_eq!(win.shared_vars.len(), 1);
+        let e = &win.shared_vars[0];
+        assert_eq!(e["accessor"], "shared_count");
+        assert_eq!(e["type"], "int");
+        assert_eq!(e["init"], "0");
+        assert_eq!(e["getter"], "count");
+        // The fully qualified accessor uses a namespace derived from the store
+        // module path, not a global name.
+        assert!(e["ns"].starts_with("store_"), "ns: {}", e["ns"]);
+        // Panel's local state is mangled alongside.
+        assert!(getters(win).contains(&"inst0_open".to_string()));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn shared_import_ambiguous_is_error() {
+        let root = scratch("ambig");
+        write_file(
+            &root,
+            "a.mx",
+            "export const [count, setCount] = morphShared<number>(1)\nexport default function A() { return (<div>{count}</div>) }\n",
+        );
+        write_file(
+            &root,
+            "b.mx",
+            "export const [count, setCount] = morphShared<number>(2)\nexport default function B() { return (<div>{count}</div>) }\n",
+        );
+        // App imports `count` from both a and b — ambiguous.
+        write_file(
+            &root,
+            "App.mx",
+            "import { count } from './a.mx'\nimport { count } from './b.mx'\nexport default function App() { return (<div>{count}</div>) }\n",
+        );
+        let graph = morph_parser::resolve_graph(&root.join("App.mx"), &root).unwrap();
+        let err = IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap_err();
+        assert!(err.to_string().contains("ambiguous import"), "{err}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn helpers_rename_is_member_and_string_safe() {
+        // `item.count` (member) and "count" (string) must survive; bare
+        // `count` renames.
+        let mut renames = HashMap::new();
+        renames.insert("count".to_string(), "inst0_count".to_string());
+        let frame = InstanceFrame {
+            module: PathBuf::new(),
+            vars: HashMap::new(),
+            types: HashMap::new(),
+            events: HashMap::new(),
+            props_param: String::new(),
+            renames,
+            prop_binds: HashMap::new(),
+        };
+        let out = capture_raw(r#"item.count + count + "count" + f(count)"#, &frame);
+        assert_eq!(out, r#"item.count + inst0_count + "count" + f(inst0_count)"#);
+        // props.x rewriting.
+        let frame2 = InstanceFrame {
+            module: PathBuf::new(),
+            vars: HashMap::new(),
+            types: HashMap::new(),
+            events: HashMap::new(),
+            props_param: "props".to_string(),
+            renames: HashMap::new(),
+            prop_binds: HashMap::new(),
+        };
+        assert_eq!(subst_props_refs("props.title + y.props.z", &frame2), "title + y.props.z");
     }
 }

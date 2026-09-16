@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
-use lightningcss::stylesheet::{ParserOptions, PrinterOptions, StyleSheet};
-use lightningcss::traits::ToCss;
 #[allow(unused_imports)]
 use lightningcss::rules::keyframes::KeyframesName;
+use lightningcss::stylesheet::{ParserOptions, PrinterOptions, StyleSheet};
+use lightningcss::traits::ToCss;
 
 use super::ast_types::{CssData, CssKeyframe, CssRule};
 
@@ -21,12 +21,14 @@ pub fn parse_css(source: &str) -> Result<CssData> {
             let selector = style_rule.selectors.to_string();
             let mut properties = HashMap::new();
             for prop in &style_rule.declarations.declarations {
-                let name = prop.property_id().to_css_string(PrinterOptions::default()).unwrap_or_default();
+                let name =
+                    prop.property_id().to_css_string(PrinterOptions::default()).unwrap_or_default();
                 let value = prop.value_to_css_string(PrinterOptions::default()).unwrap_or_default();
                 properties.insert(name, value);
             }
             for prop in &style_rule.declarations.important_declarations {
-                let name = prop.property_id().to_css_string(PrinterOptions::default()).unwrap_or_default();
+                let name =
+                    prop.property_id().to_css_string(PrinterOptions::default()).unwrap_or_default();
                 let value = prop.value_to_css_string(PrinterOptions::default()).unwrap_or_default();
                 properties.insert(name, value);
             }
@@ -47,10 +49,12 @@ pub fn parse_css(source: &str) -> Result<CssData> {
                 let mut offsets = Vec::new();
                 for s in &kf.selectors {
                     let offset = match s {
-                        lightningcss::rules::keyframes::KeyframeSelector::Percentage(p) => Some(p.0),
+                        lightningcss::rules::keyframes::KeyframeSelector::Percentage(p) => {
+                            Some(p.0)
+                        }
                         lightningcss::rules::keyframes::KeyframeSelector::From => Some(0.0),
                         lightningcss::rules::keyframes::KeyframeSelector::To => Some(1.0),
-                        _ => None,
+                        lightningcss::rules::keyframes::KeyframeSelector::TimelineRangePercentage(_) => None,
                     };
                     if let Some(offset) = offset {
                         offsets.push(offset);
@@ -61,13 +65,21 @@ pub fn parse_css(source: &str) -> Result<CssData> {
                 }
                 let mut properties = HashMap::new();
                 for prop in &kf.declarations.declarations {
-                    let name = prop.property_id().to_css_string(PrinterOptions::default()).unwrap_or_default();
-                    let value = prop.value_to_css_string(PrinterOptions::default()).unwrap_or_default();
+                    let name = prop
+                        .property_id()
+                        .to_css_string(PrinterOptions::default())
+                        .unwrap_or_default();
+                    let value =
+                        prop.value_to_css_string(PrinterOptions::default()).unwrap_or_default();
                     properties.insert(name, value);
                 }
                 for prop in &kf.declarations.important_declarations {
-                    let name = prop.property_id().to_css_string(PrinterOptions::default()).unwrap_or_default();
-                    let value = prop.value_to_css_string(PrinterOptions::default()).unwrap_or_default();
+                    let name = prop
+                        .property_id()
+                        .to_css_string(PrinterOptions::default())
+                        .unwrap_or_default();
+                    let value =
+                        prop.value_to_css_string(PrinterOptions::default()).unwrap_or_default();
                     properties.insert(name, value);
                 }
                 for offset in offsets {
@@ -104,10 +116,9 @@ mod tests {
 
     #[test]
     fn duplicate_keyframe_offsets_merge_later_wins() {
-        let data = parse_css(
-            "@keyframes dupe { 50% { left: 10px; top: 1px; } 50% { left: 20px; } }",
-        )
-        .unwrap();
+        let data =
+            parse_css("@keyframes dupe { 50% { left: 10px; top: 1px; } 50% { left: 20px; } }")
+                .unwrap();
         let frames = &data.keyframes["dupe"];
         assert_eq!(frames.len(), 1);
         assert_eq!(frames[0].properties.get("left").map(String::as_str), Some("20px"));

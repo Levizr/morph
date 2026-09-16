@@ -10,7 +10,7 @@ fn probe_snippet_shapes() {
         let out = morpher::translate_snippet(src, "snippet.ts", options.clone());
         match out {
             Ok(o) => println!("SRC {:?}\n  includes {:?}\n  body {:?}", src, o.includes, o.body),
-            Err(e) => println!("SRC {:?}\n  ERROR {:?}", src, e),
+            Err(e) => println!("SRC {src:?}\n  ERROR {e:?}"),
         }
     }
 }

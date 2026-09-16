@@ -11,7 +11,7 @@ pub mod style;
 pub mod tailwind;
 pub mod transforms;
 
-pub use builder::IRBuilder;
+pub use builder::{is_instance_slot, IRBuilder};
 pub use node::{IRAnimation, IRConditionalClassEffect, IREvent, IRKeyframe, IRNode, IRWindow};
 pub use serializer::IRSerializer;
 pub use style::IRStyle;

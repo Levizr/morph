@@ -1,0 +1,19 @@
+{
+  "name": "components",
+  "entry": "src/App.mx",
+
+  "window": {
+    "width": 900,
+    "height": 700,
+    "title": "Components Demo"
+  },
+  "dependencies": {},
+  "cpp_sources": [],
+  "renderer": "flash",
+  "build": {
+    "wayland": false,
+    "system_freetype": false,
+    "upx": true,
+    "upx_version": ""
+  }
+}
