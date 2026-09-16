@@ -1608,6 +1608,24 @@
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
+      },
+      {
+        "title": "State, Events & Native C++ Interop",
+        "slug": "future/state-events-native-interop",
+        "file": "future/state-events-native-interop",
+        "status": "development",
+        "author": "PIYUSH",
+        "description": "Complete architecture for Morph's reactive system (state, events, effects) and native C++ interop: module-path identity, namespaced C++ emission, morph_gen.h contract, mid addressing, decision tree for native.cpp.",
+        "keywords": [
+          "morph state events native",
+          "morph_mods namespace",
+          "morph_gen header",
+          "mid instance descriptor"
+        ],
+        "lastUpdated": "2026-09-16",
+        "publishedAt": "2026-09-16",
+        "priority": "0.9",
+        "changefreq": "monthly"
       }
     ]
   },

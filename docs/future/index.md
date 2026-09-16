@@ -27,6 +27,7 @@ Everything on Morph's roadmap, documented in detail. Each feature page covers wh
 | Full Rust runtime (`--lang rust`, cross-language interop) | [Rust Support](rust.md) | High | — |
 | Vulkan / Metal / DirectX backends (pluggable graphics) | [Graphics APIs](graphics-api.md) | High | — |
 | Rust compiler (SWC/Oxc) + native CLI, Python removed | [Rust Compiler](compiler.md) | ✅ Shipped (Sept 2026) | — |
+| **State, Events & Native C++ Interop** | [State/Events/Native](state-events-native-interop.md) | High | Rust Compiler |
 
 **Status meanings:** `production` — shipped and stable · `beta` — shipped, known bugs · `development` — under active construction · `future` — planned, not built yet.
 
