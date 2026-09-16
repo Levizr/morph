@@ -346,6 +346,10 @@ If you need multiple similar instances, use descriptive names: `heroPrimary`, `h
 
 Any native code using that `MID_*` constant will fail to compile — the constant disappears from `morph_gen.h`. This is **intentional**: it forces you to update native code when the UI contract changes, instead of silently calling into dead instances (the bug class `mid` was designed to eliminate).
 
+### Why `mid`? Is this really the best approach?
+
+This is the best design we've found given the constraints (zero runtime strings, no registry, no templates, unmount safety, human-readable identity, build-time resolution). If you have a better idea — a different identity model, a simpler DX, a way to handle per-instance native access without the trade-offs we've documented — **please tell us**. The project lives on GitHub; open an issue or PR at [Suggestions](suggestions.md) or email us at [suggestions.morph@levizr.com](mailto:suggestions.morph@levizr.com). Every design decision in this document is open to challenge — that's how it gets better.
+
 ### Can I use `mid` on a component rendered inside a `.map()`?
 
 **Hard error.** List items currently share one state slot per template (documented limitation). Allowing `mid` there would imply per-instance identity that doesn't exist. When per-item state lands, `mid` on list items will use the item's `key` as the sub-address (`MID_HERO::key`), not a positional index.
