@@ -587,7 +587,8 @@ fn check_call_props(
     file_path: &str,
     out: &mut Vec<LintError>,
 ) {
-    let call: Vec<&str> = u.props.iter().map(String::as_str).filter(|p| *p != "key").collect();
+    let call: Vec<&str> =
+        u.props.iter().map(String::as_str).filter(|p| *p != "key" && *p != "mid").collect();
     if decl.props.is_empty() && decl.props_param.is_empty() {
         if let Some(name) = call.first() {
             out.push(LintError {
@@ -1980,6 +1981,46 @@ fn check_scope_call(
 /// before an expensive native compile.
 pub fn lint_graph(graph: &crate::resolve::ModuleGraph) -> Vec<LintError> {
     let mut out = Vec::new();
+    // mx-naming: lowercase `[a-z0-9_]` segments + no normalized collisions.
+    {
+        let mut seen: HashMap<String, String> = HashMap::new();
+        for mod_path in graph.all_paths() {
+            let file = mod_path.display().to_string();
+            match crate::resolve::module_ns_path(&graph.entry, mod_path) {
+                Err(msg) => out.push(LintError {
+                    severity: "error".into(),
+                    code: "mx-naming".into(),
+                    message: msg,
+                    suggestion: Some(
+                        "Use lowercase letters, digits and underscores in file and directory names"
+                            .into(),
+                    ),
+                    file_path: file,
+                    line: 1,
+                    col: 1,
+                }),
+                Ok(ns) => {
+                    if let Some(first) = seen.get(&ns) {
+                        out.push(LintError {
+                            severity: "error".into(),
+                            code: "mx-naming".into(),
+                            message: format!(
+                                "module {file} normalizes to namespace `{ns}`, already claimed by {first}: rename one (mx-naming)"
+                            ),
+                            suggestion: Some(
+                                "Lowercased path segments must be unique across the project".into(),
+                            ),
+                            file_path: file,
+                            line: 1,
+                            col: 1,
+                        });
+                    } else {
+                        seen.insert(ns, file);
+                    }
+                }
+            }
+        }
+    }
     for mod_path in graph.all_paths() {
         let Some(resolved) = graph.get(mod_path) else {
             continue;

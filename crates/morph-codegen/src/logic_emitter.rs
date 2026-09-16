@@ -965,51 +965,9 @@ pub fn generate_state_header(windows: &[IRWindow], premain: &[String], dev_mode:
         }
         lines.push(String::new());
     }
-    let mut shared_wrappers = Vec::new();
-    let mut seen_shared = HashSet::new();
-    for w in windows {
-        for sv in &w.shared_vars {
-            let key = sv.get("key").map_or("", String::as_str);
-            let accessor = sv.get("accessor").map_or("", String::as_str);
-            let getter = sv.get("getter").map_or("", String::as_str);
-            let setter = sv.get("setter").map_or("", String::as_str);
-            if key.is_empty() || accessor.is_empty() || getter.is_empty() {
-                continue;
-            }
-            if !seen_shared.insert(key.to_string()) {
-                continue;
-            }
-            let init = sv.get("init").map_or("0", String::as_str);
-            let cpp_type = sv
-                .get("type")
-                .filter(|t| *t != "auto")
-                .cloned()
-                .unwrap_or_else(|| infer_cpp_type(init));
-            let ns = shared_ns(sv);
-            let backing = if dev_mode {
-                shared_backing_ref(&ns, accessor)
-            } else {
-                shared_ref(&ns, accessor)
-            };
-            if !jsx_names.contains(getter) {
-                shared_wrappers.push((
-                    ns.clone(),
-                    format!("inline {cpp_type} {getter}() {{ return {backing}.get(); }}"),
-                ));
-            }
-            if !setter.is_empty() && !jsx_names.contains(setter) {
-                shared_wrappers.push((
-                    ns.clone(),
-                    format!("inline void {setter}({cpp_type} v) {{ {backing}.set(v); }}"),
-                ));
-            }
-        }
-    }
-    if !shared_wrappers.is_empty() {
-        lines.push("// ── morphShared wrappers (app-global keyed stores) ──".to_string());
-        emit_shared_entries(&mut lines, shared_wrappers);
-        lines.push(String::new());
-    }
+    // morphShared wrappers are NOT emitted here: the generated
+    // `morph_api.h` (always included before this header) already defines
+    // them exactly once — duplicating them here is a redefinition error.
     let mut func_decls = Vec::new();
     let mut seen_decls = HashSet::new();
     for part in premain {
@@ -1617,25 +1575,31 @@ mod tests {
     }
 
     #[test]
-    fn shared_header_wrappers_use_mode_backing() {
+    fn state_header_skips_shared_wrappers_owned_by_morph_api() {
+        // morphShared wrappers live in the generated morph_api.h (always
+        // included before this header); emitting them here too is a
+        // redefinition error (caught by a real fixture build).
         let windows = vec![shared_window()];
         let build_h = generate_state_header(&windows, &[], false);
-        assert!(build_h.contains("shared_cart_count().get()"), "{build_h}");
-        assert!(build_h.contains("shared_cart_count().set"), "{build_h}");
+        assert!(!build_h.contains("shared_cart_count().get()"), "{build_h}");
+        assert!(!build_h.contains("shared_cart_count().set"), "{build_h}");
         let dev_h = generate_state_header(&windows, &[], true);
-        assert!(dev_h.contains("__shared_cart_count.get()"), "{dev_h}");
+        assert!(!dev_h.contains("__shared_cart_count.get()"), "{dev_h}");
     }
 
     #[test]
-    fn shared_header_wrappers_follow_module_namespace() {
+    fn state_header_skips_namespaced_shared_wrappers() {
         let windows = vec![namespaced_shared_window()];
         let build_h = generate_state_header(&windows, &[], false);
         assert!(
-            build_h.contains("morph_mods::store_deadbeef::shared_cart_count().get()"),
+            !build_h.contains("morph_mods::store_deadbeef::shared_cart_count().get()"),
             "{build_h}"
         );
         let dev_h = generate_state_header(&windows, &[], true);
-        assert!(dev_h.contains("morph_mods::store_deadbeef::__shared_cart_count.get()"), "{dev_h}");
+        assert!(
+            !dev_h.contains("morph_mods::store_deadbeef::__shared_cart_count.get()"),
+            "{dev_h}"
+        );
     }
 
     #[test]

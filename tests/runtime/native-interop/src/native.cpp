@@ -43,3 +43,35 @@ std::vector<int> sorted(std::vector<int> v) {
     std::sort(v.begin(), v.end());
     return v;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Generated-API interop (morph_api.h): shared store, events, mid instances.
+// Namespaces are human-computable from file paths:
+//   CartStore.mx → morph_mods::cartstore, Counter.mx → morph_mods::counter.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Shared store: thin wrappers generated per project (see morph_api.h).
+// Names match the JSX bindings exactly (`cart` / `setCart`).
+void resetCartNative() {
+    morph_mods::cartstore::setCart(0);
+    morph_mods::cartstore::notify_cartChanged();
+}
+
+int getCartNative() {
+    return morph_mods::cartstore::cart();
+}
+
+// Native-initiated event emission (same channel JSX subscribes to).
+void announceCartNative() {
+    morph_mods::cartstore::emit_cartChanged(JsObject{{"cart", morph_mods::cartstore::cart()}});
+}
+
+// Specific instance from native via its opt-in `mid` tag:
+// <Counter mid="hero" /> in App.mx → morph_mods::counter::MID_HERO.
+void resetHeroCounter() {
+    morph_mods::counter::set_count(morph_mods::counter::MID_HERO, 0);
+}
+
+int heroCountNative() {
+    return morph_mods::counter::get_count(morph_mods::counter::MID_HERO);
+}

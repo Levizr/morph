@@ -1,0 +1,12 @@
+import { morphState } from 'morph'
+
+export default function Counter() {
+  const [count, setCount] = morphState(0)
+  function bump() { setCount(count + 1) }
+  return (
+    <div className="card" id="counter">
+      <div className="label">Counter: {count}</div>
+      <button id="btn-bump" onClick={() => bump()}>+1</button>
+    </div>
+  )
+}

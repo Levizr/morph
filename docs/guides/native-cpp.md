@@ -2,6 +2,8 @@
 
 Import user C++ functions directly into your JSX code. No FFI, no bindings — the C++ is compiled into the same binary.
 
+One include gives native code everything: `#include "morph_api.h"`. That header is generated per project (next to `app.cpp`) and is the **entire** native contract — you never read `app.cpp`.
+
 ## Basic Usage
 
 Create a `.cpp` file and import its functions:
@@ -22,11 +24,8 @@ double area(double w, double h) {
 }
 ```
 
-Use the imported functions in event handlers:
-
 ```tsx
 <button onClick={() => setCount(doubleIt(count))}>Double it</button>
-<button onClick={() => setArea(area(5, 7))}>Compute area</button>
 ```
 
 ## How It Works
@@ -34,26 +33,112 @@ Use the imported functions in event handlers:
 1. Morph detects `import { fn } from './file.cpp'` in your `.mx` file
 2. The user `.cpp` file is `#included` into the generated translation unit
 3. Functions are callable directly from JSX event handlers
-4. A `_morph_state.h` header is generated exposing signals and setter wrappers so C++ can update state and call JSX code
+4. `morph_api.h` is generated with signal/channel definitions plus thin wrappers, so C++ can read/write state, emit events, and address tagged instances
 
-## C++ → JSX State
+## Decision Tree
 
-C++ code can update `morphState` signals from any thread:
+| Need | Route | Code |
+|---|---|---|
+| Read shared state | `<binding>()` wrapper | `morph_mods::cartstore::cart()` |
+| Write shared state | `<setter>(v)` + optional `notify_<event>()` | `setCart(0); notify_cartChanged();` |
+| Emit event | `emit_<name>(payload)` or `evt_<name>().emit(...)` | `emit_cartChanged(JsObject{{"cart", cart()}});` |
+| Read another component's local | **Don't.** Emit an event; let that component reset its own local | `evt_resetEvent().emit({});` / `resetEvent.on(() => setCount(0))` |
+| C++ produces a value for a local | Return it; the TSX handler writes its own local | `int compute();` / `<button onClick={() => setCount(compute())}>` |
+| **Native initiates a write to a specific instance** | Tag `<Comp mid="tag" />`; use the `MID_TAG` constant | `set_count(MID_HERO, 0)` |
+| Pure compute | Plain function, zero plumbing, always | `int doubleIt(int x) { return x * 2; }` |
+
+## Shared State (`morphShared`)
+
+```tsx
+// src/CartStore.mx
+export const [cart, setCart] = morphShared<number>(0)
+```
 
 ```cpp
 #include "morph_api.h"
 
-void loadData() {
-    setStatus("loading...");
-    std::thread([]() {
-        // ... do work ...
-        setData("result");
+void resetCartNative() {
+    morph_mods::cartstore::setCart(0);           // wrapper → shared_cart().set(0)
+    morph_mods::cartstore::notify_cartChanged(); // wrapper → evt_cartChanged().emit({})
+}
+
+int getCartNative() {
+    return morph_mods::cartstore::cart();        // wrapper → shared_cart().get()
+}
+```
+
+Namespaces are human-computable from file paths: `CartStore.mx` next to the entry → `morph_mods::cartstore`; `src/components/shop/ShopStore.mx` → `morph_mods::components::shop::shopstore`. Wrapper names match the JSX bindings exactly.
+
+## Events (`morphEvent`)
+
+```tsx
+// src/CartStore.mx
+export const cartChanged = morphEvent<{ cart: number }>()
+```
+
+```cpp
+// Emit from anywhere (thread-safe; listeners run on the emitter's thread):
+morph_mods::cartstore::emit_cartChanged(JsObject{{"cart", morph_mods::cartstore::cart()}});
+
+// Or the channel directly:
+morph_mods::cartstore::evt_cartChanged().emit(JsObject{{"cart", 3}});
+```
+
+Zero string lookup: each event is one static `Channel` in its module namespace. Subscribe from JSX with `cartChanged.on(...)` — user C++ never subscribes (generated code owns subscriptions).
+
+## Specific Instances (`mid`)
+
+Tag the instances native code may address — untagged instances stay purely local (no overhead, no access):
+
+```tsx
+<Counter mid="hero" />
+<Counter />
+```
+
+```cpp
+void resetHeroCounter() {
+    morph_mods::counter::set_count(morph_mods::counter::MID_HERO, 0);
+}
+
+int heroCountNative() {
+    return morph_mods::counter::get_count(morph_mods::counter::MID_HERO);
+}
+```
+
+Rules: `mid` is a string literal (`mid="hero"`, never `mid={x}`), letters-only (`[a-zA-Z]`, any case), unique per component type (case-insensitive), reserved (never a prop), and rejected inside `.map()` item templates. `mid` exists only at component reuse sites — never inside a component definition, never on native elements (frontend identity is `id`; the two coexist: `<Comp id="card" mid="hero" />`). Unknown indexes are silent no-ops (switch dispatch, bounds-safe by construction).
+
+`morph_api.h` carries a mapping comment per constant (`// <Counter mid="hero"> (App.mx:5:7)`), and deleting a tagged component breaks native compilation loudly — the UI contract changing forces native code to follow.
+
+## C++ → JSX State (any thread)
+
+`set...()` wrappers are mutex-protected; effects re-run on the main loop:
+
+```cpp
+void runAsync(int start) {
+    setStatus("working...");
+    std::thread([start]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(60));
+        setCount(start + 100);
         setStatus("done");
     }).detach();
 }
 ```
 
-The `setStatus()` and `setData()` functions are generated wrappers that update the corresponding morphState signals. They are mutex-protected and safe to call from worker threads.
+## C++ → JSX Function Calls
+
+```tsx
+// src/App.mx
+function jsxHelper(x: int): int {
+  return x * 10 + 1
+}
+```
+
+```cpp
+// Declared in the generated headers; defined in the generated TU.
+int callJsxFromCpp(int x) {
+    return jsxHelper(x);
+}
+```
 
 ## Clipboard
 
@@ -67,26 +152,6 @@ void copyGreeting() {
 }
 
 std::string paste = morph::getClipboard();
-```
-
-## C++ → JSX Function Calls
-
-C++ can call functions defined in your JSX:
-
-```tsx
-// src/App.mx
-function jsxHelper(x: int): int {
-  return x * 10 + 1
-}
-```
-
-```cpp
-// C++ can call jsxHelper via the generated header
-#include "_morph_state.h"
-
-int callJsxFromCpp(int x) {
-    return jsxHelper(x);
-}
 ```
 
 ## Configuration
@@ -107,11 +172,24 @@ Set build options for your C++ imports in `morph.config.json`:
 
 See [Configuration](../getting-started/configuration.md) for all options.
 
+## Verifying (`--morph-self-test`)
+
+Every build embeds headless runtime assertions (shared roundtrips, event delivery, `mid` indexed writes). Run without a display:
+
+```sh
+./.morph/output/<app> --morph-self-test
+# [morph-self-test] 3 checks, 0 failures
+```
+
+The [runtime self-test script](../../tests/runtime/run-selftests.sh) rebuilds the fixtures and runs this automatically.
+
 ## Example
 
 ```tsx
 import { CSS, morphState } from 'morph'
-import { doubleIt, area, runAsync } from './native.cpp'
+import { doubleIt, area, runAsync, resetCartNative } from './native.cpp'
+import { cart } from './CartStore.mx'
+import Counter from './Counter.mx'
 
 CSS.load("style.css")
 
@@ -121,15 +199,20 @@ export default function App() {
   const [count, setCount] = morphState(0)
   const [status, setStatus] = morphState("idle")
 
+  function addToCart() { /* shared store lives in CartStore.mx */ }
+
   return (
     <body>
       <div>Count: {count}</div>
       <button onClick={() => setCount(doubleIt(count))}>Double it</button>
       <button onClick={() => runAsync(count)}>Run async</button>
       <div>{status}</div>
+      <div>Cart: {cart}</div>
+      <Counter mid="hero" />
+      <Counter />
     </body>
   )
 }
 ```
 
-See the [native-interop test](../../tests/runtime/native-interop/README.md) for a complete working example.
+See the [native-interop fixture](../../tests/runtime/native-interop/src/App.mx) for a complete working example.

@@ -9,7 +9,10 @@ pub mod resolve;
 
 pub use ast_types::*;
 pub use linter::{check as lint_check, lint};
-pub use resolve::{resolve_graph, resolve_import_path, ModuleGraph, ResolvedModule};
+pub use resolve::{
+    module_ns_path, module_ns_segments, resolve_graph, resolve_import_path, ModuleGraph,
+    ResolvedModule,
+};
 
 /// Parse an .mx file (which is TSX) and return a structured representation.
 pub fn parse_mx_file(path: &Path) -> Result<MxSource> {

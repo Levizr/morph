@@ -25,6 +25,65 @@ pub struct ModuleGraph {
     pub order: Vec<PathBuf>,
 }
 
+/// C++ namespace segments for a module, relative to the entry file's
+/// directory (`src/components/shop/ShopStore.mx` →
+/// `["components", "shop", "shopstore"]`).
+///
+/// Hard `mx-naming` gates: every segment is lowercased and must match
+/// `[a-z0-9_]` (CamelCase complies automatically; spaces/dashes/dots do
+/// not — rename the file). A leading digit is `_`-prefixed for C++
+/// validity. Modules outside the entry directory tree (`..`) are
+/// rejected. Two modules normalizing to the same segments are a
+/// collision (checked by the linter/builder, not here).
+pub fn module_ns_segments(entry: &Path, module: &Path) -> Result<Vec<String>, String> {
+    let entry_dir = entry.parent().unwrap_or_else(|| Path::new("."));
+    let rel = module.strip_prefix(entry_dir).map_err(|_| {
+        format!(
+            "module {} is outside the entry directory tree {} (mx-naming)",
+            module.display(),
+            entry_dir.display()
+        )
+    })?;
+    let mut segs: Vec<String> = Vec::new();
+    for comp in rel.components().take(rel.components().count().saturating_sub(1)) {
+        let s = comp.as_os_str().to_string_lossy().to_lowercase();
+        if s.is_empty()
+            || !s.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+        {
+            return Err(format!(
+                "directory `{s}` in {} violates mx-naming (lowercase `[a-z0-9_]` only): rename it",
+                module.display()
+            ));
+        }
+        segs.push(if s.starts_with(|c: char| c.is_ascii_digit()) { format!("_{s}") } else { s });
+    }
+    let stem = module
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_lowercase())
+        .unwrap_or_else(|| "m".to_string());
+    // Strip a leftover compound suffix (`foo.test` from `foo.test.mx` can
+    // never be a clean segment).
+    if stem.is_empty()
+        || !stem.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+    {
+        return Err(format!(
+            "file stem `{stem}` in {} violates mx-naming (lowercase `[a-z0-9_]` only): rename it",
+            module.display()
+        ));
+    }
+    segs.push(if stem.starts_with(|c: char| c.is_ascii_digit()) {
+        format!("_{stem}")
+    } else {
+        stem
+    });
+    Ok(segs)
+}
+
+/// C++ namespace path (`a::b::c`) for a module, or an `mx-naming` error.
+pub fn module_ns_path(entry: &Path, module: &Path) -> Result<String, String> {
+    module_ns_segments(entry, module).map(|s| s.join("::"))
+}
+
 impl ModuleGraph {
     pub fn entry_module(&self) -> Option<&ResolvedModule> {
         self.modules.get(&self.entry)

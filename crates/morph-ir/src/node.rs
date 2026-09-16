@@ -104,6 +104,12 @@ pub struct IRWindow {
     /// Event subscriptions: `channel` + `body` (a `[](const JsValue&)`
     /// listener). Emitters subscribe at startup.
     pub channel_subs: Vec<HashMap<String, String>>,
+    /// `mid` native index assignments, one entry per (tagged instance ×
+    /// state slot): `ns` (component scope), `comp`, `mid`, `const`
+    /// (`MID_*`), `index` (ordinal among tagged instances), `signal`
+    /// (backing `__st_` static), `getter`/`setter`/`init`, `module`, `loc`.
+    #[serde(default)]
+    pub mid_assignments: Vec<HashMap<String, String>>,
     pub cpp_imports: Vec<HashMap<String, String>>,
     pub keyframes: HashMap<String, Vec<IRKeyframe>>,
 }

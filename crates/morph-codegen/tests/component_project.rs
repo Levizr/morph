@@ -54,7 +54,7 @@ fn component_project_resolves_lints_builds_and_emits() {
     let shared_accessor = shared.get("accessor").cloned().unwrap_or_default();
     assert!(shared_key.ends_with("Store.mx::total"), "{shared_key}");
     assert_eq!(shared_accessor, "shared_total");
-    assert!(shared_ns.starts_with("store_"), "{shared_ns}");
+    assert_eq!(shared_ns, "components::store");
     let mut subscriptions = Vec::new();
     for sub in &windows[0].channel_subs {
         let channel = sub.get("channel").cloned().unwrap_or_default();
@@ -84,7 +84,7 @@ fn component_project_resolves_lints_builds_and_emits() {
     );
     assert!(
         api_h.contains(&format!("namespace {shared_ns} {{")),
-        "missing shared namespace in header"
+        "missing shared namespace in header: {api_h}"
     );
     assert!(!app_cpp.contains("morph::channel(\"evt:"), "string lookup in app.cpp");
     for (_, body) in &subscriptions {

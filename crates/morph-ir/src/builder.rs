@@ -211,6 +211,7 @@ impl IRBuilder {
             shared_vars: Vec::new(),
             event_decls: Vec::new(),
             channel_subs: Vec::new(),
+            mid_assignments: Vec::new(),
             cpp_imports: source
                 .cpp_imports
                 .iter()
@@ -320,6 +321,10 @@ impl IRBuilder {
             );
         }
 
+        // Human-computable namespaces are 1:1 by construction; fail fast
+        // on any normalized collision (mirrors the mx-naming lint).
+        validate_namespaces(graph)?;
+
         for mod_path in &graph.order {
             let Some(module) = graph.modules.get(mod_path) else {
                 continue;
@@ -417,6 +422,7 @@ impl IRBuilder {
             shared_vars: ctx.shared_entries.clone(),
             event_decls: ctx.event_entries.clone(),
             channel_subs: ctx.channels.clone(),
+            mid_assignments: Self::mid_assignments(graph, &ctx)?,
             cpp_imports,
             keyframes: self.convert_keyframes(css_keyframes),
         };
@@ -729,7 +735,7 @@ impl IRBuilder {
         frame: &mut InstanceFrame,
         ctx: &mut BuilderCtx,
     ) -> anyhow::Result<()> {
-        let ns = module_namespace(module_path);
+        let ns = ns_of(graph, module_path)?;
         let mut seeded: HashSet<String> = HashSet::new();
         for sb in &module.shared_bindings {
             if sb.init.is_empty() {
@@ -786,7 +792,7 @@ impl IRBuilder {
                             module_path.display()
                         );
                     }
-                    let target_ns = module_namespace(target_path);
+                    let target_ns = ns_of(graph, target_path)?;
                     if let Some(sb) =
                         target_mod.source.shared_bindings.iter().find(|b| b.getter == *spec)
                     {
@@ -898,6 +904,101 @@ impl IRBuilder {
         }
     }
 
+    /// Validate a `mid` (Morph ID) attribute value. `mid` exists only at
+    /// component use-sites (`<Hero mid="something" />`) for native C++
+    /// identification — never inside a component definition, never on
+    /// native elements (frontend identity is `id`; the two coexist on one
+    /// component). Literal-only, letters-only, canonicalized to
+    /// lowercase: `mid="hero"` is valid; `mid={x}` / `mid="item1"` / bare
+    /// `mid` are hard errors.
+    fn validate_mid(
+        tag: &str,
+        value: &morph_parser::JsxPropValue,
+        line: usize,
+        col: usize,
+    ) -> anyhow::Result<String> {
+        let raw = match value {
+            morph_parser::JsxPropValue::String(s) => s.clone(),
+            _ => {
+                anyhow::bail!(
+                    "`mid` on <{tag}> ({line}:{col}) must be a string literal (`mid=\"hero\"`); dynamic values (`mid={{...}}`) are rejected so instance identity always resolves at build time"
+                );
+            }
+        };
+        if raw.is_empty() || !raw.chars().all(|c| c.is_ascii_alphabetic()) {
+            anyhow::bail!(
+                "`mid=\"{raw}\"` on <{tag}> ({line}:{col}) is invalid: letters only (`[a-zA-Z]`, any case), no digits or symbols; use descriptive names like `heroPrimary`"
+            );
+        }
+        Ok(raw.to_lowercase())
+    }
+
+    /// C++ constant name for a `mid` value: `hero` → `MID_HERO`.
+    fn mid_const_name(mid: &str) -> String {
+        let safe: String = mid
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+            .collect();
+        format!("MID_{}", safe.to_uppercase())
+    }
+
+    /// Emit one assignment entry per (tagged instance × state slot) for
+    /// indexed native access. Index is the ordinal among TAGGED instances
+    /// of the component type (untagged instances never shift `MID_*`
+    /// values). Entries carry everything codegen needs: component
+    /// namespace, constant, index, backing signal, type init, and source
+    /// location for header mapping comments.
+    fn mid_assignments(
+        graph: &morph_parser::ModuleGraph,
+        ctx: &BuilderCtx,
+    ) -> anyhow::Result<Vec<HashMap<String, String>>> {
+        let mut out = Vec::new();
+        let mut types: Vec<(&(PathBuf, String), &Vec<(String, usize, usize, usize)>)> =
+            ctx.mid_tags.iter().collect();
+        types.sort_by(|a, b| a.0.cmp(b.0));
+        for ((module, comp_name), type_tags) in types {
+            let module_ns = ns_of(graph, module)?;
+            // Component scope: module stem already names single-component
+            // modules (`Counter.mx` → `...::counter`), so only append the
+            // component name when it differs.
+            let stem_last = module_ns.rsplit("::").next().unwrap_or("");
+            let comp_seg: String = comp_name
+                .chars()
+                .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+                .collect::<String>()
+                .to_lowercase();
+            let comp_ns = if comp_seg == stem_last {
+                module_ns.clone()
+            } else {
+                format!("{module_ns}::{comp_seg}")
+            };
+            let mut tags = type_tags.clone();
+            tags.sort_by_key(|(_, instance_no, _, _)| *instance_no);
+            for (index, (mid, instance_no, line, col)) in tags.iter().enumerate() {
+                let Some(slots) = ctx.mid_states.get(instance_no) else {
+                    continue;
+                };
+                for (suffix_getter, suffix_setter, init) in slots {
+                    let mut m = HashMap::new();
+                    m.insert("key".into(), format!("{}::{comp_name}::{mid}", module.display()));
+                    m.insert("ns".into(), comp_ns.clone());
+                    m.insert("comp".into(), comp_name.clone());
+                    m.insert("mid".into(), mid.clone());
+                    m.insert("const".into(), Self::mid_const_name(mid));
+                    m.insert("index".into(), index.to_string());
+                    m.insert("signal".into(), format!("__st_inst{instance_no}_{suffix_getter}"));
+                    m.insert("getter".into(), suffix_getter.clone());
+                    m.insert("setter".into(), suffix_setter.clone());
+                    m.insert("init".into(), init.clone());
+                    m.insert("module".into(), module.display().to_string());
+                    m.insert("loc".into(), format!("{line}:{col}"));
+                    out.push(m);
+                }
+            }
+        }
+        Ok(out)
+    }
+
     /// Expand one `<Tag ... />` instantiation into its root IR node.
     ///
     /// # Errors
@@ -931,9 +1032,40 @@ impl IRBuilder {
             chain.push(comp.name.clone());
             anyhow::bail!("cyclic component instantiation: {}", chain.join(" → "));
         }
+        if comp.props.iter().any(|p| p.name == "mid") || comp.props_param == "mid" {
+            anyhow::bail!(
+                "component `{}` declares a prop named `mid` ({}): `mid` is reserved for native instance identity; rename it",
+                comp.name,
+                target_module.display()
+            );
+        }
         let instance_no = ctx.next_instance;
         ctx.next_instance += 1;
         let prefix = format!("inst{instance_no}");
+        // `mid` is reserved (like `key`): claim it here so it never
+        // reaches prop binding, and record the tag for native indexing.
+        let bound_props: HashMap<String, morph_parser::JsxPropValue> = call_props
+            .iter()
+            .filter(|(k, _)| k.as_str() != "mid")
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        if let Some(mid_value) = call_props.get("mid") {
+            // Canonical form: lowercased (`Hero` ≡ `hero`).
+            let mid = Self::validate_mid(tag, mid_value, line, col)?;
+            if ctx.list_depth > 0 {
+                anyhow::bail!(
+                    "`mid=\"{mid}\"` on <{tag}> ({line}:{col}): list items share one state slot per template, so per-item identity does not exist; remove `mid` here"
+                );
+            }
+            let tags = ctx.mid_tags.entry((target_module.clone(), comp.name.clone())).or_default();
+            if let Some((_, _, first_line, first_col)) = tags.iter().find(|(m, _, _, _)| m == &mid)
+            {
+                anyhow::bail!(
+                    "duplicate `mid=\"{mid}\"` on <{tag}> ({line}:{col}): already used at {first_line}:{first_col}; `mid` must be unique per component type"
+                );
+            }
+            tags.push((mid, instance_no, line, col));
+        }
         ctx.stack.push((target_module.clone(), comp.name.clone()));
 
         if !ctx.modules_emitted.contains(&target_module) {
@@ -972,13 +1104,19 @@ impl IRBuilder {
                 Self::seed_state_var(
                     &mut frame, &sv.getter, &sv.setter, &sv.init, &getter, &setter,
                 );
+                // State slots backing indexed native access (`mid`).
+                ctx.mid_states.entry(instance_no).or_default().push((
+                    sv.getter.clone(),
+                    sv.setter.clone(),
+                    sv.init.clone(),
+                ));
             }
         }
         Self::preseed_sibling_names(&comp, &mut frame, Some(&prefix));
         self.bind_props(
             ctx,
             &comp,
-            call_props,
+            &bound_props,
             &mut frame,
             parent_frame,
             extra_headers,
@@ -1366,6 +1504,15 @@ impl IRBuilder {
                         keyframes,
                     );
                 }
+                // `mid` is C++-side identity for component instances
+                // only. Frontend elements use `id`. The two coexist on
+                // one component (`<Comp id="x" mid="y" />`) but `mid`
+                // never appears on a native element.
+                if props.contains_key("mid") {
+                    anyhow::bail!(
+                        "`mid` on `<{tag}>` ({line}:{col}): `mid` is only for component use-sites (`<Name mid=\"...\" />`), never native elements and never inside a component definition; frontend identity is `id`"
+                    );
+                }
                 let node_id = self.next_id();
                 let mut node = IRNode { node_id, node_type: tag.clone(), ..Default::default() };
                 let mut style = IRStyle::new();
@@ -1662,7 +1809,10 @@ impl IRBuilder {
                 };
                 node.list_expr = capture_raw(array_expr, frame);
                 node.list_key_expr = capture_raw(key_expr, frame);
-                node.item_template = Some(Box::new(self.build_node_in(
+                // Item templates share one state slot per template: `mid`
+                // on anything instantiated inside is a hard error.
+                ctx.list_depth += 1;
+                let template = self.build_node_in(
                     item_template,
                     css_rules,
                     depth,
@@ -1671,7 +1821,9 @@ impl IRBuilder {
                     ctx,
                     extra_headers,
                     keyframes,
-                )?));
+                );
+                ctx.list_depth -= 1;
+                node.item_template = Some(Box::new(template?));
                 Ok(node)
             }
         }
@@ -1763,6 +1915,13 @@ struct BuilderCtx<'a> {
     modules_emitted: HashSet<PathBuf>,
     shared_entries: Vec<HashMap<String, String>>,
     event_entries: Vec<HashMap<String, String>>,
+    /// Depth inside `.map()` item templates (`mid` is rejected there).
+    list_depth: usize,
+    /// Tagged instances: (module, component) → [(mid, instance_no, line, col)].
+    mid_tags: HashMap<(PathBuf, String), Vec<(String, usize, usize, usize)>>,
+    /// Instance states for indexed native access: instance_no →
+    /// [(suffix getter, suffix setter, init)].
+    mid_states: HashMap<usize, Vec<(String, String, String)>>,
 }
 
 impl<'a> BuilderCtx<'a> {
@@ -1781,6 +1940,9 @@ impl<'a> BuilderCtx<'a> {
             modules_emitted: HashSet::new(),
             shared_entries: Vec::new(),
             event_entries: Vec::new(),
+            list_depth: 0,
+            mid_tags: HashMap::new(),
+            mid_states: HashMap::new(),
         }
     }
 }
@@ -2093,32 +2255,31 @@ fn is_ident_char_at(src: &str, byte_idx: usize) -> bool {
     src[byte_idx..].chars().next().is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '$')
 }
 
-/// FNV-1a 64-bit hash (deterministic across runs and platforms).
-fn fnv1a(text: &str) -> u64 {
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for b in text.as_bytes() {
-        h ^= u64::from(*b);
-        h = h.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    h
+/// Human-computable C++ namespace path for a module: entry-relative
+/// segments joined with `::` (`src/components/ShopStore.mx` →
+/// `components::shopstore`). No hash leaf — `mx-naming` hard gates make
+/// the mapping 1:1 (see `validate_namespaces`).
+fn ns_of(graph: &morph_parser::ModuleGraph, module: &Path) -> anyhow::Result<String> {
+    morph_parser::module_ns_path(&graph.entry, module).map_err(|msg| anyhow::anyhow!("{msg}"))
 }
 
-/// C++-safe per-module namespace segment: `store_{stem}_{hash8}`. The stem
-/// keeps generated code readable; the path hash disambiguates same-named
-/// files in different directories.
-fn module_namespace(module: &Path) -> String {
-    let stem =
-        module.file_stem().map_or_else(|| "m".to_string(), |s| s.to_string_lossy().to_string());
-    let safe: String = stem
-        .trim_end_matches(".mx")
-        .trim_end_matches(".ts")
-        .trim_end_matches(".tsx")
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
-        .collect();
-    let safe = if safe.is_empty() { "m".to_string() } else { safe };
-    let hash = (fnv1a(&module.display().to_string()) & 0xFFFF_FFFF) as u32;
-    format!("store_{safe}_{hash:08x}")
+/// Reject normalized namespace collisions across the graph before
+/// emitting code (mirrors the `mx-naming` lint; `morph build` does not
+/// run the linter).
+fn validate_namespaces(graph: &morph_parser::ModuleGraph) -> anyhow::Result<()> {
+    let mut seen: HashMap<String, PathBuf> = HashMap::new();
+    for path in graph.all_paths() {
+        let ns = ns_of(graph, path)?;
+        if let Some(first) = seen.get(&ns) {
+            anyhow::bail!(
+                "module {} normalizes to namespace `{ns}`, already claimed by {}: rename one (mx-naming)",
+                path.display(),
+                first.display()
+            );
+        }
+        seen.insert(ns, path.clone());
+    }
+    Ok(())
 }
 
 /// Internal identity of a binding: canonical module path + binding name.
@@ -4975,6 +5136,186 @@ export default function App() {
     }
 
     #[test]
+    fn mid_tags_collect_assignments_with_constants() {
+        let root = scratch("midtags");
+        write_file(&root, "Counter.mx", COUNTER);
+        write_file(
+            &root,
+            "App.mx",
+            r#"
+import Counter from './Counter.mx'
+export default function App() {
+  return (
+    <body>
+      <Counter label="A" step={1} onStep={(v: number) => {}} mid="hero" />
+      <Counter label="B" step={2} onStep={(v: number) => {}} />
+      <Counter label="C" step={3} onStep={(v: number) => {}} mid="Fives" />
+    </body>
+  )
+}
+"#,
+        );
+        let graph = morph_parser::resolve_graph(&root.join("App.mx"), &root).unwrap();
+        let wins =
+            IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).expect("mid build");
+        assert_eq!(wins.len(), 1);
+        let assigns = &wins[0].mid_assignments;
+        // One entry per (tagged instance × state slot); Counter has 1 state.
+        assert_eq!(assigns.len(), 2, "{assigns:?}");
+        assert_eq!(assigns[0].get("mid").map(String::as_str), Some("hero"));
+        assert_eq!(assigns[0].get("const").map(String::as_str), Some("MID_HERO"));
+        assert_eq!(assigns[0].get("index").map(String::as_str), Some("0"));
+        assert_eq!(assigns[1].get("mid").map(String::as_str), Some("fives"));
+        assert_eq!(assigns[1].get("const").map(String::as_str), Some("MID_FIVES"));
+        assert_eq!(assigns[1].get("index").map(String::as_str), Some("1"));
+        // Untagged middle instance never shifts ordinals.
+        assert!(assigns[0].get("signal").unwrap().ends_with("_count"), "{assigns:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn mid_use_site_rule() {
+        // `mid` inside a component definition (declared prop) is rejected
+        // even when the use-site is valid: identity lives only at reuse.
+        let root = scratch("middef");
+        write_file(
+            &root,
+            "Counter.mx",
+            r"
+import { morphState } from 'morph'
+export default function Counter(props: { label: string, mid: string }) {
+  const [count, setCount] = morphState(0)
+  return (<div><span>{props.label}: {count}</span></div>)
+}
+",
+        );
+        write_file(
+            &root,
+            "App.mx",
+            r#"
+import Counter from './Counter.mx'
+export default function App() {
+  return (<body><Counter label="A" mid="hero" /></body>)
+}
+"#,
+        );
+        let graph = morph_parser::resolve_graph(&root.join("App.mx"), &root).unwrap();
+        let err = IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap_err();
+        assert!(err.to_string().contains("reserved"), "{err}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn mid_rejects_duplicates_digits_dynamic_lists_and_native_tags() {
+        // Duplicate mid on the same component type.
+        let root = scratch("middup");
+        write_file(&root, "Counter.mx", COUNTER);
+        write_file(
+            &root,
+            "App.mx",
+            r#"
+import Counter from './Counter.mx'
+export default function App() {
+  return (
+    <body>
+      <Counter label="A" step={1} onStep={(v: number) => {}} mid="hero" />
+      <Counter label="B" step={2} onStep={(v: number) => {}} mid="Hero" />
+    </body>
+  )
+}
+"#,
+        );
+        let graph = morph_parser::resolve_graph(&root.join("App.mx"), &root).unwrap();
+        let err = IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap_err();
+        assert!(err.to_string().contains("duplicate `mid=\"hero\"`"), "{err}");
+
+        // Digits and symbols are banned (letters only).
+        write_file(
+            &root,
+            "App2.mx",
+            r#"
+import Counter from './Counter.mx'
+export default function App() {
+  return (<body><Counter label="A" step={1} onStep={(v: number) => {}} mid="item1" /></body>)
+}
+"#,
+        );
+        let graph = morph_parser::resolve_graph(&root.join("App2.mx"), &root).unwrap();
+        let err = IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap_err();
+        assert!(err.to_string().contains("letters only"), "{err}");
+
+        // Dynamic values rejected.
+        write_file(
+            &root,
+            "App3.mx",
+            r#"
+import Counter from './Counter.mx'
+const tag = "hero"
+export default function App() {
+  return (<body><Counter label="A" step={1} onStep={(v: number) => {}} mid={tag} /></body>)
+}
+"#,
+        );
+        let graph = morph_parser::resolve_graph(&root.join("App3.mx"), &root).unwrap();
+        let err = IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap_err();
+        assert!(err.to_string().contains("must be a string literal"), "{err}");
+
+        // mid inside .map() item templates.
+        write_file(
+            &root,
+            "App4.mx",
+            r#"
+import Counter from './Counter.mx'
+export default function App() {
+  const items = [1, 2, 3]
+  return (<body>{items.map((it) => <Counter label="A" step={1} onStep={(v: number) => {}} mid="hero" />)}</body>)
+}
+"#,
+        );
+        let graph = morph_parser::resolve_graph(&root.join("App4.mx"), &root).unwrap();
+        let err = IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap_err();
+        assert!(err.to_string().contains("share one state slot"), "{err}");
+
+        // mid on native elements is rejected: frontend identity is `id`,
+        // `mid` is C++-side component-instance identity only.
+        write_file(
+            &root,
+            "App5.mx",
+            r#"export default function App() { return (<body><div mid="hero">x</div></body>) }"#,
+        );
+        let graph = morph_parser::resolve_graph(&root.join("App5.mx"), &root).unwrap();
+        let err = IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap_err();
+        assert!(err.to_string().contains("only for component use-sites"), "{err}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn mx_naming_collision_is_a_hard_error() {
+        let root = scratch("namingcollide");
+        write_file(
+            &root,
+            "App.mx",
+            r#"
+import { Store } from './sub/Store.mx'
+import { Store2 } from './Sub/Store.mx'
+export default function App() { return (<body><Store /><Store2 /></body>) }
+"#,
+        );
+        write_file(&root, "sub/Store.mx", "export function Store() { return (<div/>) }");
+        // Same normalized namespace `sub::store` with different casing.
+        write_file(&root, "Sub/Store.mx", "export function Store2() { return (<div/>) }");
+        let graph = morph_parser::resolve_graph(&root.join("App.mx"), &root).unwrap();
+        let lints = morph_parser::linter::lint_graph(&graph);
+        assert!(
+            lints.iter().any(|l| l.code == "mx-naming" && l.message.contains("already claimed")),
+            "{lints:?}"
+        );
+        let err = IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap_err();
+        assert!(err.to_string().contains("already claimed"), "{err}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn entry_props_and_children_are_rejected() {
         let root = scratch("entryprops");
         write_file(
@@ -5169,9 +5510,10 @@ export default function App() {
         assert_eq!(e["type"], "int");
         assert_eq!(e["init"], "0");
         assert_eq!(e["getter"], "count");
-        // The fully qualified accessor uses a namespace derived from the store
-        // module path, not a global name.
-        assert!(e["ns"].starts_with("store_"), "ns: {}", e["ns"]);
+        // The fully qualified accessor uses a human-computable namespace
+        // derived from the store module path (entry-relative, lowercased),
+        // not a global name: store.mx next to App.mx → `store`.
+        assert_eq!(e["ns"], "store");
         // Panel's local state is mangled alongside.
         assert!(getters(win).contains(&"inst0_open".to_string()));
         let _ = std::fs::remove_dir_all(&root);

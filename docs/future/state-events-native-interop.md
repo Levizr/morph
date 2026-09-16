@@ -31,13 +31,13 @@ Importing the same binding from the same module = same signal/channel. Same bind
 - **Collision:** two paths that normalize to the same segments → **hard error** (even on case-insensitive FS, even if original casing differed).
 - **No renames needed:** existing CamelCase fixtures (`Store.mx`, `ShopStore.mx`, etc.) automatically comply once lowercased.
 
-### `mid` (Morph Instance Descriptor)
-- **Purpose:** make a specific component instance addressable from native C++.
-- **Alphabet:** letters only (`a-zA-Z`), any case accepted, lowercased at compile time (`"Hero"` ≡ `"hero"`). **Digits banned** — identifiers must stay readable and unambiguous.
-- **Duplicates:** same `mid` (post-lowercase) on same component type → hard error. Different component types may reuse `mid` (namespaced per component).
-- **Literals only:** `mid="hero"` valid, `mid={var}` → hard error. The string must resolve to a build-time integer constant.
-- **Reserved:** `mid` is reserved (like `key` for lists), never passed as a prop.
-- **Lists:** `mid` on list template items is a **hard error** until per-item state lands (current limitation documented).
+### `mid` (Morph ID — C++-side component-instance identity)
+- **Purpose:** make a specific component instance addressable from native C++ (`MID_*` + indexed accessors). Frontend identity is `id`; the two are independent and coexist on one component (`<Comp id="card" mid="hero" />` — `id` for CSS/hooks, `mid` for C++).
+- **Use-sites only:** `mid` appears only where a component is reused (`<Hero mid="something" />`) — never inside a component definition (declaring a `mid` prop is a hard error; `mid` is reserved like `key`, never passed as a prop), never on native elements (hard error), never on the entry component (it is never instantiated).
+- **Alphabet:** letters only (`[a-zA-Z]`), any case accepted, lowercased at compile time (`"Hero"` ≡ `"hero"`). **Digits and symbols banned** — identifiers stay readable and unambiguous.
+- **Duplicates:** same `mid` (canonical form) on same component type → hard error. Different component types may reuse `mid` (namespaced per component).
+- **Literals only:** `mid="hero"` valid, `mid={var}` → hard error. Identity must resolve at build time.
+- **Lists:** `mid` inside `.map()` item templates is a **hard error** until per-item state lands (current limitation documented).
 
 ---
 
@@ -134,8 +134,8 @@ int doubleIt(int x) { return x * 2; }   // zero plumbing, always
 
 | Need | Route | Code |
 |---|---|---|
-| Read shared state | `get_<binding>()` | `components::shop::shopstore::get_cart()` |
-| Write shared state | `set_<binding>(v)` + optional `notify_<event>()` | `set_cart(0); notify_cartChanged();` |
+| Read shared state | `<binding>()` (JSX name) | `morph_mods::cartstore::cart()` |
+| Write shared state | `<setter>(v)` + optional `notify_<event>()` | `setCart(0); notify_cartChanged();` |
 | Emit event | `evt_<name>().emit(payload)` | `evt_cartChanged().emit({});` |
 | Read another component's local | **Don't.** Emit event; let that component reset its own local. | `evt_resetEvent().emit({});` / `resetEvent.on(() => setCount(0))` |
 | C++ produces value for local | Return it; TSX handler writes its own local. | `int compute();` / `<button onClick={() => setCount(compute())}>` |
@@ -191,10 +191,11 @@ morph_mods::store_shopstore_1a2b3c4d::evt_clearCart().on([](const JsValue& __ch_
 - Instance count known at build time; lambda closures hardcode their instance's static.
 - **Limitation:** list items share one slot per template (documented). `mid` on list items = hard error.
 
-### Future (`mid` support)
-- Build-time `mid` → `constexpr` integer constant + indexed accessor over existing statics + liveness bitmask.
-- Unmount clears the bit → stale index → silent no-op (no crash, no ghost writes).
+### Shipped (`mid` support)
+- Build-time `mid` → `constexpr` integer constant (`MID_HERO`) + `set_<state>(mid, v)` / `get_<state>(mid)` with switch dispatch over the existing `__st_` statics. Index covers tagged instances only, so untagged instances never shift `MID_*` values.
+- **No liveness bitmask — deliberately.** Instance statics are build-time constants with no dynamic lifetime (conditional branches detach nodes, never free signals), so there is nothing to track: a write to a detached instance updates its own static harmlessly and can never touch another instance. Unknown indexes hit `default:` → silent no-op (no crash, no ghost writes).
 - No runtime registry, no string lookup, no templates beyond existing `Signal<T>`.
+- Every build embeds `binary --morph-self-test`: headless assertions over shared roundtrips, event delivery, and `mid` indexed writes (runs before GLFW init; see `tests/runtime/run-selftests.sh`).
 
 ---
 
@@ -204,11 +205,12 @@ morph_mods::store_shopstore_1a2b3c4d::evt_clearCart().on([](const JsValue& __ch_
 |---|---|---|
 | `morphShared` namespaced, `morphEvent` namespaced | ✅ Shipped | `morph_mods::<path>::shared_<name>()`, `evt_<name>()` |
 | Strict TS-only sources (`.ts`/`.tsx`/`.mx`) | ✅ Shipped | `.js`/`.jsx` rejected at parse |
-| `mid` parser + dedupe + codegen constants | 🔧 In progress | Parser collects, codegen emits constants + indexed accessors |
+| `mid` parser + dedupe + codegen constants | ✅ Shipped | Builder validates/records, codegen emits `MID_*` + switch-dispatch accessors + header decls |
 | Static event channels (no string registry) | ✅ Shipped (build) | Channel statics in namespace; build TU lowers `morph::channel("<id>")` → accessor; dev TU keeps registry for rewire |
-| `morph_api.h` generation | ✅ Shipped | Shared/event accessors + thin wrappers + mapping comments (`MID_*` lands with `mid`) |
-| Naming-rule linter (`mx-naming`) | 📋 Planned | `morph check` enforces lowercasing + collision |
-| `morph_api.h` in `native-cpp.md` | 📋 Planned | Rewrite with decision tree + examples |
+| `morph_api.h` generation | ✅ Shipped | Shared/event accessors + thin wrappers + mapping comments + `MID_*` |
+| Naming-rule linter (`mx-naming`) | ✅ Shipped | `morph check` enforces lowercasing + collision; namespaces are hash-free and human-computable |
+| `morph_api.h` in `native-cpp.md` | ✅ Shipped | Rewritten with decision tree + shared/event/mid examples + self-test |
+| Headless runtime self-tests | ✅ Shipped | `binary --morph-self-test` + `tests/runtime/run-selftests.sh` over both fixtures |
 
 ---
 
@@ -343,10 +345,28 @@ This is the same pattern we already use for shared signals — we're just applyi
 
 Two reasons:
 
-1. **Readability at a distance:** `mid="hero"` reads like a name; `mid="item1"` reads like a database key. The namespace already encodes structure — `components::counter::MID_HERO` is self-explanatory.
+1. **Readability at a distance:** `mid="hero"` reads like a name; `mid="item1"` reads like a database key. The namespace already encodes structure — `counter::MID_HERO` is self-explanatory.
 2. **Sanitization ambiguity:** `item1` + `item12` → what's the lowered form? `item1` vs `item12` are distinct, but `item_1` vs `item1` collides in unpredictable ways. Banning digits makes the lowered form 1:1 with the source.
 
 If you need multiple similar instances, use descriptive names: `heroPrimary`, `heroSecondary`, `fives`, `tens`, etc. The compiler will catch duplicates.
+
+### Where can `mid` appear? Why not inside component definitions?
+
+`mid` is C++-side identity, and C++ addresses *instances* — instances only exist where a component is reused. So `mid` lives exclusively at use-sites:
+
+```tsx
+// App.mx — reuse sites: legal
+<Counter mid="hero" />
+<Counter id="secondary" mid="fives" />   // id (frontend) + mid (C++) coexist
+```
+
+```tsx
+// Counter.mx — definition side: illegal
+export default function Counter(props: { label: string, mid: string }) // hard error: reserved
+<div mid="hero">…</div>   // hard error: native elements use id
+```
+
+The compiler reads `mid` only when expanding a `<Tag />` instantiation. Declaring it as a prop, putting it on a native element, or using it inside `.map()` templates are all hard errors — each would imply an identity the runtime cannot honor.
 
 ### What happens if I delete a component file that has a `mid` tag?
 
@@ -386,6 +406,10 @@ This is the best design we've found given the constraints (zero runtime strings,
 | 2026-09-16 | Generated header named `morph_api.h` (shadows runtime base by include order) | One include for user code; generated header re-includes runtime subpaths explicitly so it is a strict superset |
 | 2026-09-16 | Signal/channel definitions live in `morph_api.h` as `inline`, `app.cpp` just includes it | Fixes declaration-before-use for user code included at top of `app.cpp`; TU-safe; `app.cpp` complexity is fine, user DX is sacred |
 | 2026-09-16 | `-I<output dir>` before `-I<runtime>` | User `.cpp` `#include "morph_api.h"` resolves to the generated project header |
+| 2026-09-16 | `mid` is use-site-only C++ identity (`id` is frontend) | `mid` only on component reuse tags; definition-side declarations, native elements, and `.map()` templates are hard errors; `id`+`mid` coexist on one component |
+| 2026-09-16 | No liveness bitmask for `mid` | Build-time statics have no dynamic lifetime; switch-`default` gives the no-op guarantee with zero tracking |
+| 2026-09-16 | Native wrappers keep JSX names (`cart()`/`setCart()`) | Same names both sides of the boundary; no `get_`/`set_` prefix dialect |
+| 2026-09-16 | `_morph_state.h` drops shared wrappers | `morph_api.h` owns them; duplication was a redefinition error (caught by fixture build) |
 
 ---
 

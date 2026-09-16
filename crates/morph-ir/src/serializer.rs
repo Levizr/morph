@@ -72,6 +72,10 @@ impl IRSerializer {
             Value::Array(w.channel_subs.iter().map(string_map).collect()),
         );
         out.insert(
+            "mid_assignments".to_string(),
+            Value::Array(w.mid_assignments.iter().map(string_map).collect()),
+        );
+        out.insert(
             "cpp_imports".to_string(),
             Value::Array(w.cpp_imports.iter().map(string_map).collect()),
         );

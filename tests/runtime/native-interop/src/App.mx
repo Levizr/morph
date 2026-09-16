@@ -1,5 +1,8 @@
 import { CSS } from 'morph'
 import { doubleIt, area, callJsxFromCpp, runAsync } from './native.cpp'
+import { cart, setCart, cartChanged } from './CartStore.mx'
+import { resetCartNative, getCartNative, resetHeroCounter, heroCountNative } from './native.cpp'
+import Counter from './Counter.mx'
 
 CSS.load("style.css")
 
@@ -14,6 +17,7 @@ export default function App() {
   const [count, setCount] = morphState(0)
   const [status, setStatus] = morphState("idle")
   const [areaVal, setAreaVal] = morphState(0.0)
+  function addToCart() { setCart(cart + 1); cartChanged.emit({ cart: cart }) }
 
   return (
     <body>
@@ -41,6 +45,18 @@ export default function App() {
         <button id="btn-area" onClick={() => setAreaVal(area(5, 7))}>compute area</button>
         <div className="value" id="area">{areaVal}</div>
       </div>
+
+      <div className="card" id="card-shared">
+        <div className="label">Shared store + native C++ : cart = {cart}</div>
+        <button id="btn-cart" onClick={() => addToCart()}>add to cart</button>
+        <button id="btn-cart-native" onClick={() => resetCartNative()}>native reset (C++)</button>
+        <div className="value" id="cart-native">{getCartNative()}</div>
+      </div>
+
+      <Counter mid="hero" />
+      <Counter />
+      <button id="btn-hero-native" onClick={() => resetHeroCounter()}>reset hero (C++)</button>
+      <div className="value" id="hero-native">{heroCountNative()}</div>
     </body>
   )
 }
