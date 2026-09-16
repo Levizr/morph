@@ -7,8 +7,8 @@ export function CartBar() {
   }
   return (
     <div className="cartbar">
-      <text>Cart total: ${cart}</text>
-      <button onClick={() => clear()}>Clear cart</button>
+      <text className="cart-total">Cart total: ${cart}</text>
+      <button className="btn btn-clear" onClick={() => clear()}>Clear cart</button>
     </div>
   )
 }

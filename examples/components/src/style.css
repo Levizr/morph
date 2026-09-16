@@ -1,35 +1,108 @@
+body {
+  padding: 20px;
+  background-color: #f3f4f6;
+  color: #111827;
+}
+
 .hero {
-  padding: 24px;
-  background-color: #eef2ff;
+  padding: 28px;
+  background-color: #4f46e5;
+  border-radius: 12px;
+  margin-bottom: 16px;
 }
 
 .hero-title {
-  font-size: 28px;
+  font-size: 30px;
   font-weight: bold;
+  color: #ffffff;
 }
 
 .hero-subtitle {
   font-size: 16px;
+  color: #c7d2fe;
+  margin-bottom: 12px;
 }
 
 .grid {
   display: flex;
   flex-direction: row;
+  flex-wrap: wrap;
   gap: 12px;
   padding: 12px;
 }
 
 .card {
-  padding: 12px;
+  padding: 16px;
   background-color: #ffffff;
+  border: 2px solid #e5e7eb;
+  border-radius: 12px;
+  flex: 1;
+}
+
+.card:hover {
+  border-color: #4f46e5;
 }
 
 .card-title {
   font-size: 18px;
   font-weight: bold;
+  color: #111827;
+}
+
+.card-price {
+  font-size: 22px;
+  font-weight: bold;
+  color: #4f46e5;
+}
+
+.card-qty {
+  font-size: 14px;
+  color: #6b7280;
+}
+
+.btn {
+  padding: 8px;
+  background-color: #4f46e5;
+  color: #ffffff;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: bold;
+  text-align: center;
+}
+
+.btn:hover {
+  background-color: #4338ca;
+}
+
+.btn-clear {
+  background-color: #dc2626;
+}
+
+.btn-clear:hover {
+  background-color: #b91c1c;
 }
 
 .cartbar {
-  padding: 12px;
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
   background-color: #ecfdf5;
+  border: 2px solid #6ee7b7;
+  border-radius: 12px;
+  margin-bottom: 12px;
+}
+
+.cart-total {
+  font-size: 20px;
+  font-weight: bold;
+  color: #065f46;
+}
+
+.last-added {
+  font-size: 14px;
+  color: #6b7280;
+  text-align: center;
 }

@@ -6,7 +6,7 @@ export default function Hero(props: { title: string, subtitle: string }) {
     <div className="hero">
       <text className="hero-title">{props.title}</text>
       <text className="hero-subtitle">{props.subtitle}</text>
-      <button onClick={() => setCheers(cheers + 1)}>Cheers: {cheers}</button>
+      <button className="btn" onClick={() => setCheers(cheers + 1)}>Cheers: {cheers}</button>
     </div>
   )
 }

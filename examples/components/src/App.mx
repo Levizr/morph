@@ -17,7 +17,7 @@ export default function App() {
         <ProductCard name="Echo Headset" price={199} onAdd={(name) => setLastAdded(name)} />
       </div>
       <CartBar />
-      <text>Last added: {lastAdded}</text>
+      <text className="last-added">Last added: {lastAdded}</text>
     </body>
   )
 }

@@ -12,8 +12,9 @@ export function ProductCard(props: { name: string, price: number, onAdd: (name: 
   return (
     <div className="card">
       <text className="card-title">{props.name}</text>
-      <text>${props.price} in cart: {qty}</text>
-      <button onClick={() => add()}>Add to cart</button>
+      <text className="card-price">${props.price}</text>
+      <text className="card-qty">in cart: {qty}</text>
+      <button className="btn" onClick={() => add()}>Add to cart</button>
     </div>
   )
 }
