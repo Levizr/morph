@@ -953,7 +953,7 @@ impl IRBuilder {
         ctx: &BuilderCtx,
     ) -> anyhow::Result<Vec<HashMap<String, String>>> {
         let mut out = Vec::new();
-        let mut types: Vec<(&(PathBuf, String), &Vec<(String, usize, usize, usize)>)> =
+        let mut types: Vec<(&(PathBuf, String), &Vec<(String, usize, usize, usize, PathBuf)>)> =
             ctx.mid_tags.iter().collect();
         types.sort_by(|a, b| a.0.cmp(b.0));
         for ((module, comp_name), type_tags) in types {
@@ -973,8 +973,8 @@ impl IRBuilder {
                 format!("{module_ns}::{comp_seg}")
             };
             let mut tags = type_tags.clone();
-            tags.sort_by_key(|(_, instance_no, _, _)| *instance_no);
-            for (index, (mid, instance_no, line, col)) in tags.iter().enumerate() {
+            tags.sort_by_key(|(_, instance_no, _, _, _)| *instance_no);
+            for (index, (mid, instance_no, line, col, use_site)) in tags.iter().enumerate() {
                 let Some(slots) = ctx.mid_states.get(instance_no) else {
                     continue;
                 };
@@ -990,7 +990,7 @@ impl IRBuilder {
                     m.insert("getter".into(), suffix_getter.clone());
                     m.insert("setter".into(), suffix_setter.clone());
                     m.insert("init".into(), init.clone());
-                    m.insert("module".into(), module.display().to_string());
+                    m.insert("module".into(), use_site.display().to_string());
                     m.insert("loc".into(), format!("{line}:{col}"));
                     out.push(m);
                 }
@@ -1058,13 +1058,14 @@ impl IRBuilder {
                 );
             }
             let tags = ctx.mid_tags.entry((target_module.clone(), comp.name.clone())).or_default();
-            if let Some((_, _, first_line, first_col)) = tags.iter().find(|(m, _, _, _)| m == &mid)
+            if let Some((_, _, first_line, first_col, _)) =
+                tags.iter().find(|(m, _, _, _, _)| m == &mid)
             {
                 anyhow::bail!(
                     "duplicate `mid=\"{mid}\"` on <{tag}> ({line}:{col}): already used at {first_line}:{first_col}; `mid` must be unique per component type"
                 );
             }
-            tags.push((mid, instance_no, line, col));
+            tags.push((mid, instance_no, line, col, parent_frame.module.clone()));
         }
         ctx.stack.push((target_module.clone(), comp.name.clone()));
 
@@ -1917,8 +1918,11 @@ struct BuilderCtx<'a> {
     event_entries: Vec<HashMap<String, String>>,
     /// Depth inside `.map()` item templates (`mid` is rejected there).
     list_depth: usize,
-    /// Tagged instances: (module, component) → [(mid, instance_no, line, col)].
-    mid_tags: HashMap<(PathBuf, String), Vec<(String, usize, usize, usize)>>,
+    /// Tagged instances: (module, component) →
+    /// [(mid, instance_no, line, col, use_site module)]. The use-site
+    /// module is where the `<Tag mid="…">` was written (mapping comments);
+    /// the key module owns the component type.
+    mid_tags: HashMap<(PathBuf, String), Vec<(String, usize, usize, usize, PathBuf)>>,
     /// Instance states for indexed native access: instance_no →
     /// [(suffix getter, suffix setter, init)].
     mid_states: HashMap<usize, Vec<(String, String, String)>>,
