@@ -1436,7 +1436,11 @@ pub fn emit_logic(windows: &[IRWindow]) -> LogicOutput {
         lines.insert(pos + 1, array_line);
     }
 
-    LogicOutput { source: lines.join("\n"), state_header }
+    // Snippet bodies splice into lambdas, where the namespace-scope
+    // `morph::js_cmp` helpers some translations glue in are illegal:
+    // hoist them to file scope (single union header).
+    let source = morpher::codegen::js_comparison::hoist_js_cmp_preludes(&lines.join("\n"));
+    LogicOutput { source, state_header }
 }
 
 #[cfg(test)]
@@ -1488,6 +1492,39 @@ mod tests {
         let output = emit_logic(&[window]);
         assert!(output.source.contains("nodes.get(\"node_0001\")"));
         assert!(output.source.contains("n->onClick = [](JsObject e) { pressClear(); };"));
+    }
+
+    #[test]
+    fn comparison_helpers_hoist_out_of_handler_lambdas() {
+        use morph_ir::{IREvent, IRNode};
+        // double state vs int literal forces the js_cmp helper path, whose
+        // namespace-scope block must land at file scope, not in the lambda.
+        let mut sv = HashMap::new();
+        sv.insert("getter".to_string(), "bodyWidth".to_string());
+        sv.insert("setter".to_string(), "setBodyWidth".to_string());
+        sv.insert("init".to_string(), "220.0".to_string());
+        let node = IRNode {
+            node_id: "node_0042".to_string(),
+            node_type: "button".to_string(),
+            events: vec![IREvent {
+                trigger: "click".to_string(),
+                action: "call".to_string(),
+                target: "() => setBodyWidth(bodyWidth > 60 ? bodyWidth - 20 : bodyWidth)"
+                    .to_string(),
+            }],
+            ..Default::default()
+        };
+        let window = IRWindow { nodes: vec![node], state_vars: vec![sv], ..Default::default() };
+        let output = emit_logic(&[window]);
+        let lambda_start = output.source.find("n->onClick").expect("handler emitted");
+        let lambda = &output.source[lambda_start..];
+        assert!(!lambda.contains("namespace morph::js_cmp"), "{lambda}");
+        assert!(lambda.contains("js_cmp::"), "{lambda}");
+        assert_eq!(
+            output.source.matches("namespace morph::js_cmp\n{").count(),
+            1,
+            "single hoisted header"
+        );
     }
 
     #[test]

@@ -13,6 +13,7 @@ pub use analyzer::{
 pub use cpp::CppTranslator;
 pub use js_comparison::{
     ComparisonKind, ComparisonSections, ComparisonSignature, OperandClass, build_header,
-    cpp_type_to_class, required_includes, ts_annotation_to_class,
+    cpp_type_to_class, full_sections, hoist_js_cmp_preludes, required_includes,
+    ts_annotation_to_class,
 };
 pub use rust::RustTranslator;

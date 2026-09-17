@@ -377,6 +377,176 @@ pub fn required_includes(sections: ComparisonSections) -> Vec<&'static str> {
     includes
 }
 
+/// Every section on: the union header. Used when hoisting helper blocks
+/// out of spliced snippet bodies — per-snippet subsets would redefine
+/// each other, so one full block covers every use site.
+pub fn full_sections() -> ComparisonSections {
+    ComparisonSections {
+        loose: true,
+        strict: true,
+        relational: true,
+        truthy: true,
+        text: true,
+        float_ops: true,
+        js_types: true,
+        js_value: true,
+    }
+}
+
+/// Hoist `namespace morph::js_cmp { ... }` helper blocks (which snippet
+/// translation glues into spliceable statement bodies) to file scope.
+///
+/// Snippet bodies splice into lambdas (`onClick`, effects), where
+/// namespace/template definitions are illegal C++. This removes every
+/// machine-generated block (recognized by the `MORPH_JS_CMP_INLINE`
+/// marker, so hand-written user namespaces are untouched) and prepends
+/// a single union header after the leading `#include` cluster, adding
+/// any missing system includes. Sources without a generated block are
+/// returned unchanged.
+pub fn hoist_js_cmp_preludes(source: &str) -> String {
+    const MARKER: &str = "namespace morph::js_cmp";
+    if !source.contains(MARKER) {
+        return source.to_string();
+    }
+    // Collect generated block spans: `namespace morph::js_cmp` + optional
+    // whitespace + balanced `{...}` containing the machine marker.
+    let mut spans: Vec<(usize, usize)> = Vec::new();
+    let mut search_from = 0;
+    while let Some(found) = source[search_from..].find(MARKER) {
+        let start = search_from + found;
+        let mut i = start + MARKER.len();
+        let bytes = source.as_bytes();
+        while i < bytes.len() && (bytes[i] as char).is_whitespace() {
+            i += 1;
+        }
+        if bytes.get(i) != Some(&b'{') {
+            search_from = start + MARKER.len();
+            continue;
+        }
+        match match_brace(source, i) {
+            Some(end) if source[start..end].contains("MORPH_JS_CMP_INLINE") => {
+                // Swallow the block's trailing `// namespace morph::js_cmp`
+                // comment line so no marker fragments remain behind.
+                let mut end = end;
+                let mut j = end;
+                while j < bytes.len() && (bytes[j] == b' ' || bytes[j] == b'\t') {
+                    j += 1;
+                }
+                if source[j..].starts_with("//") {
+                    let line_end = source[j..].find('\n').map_or(bytes.len(), |n| j + n + 1);
+                    if source[j..line_end].contains(MARKER) {
+                        end = line_end;
+                    }
+                }
+                spans.push((start, end));
+                search_from = end;
+            }
+            _ => {
+                search_from = start + MARKER.len();
+            }
+        }
+    }
+    if spans.is_empty() {
+        return source.to_string();
+    }
+    // Blank removed spans (preserving line numbers for diagnostics).
+    let mut rest = String::with_capacity(source.len());
+    let mut cursor = 0;
+    for (start, end) in &spans {
+        rest.push_str(&source[cursor..*start]);
+        rest.push_str(&"\n".repeat(source[*start..*end].matches('\n').count()));
+        cursor = *end;
+    }
+    rest.push_str(&source[cursor..]);
+    // Split the leading #include cluster (tolerating blanks/comments —
+    // generated TUs interleave banner comments between includes).
+    let mut head_end = 0;
+    for line in rest.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("#include") || trimmed.starts_with("//") {
+            head_end += line.len() + 1;
+        } else {
+            break;
+        }
+    }
+    let head_end = head_end.min(rest.len());
+    let (head, body) = rest.split_at(head_end);
+    let mut missing: Vec<&str> = Vec::new();
+    for inc in required_includes(full_sections()) {
+        let line = format!("#include {inc}");
+        if !head.lines().any(|l| l.trim() == line) {
+            missing.push(inc);
+        }
+    }
+    let mut out = String::with_capacity(rest.len() + 4096);
+    out.push_str(head);
+    if !head.ends_with('\n') {
+        out.push('\n');
+    }
+    for inc in missing {
+        out.push_str(&format!("#include {inc}\n"));
+    }
+    out.push('\n');
+    out.push_str(&build_header(full_sections()));
+    out.push('\n');
+    out.push_str(body);
+    out
+}
+
+/// Byte index just past the balanced closing brace of the `{` at `open`.
+/// Strings, char literals, and comments are skipped. `None` when
+/// unbalanced.
+fn match_brace(src: &str, open: usize) -> Option<usize> {
+    let bytes = src.as_bytes();
+    let mut depth = 0i32;
+    let mut i = open;
+    while i < bytes.len() {
+        let c = bytes[i] as char;
+        if c == '"' || c == '\'' {
+            i = str_lit_end(src, i);
+            continue;
+        }
+        if c == '/' && i + 1 < bytes.len() {
+            if bytes[i + 1] == b'/' {
+                i = src[i..].find('\n').map_or(bytes.len(), |n| i + n);
+                continue;
+            }
+            if bytes[i + 1] == b'*' {
+                i = src[i..].find("*/").map_or(bytes.len(), |n| i + n + 2);
+                continue;
+            }
+        }
+        if c == '{' {
+            depth += 1;
+        } else if c == '}' {
+            depth -= 1;
+            if depth == 0 {
+                return Some(i + 1);
+            }
+        }
+        i += c.len_utf8();
+    }
+    None
+}
+
+/// End index (exclusive) of a `"..."` / `'...'` literal starting at `start`.
+fn str_lit_end(src: &str, start: usize) -> usize {
+    let bytes = src.as_bytes();
+    let q = bytes[start];
+    let mut i = start + 1;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            i += 2;
+            continue;
+        }
+        if bytes[i] == q {
+            return i + 1;
+        }
+        i += 1;
+    }
+    bytes.len()
+}
+
 fn header_preamble() -> &'static str {
     r#"#if defined(_MSC_VER)
 #define MORPH_JS_CMP_INLINE __forceinline
@@ -1894,6 +2064,47 @@ mod tests {
         assert!(sections.js_types);
         let header = build_header(sections);
         assert!(header.contains("JsCmpJsNumber"));
+    }
+
+    #[test]
+    fn hoist_moves_generated_blocks_to_file_scope() {
+        let mut sections = ComparisonSections::default();
+        sections.relational = true;
+        let block = build_header(sections);
+        assert!(block.contains("namespace morph::js_cmp"));
+        let src = format!(
+            "#include <string>\n\nvoid rewire() {{\n    n->onClick = [](JsObject e) {{ {block}do_it(); }};\n}}\n"
+        );
+        let out = hoist_js_cmp_preludes(&src);
+        assert_eq!(out.matches("namespace morph::js_cmp\n{").count(), 1, "{out}");
+        assert!(out.contains("#include <type_traits>"), "{out}");
+        assert!(out.contains("constexpr") || out.contains("concept"), "{out}");
+        // Lambda body keeps only statements.
+        let lambda_start = out.find("onClick").unwrap();
+        let lambda = &out[lambda_start..];
+        assert!(!lambda.contains("namespace morph::js_cmp"), "{out}");
+        assert!(lambda.contains("do_it();"), "{out}");
+    }
+
+    #[test]
+    fn hoist_dedupes_and_ignores_user_namespaces() {
+        let mut sections = ComparisonSections::default();
+        sections.truthy = true;
+        let block = build_header(sections);
+        let src = format!(
+            "void a() {{ {block} }}\nvoid b() {{ {block} }}\nnamespace morph::js_cmp {{ int mine = 1; }}\n"
+        );
+        let out = hoist_js_cmp_preludes(&src);
+        // Two generated blocks + one hand-written: single union header,
+        // hand-written block untouched in place.
+        assert_eq!(out.matches("namespace morph::js_cmp\n{").count(), 1, "{out}");
+        assert!(out.contains("int mine = 1;"), "{out}");
+    }
+
+    #[test]
+    fn hoist_is_noop_without_generated_blocks() {
+        let src = "void f() { g(); }\n";
+        assert_eq!(hoist_js_cmp_preludes(src), src);
     }
 
     #[test]

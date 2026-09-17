@@ -328,6 +328,9 @@ impl<'a> CppEmitter<'a> {
 
         let rendered = tera::Tera::one_off(TEMPLATE, &ctx, false)
             .unwrap_or_else(|e| format!("// Tera error: {e}\n{TEMPLATE}"));
+        // Same hazard as the dev TU: snippet bodies spliced into lambdas
+        // must not carry namespace-scope `morph::js_cmp` helpers.
+        let rendered = morpher::codegen::js_comparison::hoist_js_cmp_preludes(&rendered);
 
         std::fs::write(output_dir.join("app.cpp"), rendered)?;
 

@@ -1739,10 +1739,7 @@ mod tests {
     fn cart_map() -> HashMap<String, String> {
         let mut m = HashMap::new();
         m.insert("cart".to_string(), "morph_mods::cartstore::shared_cart().get()".to_string());
-        m.insert(
-            "setCart".to_string(),
-            "morph_mods::cartstore::shared_cart().set".to_string(),
-        );
+        m.insert("setCart".to_string(), "morph_mods::cartstore::shared_cart().set".to_string());
         m
     }
 
@@ -1750,10 +1747,8 @@ mod tests {
     fn state_substitution_skips_string_literals() {
         // Inlined prop text mentioning a store name must survive: only real
         // code identifiers are substituted.
-        let out = translate_js(
-            "(\"Reusable components, shared cart, zero providers\")",
-            &cart_map(),
-        );
+        let out =
+            translate_js("(\"Reusable components, shared cart, zero providers\")", &cart_map());
         assert!(out.contains("shared cart"), "{out}");
         assert!(!out.contains("shared_cart"), "{out}");
     }
