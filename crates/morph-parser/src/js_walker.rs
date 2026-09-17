@@ -98,6 +98,18 @@ fn binding_ident_name(bp: &BindingPattern) -> Option<String> {
     }
 }
 
+impl<'src> MxWalker<'src> {
+    /// Name behind a `ModuleExportName` (`foo`, `foo` in `as foo`, or a
+    /// string-literal export name).
+    fn export_name(name: &ModuleExportName) -> String {
+        match name {
+            ModuleExportName::IdentifierName(id) => id.name.to_string(),
+            ModuleExportName::IdentifierReference(r) => r.name.to_string(),
+            ModuleExportName::StringLiteral(lit) => lit.value.to_string(),
+        }
+    }
+}
+
 fn binding_array_elements(bp: &BindingPattern) -> Option<Vec<Option<String>>> {
     if let BindingPattern::ArrayPattern(arr) = bp {
         Some(
@@ -284,6 +296,11 @@ pub struct MxWalker<'src> {
     pub effects: Vec<MxEffect>,
     pub inner_functions: Vec<InnerFunction>,
     pub function_declarations: Vec<InnerFunction>,
+    pub class_declarations: Vec<ClassDecl>,
+    pub exported_vars: Vec<ExportedVar>,
+    pub named_exports: Vec<(String, String)>,
+    pub default_export: Option<String>,
+    pub re_exports: Vec<ReExport>,
     pub global_vars: Vec<String>,
     pub console_logs: Vec<String>,
     pub extra_headers: Vec<String>,
@@ -304,6 +321,11 @@ impl<'src> MxWalker<'src> {
             effects: Vec::new(),
             inner_functions: Vec::new(),
             function_declarations: Vec::new(),
+            class_declarations: Vec::new(),
+            exported_vars: Vec::new(),
+            named_exports: Vec::new(),
+            default_export: None,
+            re_exports: Vec::new(),
             global_vars: Vec::new(),
             console_logs: Vec::new(),
             extra_headers: Vec::new(),
@@ -1362,22 +1384,143 @@ impl<'a> Visit<'a> for MxWalker<'_> {
             match stmt {
                 Statement::ExportDefaultDeclaration(d) => match &d.declaration {
                     ExportDefaultDeclarationKind::FunctionDeclaration(f) => {
+                        let before = self.components.len();
                         self.extract_component(f, true, true);
+                        if self.components.len() == before {
+                            // Not JSX: a plain module helper with a default
+                            // export (previously dropped entirely).
+                            if let Some(id) = &f.id {
+                                let name = id.name.to_string();
+                                self.function_declarations.push(InnerFunction {
+                                    name: name.clone(),
+                                    source: self.span_text(f.span).to_string(),
+                                });
+                                self.default_export = Some(name);
+                            }
+                        } else if let Some(last) = self.components.last() {
+                            if !last.name.is_empty() {
+                                self.default_export = Some(last.name.clone());
+                            }
+                        }
                     }
                     ExportDefaultDeclarationKind::ArrowFunctionExpression(arrow) => {
+                        let before = self.components.len();
                         self.extract_arrow_component("default".to_string(), arrow, true, true);
+                        if self.components.len() != before {
+                            if let Some(last) = self.components.last() {
+                                if !last.name.is_empty() {
+                                    self.default_export = Some(last.name.clone());
+                                }
+                            }
+                        }
+                    }
+                    ExportDefaultDeclarationKind::ClassDeclaration(c) => {
+                        let name = c
+                            .id
+                            .as_ref()
+                            .map_or_else(|| "default_export".to_string(), |id| id.name.to_string());
+                        self.class_declarations.push(ClassDecl {
+                            name: name.clone(),
+                            source: self.span_text(c.span).to_string(),
+                            exported: true,
+                        });
+                        self.default_export = Some(name);
+                    }
+                    ExportDefaultDeclarationKind::Identifier(id) => {
+                        self.default_export = Some(id.name.to_string());
                     }
                     _ => {}
                 },
                 Statement::ExportDeclaration(d) => match &d.declaration {
-                    Declaration::FunctionDeclaration(f) => self.extract_component(f, true, false),
+                    Declaration::FunctionDeclaration(f) => {
+                        let before = self.components.len();
+                        self.extract_component(f, true, false);
+                        if self.components.len() == before {
+                            // Exported non-component helper (previously
+                            // dropped: only JSX registered as a component).
+                            if let Some(id) = &f.id {
+                                self.function_declarations.push(InnerFunction {
+                                    name: id.name.to_string(),
+                                    source: self.span_text(f.span).to_string(),
+                                });
+                            }
+                        }
+                    }
                     Declaration::VariableDeclaration(vd) => {
                         for decl in &vd.declarations {
+                            let before = self.components.len();
                             self.try_extract_arrow_declarator(decl, true, false);
+                            if self.components.len() == before {
+                                if let Some(name) = binding_ident_name(&decl.id) {
+                                    self.exported_vars.push(ExportedVar {
+                                        name,
+                                        source: self.span_text(decl.span).to_string(),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    Declaration::ClassDeclaration(c) => {
+                        if let Some(id) = &c.id {
+                            self.class_declarations.push(ClassDecl {
+                                name: id.name.to_string(),
+                                source: self.span_text(c.span).to_string(),
+                                exported: true,
+                            });
                         }
                     }
                     _ => {}
                 },
+                Statement::ExportNamedDeclaration(d) => {
+                    // `export { a, b as c }`: mark locals exported.
+                    for spec in &d.specifiers {
+                        self.named_exports.push((
+                            Self::export_name(&spec.local),
+                            Self::export_name(&spec.exported),
+                        ));
+                    }
+                }
+                Statement::ExportFromDeclaration(d) => {
+                    // `export { a, b as c } from './path'` re-export.
+                    let mut names = Vec::new();
+                    for spec in &d.specifiers {
+                        names.push((
+                            Self::export_name(&spec.local),
+                            Self::export_name(&spec.exported),
+                        ));
+                    }
+                    self.re_exports.push(ReExport {
+                        path: d.source.value.to_string(),
+                        names,
+                        star: false,
+                        star_as: None,
+                    });
+                }
+                Statement::ExportAllDeclaration(d) => {
+                    // `export * [as ns] from './path'`.
+                    let star_as = d.exported.as_ref().and_then(|e| match e {
+                        ModuleExportName::IdentifierName(id) => Some(id.name.to_string()),
+                        ModuleExportName::IdentifierReference(r) => Some(r.name.to_string()),
+                        ModuleExportName::StringLiteral(_) => None,
+                    });
+                    self.re_exports.push(ReExport {
+                        path: d.source.value.to_string(),
+                        names: Vec::new(),
+                        star: true,
+                        star_as,
+                    });
+                }
+                Statement::ClassDeclaration(c) => {
+                    // Non-exported module class: inventoried for own-module
+                    // rewriting (same as plain helper functions below).
+                    if let Some(id) = &c.id {
+                        self.class_declarations.push(ClassDecl {
+                            name: id.name.to_string(),
+                            source: self.span_text(c.span).to_string(),
+                            exported: false,
+                        });
+                    }
+                }
                 Statement::FunctionDeclaration(f) => {
                     // A function that returns JSX is a component; otherwise it's a
                     // module-level helper function (e.g. `compute`), transpiled into
@@ -1487,6 +1630,43 @@ mod walker_tests {
             }
             k => panic!("unexpected kind: {k:?}"),
         }
+    }
+
+    #[test]
+    fn exported_helpers_classes_vars_are_inventoried() {
+        let s = parse(
+            "export function loadData(): int { return 1 }\nexport const token = \"abc\"\nexport class User {}\nclass Helper {}\nexport { loadData as fetch }\nexport * from './other.ts'\n",
+        );
+        assert!(s.function_declarations.iter().any(|f| f.name == "loadData"), "{s:?}");
+        assert!(s.exported_vars.iter().any(|v| v.name == "token"), "{s:?}");
+        assert!(s.class_declarations.iter().any(|c| c.name == "User" && c.exported), "{s:?}");
+        assert!(s.class_declarations.iter().any(|c| c.name == "Helper" && !c.exported), "{s:?}");
+        assert!(s.named_exports.contains(&("loadData".to_string(), "fetch".to_string())), "{s:?}");
+        assert_eq!(s.re_exports.len(), 1);
+        assert_eq!(s.re_exports[0].path, "./other.ts");
+        assert!(s.re_exports[0].star);
+    }
+
+    #[test]
+    fn default_exports_map_to_declared_names() {
+        let s = parse("export default function loadData(): int { return 1 }");
+        assert!(s.function_declarations.iter().any(|f| f.name == "loadData"), "{s:?}");
+        assert_eq!(s.default_export.as_deref(), Some("loadData"));
+        let s = parse("export default class Store {}");
+        assert!(s.class_declarations.iter().any(|c| c.name == "Store" && c.exported), "{s:?}");
+        assert_eq!(s.default_export.as_deref(), Some("Store"));
+        let s = parse("const helper = 1\nexport default helper");
+        assert_eq!(s.default_export.as_deref(), Some("helper"));
+    }
+
+    #[test]
+    fn named_reexports_record_paths_and_pairs() {
+        let s = parse("export { loadData, token as auth } from './utility.ts'");
+        assert_eq!(s.re_exports.len(), 1);
+        assert_eq!(s.re_exports[0].path, "./utility.ts");
+        assert!(!s.re_exports[0].star);
+        assert!(s.re_exports[0].names.contains(&("loadData".to_string(), "loadData".to_string())));
+        assert!(s.re_exports[0].names.contains(&("token".to_string(), "auth".to_string())));
     }
 
     #[test]

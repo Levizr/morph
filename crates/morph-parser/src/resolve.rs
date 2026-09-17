@@ -164,6 +164,25 @@ pub fn resolve_graph(entry: &Path, cwd: &Path) -> anyhow::Result<ModuleGraph> {
                 }
             }
         }
+        // Re-export targets join the graph too (missing targets are as
+        // fatal as missing imports).
+        for re in &source.re_exports {
+            match resolve_import_path(&dir, cwd, &re.path) {
+                Some(resolved) => {
+                    module_imports.push((re.path.clone(), resolved.clone()));
+                    if !graph.modules.contains_key(&resolved) {
+                        queue.push_back(resolved);
+                    }
+                }
+                None => {
+                    anyhow::bail!(
+                        "Re-export target not found: {} (re-exported from {})",
+                        re.path,
+                        path.display()
+                    );
+                }
+            }
+        }
         graph.order.push(path.clone());
         graph.modules.insert(path.clone(), ResolvedModule { path, dir, source, module_imports });
     }

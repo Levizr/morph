@@ -15,6 +15,17 @@ pub struct MxSource {
     pub effects: Vec<MxEffect>,
     pub inner_functions: Vec<InnerFunction>,
     pub function_declarations: Vec<InnerFunction>,
+    /// Top-level `class C { ... }` declarations (any module kind).
+    pub class_declarations: Vec<ClassDecl>,
+    /// Top-level exported `const`/`let` bindings (non-component,
+    /// non-destructured): `{name, declarator source}`.
+    pub exported_vars: Vec<ExportedVar>,
+    /// `export { local as exported }` without a `from` clause.
+    pub named_exports: Vec<(String, String)>,
+    /// Declared name behind `export default` (`None` when anonymous).
+    pub default_export: Option<String>,
+    /// `export ... from './path'` re-exports (resolved into the graph).
+    pub re_exports: Vec<ReExport>,
     pub global_vars: Vec<String>,
     pub console_logs: Vec<String>,
     pub extra_headers: Vec<String>,
@@ -216,6 +227,31 @@ pub struct MxEffect {
 pub struct InnerFunction {
     pub name: String,
     pub source: String,
+}
+
+/// A top-level `class C { ... }` declaration with its source span.
+#[derive(Debug, Clone)]
+pub struct ClassDecl {
+    pub name: String,
+    pub source: String,
+    pub exported: bool,
+}
+
+/// A top-level exported `const`/`let` binding with its declarator source.
+#[derive(Debug, Clone)]
+pub struct ExportedVar {
+    pub name: String,
+    pub source: String,
+}
+
+/// An `export ... from './path'` re-export: `(original, exported)` name
+/// pairs (`star` for `export *`, with optional `export * as ns` target).
+#[derive(Debug, Clone)]
+pub struct ReExport {
+    pub path: String,
+    pub names: Vec<(String, String)>,
+    pub star: bool,
+    pub star_as: Option<String>,
 }
 
 #[derive(Debug, Clone)]
