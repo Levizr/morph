@@ -42,10 +42,34 @@ double area(double w, double h) {
 | Read shared state | `<binding>()` wrapper | `morph_mods::cartstore::cart()` |
 | Write shared state | `<setter>(v)` + optional `notify_<event>()` | `setCart(0); notify_cartChanged();` |
 | Emit event | `emit_<name>(payload)` or `evt_<name>().emit(...)` | `emit_cartChanged(JsObject{{"cart", cart()}});` |
+| Call a TS/TSX function | Defining module's namespace (never the importer's) | `morph_mods::utility::loadData()` |
+| Call a re-exported function | Re-exporting namespace (via `using`-alias) | `morph_mods::mid::loadData()` |
 | Read another component's local | **Don't.** Emit an event; let that component reset its own local | `evt_resetEvent().emit({});` / `resetEvent.on(() => setCount(0))` |
 | C++ produces a value for a local | Return it; the TSX handler writes its own local | `int compute();` / `<button onClick={() => setCount(compute())}>` |
 | **Native initiates a write to a specific instance** | Tag `<Comp mid="tag" />`; use the `MID_TAG` constant | `set_count(MID_HERO, 0)` |
 | Pure compute | Plain function, zero plumbing, always | `int doubleIt(int x) { return x * 2; }` |
+
+## Calling TS / TSX Bindings from C++
+
+Every binding lives in its defining file's namespace — find it in `morph_api.h` via the mapping comments:
+
+```cpp
+#include "morph_api.h"
+
+int loadFromNative() {
+    return morph_mods::utility::loadData();   // defined in utility.ts
+}
+
+int viaReexport() {
+    return morph_mods::mid::loadData();       // mid.ts re-exports utility.ts
+}
+
+void makeUser() {
+    morph_mods::models::User u("hero");       // defined in models.ts
+}
+```
+
+Rules: import any exported binding (`import { loadData } from './utility.ts'`, default or named) and call it bare in JSX — the compiler rewrites to the defining namespace. Unknown or ambiguous imports are hard errors. Same-name definitions in different files coexist; each keeps its own namespace.
 
 ## Shared State (`morphShared`)
 

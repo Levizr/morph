@@ -359,6 +359,7 @@ mod tests {
             cpp_imports: Vec::new(),
             event_decls: Vec::new(),
             mid_assignments: Vec::new(),
+            module_bindings: Vec::new(),
             channel_subs: Vec::new(),
             keyframes: std::collections::HashMap::new(),
         };

@@ -20,9 +20,10 @@ double area(double w, double h) {
     return w * h;
 }
 
-// C++ → JSX: calls a function defined in App.mx (declared in _morph_state.h).
+// C++ → JSX: calls a function defined in App.mx (declared namespaced in
+// morph_api.h — always the defining module's namespace).
 int callJsxFromCpp(int x) {
-    return jsxHelper(x);
+    return morph_mods::app::jsxHelper(x);
 }
 
 // C++ → JSX state, from a worker thread: set() is mutex-protected, effects

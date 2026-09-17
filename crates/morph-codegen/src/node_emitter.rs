@@ -36,48 +36,52 @@ pub(crate) fn translate_js<S: std::hash::BuildHasher>(
         };
         s = inner;
     }
-    // Generic state var replacement (identifiers only — never inside
-    // `"..."` / `'...'` literals, so inlined prop text like
-    // "shared cart" survives substitution of the `cart` store).
-    for (from, to) in state_map {
-        // Replace "setX(" with map value
-        if !from.is_empty() && s.contains(from) {
-            let mut res = String::with_capacity(s.len());
-            let mut i = 0;
-            while i < s.len() {
-                let b = s.as_bytes()[i];
-                if b == b'"' || b == b'\'' {
-                    let end = js_skip_string(&s, i);
-                    res.push_str(&s[i..end]);
-                    i = end;
-                    continue;
-                }
-                if s[i..].starts_with(from) {
-                    let start = i;
-                    let end = start + from.len();
-                    let before_ok = start == 0 || {
-                        let b = s.as_bytes()[start - 1];
-                        !b.is_ascii_alphanumeric() && b != b'_'
-                    };
-                    let after_ok = end >= s.len() || {
-                        let b = s.as_bytes()[end];
-                        !b.is_ascii_alphanumeric() && b != b'_'
-                    };
-                    let already = start >= 4 && &s[start - 4..start] == "__st";
-                    if before_ok && after_ok && !already {
-                        res.push_str(to);
-                    } else {
-                        res.push_str(&s[start..end]);
-                    }
-                    i = end;
-                    continue;
-                }
-                let ch_len = s[i..].chars().next().map_or(1, char::len_utf8);
-                res.push_str(&s[i..i + ch_len]);
-                i += ch_len;
+    // Generic state var replacement: one left-to-right pass over whole
+    // identifiers (never inside `"..."` / `'...'` literals, so inlined
+    // prop text like "shared cart" survives substitution of the `cart`
+    // store). Single-pass means substituted text is never re-scanned, so
+    // overlapping keys (`loadData` imported + defined) cannot
+    // double-qualify and entry order cannot change the result.
+    {
+        let mut res = String::with_capacity(s.len());
+        let mut i = 0;
+        let bytes = s.as_bytes();
+        while i < bytes.len() {
+            let b = bytes[i];
+            if b == b'"' || b == b'\'' {
+                let end = js_skip_string(&s, i);
+                res.push_str(&s[i..end]);
+                i = end;
+                continue;
             }
-            s = res;
+            if (b as char).is_ascii_alphabetic() || b == b'_' || b == b'$' {
+                let mut j = i + 1;
+                while j < bytes.len() {
+                    let c = bytes[j] as char;
+                    if c.is_ascii_alphanumeric() || c == '_' || c == '$' {
+                        j += 1;
+                    } else {
+                        break;
+                    }
+                }
+                let word = &s[i..j];
+                // `__st_`-prefixed words are already-lowered signals.
+                if !word.starts_with("__st") {
+                    if let Some(to) = state_map.get(word) {
+                        res.push_str(to);
+                        i = j;
+                        continue;
+                    }
+                }
+                res.push_str(word);
+                i = j;
+                continue;
+            }
+            let ch_len = s[i..].chars().next().map_or(1, char::len_utf8);
+            res.push_str(&s[i..i + ch_len]);
+            i += ch_len;
         }
+        s = res;
     }
     s = normalize_value_access(&s);
     s = s.replace("===", "==");
@@ -112,7 +116,7 @@ pub(crate) fn normalize_value_access(s: &str) -> String {
 
 // Skip a `"..."` / `'...'` string literal starting at `start`; returns idx past
 // the closing quote.
-const fn js_skip_string(s: &str, start: usize) -> usize {
+pub(crate) const fn js_skip_string(s: &str, start: usize) -> usize {
     let b = s.as_bytes();
     let q = b[start] as char;
     let mut i = start + 1;
@@ -1765,5 +1769,17 @@ mod tests {
         let out = translate_js("(setCart(cart + 1))", &cart_map());
         assert!(out.contains("morph_mods::cartstore::shared_cart().set"), "{out}");
         assert!(out.contains("morph_mods::cartstore::shared_cart().get()"), "{out}");
+    }
+
+    #[test]
+    fn overlapping_keys_never_double_qualify() {
+        // An imported name and a same-spelled definition in scope: one
+        // pass, one substitution — substituted text is never re-scanned.
+        let mut m = HashMap::new();
+        m.insert("reloadData".to_string(), "morph_mods::utility::loadData".to_string());
+        m.insert("loadData".to_string(), "morph_mods::utility::loadData".to_string());
+        let out = translate_js("(reloadData())", &m);
+        assert_eq!(out.matches("morph_mods").count(), 1, "{out}");
+        assert!(out.contains("morph_mods::utility::loadData()"), "{out}");
     }
 }

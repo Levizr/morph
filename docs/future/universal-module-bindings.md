@@ -139,12 +139,14 @@ Decision tree addition (extends the `native-cpp.md` table): *call a TS/TSX funct
 | Item | Status | Notes |
 |---|---|---|
 | Design record (this page) | ✅ Shipped | Decided with reviewer 2026-09-17 |
-| Parser inventory (classes, exported vars, default mapping) | 🔧 In progress | `emit_class` exists; inventory is the gap |
-| Unified `morph_mods::<ns>` fragments (retire `<stem>_logic`) | 📋 Planned | Fixes same-stem collisions |
-| Builder registry + import resolution + re-export aliases | 📋 Planned | Generalizes `register_binding`/`register_event` |
-| Codegen namespaced defs + full `morph_api.h` | 📋 Planned | Per-namespace grouping as with shared/events |
-| `native-cpp.md` binding-call examples | 📋 Planned | After codegen lands |
+| Parser inventory (classes, exported vars, default mapping) | ✅ Shipped | `emit_class` existed; inventory was the gap |
+| Builder registry + import resolution + re-export aliases | ✅ Shipped | Generalizes `register_binding`/`register_event`; unknown/ambiguous/cycle = hard errors |
+| Codegen namespaced defs + full `morph_api.h` | ✅ Shipped | Func decls, var externs, moved classes, `using`-aliases; single-pass substitution (no double-qualify) |
+| Fragments of graph-member `.ts` skipped | ✅ Shipped | Builder owns graph modules; unimported files keep fragments |
+| `native-cpp.md` binding-call examples | ✅ Shipped | Decision tree + defining-namespace rules |
+| Unified `morph_mods::<ns>` fragments (retire `<stem>_logic`) | 📋 Planned | Standalone (unimported) files still use it; unify when touched |
 | `import type` erasure guidance | 📋 Planned | Linter hint |
+| Top-level side-effect statements in imported `.ts` | 📋 Known limitation | Builder drops bare statements; keep init code in functions |
 
 ---
 

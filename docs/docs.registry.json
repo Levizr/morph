@@ -1644,6 +1644,24 @@
         "publishedAt": "2026-09-17",
         "priority": "0.9",
         "changefreq": "monthly"
+      },
+      {
+        "title": "Kill All Runtime Strings",
+        "slug": "future/kill-runtime-strings",
+        "file": "future/kill-runtime-strings",
+        "status": "development",
+        "author": "PIYUSH",
+        "description": "Replace every hot-path runtime string (style values, node types, JsObject/JsArray lookups) with enums, hashes, and convert-once-at-boundary: per-layer changes, behavior contract, and batches.",
+        "keywords": [
+          "runtime strings enums",
+          "CSS namespace",
+          "NodeType",
+          "JsObject unordered_map"
+        ],
+        "lastUpdated": "2026-09-17",
+        "publishedAt": "2026-09-17",
+        "priority": "0.9",
+        "changefreq": "monthly"
       }
     ]
   },
