@@ -3706,11 +3706,16 @@ impl<'a> CppTranslator<'a> {
             if let Some(mapped) = self.ctx.state_vars.get(id.name.as_str()).cloned() {
                 let args: Vec<String> =
                     call.arguments.iter().map(|a| self.emit_argument(a)).collect();
-                if args.is_empty() {
+                if mapped.trim_end().ends_with(')') {
+                    // Mapping is already a complete call (signal `.get()`,
+                    // reactive-const `name()`): extra args would be dropped
+                    // exactly as before.
                     return mapped;
-                } else {
-                    return format!("{}({})", mapped, args.join(", "));
                 }
+                // Otherwise the mapping is a callable head (signal `.set`,
+                // namespaced function): append the call parentheses, even
+                // when empty, so zero-arg calls keep theirs.
+                return format!("{}({})", mapped, args.join(", "));
             }
         }
         if let Expression::StaticMemberExpression(m) = &call.callee {

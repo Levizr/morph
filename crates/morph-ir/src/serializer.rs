@@ -76,6 +76,10 @@ impl IRSerializer {
             Value::Array(w.mid_assignments.iter().map(string_map).collect()),
         );
         out.insert(
+            "module_bindings".to_string(),
+            Value::Array(w.module_bindings.iter().map(string_map).collect()),
+        );
+        out.insert(
             "cpp_imports".to_string(),
             Value::Array(w.cpp_imports.iter().map(string_map).collect()),
         );

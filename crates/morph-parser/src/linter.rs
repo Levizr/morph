@@ -553,8 +553,8 @@ fn lint_component_usages(source: &MxSource, file_path: &str, out: &mut Vec<LintE
             if let Some(d) = default {
                 imported.insert(d.as_str());
             }
-            for s in specifiers {
-                imported.insert(s.as_str());
+            for (local, _) in specifiers {
+                imported.insert(local.as_str());
             }
         }
     }
@@ -2080,7 +2080,7 @@ fn resolve_in_graph(
             continue;
         };
         let is_default = default.as_deref() == Some(local);
-        let is_named = specifiers.iter().any(|s| s == local);
+        let is_named = specifiers.iter().any(|(l, _)| l == local);
         if !is_default && !is_named {
             continue;
         }

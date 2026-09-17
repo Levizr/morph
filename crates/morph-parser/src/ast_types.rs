@@ -47,10 +47,24 @@ pub struct WindowConfig {
 
 #[derive(Debug, Clone)]
 pub enum MxImportKind {
-    CssLocal { path: String },
-    CssUrl { url: String },
-    CppLocal { path: String, specifiers: Vec<String> },
-    Component { path: String, default: Option<String>, specifiers: Vec<String> },
+    CssLocal {
+        path: String,
+    },
+    CssUrl {
+        url: String,
+    },
+    CppLocal {
+        path: String,
+        specifiers: Vec<String>,
+    },
+    /// Module import: `default` is the local name of a default import;
+    /// `specifiers` are `(local, imported)` pairs (`import { a as b }`
+    /// records `("b", "a")`; non-aliased pairs repeat the name).
+    Component {
+        path: String,
+        default: Option<String>,
+        specifiers: Vec<(String, String)>,
+    },
 }
 
 impl MxImportKind {
@@ -227,6 +241,9 @@ pub struct MxEffect {
 pub struct InnerFunction {
     pub name: String,
     pub source: String,
+    /// True when declared with an `export` keyword (importable cross-file).
+    /// Component-inner helpers are never exported.
+    pub exported: bool,
 }
 
 /// A top-level `class C { ... }` declaration with its source span.

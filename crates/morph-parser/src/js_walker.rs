@@ -646,12 +646,13 @@ impl<'src> MxWalker<'src> {
     fn extract_import(&mut self, decl: &ImportDeclaration) {
         let source = decl.source.value.to_string();
         let mut default: Option<String> = None;
-        let mut specifiers: Vec<String> = Vec::new();
+        let mut specifiers: Vec<(String, String)> = Vec::new();
         if let Some(specs) = decl.specifiers.as_ref() {
             for s in specs {
                 match s {
                     ImportDeclarationSpecifier::ImportSpecifier(spec) => {
-                        specifiers.push(spec.local.name.to_string());
+                        specifiers
+                            .push((spec.local.name.to_string(), Self::export_name(&spec.imported)));
                     }
                     ImportDeclarationSpecifier::ImportDefaultSpecifier(spec) => {
                         default = Some(spec.local.name.to_string());
@@ -685,10 +686,11 @@ impl<'src> MxWalker<'src> {
                 style: "import".to_string(),
             });
         } else if ext_is("cpp") || ext_is("cc") || ext_is("cxx") || ext_is("h") || ext_is("hpp") {
-            self.cpp_imports
-                .push(CppImport { path: source.clone(), specifiers: specifiers.clone() });
+            // Native imports keep local names only (no cross-file rewrite).
+            let local: Vec<String> = specifiers.iter().map(|(l, _)| l.clone()).collect();
+            self.cpp_imports.push(CppImport { path: source.clone(), specifiers: local.clone() });
             self.imports.push(MxImport {
-                kind: MxImportKind::CppLocal { path: source, specifiers },
+                kind: MxImportKind::CppLocal { path: source, specifiers: local },
                 style: "import".to_string(),
             });
         } else {
@@ -1153,6 +1155,7 @@ impl<'src> MxWalker<'src> {
                         funcs.push(InnerFunction {
                             name: id.name.to_string(),
                             source: self.span_text(f.span).to_string(),
+                            exported: false,
                         });
                     }
                 }
@@ -1170,6 +1173,7 @@ impl<'src> MxWalker<'src> {
                             funcs.push(InnerFunction {
                                 name,
                                 source: self.span_text(decl.span).to_string(),
+                                exported: false,
                             });
                         }
                     }
@@ -1394,6 +1398,7 @@ impl<'a> Visit<'a> for MxWalker<'_> {
                                 self.function_declarations.push(InnerFunction {
                                     name: name.clone(),
                                     source: self.span_text(f.span).to_string(),
+                                    exported: true,
                                 });
                                 self.default_export = Some(name);
                             }
@@ -1442,20 +1447,48 @@ impl<'a> Visit<'a> for MxWalker<'_> {
                                 self.function_declarations.push(InnerFunction {
                                     name: id.name.to_string(),
                                     source: self.span_text(f.span).to_string(),
+                                    exported: true,
                                 });
                             }
                         }
                     }
                     Declaration::VariableDeclaration(vd) => {
+                        // Framework bindings (morphShared/morphEvent/...) have
+                        // dedicated handling; never inventory them as vars.
+                        let is_framework_call = vd.declarations.iter().any(|d| {
+                            if let Some(Expression::CallExpression(call)) = &d.init {
+                                matches!(&call.callee, Expression::Identifier(id) if {
+                                    let n = id.name.as_str();
+                                    n == "morphState"
+                                        || n == "morphShared"
+                                        || n == "morphEvent"
+                                        || n == "morphOn"
+                                        || n == "morphEmit"
+                                })
+                            } else {
+                                false
+                            }
+                        });
+                        if is_framework_call {
+                            for decl in &vd.declarations {
+                                self.try_extract_arrow_declarator(decl, true, false);
+                            }
+                            continue;
+                        }
+                        // Statement source (minus `export`) retranslates for
+                        // emission; identical wrapped bodies dedupe in premain.
+                        let stmt_src = self
+                            .span_text(vd.span)
+                            .trim_start_matches("export")
+                            .trim_start()
+                            .to_string();
                         for decl in &vd.declarations {
                             let before = self.components.len();
                             self.try_extract_arrow_declarator(decl, true, false);
                             if self.components.len() == before {
                                 if let Some(name) = binding_ident_name(&decl.id) {
-                                    self.exported_vars.push(ExportedVar {
-                                        name,
-                                        source: self.span_text(decl.span).to_string(),
-                                    });
+                                    self.exported_vars
+                                        .push(ExportedVar { name, source: stmt_src.clone() });
                                 }
                             }
                         }
@@ -1539,6 +1572,7 @@ impl<'a> Visit<'a> for MxWalker<'_> {
                         self.function_declarations.push(InnerFunction {
                             name: id.name.to_string(),
                             source: self.span_text(f.span).to_string(),
+                            exported: false,
                         });
                     }
                 }
@@ -1626,7 +1660,13 @@ mod walker_tests {
         match &s.imports[0].kind {
             MxImportKind::Component { default, specifiers, .. } => {
                 assert_eq!(default, &None);
-                assert_eq!(specifiers, &vec!["Card".to_string(), "Btn".to_string()]);
+                assert_eq!(
+                    specifiers,
+                    &vec![
+                        ("Card".to_string(), "Card".to_string()),
+                        ("Btn".to_string(), "Btn".to_string())
+                    ]
+                );
             }
             k => panic!("unexpected kind: {k:?}"),
         }
@@ -1667,6 +1707,32 @@ mod walker_tests {
         assert!(!s.re_exports[0].star);
         assert!(s.re_exports[0].names.contains(&("loadData".to_string(), "loadData".to_string())));
         assert!(s.re_exports[0].names.contains(&("token".to_string(), "auth".to_string())));
+    }
+
+    #[test]
+    fn aliased_imports_keep_local_and_imported_names() {
+        let s = parse(
+            "import { Card as C, Btn } from './ui.mx'\nimport loadData from './u.ts'\nexport default function App() { return <div/> }",
+        );
+        match &s.imports[0].kind {
+            MxImportKind::Component { specifiers, .. } => {
+                assert_eq!(
+                    specifiers,
+                    &vec![
+                        ("C".to_string(), "Card".to_string()),
+                        ("Btn".to_string(), "Btn".to_string())
+                    ]
+                );
+            }
+            k => panic!("unexpected kind: {k:?}"),
+        }
+        match &s.imports[1].kind {
+            MxImportKind::Component { default, specifiers, .. } => {
+                assert_eq!(default.as_deref(), Some("loadData"));
+                assert!(specifiers.is_empty());
+            }
+            k => panic!("unexpected kind: {k:?}"),
+        }
     }
 
     #[test]

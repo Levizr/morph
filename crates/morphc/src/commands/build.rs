@@ -423,9 +423,14 @@ fn collect_typescript_sources(
             push_candidate(path.to_path_buf());
         }
     }
+    // Graph members are owned by the builder (namespaced definitions in
+    // app.cpp + header declarations, imports resolved): compiling them
+    // again as standalone fragments would duplicate broken code (fragments
+    // never resolved imports). Only unimported files keep fragments.
+    let graph_members: std::collections::HashSet<&PathBuf> = graph.all_paths().collect();
     let mut sources = Vec::new();
     for path in found {
-        if path == graph.entry {
+        if path == graph.entry || graph_members.contains(&path) {
             continue;
         }
         let text = std::fs::read_to_string(&path).map_err(|e| {

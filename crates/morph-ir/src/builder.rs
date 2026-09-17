@@ -92,6 +92,7 @@ impl IRBuilder {
                 &ambient_vars,
                 &ambient_types,
                 &events,
+                None,
             );
         }
         for gv in &source.global_vars {
@@ -102,6 +103,7 @@ impl IRBuilder {
                 &ambient_vars,
                 &ambient_types,
                 &events,
+                None,
             );
         }
         // ── Component consts become reactive lambdas; later translations ──
@@ -139,6 +141,7 @@ impl IRBuilder {
                 &ambient_vars,
                 &ambient_types,
                 &events,
+                None,
             );
         }
         // ── Effects: transpile callbacks now, emit `create_effect` later ──
@@ -212,6 +215,7 @@ impl IRBuilder {
             event_decls: Vec::new(),
             channel_subs: Vec::new(),
             mid_assignments: Vec::new(),
+            module_bindings: Vec::new(),
             cpp_imports: source
                 .cpp_imports
                 .iter()
@@ -261,6 +265,9 @@ impl IRBuilder {
 
     /// Translate a statement-level snippet and splice its body into `premain`
     /// with external linkage (mirrors Python's `strip_static_function`).
+    /// With `wrap_ns`, the body is wrapped in its defining file's
+    /// namespace first (identical wrapped bodies dedupe); without it the
+    /// legacy flat emission is kept (single-file builds have no imports).
     fn push_snippet(
         &self,
         premain: &mut Vec<String>,
@@ -269,11 +276,19 @@ impl IRBuilder {
         ambient_vars: &HashMap<String, String>,
         ambient_types: &HashMap<String, String>,
         events: &HashMap<String, String>,
+        wrap_ns: Option<&str>,
     ) {
         if let Some(out) = self.translate_logic(source, ambient_vars, ambient_types, events) {
             extra_headers.extend(include_lines(&out.includes));
             let body = strip_static_linkage(&out.body);
-            if !body.is_empty() {
+            if body.is_empty() {
+                return;
+            }
+            let body = match wrap_ns {
+                Some(ns) => format!("namespace morph_mods {{\nnamespace {ns} {{\n{body}\n}}\n}}"),
+                None => body,
+            };
+            if !premain.contains(&body) {
                 premain.push(body);
             }
         }
@@ -376,6 +391,42 @@ impl IRBuilder {
             css_keyframes,
         )?;
 
+        // Pure-helper modules (no components, never instantiated) still
+        // need their globals translated + imports registered: seed a
+        // neutral frame and emit once, in graph order for determinism.
+        // (Component-bearing modules were already handled via expansion.)
+        for mod_path in &graph.order {
+            if ctx.modules_emitted.contains(mod_path) {
+                continue;
+            }
+            ctx.modules_emitted.insert(mod_path.clone());
+            if let Some(module) = graph.modules.get(mod_path) {
+                let mut neutral = InstanceFrame::root(module.path.clone());
+                Self::seed_module_bindings(
+                    &module.source,
+                    &module.path,
+                    graph,
+                    &mut neutral,
+                    &mut ctx,
+                )?;
+                let snapshot = std::mem::take(&mut ctx.premain);
+                self.translate_module_globals(
+                    &module.source,
+                    &neutral,
+                    &mut ctx,
+                    &mut extra_headers,
+                );
+                let mut added = std::mem::replace(&mut ctx.premain, snapshot);
+                added.retain(|p| !ctx.premain.contains(p));
+                ctx.premain.extend(added);
+                for log in &module.source.console_logs {
+                    if !ctx.logs.contains(log) {
+                        ctx.logs.push(log.clone());
+                    }
+                }
+            }
+        }
+
         extra_headers.sort();
         extra_headers.dedup();
         let wc = entry_mod.source.window_config.as_ref();
@@ -423,13 +474,17 @@ impl IRBuilder {
             event_decls: ctx.event_entries.clone(),
             channel_subs: ctx.channels.clone(),
             mid_assignments: Self::mid_assignments(graph, &ctx)?,
+            module_bindings: ctx.module_bindings.clone(),
             cpp_imports,
             keyframes: self.convert_keyframes(css_keyframes),
         };
         Ok(vec![window])
     }
 
-    /// Translate a module's top-level helpers + globals into premain.
+    /// Translate a module's top-level helpers + globals into premain,
+    /// each wrapped in its defining file's namespace (the universal
+    /// module-binding rule: definitions live once at the definition
+    /// site, calls rewrite to qualified names via the frame maps).
     fn translate_module_globals(
         &self,
         source: &morph_parser::MxSource,
@@ -437,6 +492,8 @@ impl IRBuilder {
         ctx: &mut BuilderCtx,
         extra_headers: &mut Vec<String>,
     ) {
+        let ns = ns_of(ctx.graph, &frame.module).unwrap_or_default();
+        let wrap = (!ns.is_empty()).then_some(ns.as_str());
         for fd in &source.function_declarations {
             self.push_snippet(
                 &mut ctx.premain,
@@ -445,9 +502,21 @@ impl IRBuilder {
                 &frame.vars,
                 &frame.types,
                 &frame.events,
+                wrap,
             );
         }
-        for gv in &source.global_vars {
+        for cd in &source.class_declarations {
+            self.push_snippet(
+                &mut ctx.premain,
+                extra_headers,
+                &cd.source,
+                &frame.vars,
+                &frame.types,
+                &frame.events,
+                wrap,
+            );
+        }
+        for gv in source.global_vars.iter().chain(source.exported_vars.iter().map(|v| &v.source)) {
             self.push_snippet(
                 &mut ctx.premain,
                 extra_headers,
@@ -455,6 +524,7 @@ impl IRBuilder {
                 &frame.vars,
                 &frame.types,
                 &frame.events,
+                wrap,
             );
         }
     }
@@ -771,6 +841,29 @@ impl IRBuilder {
             Self::register_event(module_path, &ns, &eb.name, ctx);
             seeded.insert(eb.name.clone());
         }
+        // Own functions/vars/classes: every binding lives in its defining
+        // file's namespace (same universal rule as shared/events), so even
+        // unexported helpers rewrite to qualified calls at use sites.
+        for fd in &module.function_declarations {
+            Self::register_module_binding(module_path, &ns, "function", &fd.name, ctx);
+            let qualified = format!("morph_mods::{ns}::{}", binding_ident(&fd.name));
+            Self::seed_frame_name(frame, module_path, &fd.name, &qualified)?;
+            seeded.insert(fd.name.clone());
+        }
+        for ev in &module.exported_vars {
+            Self::register_module_binding(module_path, &ns, "var", &ev.name, ctx);
+            let qualified = format!("morph_mods::{ns}::{}", binding_ident(&ev.name));
+            Self::seed_frame_name(frame, module_path, &ev.name, &qualified)?;
+            seeded.insert(ev.name.clone());
+        }
+        for cd in &module.class_declarations {
+            Self::register_module_binding(module_path, &ns, "class", &cd.name, ctx);
+            let qualified = format!("morph_mods::{ns}::{}", binding_ident(&cd.name));
+            Self::seed_frame_name(frame, module_path, &cd.name, &qualified)?;
+            seeded.insert(cd.name.clone());
+        }
+        // Own re-export aliases (`export { x } from`, `export *`).
+        Self::seed_re_exports(module, module_path, graph, &ns, ctx)?;
         // Named imports of directly-imported modules expose their bindings.
         let Some(resolved_mod) = graph.modules.get(module_path) else {
             return Ok(());
@@ -778,88 +871,419 @@ impl IRBuilder {
         for (raw_path, target_path) in &resolved_mod.module_imports {
             let Some(target_mod) = graph.modules.get(target_path) else { continue };
             for imp in &module.imports {
-                let morph_parser::MxImportKind::Component { path, specifiers, .. } = &imp.kind
+                let morph_parser::MxImportKind::Component { path, specifiers, default } = &imp.kind
                 else {
                     continue;
                 };
                 if path != raw_path {
                     continue;
                 }
-                for spec in specifiers {
-                    if !seeded.insert(spec.clone()) {
+                if let Some(local) = default {
+                    Self::seed_default_import(
+                        &target_mod.source,
+                        target_path,
+                        graph,
+                        local,
+                        module_path,
+                        frame,
+                        ctx,
+                    )?;
+                }
+                for (local, imported) in specifiers {
+                    if !seeded.insert(local.clone()) {
                         anyhow::bail!(
-                            "ambiguous import of `{spec}` in {}: it is both an export and an import, or imported from two different modules; import it from only one module",
+                            "ambiguous import of `{local}` in {}: it is both an export and an import, or imported from two different modules; import it from only one module",
                             module_path.display()
                         );
                     }
-                    let target_ns = ns_of(graph, target_path)?;
-                    if let Some(sb) =
-                        target_mod.source.shared_bindings.iter().find(|b| b.getter == *spec)
-                    {
-                        let accessor = shared_signal_accessor(&sb.getter);
-                        let ty = shared_binding_type(&sb.type_arg, &sb.init);
-                        Self::register_binding(
-                            target_path,
-                            &target_ns,
-                            &accessor,
-                            &ty,
-                            &sb.init,
-                            &sb.getter,
-                            &sb.setter,
-                            ctx,
-                        );
-                        frame.vars.insert(
-                            sb.getter.clone(),
-                            format!("morph_mods::{target_ns}::{accessor}().get()"),
-                        );
-                        if !sb.setter.is_empty() {
-                            let setter = sb.setter.clone();
-                            let setter_expr = format!("morph_mods::{target_ns}::{accessor}().set");
-                            if frame.vars.insert(setter.clone(), setter_expr).is_some() {
-                                anyhow::bail!(
-                                    "ambiguous import of `{setter}` in {}: bound by two different modules; import it from only one module",
-                                    module_path.display()
-                                );
-                            }
-                        }
-                        if ty != "auto" {
-                            frame.types.insert(spec.clone(), ty);
-                        }
-                    } else if let Some(sb) =
-                        target_mod.source.shared_bindings.iter().find(|b| b.setter == *spec)
-                    {
-                        let accessor = shared_signal_accessor(&sb.getter);
-                        let ty = shared_binding_type(&sb.type_arg, &sb.init);
-                        Self::register_binding(
-                            target_path,
-                            &target_ns,
-                            &accessor,
-                            &ty,
-                            &sb.init,
-                            &sb.getter,
-                            &sb.setter,
-                            ctx,
-                        );
-                        frame.vars.insert(
-                            sb.setter.clone(),
-                            format!("morph_mods::{target_ns}::{accessor}().set"),
-                        );
-                    } else if let Some(eb) =
-                        target_mod.source.event_bindings.iter().find(|b| b.name == *spec)
-                    {
-                        let id = event_channel_id(target_path, &eb.name);
-                        if frame.events.insert(spec.clone(), id).is_some() {
-                            anyhow::bail!(
-                                "ambiguous import of `{spec}` in {}: bound by two different modules; import it from only one module",
-                                module_path.display()
-                            );
-                        }
-                        Self::register_event(target_path, &target_ns, &eb.name, ctx);
-                    }
+                    Self::seed_named_import(
+                        &target_mod.source,
+                        target_path,
+                        graph,
+                        local,
+                        imported,
+                        module_path,
+                        frame,
+                        ctx,
+                    )?;
                 }
             }
         }
         Ok(())
+    }
+
+    /// Resolve one named import specifier against the target's full
+    /// inventory, following re-exports to the ultimate definition site.
+    /// Components resolve at use sites (`resolve_binding`) and are skipped
+    /// here; anything else unknown is a hard error.
+    #[allow(clippy::too_many_arguments)]
+    fn seed_named_import(
+        target: &morph_parser::MxSource,
+        target_path: &Path,
+        graph: &morph_parser::ModuleGraph,
+        local: &str,
+        imported: &str,
+        module_path: &Path,
+        frame: &mut InstanceFrame,
+        ctx: &mut BuilderCtx,
+    ) -> anyhow::Result<()> {
+        let target_ns = ns_of(graph, target_path)?;
+        // Components keep use-site resolution.
+        if target.components.iter().any(|c| c.name == imported && c.exported) {
+            return Ok(());
+        }
+        if let Some(sb) = target.shared_bindings.iter().find(|b| b.getter == imported) {
+            let accessor = shared_signal_accessor(&sb.getter);
+            let ty = shared_binding_type(&sb.type_arg, &sb.init);
+            Self::register_binding(
+                target_path,
+                &target_ns,
+                &accessor,
+                &ty,
+                &sb.init,
+                &sb.getter,
+                &sb.setter,
+                ctx,
+            );
+            let expr = format!("morph_mods::{target_ns}::{accessor}().get()");
+            Self::seed_frame_name(frame, module_path, local, &expr)?;
+            Self::register_import(module_path, local, &target_ns, &sb.getter, &expr, ctx);
+            if !sb.setter.is_empty() {
+                let setter_expr = format!("morph_mods::{target_ns}::{accessor}().set");
+                Self::seed_frame_name(frame, module_path, &sb.setter, &setter_expr)?;
+                Self::register_import(
+                    module_path,
+                    &sb.setter,
+                    &target_ns,
+                    &sb.setter,
+                    &setter_expr,
+                    ctx,
+                );
+            }
+            if ty != "auto" {
+                frame.types.insert(local.to_string(), ty);
+            }
+            return Ok(());
+        }
+        if let Some(sb) = target.shared_bindings.iter().find(|b| b.setter == imported) {
+            let accessor = shared_signal_accessor(&sb.getter);
+            let ty = shared_binding_type(&sb.type_arg, &sb.init);
+            Self::register_binding(
+                target_path,
+                &target_ns,
+                &accessor,
+                &ty,
+                &sb.init,
+                &sb.getter,
+                &sb.setter,
+                ctx,
+            );
+            let expr = format!("morph_mods::{target_ns}::{accessor}().set");
+            Self::seed_frame_name(frame, module_path, local, &expr)?;
+            Self::register_import(module_path, local, &target_ns, &sb.setter, &expr, ctx);
+            return Ok(());
+        }
+        if target.event_bindings.iter().any(|b| b.name == imported) {
+            let id = event_channel_id(target_path, imported);
+            if frame.events.insert(local.to_string(), id).is_some() {
+                anyhow::bail!(
+                    "ambiguous import of `{local}` in {}: bound by two different modules; import it from only one module",
+                    module_path.display()
+                );
+            }
+            Self::register_event(target_path, &target_ns, imported, ctx);
+            return Ok(());
+        }
+        if target.function_declarations.iter().any(|f| f.name == imported && f.exported)
+            || target.named_exports.iter().any(|(l, _)| l == imported)
+        {
+            Self::register_module_binding(target_path, &target_ns, "function", imported, ctx);
+            let qualified = format!("morph_mods::{target_ns}::{}", binding_ident(imported));
+            Self::seed_frame_name(frame, module_path, local, &qualified)?;
+            Self::register_import(module_path, local, &target_ns, imported, &qualified, ctx);
+            return Ok(());
+        }
+        if target.exported_vars.iter().any(|v| v.name == imported) {
+            Self::register_module_binding(target_path, &target_ns, "var", imported, ctx);
+            let qualified = format!("morph_mods::{target_ns}::{}", binding_ident(imported));
+            Self::seed_frame_name(frame, module_path, local, &qualified)?;
+            Self::register_import(module_path, local, &target_ns, imported, &qualified, ctx);
+            return Ok(());
+        }
+        if target.class_declarations.iter().any(|c| c.name == imported && c.exported) {
+            Self::register_module_binding(target_path, &target_ns, "class", imported, ctx);
+            let qualified = format!("morph_mods::{target_ns}::{}", binding_ident(imported));
+            Self::seed_frame_name(frame, module_path, local, &qualified)?;
+            Self::register_import(module_path, local, &target_ns, imported, &qualified, ctx);
+            return Ok(());
+        }
+        // Through re-exports: resolve to the ultimate definition site.
+        if let Some((ultimate_ns, ultimate_name)) =
+            Self::resolve_through_reexports(target_path, graph, imported, module_path)?
+        {
+            let qualified = format!("morph_mods::{ultimate_ns}::{}", binding_ident(&ultimate_name));
+            Self::seed_frame_name(frame, module_path, local, &qualified)?;
+            Self::register_import(
+                module_path,
+                local,
+                &ultimate_ns,
+                &ultimate_name,
+                &qualified,
+                ctx,
+            );
+            return Ok(());
+        }
+        anyhow::bail!(
+            "unknown import `{imported}` in {}: {} exports no such binding (function, var, class, component, shared, or event)",
+            module_path.display(),
+            target_path.display()
+        )
+    }
+
+    /// Resolve a default import against the target's default export (any
+    /// non-component kind). Components keep use-site resolution and are
+    /// skipped; unresolvable defaults stay silent here (use sites still
+    /// error, preserving existing behavior for unused imports).
+    #[allow(clippy::too_many_arguments)]
+    fn seed_default_import(
+        target: &morph_parser::MxSource,
+        target_path: &Path,
+        graph: &morph_parser::ModuleGraph,
+        local: &str,
+        module_path: &Path,
+        frame: &mut InstanceFrame,
+        ctx: &mut BuilderCtx,
+    ) -> anyhow::Result<()> {
+        let Some(decl) = target.default_export.clone() else {
+            return Ok(());
+        };
+        if target.components.iter().any(|c| c.name == decl) {
+            return Ok(());
+        }
+        let target_ns = ns_of(graph, target_path)?;
+        let kind = if target.function_declarations.iter().any(|f| f.name == decl) {
+            "function"
+        } else if target.class_declarations.iter().any(|c| c.name == decl) {
+            "class"
+        } else if target.exported_vars.iter().any(|v| v.name == decl) {
+            "var"
+        } else if let Some(sb) = target.shared_bindings.iter().find(|b| b.getter == decl) {
+            // Shared default: map to the getter read.
+            let accessor = shared_signal_accessor(&sb.getter);
+            let ty = shared_binding_type(&sb.type_arg, &sb.init);
+            Self::register_binding(
+                target_path,
+                &target_ns,
+                &accessor,
+                &ty,
+                &sb.init,
+                &sb.getter,
+                &sb.setter,
+                ctx,
+            );
+            let expr = format!("morph_mods::{target_ns}::{accessor}().get()");
+            Self::seed_frame_name(frame, module_path, local, &expr)?;
+            Self::register_import(module_path, local, &target_ns, &sb.getter, &expr, ctx);
+            return Ok(());
+        } else {
+            return Ok(());
+        };
+        Self::register_module_binding(target_path, &target_ns, kind, &decl, ctx);
+        let qualified = format!("morph_mods::{target_ns}::{}", binding_ident(&decl));
+        Self::seed_frame_name(frame, module_path, local, &qualified)?;
+        Self::register_import(module_path, local, &target_ns, &decl, &qualified, ctx);
+        Ok(())
+    }
+
+    /// Follow a target's re-exports to the ultimate `(ns, name)` definition
+    /// site for `imported`. `None` when the target re-exports nothing by
+    /// that name. Cycles are hard errors.
+    fn resolve_through_reexports(
+        target_path: &Path,
+        graph: &morph_parser::ModuleGraph,
+        imported: &str,
+        module_path: &Path,
+    ) -> anyhow::Result<Option<(String, String)>> {
+        // NOTE: no early exit when the first module lacks re-exports — it
+        // may directly define the name (the loop's first iteration checks).
+        let mut visited: HashSet<PathBuf> = HashSet::new();
+        let mut current_path = target_path.to_path_buf();
+        let mut current_name = imported.to_string();
+        loop {
+            if !visited.insert(current_path.clone()) {
+                anyhow::bail!(
+                    "re-export cycle while resolving `{imported}` imported in {}",
+                    module_path.display()
+                );
+            }
+            let Some(current_mod) = graph.modules.get(&current_path) else {
+                return Ok(None);
+            };
+            // Direct definition wins over further re-exports.
+            if Self::target_defines(&current_mod.source, &current_name) {
+                let ns = ns_of(graph, &current_path)?;
+                return Ok(Some((ns, current_name)));
+            }
+            let mut advanced = false;
+            for re in &current_mod.source.re_exports {
+                let Some(orig) = Self::reexport_provides(re, &current_name) else {
+                    continue;
+                };
+                let Some(next) = Self::resolve_module_path(&current_mod, &re.path) else {
+                    continue;
+                };
+                current_path = next;
+                current_name = orig;
+                advanced = true;
+                break;
+            }
+            if !advanced {
+                return Ok(None);
+            }
+        }
+    }
+
+    /// True when the module directly defines `name` as an importable value
+    /// binding (components resolve separately at use sites).
+    fn target_defines(source: &morph_parser::MxSource, name: &str) -> bool {
+        source.shared_bindings.iter().any(|b| b.getter == name || b.setter == name)
+            || source.event_bindings.iter().any(|b| b.name == name)
+            || source.function_declarations.iter().any(|f| f.name == name && f.exported)
+            || source.exported_vars.iter().any(|v| v.name == name)
+            || source.class_declarations.iter().any(|c| c.name == name && c.exported)
+            || source.named_exports.iter().any(|(l, _)| l == name)
+            || source.default_export.as_deref() == Some(name)
+    }
+
+    /// Original name a re-export provides under `exported`, if any. Star
+    /// re-exports provide every name (resolved against the target's
+    /// inventory by the caller loop).
+    fn reexport_provides(re: &morph_parser::ReExport, exported: &str) -> Option<String> {
+        if re.star {
+            return Some(exported.to_string());
+        }
+        re.names.iter().find(|(_, e)| e == exported).map(|(o, _)| o.clone())
+    }
+
+    /// Resolve a re-export/import path against the owning module's resolved
+    /// imports.
+    fn resolve_module_path(owner: &morph_parser::ResolvedModule, raw: &str) -> Option<PathBuf> {
+        owner.module_imports.iter().find(|(p, _)| p == raw).map(|(_, t)| t.clone())
+    }
+
+    /// Register the module's own re-export aliases (`using` targets in the
+    /// re-exporting namespace, so C++ can call re-exported things).
+    /// Re-exported names are NOT local bindings (ES semantics), so the
+    /// frame map stays untouched here.
+    fn seed_re_exports(
+        module: &morph_parser::MxSource,
+        module_path: &Path,
+        graph: &morph_parser::ModuleGraph,
+        ns: &str,
+        ctx: &mut BuilderCtx,
+    ) -> anyhow::Result<()> {
+        let Some(resolved_mod) = graph.modules.get(module_path) else {
+            return Ok(());
+        };
+        for re in &module.re_exports {
+            let Some(target_path) = Self::resolve_module_path(resolved_mod, &re.path) else {
+                continue;
+            };
+            let Some(target_mod) = graph.modules.get(&target_path) else {
+                continue;
+            };
+            if re.star {
+                if re.star_as.is_some() {
+                    anyhow::bail!(
+                        "`export * as ns` in {} is not supported yet; name re-exports explicitly",
+                        module_path.display()
+                    );
+                }
+                // Alias every function/var/class binding of the target
+                // (components/shared/events resolve through to the
+                // ultimate namespace on import and need no alias).
+                let mut names = Self::exportable_names(&target_mod.source);
+                names.sort();
+                for (name, kind) in names {
+                    if kind != "function" && kind != "var" && kind != "class" {
+                        continue;
+                    }
+                    let resolved =
+                        Self::resolve_through_reexports(&target_path, graph, &name, module_path)?;
+                    let (ultimate_ns, ultimate_name) = match resolved {
+                        Some(r) => r,
+                        None => (ns_of(graph, &target_path)?, name.clone()),
+                    };
+                    Self::register_alias(
+                        module_path,
+                        ns,
+                        &name,
+                        &ultimate_ns,
+                        &ultimate_name,
+                        ctx,
+                    )?;
+                }
+                continue;
+            }
+            for (orig, exported) in &re.names {
+                if exported == "default" {
+                    anyhow::bail!(
+                        "cannot re-export `default` under its own name in {}: rename it (`export {{ default as x }}`)",
+                        module_path.display()
+                    );
+                }
+                let (ultimate_ns, ultimate_name) =
+                    Self::resolve_through_reexports(&target_path, graph, orig, module_path)?
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "unknown re-export `{orig}` in {}: {} exports no such binding",
+                                module_path.display(),
+                                target_path.display()
+                            )
+                        })?;
+                Self::register_alias(module_path, ns, exported, &ultimate_ns, &ultimate_name, ctx)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Every exportable value binding of a module (no default) with its
+    /// kind: components, shared, events, functions, vars, classes, and
+    /// `export {}`-listed locals.
+    fn exportable_names(source: &morph_parser::MxSource) -> Vec<(String, &'static str)> {
+        let mut names = HashSet::new();
+        for c in &source.components {
+            if c.exported {
+                names.insert((c.name.clone(), "component"));
+            }
+        }
+        for sb in &source.shared_bindings {
+            names.insert((sb.getter.clone(), "shared"));
+            if !sb.setter.is_empty() {
+                names.insert((sb.setter.clone(), "shared"));
+            }
+        }
+        for eb in &source.event_bindings {
+            names.insert((eb.name.clone(), "event"));
+        }
+        for fd in &source.function_declarations {
+            if fd.exported {
+                names.insert((fd.name.clone(), "function"));
+            }
+        }
+        for ev in &source.exported_vars {
+            names.insert((ev.name.clone(), "var"));
+        }
+        for cd in &source.class_declarations {
+            if cd.exported {
+                names.insert((cd.name.clone(), "class"));
+            }
+        }
+        for (l, e) in &source.named_exports {
+            names.insert((l.clone(), "named"));
+            names.insert((e.clone(), "named"));
+        }
+        names.into_iter().collect()
     }
 
     /// Register one shared binding's C++ emission metadata, deduped by its
@@ -885,6 +1309,116 @@ impl IRBuilder {
         if !ctx.shared_entries.iter().any(|e| e.get("key") == m.get("key")) {
             ctx.shared_entries.push(m);
         }
+    }
+
+    /// Register one function/var/class binding's C++ emission metadata,
+    /// deduped by its identity key (module path + name). Every binding
+    /// lives in its defining file's namespace — the universal rule that
+    /// makes cross-file same-name definitions coexist.
+    fn register_module_binding(
+        module_path: &Path,
+        ns: &str,
+        kind: &str,
+        name: &str,
+        ctx: &mut BuilderCtx,
+    ) {
+        let mut m = HashMap::new();
+        m.insert("key".into(), binding_identity(module_path, name));
+        m.insert("kind".into(), kind.to_string());
+        m.insert("ns".into(), ns.to_string());
+        m.insert("name".into(), name.to_string());
+        m.insert("module".into(), module_path.display().to_string());
+        if !ctx.module_bindings.iter().any(|e| e.get("key") == m.get("key")) {
+            ctx.module_bindings.push(m);
+        }
+    }
+
+    /// Register one import mapping for codegen (`local` → `expr` in the
+    /// importing module): reactive text and list factories substitute
+    /// through codegen maps, never builder frames, so imports need IR
+    /// entries just like definitions do. Deduped by importer + local.
+    fn register_import(
+        importer_path: &Path,
+        local: &str,
+        ultimate_ns: &str,
+        ultimate_name: &str,
+        expr: &str,
+        ctx: &mut BuilderCtx,
+    ) {
+        let mut m = HashMap::new();
+        m.insert("key".into(), binding_identity(importer_path, local));
+        m.insert("kind".into(), "import".to_string());
+        m.insert("ns".into(), ultimate_ns.to_string());
+        m.insert("name".into(), ultimate_name.to_string());
+        m.insert("local".into(), local.to_string());
+        m.insert("expr".into(), expr.to_string());
+        m.insert("module".into(), importer_path.display().to_string());
+        if !ctx.module_bindings.iter().any(|e| e.get("key") == m.get("key")) {
+            ctx.module_bindings.push(m);
+        }
+    }
+
+    /// Register a re-export alias (`using` target in the re-exporting
+    /// namespace, so C++ can call re-exported things). Deduped by the
+    /// alias identity (re-exporting module + exported name).
+    fn register_alias(
+        module_path: &Path,
+        ns: &str,
+        name: &str,
+        target_ns: &str,
+        target_name: &str,
+        ctx: &mut BuilderCtx,
+    ) -> anyhow::Result<()> {
+        let mut m = HashMap::new();
+        m.insert("key".into(), binding_identity(module_path, name));
+        m.insert("kind".into(), "alias".to_string());
+        m.insert("ns".into(), ns.to_string());
+        m.insert("name".into(), name.to_string());
+        m.insert("target_ns".into(), target_ns.to_string());
+        m.insert("target_name".into(), target_name.to_string());
+        m.insert("module".into(), module_path.display().to_string());
+        if let Some(existing) = ctx.module_bindings.iter().find(|e| e.get("key") == m.get("key")) {
+            // Same identity, different meaning (e.g. own `function x` plus
+            // `export { x } from ...`): the exported name is ambiguous.
+            let same = existing.get("kind") == m.get("kind")
+                && existing.get("target_ns") == m.get("target_ns")
+                && existing.get("target_name") == m.get("target_name");
+            if !same {
+                anyhow::bail!(
+                    "ambiguous export `{}` in {}: locally defined and re-exported; rename one",
+                    name,
+                    module_path.display()
+                );
+            }
+            return Ok(());
+        }
+        ctx.module_bindings.push(m);
+        Ok(())
+    }
+
+    /// Seed one module-level name into the frame (`name` →
+    /// `morph_mods::<ns>::<safe_name>`). A different existing mapping is
+    /// an ambiguity hard error; an identical one is a harmless re-seed.
+    /// Never touches `seeded` (companion names like shared setters must
+    /// not trip the explicit-import ambiguity gate); callers track
+    /// explicitly-listed names themselves.
+    fn seed_frame_name(
+        frame: &mut InstanceFrame,
+        module_path: &Path,
+        name: &str,
+        qualified: &str,
+    ) -> anyhow::Result<()> {
+        if let Some(existing) = frame.vars.get(name) {
+            if existing != qualified {
+                anyhow::bail!(
+                    "ambiguous binding `{name}` in {}: bound by two different modules; import it from only one module",
+                    module_path.display()
+                );
+            }
+            return Ok(());
+        }
+        frame.vars.insert(name.to_string(), qualified.to_string());
+        Ok(())
     }
 
     /// Register one event binding's C++ emission metadata, deduped by its
@@ -1916,6 +2450,8 @@ struct BuilderCtx<'a> {
     modules_emitted: HashSet<PathBuf>,
     shared_entries: Vec<HashMap<String, String>>,
     event_entries: Vec<HashMap<String, String>>,
+    /// Function/var/class bindings (universal module-namespace rule).
+    module_bindings: Vec<HashMap<String, String>>,
     /// Depth inside `.map()` item templates (`mid` is rejected there).
     list_depth: usize,
     /// Tagged instances: (module, component) →
@@ -1944,6 +2480,7 @@ impl<'a> BuilderCtx<'a> {
             modules_emitted: HashSet::new(),
             shared_entries: Vec::new(),
             event_entries: Vec::new(),
+            module_bindings: Vec::new(),
             list_depth: 0,
             mid_tags: HashMap::new(),
             mid_states: HashMap::new(),
@@ -2002,7 +2539,7 @@ fn resolve_binding(
             _ => continue,
         };
         let is_default_binding = default.as_deref() == Some(local);
-        let is_named = specifiers.iter().any(|s| s == local);
+        let is_named = specifiers.iter().any(|(l, _)| l == local);
         if !is_default_binding && !is_named {
             continue;
         }
@@ -2284,6 +2821,32 @@ fn validate_namespaces(graph: &morph_parser::ModuleGraph) -> anyhow::Result<()> 
         seen.insert(ns, path.clone());
     }
     Ok(())
+}
+
+/// C++ identifier for a module-level binding name. Must match what
+/// morpher emits for the same source name exactly (it preserves
+/// `[A-Za-z0-9_$]`, which g++ accepts as an extension); anything else
+/// becomes `_`. Shared by the builder (frame maps) and codegen
+/// (reactive-text substitution) so both sides agree.
+pub fn binding_ident(name: &str) -> String {
+    let safe: String = name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '$' { c } else { '_' })
+        .collect();
+    if safe.is_empty() {
+        "binding".to_string()
+    } else {
+        safe
+    }
+}
+
+/// Fully-qualified `morph_mods::<ns>::<binding>` reference.
+pub fn qualified_binding_ref(ns: &str, name: &str) -> String {
+    if ns.is_empty() {
+        binding_ident(name)
+    } else {
+        format!("morph_mods::{ns}::{}", binding_ident(name))
+    }
 }
 
 /// Internal identity of a binding: canonical module path + binding name.
@@ -4521,6 +5084,7 @@ mod tests {
                 inner_functions: vec![InnerFunction {
                     name: "doLogin".to_string(),
                     source: "function doLogin() { setCount(count + 1); }".to_string(),
+                    exported: false,
                 }],
                 consts: vec![ComponentConst {
                     name: "doubled".to_string(),
@@ -4536,6 +5100,7 @@ mod tests {
             function_declarations: vec![InnerFunction {
                 name: "helper".to_string(),
                 source: "function helper() { return 1; }".to_string(),
+                exported: false,
             }],
             class_declarations: Vec::new(),
             exported_vars: Vec::new(),
@@ -5300,6 +5865,154 @@ export default function App() {
         let graph = morph_parser::resolve_graph(&root.join("App5.mx"), &root).unwrap();
         let err = IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap_err();
         assert!(err.to_string().contains("only for component use-sites"), "{err}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn cross_file_functions_resolve_to_defining_namespace() {
+        let root = scratch("xfunc");
+        write_file(&root, "network.ts", "export function fetchUserData(): int { return 2 }\n");
+        write_file(
+            &root,
+            "utility.ts",
+            "import { fetchUserData } from './network.ts'\nexport function loadData(): int { return fetchUserData() }\n",
+        );
+        write_file(
+            &root,
+            "Navbar.mx",
+            r#"
+import { loadData } from './utility.ts'
+export function fetchUserData(): int { return 3 }
+export function Navbar() {
+  function refresh() { loadData() }
+  function sync() { fetchUserData() }
+  return (<div><button onClick={() => refresh()}>go</button><button onClick={() => sync()}>sync</button></div>)
+}
+"#,
+        );
+        write_file(
+            &root,
+            "App.mx",
+            "import { Navbar } from './Navbar.mx'\nexport default function App() { return (<body><Navbar /></body>) }",
+        );
+        let graph = morph_parser::resolve_graph(&root.join("App.mx"), &root).unwrap();
+        let wins =
+            IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).expect("xfunc build");
+        assert_eq!(wins.len(), 1);
+        let win = &wins[0];
+        // Same-name fetchUserData in network.ts and Navbar.mx coexist, and
+        // utility.ts re-uses network's through its import.
+        let keys: Vec<&str> = win
+            .module_bindings
+            .iter()
+            .map(|m| m.get("key").map(String::as_str).unwrap_or(""))
+            .collect();
+        assert!(keys.iter().any(|k| k.ends_with("network.ts::fetchUserData")), "{keys:?}");
+        assert!(keys.iter().any(|k| k.ends_with("Navbar.mx::fetchUserData")), "{keys:?}");
+        assert!(keys.iter().any(|k| k.ends_with("utility.ts::loadData")), "{keys:?}");
+        // Calls rewrite to the defining namespace, never the importer's.
+        let premain = win.premain_functions.join("\n");
+        assert!(premain.contains("morph_mods::utility::loadData()"), "{premain}");
+        assert!(!premain.contains("morph_mods::navbar::loadData"), "{premain}");
+        assert!(premain.contains("morph_mods::network::fetchUserData()"), "{premain}");
+        assert!(premain.contains("morph_mods::navbar::fetchUserData()"), "{premain}");
+        // Definitions live namespaced in premain.
+        assert!(premain.contains("namespace utility"), "{premain}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn unknown_and_ambiguous_imports_are_hard_errors() {
+        let root = scratch("ximporterr");
+        write_file(&root, "utility.ts", "export function loadData(): int { return 1 }\n");
+        write_file(&root, "other.ts", "export function loadData(): int { return 2 }\n");
+        write_file(
+            &root,
+            "App.mx",
+            r#"
+import { loadData } from './utility.ts'
+import { missing } from './utility.ts'
+export default function App() {
+  function refresh() { loadData() }
+  return (<body><button onClick={() => refresh()}>go</button></body>)
+}
+"#,
+        );
+        let graph = morph_parser::resolve_graph(&root.join("App.mx"), &root).unwrap();
+        let err = IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap_err();
+        assert!(err.to_string().contains("unknown import `missing`"), "{err}");
+
+        write_file(
+            &root,
+            "App2.mx",
+            r#"
+import { loadData } from './utility.ts'
+import { loadData as loadData2 } from './other.ts'
+export default function App() {
+  function refresh() { loadData() }
+  function refresh2() { loadData2() }
+  return (<body><button onClick={() => refresh()}>go</button><button onClick={() => refresh2()}>go2</button></body>)
+}
+"#,
+        );
+        // Distinct locals: both resolve to their defining namespaces.
+        let graph = morph_parser::resolve_graph(&root.join("App2.mx"), &root).unwrap();
+        let wins =
+            IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).expect("aliased");
+        let premain = wins[0].premain_functions.join("\n");
+        assert!(premain.contains("morph_mods::utility::loadData()"), "{premain}");
+        assert!(premain.contains("morph_mods::other::loadData()"), "{premain}");
+
+        write_file(
+            &root,
+            "App3.mx",
+            r#"
+import { loadData } from './utility.ts'
+import { loadData } from './other.ts'
+export default function App() {
+  return (<body><div>hi</div></body>)
+}
+"#,
+        );
+        let graph = morph_parser::resolve_graph(&root.join("App3.mx"), &root).unwrap();
+        let err = IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap_err();
+        assert!(err.to_string().contains("ambiguous import of `loadData`"), "{err}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn reexports_resolve_to_ultimate_and_record_aliases() {
+        let root = scratch("reexport");
+        write_file(&root, "utility.ts", "export function loadData(): int { return 1 }\n");
+        write_file(&root, "mid.ts", "export { loadData } from './utility.ts'\n");
+        write_file(
+            &root,
+            "App.mx",
+            r#"
+import { loadData } from './mid.ts'
+export default function App() {
+  function refresh() { loadData() }
+  return (<body><button onClick={() => refresh()}>go</button></body>)
+}
+"#,
+        );
+        let graph = morph_parser::resolve_graph(&root.join("App.mx"), &root).unwrap();
+        let wins =
+            IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).expect("reexport");
+        let win = &wins[0];
+        // Import through the re-exporter lands on the defining namespace.
+        let premain = win.premain_functions.join("\n");
+        assert!(premain.contains("morph_mods::utility::loadData()"), "{premain}");
+        assert!(!premain.contains("morph_mods::mid::loadData"), "{premain}");
+        // The re-export itself is recorded as an alias entry for C++.
+        let aliases: Vec<&HashMap<String, String>> = win
+            .module_bindings
+            .iter()
+            .filter(|m| m.get("kind").map(String::as_str) == Some("alias"))
+            .collect();
+        assert_eq!(aliases.len(), 1, "{:?}", win.module_bindings);
+        assert_eq!(aliases[0].get("ns").map(String::as_str), Some("mid"));
+        assert_eq!(aliases[0].get("target_ns").map(String::as_str), Some("utility"));
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -110,6 +110,13 @@ pub struct IRWindow {
     /// (backing `__st_` static), `getter`/`setter`/`init`, `module`, `loc`.
     #[serde(default)]
     pub mid_assignments: Vec<HashMap<String, String>>,
+    /// Universal module bindings (functions/vars/classes + re-export
+    /// aliases): `key` (module path + name identity), `kind`
+    /// (`function`/`var`/`class`/`alias`), `ns`, `name`, `module`, plus
+    /// `target_ns`/`target_name` for aliases. Codegen emits definitions
+    /// in the defining namespace and `using`-aliases for re-exports.
+    #[serde(default)]
+    pub module_bindings: Vec<HashMap<String, String>>,
     pub cpp_imports: Vec<HashMap<String, String>>,
     pub keyframes: HashMap<String, Vec<IRKeyframe>>,
 }
