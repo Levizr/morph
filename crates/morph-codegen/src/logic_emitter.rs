@@ -13,8 +13,8 @@ use std::fmt::Write as _;
 use morph_ir::{IRNode, IRWindow};
 
 use super::node_emitter::{
-    css_field_reset, css_to_style_field, css_val_to_cpp, emit_node_with_state, translate_condition,
-    translate_js, translate_list_key,
+    css_field_reset, css_to_style_field, css_val_to_cpp, emit_node_with_state,
+    normalize_value_access, translate_condition, translate_js, translate_list_key,
 };
 
 /// Generated interop header name (mirrors Python `_STATE_HEADER_NAME`).
@@ -259,7 +259,10 @@ fn translate_expr(js: &str, maps: &AmbientMaps) -> String {
     if let Ok(out) = morpher::translate_snippet(js, "snippet.ts", options) {
         let body = out.body.trim().trim_end_matches(';').trim().to_string();
         if !body.is_empty() {
-            return body;
+            // Same `e.value` → `e["value"]` normalization the build TU
+            // applies: morpher parses the access fine but JsObject has no
+            // `.value` member, so the raw form would not compile.
+            return normalize_value_access(&body);
         }
     }
     translate_js(js, &maps.vars).trim().trim_end_matches(';').to_string()
@@ -1524,6 +1527,33 @@ mod tests {
             output.source.matches("namespace morph::js_cmp\n{").count(),
             1,
             "single hoisted header"
+        );
+    }
+
+    #[test]
+    fn input_value_access_normalizes_to_subscript() {
+        use morph_ir::{IREvent, IRNode};
+        let mut sv = HashMap::new();
+        sv.insert("getter".to_string(), "user".to_string());
+        sv.insert("setter".to_string(), "setUser".to_string());
+        sv.insert("init".to_string(), "\"\"".to_string());
+        let node = IRNode {
+            node_id: "node_0020".to_string(),
+            node_type: "input".to_string(),
+            events: vec![IREvent {
+                trigger: "input".to_string(),
+                action: "call".to_string(),
+                target: "(e) => setUser(e.value)".to_string(),
+            }],
+            ..Default::default()
+        };
+        let window = IRWindow { nodes: vec![node], state_vars: vec![sv], ..Default::default() };
+        let output = emit_logic(&[window]);
+        assert!(output.source.contains("e[\"value\"]"), "{}", output.source);
+        assert!(
+            !output.source.contains("e.value"),
+            "raw member access must not survive: {}",
+            output.source
         );
     }
 

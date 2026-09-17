@@ -79,8 +79,7 @@ pub(crate) fn translate_js<S: std::hash::BuildHasher>(
             s = res;
         }
     }
-    s = s.replace("e.value", "e[\"value\"]");
-    s = s.replace(".value", "[\"value\"]");
+    s = normalize_value_access(&s);
     s = s.replace("===", "==");
     s = s.replace("!==", "!=");
     let s = translate_dynamic_expr(&s);
@@ -93,6 +92,14 @@ pub(crate) fn translate_js<S: std::hash::BuildHasher>(
     } else {
         format!("{s};")
     }
+}
+
+/// Normalize `x.value` member access to `x["value"]` subscripting.
+/// JsObject payloads expose fields by subscript only (no `.value`
+/// member). Applies to any receiver so dev-mode output matches
+/// build-mode output for identical input.
+pub(crate) fn normalize_value_access(s: &str) -> String {
+    s.replace("e.value", "e[\"value\"]").replace(".value", "[\"value\"]")
 }
 
 // ── Dynamic JS expression → C++ ──────────────────────────────────────
