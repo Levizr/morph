@@ -496,7 +496,7 @@ fn mid_fn_names(getter: &str, setter: &str) -> (String, String) {
 /// constants with no dynamic lifetime, so no liveness mask is needed:
 /// a write to a detached (conditionally unmounted) instance updates
 /// its own static harmlessly and never touches another instance.
-fn generate_mid_code(windows: &[IRWindow], premain_code: &str) -> String {
+pub(crate) fn generate_mid_code(windows: &[IRWindow], premain_code: &str) -> String {
     let taken = premain_names(premain_code);
     let mut by_ns: std::collections::HashMap<
         String,
@@ -895,6 +895,106 @@ fn extern_var_decl(inner: &str, name: &str) -> Option<String> {
     Some(format!("extern {lhs};"))
 }
 
+/// (namespace, lines) groups preserving first-seen order, shared by the
+/// build and dev `morph_api.h` generators so both flavors group entries
+/// identically. Global-scope entries are spliced inline at the end.
+struct NsBlocks {
+    blocks: Vec<(String, Vec<String>)>,
+    by_ns: std::collections::HashMap<String, usize>,
+}
+
+impl NsBlocks {
+    fn new() -> Self {
+        NsBlocks { blocks: Vec::new(), by_ns: std::collections::HashMap::new() }
+    }
+
+    fn push(&mut self, ns: &str, entry_lines: Vec<String>) {
+        if let Some(&idx) = self.by_ns.get(ns) {
+            self.blocks[idx].1.extend(entry_lines);
+        } else {
+            self.by_ns.insert(ns.to_string(), self.blocks.len());
+            self.blocks.push((ns.to_string(), entry_lines));
+        }
+    }
+
+    fn flush(self, lines: &mut Vec<String>) {
+        for (ns, member_lines) in self.blocks {
+            if ns.is_empty() {
+                lines.extend(member_lines);
+                continue;
+            }
+            lines.push(format!("namespace {} {{", morph_ir::MODULE_NS_ROOT));
+            lines.push(format!("namespace {ns} {{"));
+            lines.extend(member_lines);
+            lines.push("}".to_string());
+            lines.push("}".to_string());
+        }
+    }
+}
+
+/// `mid` constants + accessor declarations for one component namespace,
+/// shared by the build and dev headers (definitions live in `app.cpp`
+/// and the dev TU respectively).
+fn mid_header_entries(
+    assigns: &[&std::collections::HashMap<String, String>],
+    taken: &std::collections::HashSet<String>,
+) -> Vec<String> {
+    let mut entry = Vec::new();
+    // Constants first, in index order.
+    let mut consts: Vec<(&str, &str, &str, &str)> = Vec::new(); // (index, const, mid, loc)
+    let mut seen_consts = std::collections::HashSet::new();
+    for a in assigns {
+        let c = a.get("const").map_or("", String::as_str);
+        if c.is_empty() || !seen_consts.insert(c.to_string()) {
+            continue;
+        }
+        consts.push((
+            a.get("index").map_or("0", String::as_str),
+            c,
+            a.get("mid").map_or("", String::as_str),
+            a.get("loc").map_or("", String::as_str),
+        ));
+    }
+    consts.sort_by_key(|(idx, _, _, _)| idx.parse::<usize>().unwrap_or(0));
+    let comp = assigns.first().map_or("", |a| a.get("comp").map_or("", String::as_str));
+    let module = assigns.first().map_or("", |a| a.get("module").map_or("", String::as_str));
+    for (_, c, mid, loc) in &consts {
+        entry.push(format!("// <{comp} mid=\"{mid}\"> ({module}:{loc})"));
+        entry.push(format!(
+            "constexpr uint32_t {c} = {};",
+            consts.iter().position(|(_, cc, _, _)| cc == c).unwrap_or(0)
+        ));
+    }
+    // One accessor pair per distinct state (exact JSX suffix names).
+    let mut states: Vec<(&str, &str, &str)> = Vec::new(); // (getter, setter, init)
+    let mut seen_states = std::collections::HashSet::new();
+    for a in assigns {
+        let g = a.get("getter").map_or("", String::as_str);
+        if g.is_empty() || !seen_states.insert(g.to_string()) {
+            continue;
+        }
+        states.push((
+            g,
+            a.get("setter").map_or("", String::as_str),
+            a.get("init").map_or("0", String::as_str),
+        ));
+    }
+    for (getter, setter, init) in states {
+        let ty = infer_cpp_type(init);
+        if ty == "auto" {
+            continue;
+        }
+        let (set_fn, get_fn) = mid_fn_names(getter, setter);
+        if !taken.contains(set_fn.as_str()) {
+            entry.push(format!("void {set_fn}(uint32_t mid, {ty} v);"));
+        }
+        if !taken.contains(get_fn.as_str()) {
+            entry.push(format!("{ty} {get_fn}(uint32_t mid);"));
+        }
+    }
+    entry
+}
+
 /// Build the per-project `morph_api.h`: the native developer's contract.
 /// Inline signal/channel definitions live here (not in `app.cpp`) so user
 /// C++ included at the top of `app.cpp` sees declarations before use, and
@@ -924,28 +1024,7 @@ fn generate_morph_api_header(
     ];
     let taken = premain_names(premain_code);
     // (namespace, lines) groups preserving first-seen order.
-    let mut blocks: Vec<(String, Vec<String>)> = Vec::new();
-    let mut block_by_ns: std::collections::HashMap<String, usize> =
-        std::collections::HashMap::new();
-    let mut push_entry = |ns: &str, entry_lines: Vec<String>| {
-        if ns.is_empty() {
-            // Global-scope entries are spliced inline at the end; collect
-            // them under a sentinel and flush after namespaced blocks.
-            if let Some(&idx) = block_by_ns.get("") {
-                blocks[idx].1.extend(entry_lines);
-            } else {
-                block_by_ns.insert(String::new(), blocks.len());
-                blocks.push((String::new(), entry_lines));
-            }
-            return;
-        }
-        if let Some(&idx) = block_by_ns.get(ns) {
-            blocks[idx].1.extend(entry_lines);
-        } else {
-            block_by_ns.insert(ns.to_string(), blocks.len());
-            blocks.push((ns.to_string(), entry_lines));
-        }
-    };
+    let mut blocks = NsBlocks::new();
 
     // Shared stores: definition + get_/set_ wrappers.
     {
@@ -982,7 +1061,7 @@ fn generate_morph_api_header(
                 if !setter.is_empty() && !taken.contains(setter) {
                     entry.push(format!("inline void {setter}({ty} v) {{ {accessor}().set(v); }}"));
                 }
-                push_entry(ns, entry);
+                blocks.push(ns, entry);
             }
         }
     }
@@ -1015,7 +1094,7 @@ fn generate_morph_api_header(
                     "inline void {notify_fn}() {{ {accessor}().emit(JsObject{{}}); }}"
                 ));
             }
-            push_entry(ns, entry);
+            blocks.push(ns, entry);
         }
     }
 
@@ -1042,60 +1121,7 @@ fn generate_morph_api_header(
         }
         for ns in ns_order {
             let assigns = &by_ns[&ns];
-            let mut entry = Vec::new();
-            // Constants first, in index order.
-            let mut consts: Vec<(&str, &str, &str, &str)> = Vec::new(); // (index, const, mid, loc)
-            let mut seen_consts = std::collections::HashSet::new();
-            for a in assigns {
-                let c = a.get("const").map_or("", String::as_str);
-                if c.is_empty() || !seen_consts.insert(c.to_string()) {
-                    continue;
-                }
-                consts.push((
-                    a.get("index").map_or("0", String::as_str),
-                    c,
-                    a.get("mid").map_or("", String::as_str),
-                    a.get("loc").map_or("", String::as_str),
-                ));
-            }
-            consts.sort_by_key(|(idx, _, _, _)| idx.parse::<usize>().unwrap_or(0));
-            let comp = assigns.first().map_or("", |a| a.get("comp").map_or("", String::as_str));
-            let module = assigns.first().map_or("", |a| a.get("module").map_or("", String::as_str));
-            for (_, c, mid, loc) in &consts {
-                entry.push(format!("// <{comp} mid=\"{mid}\"> ({module}:{loc})"));
-                entry.push(format!(
-                    "constexpr uint32_t {c} = {};",
-                    consts.iter().position(|(_, cc, _, _)| cc == c).unwrap_or(0)
-                ));
-            }
-            // One accessor pair per distinct state (exact JSX suffix names).
-            let mut states: Vec<(&str, &str, &str)> = Vec::new(); // (getter, setter, init)
-            let mut seen_states = std::collections::HashSet::new();
-            for a in assigns {
-                let g = a.get("getter").map_or("", String::as_str);
-                if g.is_empty() || !seen_states.insert(g.to_string()) {
-                    continue;
-                }
-                states.push((
-                    g,
-                    a.get("setter").map_or("", String::as_str),
-                    a.get("init").map_or("0", String::as_str),
-                ));
-            }
-            for (getter, setter, init) in states {
-                let ty = infer_cpp_type(init);
-                if ty == "auto" {
-                    continue;
-                }
-                let (set_fn, get_fn) = mid_fn_names(getter, setter);
-                if !taken.contains(set_fn.as_str()) {
-                    entry.push(format!("void {set_fn}(uint32_t mid, {ty} v);"));
-                }
-                if !taken.contains(get_fn.as_str()) {
-                    entry.push(format!("{ty} {get_fn}(uint32_t mid);"));
-                }
-            }
-            push_entry(ns.as_str(), entry);
+            blocks.push(ns.as_str(), mid_header_entries(assigns, &taken));
         }
     }
 
@@ -1133,7 +1159,7 @@ fn generate_morph_api_header(
                         entry.push(format!("{decl};"));
                     }
                     if entry.len() > 1 {
-                        push_entry(ns, entry);
+                        blocks.push(ns, entry);
                     }
                 }
                 "var" => {
@@ -1145,7 +1171,7 @@ fn generate_morph_api_header(
                         }
                     }
                     if entry.len() > 1 {
-                        push_entry(ns, entry);
+                        blocks.push(ns, entry);
                     }
                 }
                 "alias" => {
@@ -1179,7 +1205,7 @@ fn generate_morph_api_header(
                         entry.extend(alias_wrapper(name, &target_expr, target_kind, &target_decls));
                     }
                     if entry.len() > 1 {
-                        push_entry(ns, entry);
+                        blocks.push(ns, entry);
                     }
                 }
                 _ => {}
@@ -1187,21 +1213,213 @@ fn generate_morph_api_header(
         }
         // Moved class definitions, grouped by namespace.
         for (ns, inner) in moved_classes {
-            push_entry(ns, vec![inner.clone()]);
+            blocks.push(ns, vec![inner.clone()]);
         }
     }
 
-    for (ns, member_lines) in blocks {
-        if ns.is_empty() {
-            lines.extend(member_lines);
-            continue;
+    blocks.flush(&mut lines);
+    lines.push(String::new());
+    lines.join("\n")
+}
+
+/// Dev-flow `morph_api.h`: the same declaration surface as the build
+/// header — same namespaces, same wrapper names — bound to dev-TU
+/// definitions instead of static ones.
+///
+/// The dev TU (`app_logic.cpp`) `#include`s user C++ into itself, so this
+/// header is wrappers-only, never definitions:
+/// - shared `cart()`/`setCart()` call the TU's namespaced `accessor()`.
+/// - `evt_x()` returns `morph::channel("<id>")` — the same string-registry
+///   channel the dev TU wires listeners on; `emit_`/`notify_` route through it.
+/// - `mid` constants + declarations; the switch-dispatch definitions are
+///   emitted into the dev TU by `emit_logic`.
+/// - functions: declarations (as in dev `_morph_state.h`; duplicates legal).
+/// - vars: `extern` decls (the dev TU defines them with external linkage).
+/// Classes and re-export aliases stay build-only: class definitions live
+/// in the dev TU premain *after* the user-C++ include, so native code
+/// cannot see them yet (see the interop guide).
+pub fn generate_morph_api_header_dev(windows: &[IRWindow], premain_parts: &[String]) -> String {
+    let mut lines = vec![
+        "#pragma once".to_string(),
+        "// Generated by Morph — do not edit. Dev-flow contract: same".to_string(),
+        "// namespaces and wrapper names as the build header, bound to the".to_string(),
+        "// dev TU (string-registry channels, TU-local signals). Refreshed".to_string(),
+        "// on every rebuild; bodies may differ from `morph build`.".to_string(),
+        "#include \"types/js_value.h\"".to_string(),
+        "#include \"types/js_object.h\"".to_string(),
+        "#include \"reactivity/signal.h\"".to_string(),
+        "#include \"reactivity/channel.h\"".to_string(),
+        String::new(),
+    ];
+    let premain_code = premain_parts.join("\n\n");
+    let taken = premain_names(&premain_code);
+    let mut blocks = NsBlocks::new();
+
+    // Shared stores: wrappers over the dev TU accessors (defined in the
+    // TU next to the backing signals; never redefined here).
+    {
+        let mut seen_keys = std::collections::HashSet::new();
+        for w in windows {
+            for sv in &w.shared_vars {
+                let key = sv.get("key").map_or("", String::as_str);
+                let accessor = sv.get("accessor").map_or("", String::as_str);
+                let getter = sv.get("getter").map_or("", String::as_str);
+                let setter = sv.get("setter").map_or("", String::as_str);
+                if key.is_empty() || accessor.is_empty() || !seen_keys.insert(key.to_string()) {
+                    continue;
+                }
+                let init_raw = sv.get("init").map_or("0", String::as_str);
+                let mut ty = sv.get("type").map_or("auto", String::as_str).to_string();
+                if ty == "auto" {
+                    ty = infer_cpp_type(init_raw);
+                }
+                if ty == "auto" || getter.is_empty() {
+                    continue;
+                }
+                let ns = sv.get("ns").map_or("", String::as_str);
+                let module = sv.get("key").map_or("", String::as_str);
+                let source = format!("{}()", morph_ir::qualified_binding_ref(ns, accessor));
+                // The TU defines the accessor *after* the user-C++ include,
+                // so forward-declare it (same `static` linkage, same TU —
+                // one entity, no ODR issue; the header is included once).
+                let mut entry = vec![
+                    format!("// {getter} ({module}) [dev]"),
+                    format!("static morph::Signal<{ty}>& {accessor}();"),
+                ];
+                if !taken.contains(getter) {
+                    entry.push(format!("inline {ty} {getter}() {{ return {source}.get(); }}"));
+                }
+                if !setter.is_empty() && !taken.contains(setter) {
+                    entry.push(format!("inline void {setter}({ty} v) {{ {source}.set(v); }}"));
+                }
+                blocks.push(ns, entry);
+            }
         }
-        lines.push(format!("namespace {} {{", morph_ir::MODULE_NS_ROOT));
-        lines.push(format!("namespace {ns} {{"));
-        lines.extend(member_lines);
-        lines.push("}".to_string());
-        lines.push("}".to_string());
     }
+
+    // Events: channel functions over the string registry (the id the dev
+    // TU wires listeners on) + emit_/notify_ wrappers.
+    {
+        let mut seen_keys = std::collections::HashSet::new();
+        for w in windows {
+            for ev in &w.event_decls {
+                let key = ev.get("key").map_or("", String::as_str);
+                let accessor = ev.get("accessor").map_or("", String::as_str);
+                let name = ev.get("event").map_or("", String::as_str);
+                let channel = ev.get("channel").map_or("", String::as_str);
+                if key.is_empty()
+                    || accessor.is_empty()
+                    || name.is_empty()
+                    || channel.is_empty()
+                    || !seen_keys.insert(key.to_string())
+                {
+                    continue;
+                }
+                let escaped = channel.replace('\\', "\\\\").replace('"', "\\\"");
+                let ns = ev.get("ns").map_or("", String::as_str);
+                let module = ev.get("module").map_or("", String::as_str);
+                let mut entry = vec![
+                    format!("// {name} ({module}) [dev]"),
+                    format!(
+                        "inline morph::Channel& {accessor}() {{ return morph::channel(\"{escaped}\"); }}"
+                    ),
+                ];
+                let emit_fn = format!("emit_{name}");
+                let notify_fn = format!("notify_{name}");
+                if !taken.contains(emit_fn.as_str()) {
+                    entry.push(format!(
+                        "inline void {emit_fn}(const JsValue& payload) {{ {accessor}().emit(payload); }}"
+                    ));
+                }
+                if !taken.contains(notify_fn.as_str()) {
+                    entry.push(format!(
+                        "inline void {notify_fn}() {{ {accessor}().emit(JsObject{{}}); }}"
+                    ));
+                }
+                blocks.push(ns, entry);
+            }
+        }
+    }
+
+    // `mid` constants + declarations (definitions live in the dev TU).
+    {
+        let mut by_ns: std::collections::HashMap<
+            String,
+            Vec<&std::collections::HashMap<String, String>>,
+        > = std::collections::HashMap::new();
+        let mut ns_order: Vec<String> = Vec::new();
+        for w in windows {
+            for a in &w.mid_assignments {
+                let ns = a.get("ns").map_or("", String::as_str);
+                if ns.is_empty() {
+                    continue;
+                }
+                if !by_ns.contains_key(ns) {
+                    ns_order.push(ns.to_string());
+                }
+                by_ns.entry(ns.to_string()).or_default().push(a);
+            }
+        }
+        for ns in ns_order {
+            let assigns = &by_ns[&ns];
+            blocks.push(ns.as_str(), mid_header_entries(assigns, &taken));
+        }
+    }
+
+    // Module functions: declarations (the dev `_morph_state.h` carries
+    // the same; repeated identical declarations are legal C++).
+    // Module vars: `extern` decls (defined in the dev TU premain).
+    {
+        let wrapped: Vec<(String, String)> =
+            premain_parts.iter().filter_map(|e| logic_emitter::split_module_ns(e)).collect();
+        let mut seen_keys = std::collections::HashSet::new();
+        for w in windows {
+            for b in &w.module_bindings {
+                let key = b.get("key").map_or("", String::as_str);
+                if key.is_empty() || !seen_keys.insert(key.to_string()) {
+                    continue;
+                }
+                let kind = b.get("kind").map_or("", String::as_str);
+                let ns = b.get("ns").map_or("", String::as_str);
+                let name = b.get("name").map_or("", String::as_str);
+                let module = b.get("module").map_or("", String::as_str);
+                if ns.is_empty() || name.is_empty() {
+                    continue;
+                }
+                match kind {
+                    "function" => {
+                        let mut entry = vec![format!("// {name} ({module}) [dev]")];
+                        for (_, inner) in wrapped.iter().filter(|(w_ns, _)| w_ns == ns) {
+                            if let Some(decl) = logic_emitter::extract_function_decl(inner) {
+                                if logic_emitter::fn_name(&decl).as_deref() == Some(name) {
+                                    entry.push(format!("{};", decl.trim_end_matches(';').trim()));
+                                    break;
+                                }
+                            }
+                        }
+                        if entry.len() > 1 {
+                            blocks.push(ns, entry);
+                        }
+                    }
+                    "var" => {
+                        let mut entry = vec![format!("// {name} ({module}) [dev]")];
+                        for (_, inner) in wrapped.iter().filter(|(w_ns, _)| w_ns == ns) {
+                            if let Some(decl) = extern_var_decl(inner, name) {
+                                entry.push(decl);
+                                break;
+                            }
+                        }
+                        if entry.len() > 1 {
+                            blocks.push(ns, entry);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    blocks.flush(&mut lines);
     lines.push(String::new());
     lines.join("\n")
 }
@@ -1513,6 +1731,84 @@ mod tests {
         // Function definition itself stays namespaced in app.cpp.
         assert!(app.contains("int loadData()"), "func defn stays: {app}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn dev_window() -> IRWindow {
+        use std::collections::HashMap;
+        let mut w = mid_window();
+        let mut sv = HashMap::new();
+        sv.insert("key".to_string(), "cart.count".to_string());
+        sv.insert("accessor".to_string(), "shared_cart_count".to_string());
+        sv.insert("type".to_string(), "int".to_string());
+        sv.insert("init".to_string(), "0".to_string());
+        sv.insert("getter".to_string(), "count".to_string());
+        sv.insert("setter".to_string(), "setCount".to_string());
+        sv.insert("ns".to_string(), "cartstore".to_string());
+        w.shared_vars.push(sv);
+        let mut ev = HashMap::new();
+        ev.insert("key".to_string(), "/proj/CartStore.mx::cartChanged".to_string());
+        ev.insert("accessor".to_string(), "evt_cartChanged".to_string());
+        ev.insert("event".to_string(), "cartChanged".to_string());
+        ev.insert("channel".to_string(), "evt:/proj/CartStore.mx::cartChanged".to_string());
+        ev.insert("ns".to_string(), "cartstore".to_string());
+        ev.insert("module".to_string(), "/proj/CartStore.mx".to_string());
+        w.event_decls.push(ev);
+        let mut fb = HashMap::new();
+        fb.insert("key".to_string(), "/proj/u.ts::loadData".to_string());
+        fb.insert("kind".to_string(), "function".to_string());
+        fb.insert("ns".to_string(), "u".to_string());
+        fb.insert("name".to_string(), "loadData".to_string());
+        fb.insert("module".to_string(), "/proj/u.ts".to_string());
+        w.module_bindings.push(fb);
+        w.premain_functions.push(
+            "namespace app {\nnamespace u {\nint loadData()\n{\nreturn 1;\n}\n}\n}".to_string(),
+        );
+        w
+    }
+
+    #[test]
+    fn dev_header_binds_wrappers_to_dev_tu() {
+        let windows = vec![dev_window()];
+        let premain: Vec<String> =
+            windows.iter().flat_map(|w| w.premain_functions.clone()).collect();
+        let api = generate_morph_api_header_dev(&windows, &premain);
+        // Shared wrappers call the TU accessor; no signal defined here.
+        assert!(
+            api.contains("static morph::Signal<int>& shared_cart_count();"),
+            "accessor fwd-decl: {api}"
+        );
+        assert!(
+            api.contains(
+                "inline int count() { return app::cartstore::shared_cart_count().get(); }"
+            ),
+            "shared read: {api}"
+        );
+        assert!(
+            api.contains(
+                "inline void setCount(int v) { app::cartstore::shared_cart_count().set(v); }"
+            ),
+            "shared write: {api}"
+        );
+        assert!(!api.contains("static morph::Signal<int> s("), "no defns: {api}");
+        // Events route through the string-registry channel id.
+        assert!(
+            api.contains(
+                "inline morph::Channel& evt_cartChanged() { return morph::channel(\"evt:/proj/CartStore.mx::cartChanged\"); }"
+            ),
+            "channel fn: {api}"
+        );
+        assert!(!api.contains("static morph::Channel c;"), "no static channel: {api}");
+        assert!(
+            api.contains(
+                "inline void emit_cartChanged(const JsValue& payload) { evt_cartChanged().emit(payload); }"
+            ),
+            "emit: {api}"
+        );
+        // Mid constants + declarations (definitions live in the dev TU).
+        assert!(api.contains("constexpr uint32_t MID_HERO = 0;"), "mid const: {api}");
+        assert!(api.contains("void setCount(uint32_t mid, int v);"), "mid decl: {api}");
+        // Function declaration for native callers.
+        assert!(api.contains("int loadData();"), "func decl: {api}");
     }
 
     #[test]

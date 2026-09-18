@@ -1468,6 +1468,16 @@ pub fn emit_logic(windows: &[IRWindow]) -> LogicOutput {
     // ── File-scope signal statics (persist across morph_logic_init calls) ──
     emit_signal_statics(&mut lines, windows, native_mode);
 
+    // ── Mid indexed accessors (definitions for the dev morph_api.h
+    // declarations): switch dispatch over the per-instance `__st_`
+    // statics above, same shape as the build TU.
+    let mid_code = super::cpp::generate_mid_code(windows, &premain_parts.join("\n\n"));
+    if !mid_code.trim().is_empty() {
+        lines.push(String::new());
+        lines.push("// ── mid indexed accessors ──".to_string());
+        lines.push(mid_code);
+    }
+
     // ── File-scope premain functions ──
     for func in &premain_parts {
         lines.push(String::new());
@@ -1790,5 +1800,41 @@ mod tests {
         assert_eq!(infer_cpp_type("[1]"), "JsArray");
         assert_eq!(infer_cpp_type("3.5"), "double");
         assert_eq!(infer_cpp_type("-3"), "int");
+    }
+
+    #[test]
+    fn dev_tu_emits_mid_dispatch_defs() {
+        let mut sv = HashMap::new();
+        sv.insert("getter".to_string(), "inst1_count".to_string());
+        sv.insert("setter".to_string(), "inst1_setCount".to_string());
+        sv.insert("init".to_string(), "0".to_string());
+        sv.insert("instance".to_string(), "1".to_string());
+        let mut a = HashMap::new();
+        a.insert("key".to_string(), "/proj/Counter.mx::Counter::hero".to_string());
+        a.insert("ns".to_string(), "counter".to_string());
+        a.insert("comp".to_string(), "Counter".to_string());
+        a.insert("mid".to_string(), "hero".to_string());
+        a.insert("const".to_string(), "MID_HERO".to_string());
+        a.insert("index".to_string(), "0".to_string());
+        a.insert("signal".to_string(), "__st_inst1_count".to_string());
+        a.insert("getter".to_string(), "count".to_string());
+        a.insert("setter".to_string(), "setCount".to_string());
+        a.insert("init".to_string(), "0".to_string());
+        a.insert("module".to_string(), "/proj/Counter.mx".to_string());
+        a.insert("loc".to_string(), "5:7".to_string());
+        let window =
+            IRWindow { state_vars: vec![sv], mid_assignments: vec![a], ..Default::default() };
+        let output = emit_logic(&[window]);
+        assert!(
+            output.source.contains("void app::counter::setCount(uint32_t mid, int v) {")
+                || output.source.contains("setCount(uint32_t mid, int v) {"),
+            "mid setter defined: {}",
+            output.source
+        );
+        assert!(
+            output.source.contains("case 0: __st_inst1_count.set(v); break;"),
+            "dispatch over instance signal: {}",
+            output.source
+        );
     }
 }

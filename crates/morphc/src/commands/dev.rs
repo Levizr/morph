@@ -84,6 +84,7 @@ pub(crate) fn run(entry: Option<String>) -> Result<()> {
         type_mode,
         runtime_dir,
         cache_dir: cwd.join(".morph").join("cache"),
+        output_dir: cwd.join(&config.output),
         compiler: dev_compiler(&config),
         native: morph_build::NativeFlags {
             include_dirs: config.native.include_dirs.clone(),
@@ -200,6 +201,7 @@ struct Session {
     type_mode: morpher::TypeMode,
     runtime_dir: PathBuf,
     cache_dir: PathBuf,
+    output_dir: PathBuf,
     compiler: morph_build::Compiler,
     native: morph_build::NativeFlags,
     logic: morph_build::logic::LogicSession,
@@ -384,6 +386,23 @@ fn push_windows(
             .with_context(|| format!("creating logic cache {}", cmd.cache_dir.display()))?;
         std::fs::write(cmd.cache_dir.join(morph_codegen::logic_emitter::STATE_HEADER_NAME), header)
             .with_context(|| "writing native state header")?;
+    }
+    // Dev-flow `morph_api.h`: same declaration surface as the build
+    // header, bound to dev-TU definitions. Written to the cache (the
+    // logic TU includes it via `-I`) and to the output dir (the stable
+    // IDE path, refreshed by both flows on every rebuild).
+    {
+        let premain: Vec<String> =
+            windows.iter().flat_map(|w| w.premain_functions.clone()).collect();
+        let api = morph_codegen::cpp::generate_morph_api_header_dev(windows, &premain);
+        std::fs::create_dir_all(&cmd.cache_dir)
+            .with_context(|| format!("creating logic cache {}", cmd.cache_dir.display()))?;
+        std::fs::write(cmd.cache_dir.join("morph_api.h"), &api)
+            .with_context(|| "writing dev api header to cache")?;
+        std::fs::create_dir_all(&cmd.output_dir)
+            .with_context(|| format!("creating output {}", cmd.output_dir.display()))?;
+        std::fs::write(cmd.output_dir.join("morph_api.h"), &api)
+            .with_context(|| "writing dev api header to output")?;
     }
     let mut user_sources = Vec::new();
     for w in windows {

@@ -44,6 +44,14 @@ User C++ includes one header: `morph_api.h`. Two headers are generated per proje
 
 `_morph_state.h` includes `morph_api.h`, and the generated TU includes both — user C++ never includes `_morph_state.h` directly and never reads `app.cpp`.
 
+### Dev mode (`morph dev`)
+
+`morph dev` regenerates `morph_api.h` on **every rebuild** — same namespaces and wrapper names as `morph build`, bound to dev-TU definitions (string-registry channels, TU-local signals) instead of static ones. It is written to both `.morph/cache/` (what the dev logic TU compiles against) and `.morph/output/` (the stable path below), so bodies may differ from a build depending on which flow ran last — declarations never do.
+
+Point your IDE at `.morph/output/morph_api.h` for suggestions: it stays fresh without ever running `morph build`.
+
+Current dev limitations (build-only for now): instantiating module classes and re-export aliases from native code — class definitions live in the dev TU after the user-C++ include, so native code cannot see them yet.
+
 ## Decision Tree
 
 | Need | Route | Code |

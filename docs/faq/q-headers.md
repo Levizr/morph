@@ -31,6 +31,8 @@ Summary:
 | `_morph_state.h` | `extern __st_*` signals + `morphState` wrappers | No (generated TU does) |
 | `morph_api.h` | Shared/event/`mid`/module bindings | **Yes — the only one** |
 
+In dev mode the same file is regenerated on every rebuild with dev bindings; see [C++ / JSX Interop](../guides/native-cpp.md#dev-mode-morph-dev).
+
 ## Why is entry state at `app::app` — double `app`?
 
 The first `app` is the generated-code root namespace; the second is the entry module's own namespace (`App.mx` → `app`, same human-computable rule as every file: `CartStore.mx` → `app::cartstore`). So the entry's `count` is `app::app::count()`. Uniform rule, no special cases — the [`C++ / JSX Interop`](../guides/native-cpp.md) guide covers it.
