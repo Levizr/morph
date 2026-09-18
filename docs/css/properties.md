@@ -98,6 +98,47 @@ See [Flexbox](flexbox.md) for a deep-dive.
 |---|---|---|
 | `cursor` | `default`, `pointer`, `text` | `default` |
 
+## Scrolling
+
+Nothing scrolls by default — and that's deliberate. `overflow` defaults to `visible`, so content that exceeds its parent simply paints outside it; apps are expected to size to their window. Scrolling is opt-in per container:
+
+```css
+.panel {
+  height: 400px;
+  overflow: auto;   /* or scroll */
+}
+```
+
+| Value | Behavior |
+|---|---|
+| `visible` (default) | No scrolling. Overflowing content paints outside the box. |
+| `hidden` | Clips overflowing content. Still no scrolling. |
+| `auto` | Scrolls **only when** the content is taller than the box. |
+| `scroll` | Always a scroll container. |
+
+Rules that bite:
+
+- **The box needs a bounded height.** With `height: auto` and no bound there is nothing to overflow — give it `height`/`max-height`, or nest it in a fixed-height parent (an unbounded `auto`/`scroll` box clamps to its parent's height).
+- **Mouse wheel scrolls the nearest scroll container** under the cursor; nested scrollers work inside-out.
+- A scroll container clips its children to its own box (like `hidden` plus scrolling).
+
+Tailwind equivalents: `overflow-auto`, `overflow-scroll`, `overflow-hidden`, `overflow-visible`. Scrollbar appearance is styled with the [`scrollbar-*` properties](#scrollbar) below.
+
+Page-level scrolling (content taller than the window) is the same mechanism — put `overflow: auto` with a bounded height on your root container:
+
+```tsx
+// src/App.mx
+import "./style.css";
+
+export default function App() {
+  return <body className="page">{/* long content */}</body>;
+}
+```
+
+```css
+.page { height: 100vh; overflow: auto; }
+```
+
 ## Scrollbar
 
 | Property | Values | Default |
