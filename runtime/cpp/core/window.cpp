@@ -6,6 +6,15 @@
 #include "../ui/input.h"
 #endif
 #include <GLFW/glfw3.h>
+// X11 pointer grab for scrollbar thumb drags (devtools-style: the drag
+// keeps tracking past the window edge with the cursor visible). App-side
+// Xlib only — no GLFW rebuild needed. Non-X11 builds skip the grab and
+// keep node-capture behavior inside the window.
+#if defined(__linux__) && !defined(__ANDROID__)
+#define GLFW_EXPOSE_NATIVE_X11
+#include <GLFW/glfw3native.h>
+#include <X11/Xlib.h>
+#endif
 #include <algorithm>
 // <print> is C++23 but not in libc++ until LLVM 17 (macOS Xcode 16 and
 // older lack it), so include it only where the toolchain provides it.
@@ -18,6 +27,54 @@ RepaintHookFn g_repaintHook = nullptr;
 // Double-click detection: threshold in seconds
 static double s_lastClickTime = 0.0;
 static const double DBL_CLICK_THRESHOLD = 0.3;
+// True while an X11 pointer grab for a scrollbar drag is held.
+static bool s_pointerGrabActive = false;
+
+// Grab the pointer so a scrollbar thumb drag keeps receiving motion and
+// button events past the window edge (cursor stays visible). No-op when
+// X11 is unavailable (Wayland session, grab conflict) — the drag then
+// tracks inside the window only, as before.
+static void grabPointerForDrag(GLFWwindow* win)
+{
+#if defined(__linux__) && !defined(__ANDROID__)
+    if (s_pointerGrabActive || !win)
+    {
+        return;
+    }
+    Display* dpy = glfwGetX11Display();
+    ::Window xw = glfwGetX11Window(win);
+    if (!dpy || !xw)
+    {
+        return;
+    }
+    int rc = XGrabPointer(dpy, xw, True,
+        ButtonPressMask | ButtonReleaseMask | PointerMotionMask,
+        GrabModeAsync, GrabModeAsync, None, None, CurrentTime);
+    if (rc == GrabSuccess)
+    {
+        s_pointerGrabActive = true;
+    }
+#else
+    (void)win;
+#endif
+}
+
+static void ungrabPointerForDrag()
+{
+#if defined(__linux__) && !defined(__ANDROID__)
+    if (!s_pointerGrabActive)
+    {
+        return;
+    }
+    Display* dpy = glfwGetX11Display();
+    if (dpy)
+    {
+        XUngrabPointer(dpy, CurrentTime);
+        XFlush(dpy);
+    }
+    s_pointerGrabActive = false;
+#endif
+}
 // Node currently :active (pressed) — cleared on release / tree rebuild
 // Any live GLFWwindow, kept so widgets can reach the OS clipboard without
 // depending on GLFW themselves.
@@ -87,16 +144,28 @@ void MorphWindow::mouseButtonCb(GLFWwindow *win, int btn, int act, int mods)
         e.y = (float)my;
 
         // End a mouse drag started inside a captured node (e.g. <input>
-        // selection) even when the button is released outside its box.
-#ifdef MORPH_FEATURE_INPUT
+        // selection, scrollbar thumb) even when the button is released
+        // outside its box. Without this a release outside the scrollbar
+        // leaves scrollDragging set and the thumb follows the cursor
+        // forever, held or not.
         if (act == GLFW_RELEASE && MorphNode::s_mouseCapture)
         {
+            MorphNode* cap = MorphNode::s_mouseCapture;
             e.type = EventType::MouseUp;
-            MorphNode::s_mouseCapture->onEvent(e);
+            cap->onEvent(e);
+#ifdef MORPH_FEATURE_SCROLL
+            cap->scrollDragging = false;
+#endif
+            ungrabPointerForDrag();
             MorphNode::s_mouseCapture = nullptr;
             e.type = EventType::MouseUp;   // normal dispatch still runs below
         }
-#endif
+        else if (act == GLFW_RELEASE && s_pointerGrabActive)
+        {
+            // Captured node died mid-drag (conditional branch swapped):
+            // drop the orphaned grab so motion events flow normally again.
+            ungrabPointerForDrag();
+        }
 
         self->m_root->dispatchEvent(e, (float)mx, (float)my);
 
@@ -135,7 +204,17 @@ void MorphWindow::mouseButtonCb(GLFWwindow *win, int btn, int act, int mods)
             if (now - s_lastClickTime < DBL_CLICK_THRESHOLD)
             {
                 e.type = EventType::DoubleClick;
-                self->m_root->dispatchEvent(e, (float)mx, (float)my);
+        self->m_root->dispatchEvent(e, (float)mx, (float)my);
+
+#ifdef MORPH_FEATURE_SCROLL
+        // A thumb press captured the node above: grab the pointer so the
+        // drag survives past the window edge (devtools-style).
+        if (act == GLFW_PRESS && MorphNode::s_mouseCapture &&
+            MorphNode::s_mouseCapture->scrollDragging)
+        {
+            grabPointerForDrag(win);
+        }
+#endif
             }
             s_lastClickTime = now;
         }
@@ -252,14 +331,20 @@ void MorphWindow::cursorPosCb(GLFWwindow *win, double mx, double my)
     e.y = (float)my;
 
     // Mouse-drag capture: a node that started a drag (e.g. <input> drag
-    // selection) keeps receiving moves even when the cursor leaves its box.
-#ifdef MORPH_FEATURE_INPUT
+    // selection, scrollbar thumb) keeps receiving moves even when the
+    // cursor leaves its box.
     if (MorphNode::s_mouseCapture)
     {
         e.type = EventType::MouseMove;
-        MorphNode::s_mouseCapture->onEvent(e);
-    }
+        MorphNode* cap = MorphNode::s_mouseCapture;
+        cap->onEvent(e);
+#ifdef MORPH_FEATURE_SCROLL
+        if (cap->scrollDragging)
+        {
+            cap->scrollDragTo((float)my);
+        }
 #endif
+    }
 
     self->m_root->dispatchEvent(e, (float)mx, (float)my);
 
@@ -319,8 +404,17 @@ void MorphWindow::windowFocusCb(GLFWwindow *win, int focused)
 {
     if (focused == GLFW_TRUE)
         return;
+    // Losing focus ends any in-progress drag: Alt-Tab mid-thumb-drag
+    // would otherwise lose the release and stick the scrollbar.
+    if (MorphNode::s_mouseCapture)
+    {
+#ifdef MORPH_FEATURE_SCROLL
+        MorphNode::s_mouseCapture->scrollDragging = false;
+#endif
+        MorphNode::s_mouseCapture = nullptr;
+    }
+    ungrabPointerForDrag();
 #ifdef MORPH_FEATURE_INPUT
-    MorphNode::s_mouseCapture = nullptr;
     if (MorphNode::s_focusedNode)
         MorphNode::s_focusedNode->blur();
 #endif

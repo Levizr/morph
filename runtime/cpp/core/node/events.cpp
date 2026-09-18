@@ -97,6 +97,35 @@ MorphNode* MorphNode::hitTestImpl(float ex, float ey, const float* accInv) {
     return inside ? this : nullptr;
 }
 
+#ifdef MORPH_FEATURE_SCROLL
+void MorphNode::scrollDragTo(float ey)
+{
+    if (!scrollEnabled || !scrollDragging)
+    {
+        return;
+    }
+    float oldScrollY = scrollY;
+    float thumbH = (h / contentH) * h;
+    float dy = ey - scrollDragStartY;
+    float range = contentH - h;
+    float thumbRange = h - thumbH;
+    if (thumbRange > 0)
+    {
+        scrollY = scrollDragStartVal + (dy / thumbRange) * range;
+        if (scrollY < 0) scrollY = 0;
+        if (scrollY > range) scrollY = range;
+    }
+    if (scrollY != oldScrollY)
+    {
+        markDirty(PaintDirty);
+        for (auto* c : children) c->markDirty(PaintDirty);
+#ifdef MORPH_FEATURE_POSITION
+        updateStickySubtree();
+#endif
+    }
+}
+#endif
+
 bool MorphNode::dispatchEvent(MorphEvent& e, float ex, float ey) {
     bool inBounds = (ex >= x && ex <= x + w && ey >= y && ey <= y + h);
 
@@ -129,6 +158,11 @@ bool MorphNode::dispatchEvent(MorphEvent& e, float ex, float ey) {
                 scrollDragging = true;
                 scrollDragStartY = ey;
                 scrollDragStartVal = scrollY;
+                // Capture like <input> drag-selection: moves keep flowing
+                // past the box edges, and the release always finds this
+                // node — otherwise a release outside the box leaves the
+                // flag set and the thumb follows the cursor forever.
+                s_mouseCapture = this;
                 return true;
             } else {
                 float page = h * 0.7f;
@@ -150,23 +184,7 @@ bool MorphNode::dispatchEvent(MorphEvent& e, float ex, float ey) {
             scrollDragging = false;
         }
         if (e.type == EventType::MouseMove && scrollDragging) {
-            float oldScrollY = scrollY;
-            float thumbH = (h / contentH) * h;
-            float dy = ey - scrollDragStartY;
-            float range = contentH - h;
-            float thumbRange = h - thumbH;
-            if (thumbRange > 0) {
-                scrollY = scrollDragStartVal + (dy / thumbRange) * range;
-                if (scrollY < 0) scrollY = 0;
-                if (scrollY > range) scrollY = range;
-            }
-            if (scrollY != oldScrollY) {
-                markDirty(PaintDirty);
-                for (auto* c : children) c->markDirty(PaintDirty);
-#ifdef MORPH_FEATURE_POSITION
-                updateStickySubtree();
-#endif
-            }
+            scrollDragTo(ey);
             return true;
         }
     }

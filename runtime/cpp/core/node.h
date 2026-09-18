@@ -164,6 +164,10 @@ public:
     bool scrollDragging = false;
     float scrollDragStartY = 0;
     float scrollDragStartVal = 0;
+    // Advance an in-progress thumb drag to the given y (window coords).
+    // Absolute from the grab point, so out-of-box/out-of-window moves
+    // through the capture path land exactly where the cursor is.
+    void scrollDragTo(float ey);
 
     // True while this node has an active hover/programmatic transition (no propagation)
     bool m_isTransitioning = false;
