@@ -135,12 +135,13 @@ fn shared_ns(sv: &HashMap<String, String>) -> String {
     sv.get("ns").cloned().unwrap_or_default()
 }
 
-/// Fully-qualified accessor call (`app::<ns>::shared_x()`).
+/// Fully-qualified accessor call (`::app::<ns>::shared_x()`). Absolute
+/// for the same reason as `shared_expr` in `cpp/mod.rs`.
 fn shared_ref(ns: &str, accessor: &str) -> String {
     if ns.is_empty() {
         format!("{accessor}()")
     } else {
-        format!("{}::{ns}::{accessor}()", morph_ir::MODULE_NS_ROOT)
+        format!("::{}::{ns}::{accessor}()", morph_ir::MODULE_NS_ROOT)
     }
 }
 
@@ -1459,11 +1460,6 @@ pub fn emit_logic(windows: &[IRWindow]) -> LogicOutput {
     }
     let native_mode = emit_includes(&mut lines, windows, &list_nodes);
     let premain_parts = collect_premain(windows);
-    let state_header = if native_mode {
-        Some(emit_native_block(&mut lines, windows, &premain_parts))
-    } else {
-        None
-    };
 
     // ── File-scope signal statics (persist across morph_logic_init calls) ──
     emit_signal_statics(&mut lines, windows, native_mode);
@@ -1478,8 +1474,33 @@ pub fn emit_logic(windows: &[IRWindow]) -> LogicOutput {
         lines.push(mid_code);
     }
 
-    // ── File-scope premain functions ──
-    for func in &premain_parts {
+    // ── File-scope premain: bound class definitions first, then the
+    // rest. A function returning a class type (or instantiating one)
+    // must see the definition; mirrors the build TU, which moves
+    // classes into the header ahead of premain. Stable within each
+    // group, so valid source order stays valid.
+    let is_bound_class = |entry: &str| -> bool {
+        let Some((ns, inner)) = split_module_ns(entry) else {
+            return false;
+        };
+        let first_line = inner.trim_start().lines().next().unwrap_or("");
+        let rest = first_line.strip_prefix("class ").or_else(|| first_line.strip_prefix("struct "));
+        let Some(rest) = rest else {
+            return false;
+        };
+        let class_name = rest.split(|c: char| !c.is_alphanumeric() && c != '_' && c != '$').next();
+        let Some(class_name) = class_name.filter(|name| !name.is_empty()) else {
+            return false;
+        };
+        windows.iter().flat_map(|w| w.module_bindings.iter()).any(|b| {
+            b.get("kind").map_or(false, |k| k == "class")
+                && b.get("ns").map_or("", String::as_str) == ns
+                && b.get("name").map_or("", String::as_str) == class_name
+        })
+    };
+    let (class_parts, fn_parts): (Vec<&String>, Vec<&String>) =
+        premain_parts.iter().partition(|e| is_bound_class(e));
+    for func in class_parts.into_iter().chain(fn_parts) {
         lines.push(String::new());
         if native_mode {
             lines.push(strip_static_function(func));
@@ -1487,6 +1508,17 @@ pub fn emit_logic(windows: &[IRWindow]) -> LogicOutput {
             lines.push(func.clone());
         }
     }
+
+    // ── User C++ includes last: native code sees the signals, shared
+    // accessors, mid dispatch, and full module definitions (classes,
+    // vars, functions) above. The build TU instead provides classes and
+    // channels through morph_api.h definitions; here the TU itself is
+    // the definition site, so it must come first.
+    let state_header = if native_mode {
+        Some(emit_native_block(&mut lines, windows, &premain_parts))
+    } else {
+        None
+    };
 
     // ── Keyed list item factories ──
     emit_factories(&mut lines, &list_nodes, &maps);
@@ -1726,7 +1758,7 @@ mod tests {
         );
         assert!(
             output.source.contains(
-                "n->setText(morph::str(app::store_deadbeef::shared_cart_count().get()));"
+                "n->setText(morph::str(::app::store_deadbeef::shared_cart_count().get()));"
             ),
             "qualified read: {}",
             output.source
@@ -1791,6 +1823,49 @@ mod tests {
         assert_eq!(extract_function_decl("auto x = []() { return 1; };"), None);
         assert_eq!(extract_function_decl("int main() { return 0; }"), None);
         assert_eq!(extract_function_decl(""), None);
+    }
+
+    #[test]
+    fn dev_user_includes_come_after_premain_definitions() {
+        let mut imp = HashMap::new();
+        imp.insert("path".to_string(), "./native.cpp".to_string());
+        let window = IRWindow {
+            cpp_imports: vec![imp],
+            premain_functions: vec![
+                "namespace app {\nnamespace u {\nclass User {\npublic:\nint x;\n};\n}\n}"
+                    .to_string(),
+            ],
+            ..Default::default()
+        };
+        let output = emit_logic(&[window]);
+        let class_pos = output.source.find("class User {").expect("class in TU");
+        let include_pos = output.source.find("#include \"./native.cpp\"").expect("include in TU");
+        assert!(class_pos < include_pos, "definitions before user include");
+    }
+
+    #[test]
+    fn dev_premain_defines_classes_before_functions() {
+        use std::collections::HashMap;
+        let mut b = HashMap::new();
+        b.insert("key".to_string(), "/proj/m.ts::User".to_string());
+        b.insert("kind".to_string(), "class".to_string());
+        b.insert("ns".to_string(), "m".to_string());
+        b.insert("name".to_string(), "User".to_string());
+        b.insert("module".to_string(), "/proj/m.ts".to_string());
+        let window = IRWindow {
+            premain_functions: vec![
+                "namespace app {\nnamespace m {\nUser makeUser()\n{\nreturn User();\n}\n}\n}"
+                    .to_string(),
+                "namespace app {\nnamespace m {\nclass User {\npublic:\nint x;\n};\n}\n}"
+                    .to_string(),
+            ],
+            module_bindings: vec![b],
+            ..Default::default()
+        };
+        let output = emit_logic(&[window]);
+        let class_pos = output.source.find("class User {").expect("class in TU");
+        let func_pos = output.source.find("User makeUser()").expect("func in TU");
+        assert!(class_pos < func_pos, "class before user: {}", output.source);
     }
 
     #[test]

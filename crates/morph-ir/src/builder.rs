@@ -833,10 +833,10 @@ impl IRBuilder {
             );
             frame
                 .vars
-                .insert(sb.getter.clone(), format!("{MODULE_NS_ROOT}::{ns}::{accessor}().get()"));
+                .insert(sb.getter.clone(), format!("::{MODULE_NS_ROOT}::{ns}::{accessor}().get()"));
             frame
                 .vars
-                .insert(sb.setter.clone(), format!("{MODULE_NS_ROOT}::{ns}::{accessor}().set"));
+                .insert(sb.setter.clone(), format!("::{MODULE_NS_ROOT}::{ns}::{accessor}().set"));
             if ty != "auto" {
                 frame.types.insert(sb.getter.clone(), ty);
             }
@@ -853,19 +853,19 @@ impl IRBuilder {
         // unexported helpers rewrite to qualified calls at use sites.
         for fd in &module.function_declarations {
             Self::register_module_binding(module_path, &ns, "function", &fd.name, ctx);
-            let qualified = format!("{MODULE_NS_ROOT}::{ns}::{}", binding_ident(&fd.name));
+            let qualified = format!("::{MODULE_NS_ROOT}::{ns}::{}", binding_ident(&fd.name));
             Self::seed_frame_name(frame, module_path, &fd.name, &qualified)?;
             seeded.insert(fd.name.clone());
         }
         for ev in &module.exported_vars {
             Self::register_module_binding(module_path, &ns, "var", &ev.name, ctx);
-            let qualified = format!("{MODULE_NS_ROOT}::{ns}::{}", binding_ident(&ev.name));
+            let qualified = format!("::{MODULE_NS_ROOT}::{ns}::{}", binding_ident(&ev.name));
             Self::seed_frame_name(frame, module_path, &ev.name, &qualified)?;
             seeded.insert(ev.name.clone());
         }
         for cd in &module.class_declarations {
             Self::register_module_binding(module_path, &ns, "class", &cd.name, ctx);
-            let qualified = format!("{MODULE_NS_ROOT}::{ns}::{}", binding_ident(&cd.name));
+            let qualified = format!("::{MODULE_NS_ROOT}::{ns}::{}", binding_ident(&cd.name));
             Self::seed_frame_name(frame, module_path, &cd.name, &qualified)?;
             seeded.insert(cd.name.clone());
         }
@@ -952,11 +952,11 @@ impl IRBuilder {
                 &sb.setter,
                 ctx,
             );
-            let expr = format!("{MODULE_NS_ROOT}::{target_ns}::{accessor}().get()");
+            let expr = format!("::{MODULE_NS_ROOT}::{target_ns}::{accessor}().get()");
             Self::seed_frame_name(frame, module_path, local, &expr)?;
             Self::register_import(module_path, local, &target_ns, &sb.getter, &expr, ctx);
             if !sb.setter.is_empty() {
-                let setter_expr = format!("{MODULE_NS_ROOT}::{target_ns}::{accessor}().set");
+                let setter_expr = format!("::{MODULE_NS_ROOT}::{target_ns}::{accessor}().set");
                 Self::seed_frame_name(frame, module_path, &sb.setter, &setter_expr)?;
                 Self::register_import(
                     module_path,
@@ -985,7 +985,7 @@ impl IRBuilder {
                 &sb.setter,
                 ctx,
             );
-            let expr = format!("{MODULE_NS_ROOT}::{target_ns}::{accessor}().set");
+            let expr = format!("::{MODULE_NS_ROOT}::{target_ns}::{accessor}().set");
             Self::seed_frame_name(frame, module_path, local, &expr)?;
             Self::register_import(module_path, local, &target_ns, &sb.setter, &expr, ctx);
             return Ok(());
@@ -1005,21 +1005,21 @@ impl IRBuilder {
             || target.named_exports.iter().any(|(l, _)| l == imported)
         {
             Self::register_module_binding(target_path, &target_ns, "function", imported, ctx);
-            let qualified = format!("{MODULE_NS_ROOT}::{target_ns}::{}", binding_ident(imported));
+            let qualified = format!("::{MODULE_NS_ROOT}::{target_ns}::{}", binding_ident(imported));
             Self::seed_frame_name(frame, module_path, local, &qualified)?;
             Self::register_import(module_path, local, &target_ns, imported, &qualified, ctx);
             return Ok(());
         }
         if target.exported_vars.iter().any(|v| v.name == imported) {
             Self::register_module_binding(target_path, &target_ns, "var", imported, ctx);
-            let qualified = format!("{MODULE_NS_ROOT}::{target_ns}::{}", binding_ident(imported));
+            let qualified = format!("::{MODULE_NS_ROOT}::{target_ns}::{}", binding_ident(imported));
             Self::seed_frame_name(frame, module_path, local, &qualified)?;
             Self::register_import(module_path, local, &target_ns, imported, &qualified, ctx);
             return Ok(());
         }
         if target.class_declarations.iter().any(|c| c.name == imported && c.exported) {
             Self::register_module_binding(target_path, &target_ns, "class", imported, ctx);
-            let qualified = format!("{MODULE_NS_ROOT}::{target_ns}::{}", binding_ident(imported));
+            let qualified = format!("::{MODULE_NS_ROOT}::{target_ns}::{}", binding_ident(imported));
             Self::seed_frame_name(frame, module_path, local, &qualified)?;
             Self::register_import(module_path, local, &target_ns, imported, &qualified, ctx);
             return Ok(());
@@ -1029,7 +1029,7 @@ impl IRBuilder {
             Self::resolve_through_reexports(target_path, graph, imported, module_path)?
         {
             let qualified =
-                format!("{MODULE_NS_ROOT}::{ultimate_ns}::{}", binding_ident(&ultimate_name));
+                format!("::{MODULE_NS_ROOT}::{ultimate_ns}::{}", binding_ident(&ultimate_name));
             Self::seed_frame_name(frame, module_path, local, &qualified)?;
             Self::register_import(
                 module_path,
@@ -1089,7 +1089,7 @@ impl IRBuilder {
                 &sb.setter,
                 ctx,
             );
-            let expr = format!("{MODULE_NS_ROOT}::{target_ns}::{accessor}().get()");
+            let expr = format!("::{MODULE_NS_ROOT}::{target_ns}::{accessor}().get()");
             Self::seed_frame_name(frame, module_path, local, &expr)?;
             Self::register_import(module_path, local, &target_ns, &sb.getter, &expr, ctx);
             return Ok(());
@@ -1097,7 +1097,7 @@ impl IRBuilder {
             return Ok(());
         };
         Self::register_module_binding(target_path, &target_ns, kind, &decl, ctx);
-        let qualified = format!("{MODULE_NS_ROOT}::{target_ns}::{}", binding_ident(&decl));
+        let qualified = format!("::{MODULE_NS_ROOT}::{target_ns}::{}", binding_ident(&decl));
         Self::seed_frame_name(frame, module_path, local, &qualified)?;
         Self::register_import(module_path, local, &target_ns, &decl, &qualified, ctx);
         Ok(())
@@ -2876,7 +2876,7 @@ pub fn qualified_binding_ref(ns: &str, name: &str) -> String {
     if ns.is_empty() {
         binding_ident(name)
     } else {
-        format!("{MODULE_NS_ROOT}::{ns}::{}", binding_ident(name))
+        format!("::{MODULE_NS_ROOT}::{ns}::{}", binding_ident(name))
     }
 }
 
@@ -5943,10 +5943,10 @@ export function Navbar() {
         assert!(keys.iter().any(|k| k.ends_with("utility.ts::loadData")), "{keys:?}");
         // Calls rewrite to the defining namespace, never the importer's.
         let premain = win.premain_functions.join("\n");
-        assert!(premain.contains("app::utility::loadData()"), "{premain}");
-        assert!(!premain.contains("app::navbar::loadData"), "{premain}");
-        assert!(premain.contains("app::network::fetchUserData()"), "{premain}");
-        assert!(premain.contains("app::navbar::fetchUserData()"), "{premain}");
+        assert!(premain.contains("::app::utility::loadData()"), "{premain}");
+        assert!(!premain.contains("::app::navbar::loadData"), "{premain}");
+        assert!(premain.contains("::app::network::fetchUserData()"), "{premain}");
+        assert!(premain.contains("::app::navbar::fetchUserData()"), "{premain}");
         // Definitions live namespaced in premain.
         assert!(premain.contains("namespace utility"), "{premain}");
         let _ = std::fs::remove_dir_all(&root);
@@ -5991,8 +5991,8 @@ export default function App() {
         let wins =
             IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).expect("aliased");
         let premain = wins[0].premain_functions.join("\n");
-        assert!(premain.contains("app::utility::loadData()"), "{premain}");
-        assert!(premain.contains("app::other::loadData()"), "{premain}");
+        assert!(premain.contains("::app::utility::loadData()"), "{premain}");
+        assert!(premain.contains("::app::other::loadData()"), "{premain}");
 
         write_file(
             &root,
@@ -6033,8 +6033,8 @@ export default function App() {
         let win = &wins[0];
         // Import through the re-exporter lands on the defining namespace.
         let premain = win.premain_functions.join("\n");
-        assert!(premain.contains("app::utility::loadData()"), "{premain}");
-        assert!(!premain.contains("app::mid::loadData"), "{premain}");
+        assert!(premain.contains("::app::utility::loadData()"), "{premain}");
+        assert!(!premain.contains("::app::mid::loadData"), "{premain}");
         // The re-export itself is recorded as an alias entry for C++.
         let aliases: Vec<&HashMap<String, String>> = win
             .module_bindings

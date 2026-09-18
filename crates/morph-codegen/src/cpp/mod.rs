@@ -462,12 +462,14 @@ fn clean_shared_init(init: &str, ty: &str) -> String {
 }
 
 /// Fully-qualified shared accessor call in the generated program. Empty
-/// namespace (hand-built IR) falls back to global scope.
+/// namespace (hand-built IR) falls back to global scope. Absolute
+/// (`::app::...`): premain bodies sit inside their own namespace blocks,
+/// where a leading `app::` would resolve through `app::app`.
 fn shared_expr(ns: &str, accessor: &str) -> String {
     if ns.is_empty() {
         format!("{accessor}()")
     } else {
-        format!("{}::{ns}::{accessor}()", morph_ir::MODULE_NS_ROOT)
+        format!("::{}::{ns}::{accessor}()", morph_ir::MODULE_NS_ROOT)
     }
 }
 
@@ -476,7 +478,7 @@ fn event_expr(ns: &str, accessor: &str) -> String {
     if ns.is_empty() {
         format!("{accessor}()")
     } else {
-        format!("{}::{ns}::{accessor}()", morph_ir::MODULE_NS_ROOT)
+        format!("::{}::{ns}::{accessor}()", morph_ir::MODULE_NS_ROOT)
     }
 }
 
@@ -1129,6 +1131,9 @@ fn generate_morph_api_header(
     // moved class definitions, and re-export aliases. Definitions live
     // once at their defining namespace (premain, or here for moved
     // classes); this header is the discovery surface for native C++.
+    // Order matters: function/var declarations, then classes (method
+    // bodies may call module functions), then aliases (every target
+    // must be declared above — including moved classes).
     {
         let find_defns = |ns: &str, name: &str| -> Vec<String> {
             wrapped
@@ -1139,13 +1144,56 @@ fn generate_morph_api_header(
                 .map(|decl| decl.trim_end_matches(';').trim().to_string())
                 .collect()
         };
+        let mut emit_alias = |b: &std::collections::HashMap<String, String>,
+                              blocks: &mut NsBlocks| {
+            let ns = b.get("ns").map_or("", String::as_str);
+            let name = b.get("name").map_or("", String::as_str);
+            let module = b.get("module").map_or("", String::as_str);
+            let target_ns = b.get("target_ns").map_or("", String::as_str);
+            let target_name = b.get("target_name").map_or("", String::as_str);
+            if ns.is_empty() || name.is_empty() || target_ns.is_empty() || target_name.is_empty() {
+                return;
+            }
+            // Absolute: aliases live inside namespace blocks, where a
+            // leading `app::` would resolve through `app::app`.
+            let target_expr =
+                format!("::{r}::{target_ns}::{target_name}", r = morph_ir::MODULE_NS_ROOT);
+            let mut entry = vec![format!("// {name} (re-export of {target_expr})")];
+            if name == target_name {
+                entry.push(format!("using {target_expr};"));
+            } else {
+                let target_kind = module_bindings
+                    .iter()
+                    .find(|t| {
+                        t.get("ns").map_or("", String::as_str) == target_ns
+                            && t.get("name").map_or("", String::as_str) == target_name
+                    })
+                    .map_or("", |t| t.get("kind").map_or("", String::as_str));
+                let target_decls: Vec<String> = wrapped
+                    .iter()
+                    .filter(|(w_ns, _)| w_ns == target_ns)
+                    .filter_map(|(_, inner)| logic_emitter::extract_function_decl(inner))
+                    .filter(|decl| logic_emitter::fn_name(decl).as_deref() == Some(target_name))
+                    .map(|decl| decl.trim_end_matches(';').trim().to_string())
+                    .collect();
+                entry.extend(alias_wrapper(name, &target_expr, target_kind, &target_decls));
+            }
+            if entry.len() > 1 {
+                blocks.push(ns, entry);
+            }
+        };
         let mut seen_keys = std::collections::HashSet::new();
+        let mut aliases: Vec<&std::collections::HashMap<String, String>> = Vec::new();
         for b in module_bindings {
             let key = b.get("key").map_or("", String::as_str);
             if key.is_empty() || !seen_keys.insert(key.to_string()) {
                 continue;
             }
             let kind = b.get("kind").map_or("", String::as_str);
+            if kind == "alias" {
+                aliases.push(b);
+                continue;
+            }
             let ns = b.get("ns").map_or("", String::as_str);
             let name = b.get("name").map_or("", String::as_str);
             let module = b.get("module").map_or("", String::as_str);
@@ -1175,38 +1223,7 @@ fn generate_morph_api_header(
                     }
                 }
                 "alias" => {
-                    let target_ns = b.get("target_ns").map_or("", String::as_str);
-                    let target_name = b.get("target_name").map_or("", String::as_str);
-                    if target_ns.is_empty() || target_name.is_empty() {
-                        continue;
-                    }
-                    let target_expr =
-                        format!("{}::{target_ns}::{target_name}", morph_ir::MODULE_NS_ROOT);
-                    let mut entry = vec![format!("// {name} (re-export of {target_expr})")];
-                    if name == target_name {
-                        entry.push(format!("using {target_expr};"));
-                    } else {
-                        let target_kind = module_bindings
-                            .iter()
-                            .find(|t| {
-                                t.get("ns").map_or("", String::as_str) == target_ns
-                                    && t.get("name").map_or("", String::as_str) == target_name
-                            })
-                            .map_or("", |t| t.get("kind").map_or("", String::as_str));
-                        let target_decls: Vec<String> = wrapped
-                            .iter()
-                            .filter(|(w_ns, _)| w_ns == target_ns)
-                            .filter_map(|(_, inner)| logic_emitter::extract_function_decl(inner))
-                            .filter(|decl| {
-                                logic_emitter::fn_name(decl).as_deref() == Some(target_name)
-                            })
-                            .map(|decl| decl.trim_end_matches(';').trim().to_string())
-                            .collect();
-                        entry.extend(alias_wrapper(name, &target_expr, target_kind, &target_decls));
-                    }
-                    if entry.len() > 1 {
-                        blocks.push(ns, entry);
-                    }
+                    emit_alias(b, &mut blocks);
                 }
                 _ => {}
             }
@@ -1214,6 +1231,11 @@ fn generate_morph_api_header(
         // Moved class definitions, grouped by namespace.
         for (ns, inner) in moved_classes {
             blocks.push(ns, vec![inner.clone()]);
+        }
+        // Aliases last: every target (functions, vars, moved classes)
+        // is declared above.
+        for b in aliases {
+            emit_alias(b, &mut blocks);
         }
     }
 
@@ -1235,9 +1257,10 @@ fn generate_morph_api_header(
 ///   emitted into the dev TU by `emit_logic`.
 /// - functions: declarations (as in dev `_morph_state.h`; duplicates legal).
 /// - vars: `extern` decls (the dev TU defines them with external linkage).
-/// Classes and re-export aliases stay build-only: class definitions live
-/// in the dev TU premain *after* the user-C++ include, so native code
-/// cannot see them yet (see the interop guide).
+/// - re-export aliases: `using` / inline wrappers (targets are defined in
+///   the dev TU premain above the user-C++ include, so they resolve).
+/// Classes need no header entry: the TU definitions are visible above the
+/// include, and a second copy here would redefine.
 pub fn generate_morph_api_header_dev(windows: &[IRWindow], premain_parts: &[String]) -> String {
     let mut lines = vec![
         "#pragma once".to_string(),
@@ -1278,7 +1301,16 @@ pub fn generate_morph_api_header_dev(windows: &[IRWindow], premain_parts: &[Stri
                 }
                 let ns = sv.get("ns").map_or("", String::as_str);
                 let module = sv.get("key").map_or("", String::as_str);
-                let source = format!("{}()", morph_ir::qualified_binding_ref(ns, accessor));
+                // Absolute `::app::...` reference: the dev TU includes
+                // `_morph_state.h` (which declares `app::app`) before this
+                // header, so a leading `app::` inside `namespace app::<ns>`
+                // would resolve to `app::app::<ns>`. The build header is
+                // parsed before `app::app` exists and never hits this.
+                let source = if ns.is_empty() {
+                    format!("{accessor}()")
+                } else {
+                    format!("::{r}::{ns}::{accessor}()", r = morph_ir::MODULE_NS_ROOT)
+                };
                 // The TU defines the accessor *after* the user-C++ include,
                 // so forward-declare it (same `static` linkage, same TU —
                 // one entity, no ODR issue; the header is included once).
@@ -1369,52 +1401,98 @@ pub fn generate_morph_api_header_dev(windows: &[IRWindow], premain_parts: &[Stri
     // Module functions: declarations (the dev `_morph_state.h` carries
     // the same; repeated identical declarations are legal C++).
     // Module vars: `extern` decls (defined in the dev TU premain).
+    // Re-export aliases: `using` / inline wrappers — targets are defined
+    // in the dev TU premain *above* the user-C++ include, so they resolve.
+    // Classes need no header entry: the TU definitions are visible above.
     {
         let wrapped: Vec<(String, String)> =
             premain_parts.iter().filter_map(|e| logic_emitter::split_module_ns(e)).collect();
-        let mut seen_keys = std::collections::HashSet::new();
-        for w in windows {
-            for b in &w.module_bindings {
-                let key = b.get("key").map_or("", String::as_str);
-                if key.is_empty() || !seen_keys.insert(key.to_string()) {
-                    continue;
-                }
-                let kind = b.get("kind").map_or("", String::as_str);
-                let ns = b.get("ns").map_or("", String::as_str);
-                let name = b.get("name").map_or("", String::as_str);
-                let module = b.get("module").map_or("", String::as_str);
-                if ns.is_empty() || name.is_empty() {
-                    continue;
-                }
-                match kind {
-                    "function" => {
-                        let mut entry = vec![format!("// {name} ({module}) [dev]")];
-                        for (_, inner) in wrapped.iter().filter(|(w_ns, _)| w_ns == ns) {
-                            if let Some(decl) = logic_emitter::extract_function_decl(inner) {
-                                if logic_emitter::fn_name(&decl).as_deref() == Some(name) {
-                                    entry.push(format!("{};", decl.trim_end_matches(';').trim()));
-                                    break;
-                                }
-                            }
-                        }
-                        if entry.len() > 1 {
-                            blocks.push(ns, entry);
-                        }
+        let mut bindings_all: Vec<&std::collections::HashMap<String, String>> = Vec::new();
+        {
+            let mut seen_keys = std::collections::HashSet::new();
+            for w in windows {
+                for b in &w.module_bindings {
+                    let key = b.get("key").map_or("", String::as_str);
+                    if key.is_empty() || !seen_keys.insert(key.to_string()) {
+                        continue;
                     }
-                    "var" => {
-                        let mut entry = vec![format!("// {name} ({module}) [dev]")];
-                        for (_, inner) in wrapped.iter().filter(|(w_ns, _)| w_ns == ns) {
-                            if let Some(decl) = extern_var_decl(inner, name) {
-                                entry.push(decl);
+                    bindings_all.push(b);
+                }
+            }
+        }
+        for b in &bindings_all {
+            let kind = b.get("kind").map_or("", String::as_str);
+            let ns = b.get("ns").map_or("", String::as_str);
+            let name = b.get("name").map_or("", String::as_str);
+            let module = b.get("module").map_or("", String::as_str);
+            if ns.is_empty() || name.is_empty() {
+                continue;
+            }
+            match kind {
+                "function" => {
+                    let mut entry = vec![format!("// {name} ({module}) [dev]")];
+                    for (_, inner) in wrapped.iter().filter(|(w_ns, _)| w_ns == ns) {
+                        if let Some(decl) = logic_emitter::extract_function_decl(inner) {
+                            if logic_emitter::fn_name(&decl).as_deref() == Some(name) {
+                                entry.push(format!("{};", decl.trim_end_matches(';').trim()));
                                 break;
                             }
                         }
-                        if entry.len() > 1 {
-                            blocks.push(ns, entry);
+                    }
+                    if entry.len() > 1 {
+                        blocks.push(ns, entry);
+                    }
+                }
+                "var" => {
+                    let mut entry = vec![format!("// {name} ({module}) [dev]")];
+                    for (_, inner) in wrapped.iter().filter(|(w_ns, _)| w_ns == ns) {
+                        if let Some(decl) = extern_var_decl(inner, name) {
+                            entry.push(decl);
+                            break;
                         }
                     }
-                    _ => {}
+                    if entry.len() > 1 {
+                        blocks.push(ns, entry);
+                    }
                 }
+                "alias" => {
+                    let target_ns = b.get("target_ns").map_or("", String::as_str);
+                    let target_name = b.get("target_name").map_or("", String::as_str);
+                    if target_ns.is_empty() || target_name.is_empty() {
+                        continue;
+                    }
+                    // Absolute reference (see the shared section above: a
+                    // leading `app::` inside `namespace app::<ns>` would
+                    // resolve through `app::app` from `_morph_state.h`).
+                    let target_expr =
+                        format!("::{r}::{target_ns}::{target_name}", r = morph_ir::MODULE_NS_ROOT);
+                    let mut entry = vec![format!("// {name} (re-export of {target_expr})")];
+                    if name == target_name {
+                        entry.push(format!("using {target_expr};"));
+                    } else {
+                        let target_kind = bindings_all
+                            .iter()
+                            .find(|t| {
+                                t.get("ns").map_or("", String::as_str) == target_ns
+                                    && t.get("name").map_or("", String::as_str) == target_name
+                            })
+                            .map_or("", |t| t.get("kind").map_or("", String::as_str));
+                        let target_decls: Vec<String> = wrapped
+                            .iter()
+                            .filter(|(w_ns, _)| w_ns == target_ns)
+                            .filter_map(|(_, inner)| logic_emitter::extract_function_decl(inner))
+                            .filter(|decl| {
+                                logic_emitter::fn_name(decl).as_deref() == Some(target_name)
+                            })
+                            .map(|decl| decl.trim_end_matches(';').trim().to_string())
+                            .collect();
+                        entry.extend(alias_wrapper(name, &target_expr, target_kind, &target_decls));
+                    }
+                    if entry.len() > 1 {
+                        blocks.push(ns, entry);
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -1542,7 +1620,7 @@ mod tests {
         assert!(api.contains("namespace app {"), "module namespace: {api}");
         assert!(api.contains("namespace cart_12345678 {"), "store namespace: {api}");
         assert!(
-            app.contains("app::cart_12345678::shared_cart_count().get()"),
+            app.contains("::app::cart_12345678::shared_cart_count().get()"),
             "qualified read: {app}"
         );
         let _ = std::fs::remove_dir_all(&dir);
@@ -1590,11 +1668,11 @@ mod tests {
         let api = std::fs::read_to_string(dir.join("morph_api.h")).unwrap();
         assert!(!app.contains("morph::channel(\"evt:"), "no string lookup in app.cpp: {app}");
         assert!(
-            app.contains("app::store_abc123::evt_resetEvent().emit(JsObject{});"),
+            app.contains("::app::store_abc123::evt_resetEvent().emit(JsObject{});"),
             "emit lowered: {app}"
         );
         assert!(
-            app.contains("app::store_abc123::evt_resetEvent().on([](const JsValue& __ch_0)"),
+            app.contains("::app::store_abc123::evt_resetEvent().on([](const JsValue& __ch_0)"),
             "subscribe lowered: {app}"
         );
         assert!(
@@ -1727,7 +1805,11 @@ mod tests {
         assert!(api.contains("class User {"), "class moved: {api}");
         assert!(!app.contains("class User {"), "class left premain: {app}");
         // Same-name re-export alias via using.
-        assert!(api.contains("using app::u::loadData;"), "alias: {api}");
+        assert!(api.contains("using ::app::u::loadData;"), "alias: {api}");
+        // Aliases come after class definitions (using needs the target).
+        let class_pos = api.find("class User {").expect("class in header");
+        let alias_pos = api.find("using ::app::u::loadData;").expect("alias in header");
+        assert!(class_pos < alias_pos, "classes before aliases");
         // Function definition itself stays namespaced in app.cpp.
         assert!(app.contains("int loadData()"), "func defn stays: {app}");
         let _ = std::fs::remove_dir_all(&dir);
@@ -1763,6 +1845,15 @@ mod tests {
         w.premain_functions.push(
             "namespace app {\nnamespace u {\nint loadData()\n{\nreturn 1;\n}\n}\n}".to_string(),
         );
+        let mut ab = HashMap::new();
+        ab.insert("key".to_string(), "/proj/n.ts::loadData".to_string());
+        ab.insert("kind".to_string(), "alias".to_string());
+        ab.insert("ns".to_string(), "n".to_string());
+        ab.insert("name".to_string(), "loadData".to_string());
+        ab.insert("target_ns".to_string(), "u".to_string());
+        ab.insert("target_name".to_string(), "loadData".to_string());
+        ab.insert("module".to_string(), "/proj/n.ts".to_string());
+        w.module_bindings.push(ab);
         w
     }
 
@@ -1779,13 +1870,13 @@ mod tests {
         );
         assert!(
             api.contains(
-                "inline int count() { return app::cartstore::shared_cart_count().get(); }"
+                "inline int count() { return ::app::cartstore::shared_cart_count().get(); }"
             ),
             "shared read: {api}"
         );
         assert!(
             api.contains(
-                "inline void setCount(int v) { app::cartstore::shared_cart_count().set(v); }"
+                "inline void setCount(int v) { ::app::cartstore::shared_cart_count().set(v); }"
             ),
             "shared write: {api}"
         );
@@ -1809,6 +1900,8 @@ mod tests {
         assert!(api.contains("void setCount(uint32_t mid, int v);"), "mid decl: {api}");
         // Function declaration for native callers.
         assert!(api.contains("int loadData();"), "func decl: {api}");
+        // Same-name re-export alias (target defined in the dev TU above).
+        assert!(api.contains("using ::app::u::loadData;"), "alias: {api}");
     }
 
     #[test]

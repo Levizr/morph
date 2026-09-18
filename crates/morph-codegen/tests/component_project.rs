@@ -79,7 +79,7 @@ fn component_project_resolves_lints_builds_and_emits() {
     assert!(app_cpp.contains("__st_inst1_count"), "missing inst1 signal");
     assert!(app_cpp.contains("#include \"morph_api.h\""), "missing api include");
     assert!(
-        app_cpp.contains(&format!("app::{shared_ns}::{shared_accessor}().get()")),
+        app_cpp.contains(&format!("::app::{shared_ns}::{shared_accessor}().get()")),
         "missing qualified shared read"
     );
     assert!(
@@ -102,7 +102,7 @@ fn component_project_resolves_lints_builds_and_emits() {
     // the channel header is included for subscriptions.
     let logic = morph_codegen::logic_emitter::emit_logic(&windows);
     assert!(
-        logic.source.contains(&format!("app::{shared_ns}::{shared_accessor}()")),
+        logic.source.contains(&format!("::app::{shared_ns}::{shared_accessor}()")),
         "missing shared accessor in dev TU"
     );
     assert!(logic.source.contains("reactivity/channel.h"), "missing channel include in dev TU");
