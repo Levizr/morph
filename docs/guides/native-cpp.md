@@ -39,11 +39,11 @@ double area(double w, double h) {
 
 | Need | Route | Code |
 |---|---|---|
-| Read shared state | `<binding>()` wrapper | `morph_mods::cartstore::cart()` |
+| Read shared state | `<binding>()` wrapper | `app::cartstore::cart()` |
 | Write shared state | `<setter>(v)` + optional `notify_<event>()` | `setCart(0); notify_cartChanged();` |
 | Emit event | `emit_<name>(payload)` or `evt_<name>().emit(...)` | `emit_cartChanged(JsObject{{"cart", cart()}});` |
-| Call a TS/TSX function | Defining module's namespace (never the importer's) | `morph_mods::utility::loadData()` |
-| Call a re-exported function | Re-exporting namespace (via `using`-alias) | `morph_mods::mid::loadData()` |
+| Call a TS/TSX function | Defining module's namespace (never the importer's) | `app::utility::loadData()` |
+| Call a re-exported function | Re-exporting namespace (via `using`-alias) | `app::mid::loadData()` |
 | Read another component's local | **Don't.** Emit an event; let that component reset its own local | `evt_resetEvent().emit({});` / `resetEvent.on(() => setCount(0))` |
 | C++ produces a value for a local | Return it; the TSX handler writes its own local | `int compute();` / `<button onClick={() => setCount(compute())}>` |
 | **Native initiates a write to a specific instance** | Tag `<Comp mid="tag" />`; use the `MID_TAG` constant | `set_count(MID_HERO, 0)` |
@@ -57,15 +57,15 @@ Every binding lives in its defining file's namespace — find it in `morph_api.h
 #include "morph_api.h"
 
 int loadFromNative() {
-    return morph_mods::utility::loadData();   // defined in utility.ts
+    return app::utility::loadData();   // defined in utility.ts
 }
 
 int viaReexport() {
-    return morph_mods::mid::loadData();       // mid.ts re-exports utility.ts
+    return app::mid::loadData();       // mid.ts re-exports utility.ts
 }
 
 void makeUser() {
-    morph_mods::models::User u("hero");       // defined in models.ts
+    app::models::User u("hero");       // defined in models.ts
 }
 ```
 
@@ -82,16 +82,16 @@ export const [cart, setCart] = morphShared<number>(0)
 #include "morph_api.h"
 
 void resetCartNative() {
-    morph_mods::cartstore::setCart(0);           // wrapper → shared_cart().set(0)
-    morph_mods::cartstore::notify_cartChanged(); // wrapper → evt_cartChanged().emit({})
+    app::cartstore::setCart(0);           // wrapper → shared_cart().set(0)
+    app::cartstore::notify_cartChanged(); // wrapper → evt_cartChanged().emit({})
 }
 
 int getCartNative() {
-    return morph_mods::cartstore::cart();        // wrapper → shared_cart().get()
+    return app::cartstore::cart();        // wrapper → shared_cart().get()
 }
 ```
 
-Namespaces are human-computable from file paths: `CartStore.mx` next to the entry → `morph_mods::cartstore`; `src/components/shop/ShopStore.mx` → `morph_mods::components::shop::shopstore`. Wrapper names match the JSX bindings exactly.
+Namespaces are human-computable from file paths: `CartStore.mx` next to the entry → `app::cartstore`; `src/components/shop/ShopStore.mx` → `app::components::shop::shopstore`. Wrapper names match the JSX bindings exactly.
 
 ## Events (`morphEvent`)
 
@@ -102,10 +102,10 @@ export const cartChanged = morphEvent<{ cart: number }>()
 
 ```cpp
 // Emit from anywhere (thread-safe; listeners run on the emitter's thread):
-morph_mods::cartstore::emit_cartChanged(JsObject{{"cart", morph_mods::cartstore::cart()}});
+app::cartstore::emit_cartChanged(JsObject{{"cart", app::cartstore::cart()}});
 
 // Or the channel directly:
-morph_mods::cartstore::evt_cartChanged().emit(JsObject{{"cart", 3}});
+app::cartstore::evt_cartChanged().emit(JsObject{{"cart", 3}});
 ```
 
 Zero string lookup: each event is one static `Channel` in its module namespace. Subscribe from JSX with `cartChanged.on(...)` — user C++ never subscribes (generated code owns subscriptions).
@@ -121,11 +121,11 @@ Tag the instances native code may address — untagged instances stay purely loc
 
 ```cpp
 void resetHeroCounter() {
-    morph_mods::counter::set_count(morph_mods::counter::MID_HERO, 0);
+    app::counter::set_count(app::counter::MID_HERO, 0);
 }
 
 int heroCountNative() {
-    return morph_mods::counter::get_count(morph_mods::counter::MID_HERO);
+    return app::counter::get_count(app::counter::MID_HERO);
 }
 ```
 

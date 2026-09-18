@@ -128,42 +128,43 @@ fn shared_static(accessor: &str) -> String {
     format!("__{accessor}")
 }
 
-/// Optional per-module namespace in the generated program (`morph_mods::<ns>`).
+/// Optional per-module namespace in the generated program (`app::<ns>`).
 /// Absent for hand-built IR (unit tests / legacy), which falls back to the
 /// global-scope emission below.
 fn shared_ns(sv: &HashMap<String, String>) -> String {
     sv.get("ns").cloned().unwrap_or_default()
 }
 
-/// Fully-qualified accessor call (`morph_mods::<ns>::shared_x()`).
+/// Fully-qualified accessor call (`app::<ns>::shared_x()`).
 fn shared_ref(ns: &str, accessor: &str) -> String {
     if ns.is_empty() {
         format!("{accessor}()")
     } else {
-        format!("morph_mods::{ns}::{accessor}()")
+        format!("{}::{ns}::{accessor}()", morph_ir::MODULE_NS_ROOT)
     }
 }
 
-/// Split a builder-wrapped premain entry (`namespace morph_mods {
+/// Split a builder-wrapped premain entry (`namespace app {
 /// namespace <ns> { <body> } }`) into its namespace path and inner body.
 /// Returns `None` for legacy flat entries.
 pub(crate) fn split_module_ns(entry: &str) -> Option<(String, String)> {
-    let rest = entry.strip_prefix("namespace morph_mods {\nnamespace ")?;
+    let prefix = format!("namespace {} {{\nnamespace ", morph_ir::MODULE_NS_ROOT);
+    let rest = entry.strip_prefix(&prefix)?;
     let (ns, rest) = rest.split_once(" {\n")?;
     let inner = rest.strip_suffix("}\n}")?.trim().to_string();
     Some((ns.to_string(), inner))
 }
 
-/// Fully-qualified backing signal (`morph_mods::<ns>::__shared_x`).
+/// Fully-qualified backing signal (`app::<ns>::__shared_x`).
 fn shared_backing_ref(ns: &str, accessor: &str) -> String {
     if ns.is_empty() {
         shared_static(accessor)
     } else {
-        format!("morph_mods::{ns}::{}", shared_static(accessor))
+        format!("{}::{ns}::{}", morph_ir::MODULE_NS_ROOT, shared_static(accessor))
     }
 }
 
-/// Emit declarations grouped under their optional `morph_mods::<ns>`
+/// Emit declarations grouped under their optional `app::<ns>`
 /// namespaces. Empty namespaces fall back to global scope.
 fn emit_shared_entries(lines: &mut Vec<String>, decls: Vec<(String, String)>) {
     let mut blocks: Vec<(String, Vec<String>)> = Vec::new();
@@ -183,7 +184,7 @@ fn emit_shared_entries(lines: &mut Vec<String>, decls: Vec<(String, String)>) {
     }
     lines.extend(bare);
     for (ns, member_lines) in blocks {
-        lines.push("namespace morph_mods {".to_string());
+        lines.push(format!("namespace {} {{", morph_ir::MODULE_NS_ROOT));
         lines.push(format!("namespace {ns} {{"));
         lines.extend(member_lines);
         lines.push("}".to_string());
@@ -1666,20 +1667,20 @@ mod tests {
     fn shared_namespace_qualifies_statics_accessors_and_reads() {
         let output = emit_logic(&[namespaced_shared_window()]);
         assert!(
-            output.source.contains("namespace morph_mods {\nnamespace store_deadbeef {"),
+            output.source.contains("namespace app {\nnamespace store_deadbeef {"),
             "module namespace: {}",
             output.source
         );
         assert!(
-            output.source.contains(
-                "morph_mods::store_deadbeef::__shared_cart_count.set(store.get_or_create<int>"
-            ),
+            output
+                .source
+                .contains("app::store_deadbeef::__shared_cart_count.set(store.get_or_create<int>"),
             "qualified store sync: {}",
             output.source
         );
         assert!(
             output.source.contains(
-                "n->setText(morph::str(morph_mods::store_deadbeef::shared_cart_count().get()));"
+                "n->setText(morph::str(app::store_deadbeef::shared_cart_count().get()));"
             ),
             "qualified read: {}",
             output.source
@@ -1703,15 +1704,9 @@ mod tests {
     fn state_header_skips_namespaced_shared_wrappers() {
         let windows = vec![namespaced_shared_window()];
         let build_h = generate_state_header(&windows, &[]);
-        assert!(
-            !build_h.contains("morph_mods::store_deadbeef::shared_cart_count().get()"),
-            "{build_h}"
-        );
+        assert!(!build_h.contains("app::store_deadbeef::shared_cart_count().get()"), "{build_h}");
         let dev_h = generate_state_header(&windows, &[]);
-        assert!(
-            !dev_h.contains("morph_mods::store_deadbeef::__shared_cart_count.get()"),
-            "{dev_h}"
-        );
+        assert!(!dev_h.contains("app::store_deadbeef::__shared_cart_count.get()"), "{dev_h}");
     }
 
     #[test]

@@ -1618,7 +1618,7 @@
         "description": "Complete architecture for Morph's reactive system (state, events, effects) and native C++ interop: module-path identity, namespaced C++ emission, morph_api.h contract, mid addressing, decision tree for native.cpp.",
         "keywords": [
           "morph state events native",
-          "morph_mods namespace",
+          "app namespace",
           "morph_api header",
           "mid instance descriptor"
         ],
@@ -1636,7 +1636,7 @@
         "description": "Module-path identity for every binding kind (functions, vars, classes, components, shared, events): export inventory, import resolution, re-export aliases, and the native C++ calling convention.",
         "keywords": [
           "module bindings import export",
-          "morph_mods namespace",
+          "app namespace",
           "re-export alias",
           "native function call"
         ],

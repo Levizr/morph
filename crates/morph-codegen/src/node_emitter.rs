@@ -1749,8 +1749,8 @@ mod tests {
 
     fn cart_map() -> HashMap<String, String> {
         let mut m = HashMap::new();
-        m.insert("cart".to_string(), "morph_mods::cartstore::shared_cart().get()".to_string());
-        m.insert("setCart".to_string(), "morph_mods::cartstore::shared_cart().set".to_string());
+        m.insert("cart".to_string(), "app::cartstore::shared_cart().get()".to_string());
+        m.insert("setCart".to_string(), "app::cartstore::shared_cart().set".to_string());
         m
     }
 
@@ -1767,8 +1767,8 @@ mod tests {
     #[test]
     fn state_substitution_still_rewrites_code() {
         let out = translate_js("(setCart(cart + 1))", &cart_map());
-        assert!(out.contains("morph_mods::cartstore::shared_cart().set"), "{out}");
-        assert!(out.contains("morph_mods::cartstore::shared_cart().get()"), "{out}");
+        assert!(out.contains("app::cartstore::shared_cart().set"), "{out}");
+        assert!(out.contains("app::cartstore::shared_cart().get()"), "{out}");
     }
 
     #[test]
@@ -1776,10 +1776,10 @@ mod tests {
         // An imported name and a same-spelled definition in scope: one
         // pass, one substitution — substituted text is never re-scanned.
         let mut m = HashMap::new();
-        m.insert("reloadData".to_string(), "morph_mods::utility::loadData".to_string());
-        m.insert("loadData".to_string(), "morph_mods::utility::loadData".to_string());
+        m.insert("reloadData".to_string(), "app::utility::loadData".to_string());
+        m.insert("loadData".to_string(), "app::utility::loadData".to_string());
         let out = translate_js("(reloadData())", &m);
-        assert_eq!(out.matches("morph_mods").count(), 1, "{out}");
-        assert!(out.contains("morph_mods::utility::loadData()"), "{out}");
+        assert_eq!(out.matches("app").count(), 1, "{out}");
+        assert!(out.contains("app::utility::loadData()"), "{out}");
     }
 }

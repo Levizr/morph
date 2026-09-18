@@ -43,11 +43,11 @@ Importing the same binding from the same module = same signal/channel. Same bind
 
 ## 3. C++ Namespaces (Generated, Predictable)
 
-Root: `morph_mods` (kept to minimize diff). Then path segments, then stem. **No hash leaf** — hard naming rules guarantee 1:1 mapping.
+Root: `app` (kept to minimize diff). Then path segments, then stem. **No hash leaf** — hard naming rules guarantee 1:1 mapping.
 
 ```cpp
 // Generated for src/components/shop/ShopStore.mx exporting `cart`
-namespace morph_mods {
+namespace app {
 namespace components {
 namespace shop {
 namespace shopstore {      // stem: "shopstore" (lowercased from ShopStore.mx)
@@ -134,7 +134,7 @@ int doubleIt(int x) { return x * 2; }   // zero plumbing, always
 
 | Need | Route | Code |
 |---|---|---|
-| Read shared state | `<binding>()` (JSX name) | `morph_mods::cartstore::cart()` |
+| Read shared state | `<binding>()` (JSX name) | `app::cartstore::cart()` |
 | Write shared state | `<setter>(v)` + optional `notify_<event>()` | `setCart(0); notify_cartChanged();` |
 | Emit event | `evt_<name>().emit(payload)` | `evt_cartChanged().emit({});` |
 | Read another component's local | **Don't.** Emit event; let that component reset its own local. | `evt_resetEvent().emit({});` / `resetEvent.on(() => setCount(0))` |
@@ -162,7 +162,7 @@ The generated `morph_api.h` defines one `Channel` per event binding as an `inlin
 
 ```cpp
 // Generated morph_api.h for src/components/ShopStore.mx exporting `clearCart`
-namespace morph_mods {
+namespace app {
 namespace store_shopstore_1a2b3c4d {
 inline morph::Channel& evt_clearCart() { static morph::Channel c; return c; }
 // User DX wrappers in the same header:
@@ -175,8 +175,8 @@ The build TU lowers every `morph::channel("<id>")` at emit/subscribe sites to th
 
 ```cpp
 // Shipped generated output (zero string lookup)
-morph_mods::store_shopstore_1a2b3c4d::evt_clearCart().emit(JsObject{{"cart", morph_mods::store_shopstore_1a2b3c4d::shared_cart().get()}});
-morph_mods::store_shopstore_1a2b3c4d::evt_clearCart().on([](const JsValue& __ch_0) { __st_inst1_qty.set(0); });
+app::store_shopstore_1a2b3c4d::evt_clearCart().emit(JsObject{{"cart", app::store_shopstore_1a2b3c4d::shared_cart().get()}});
+app::store_shopstore_1a2b3c4d::evt_clearCart().on([](const JsValue& __ch_0) { __st_inst1_qty.set(0); });
 ```
 
 - **Cost:** only the listener-list lock inside `emit` (inherent to pub/sub). No registry mutex, no string map, no string compares.
@@ -203,7 +203,7 @@ morph_mods::store_shopstore_1a2b3c4d::evt_clearCart().on([](const JsValue& __ch_
 
 | Feature | Status | Notes |
 |---|---|---|
-| `morphShared` namespaced, `morphEvent` namespaced | ✅ Shipped | `morph_mods::<path>::shared_<name>()`, `evt_<name>()` |
+| `morphShared` namespaced, `morphEvent` namespaced | ✅ Shipped | `app::<path>::shared_<name>()`, `evt_<name>()` |
 | Strict TS-only sources (`.ts`/`.tsx`/`.mx`) | ✅ Shipped | `.js`/`.jsx` rejected at parse |
 | `mid` parser + dedupe + codegen constants | ✅ Shipped | Builder validates/records, codegen emits `MID_*` + switch-dispatch accessors + header decls |
 | Static event channels (no string registry) | ✅ Shipped (build) | Channel statics in namespace; build TU lowers `morph::channel("<id>")` → accessor; dev TU keeps registry for rewire |
@@ -332,7 +332,7 @@ The fix is exactly what you'd expect: **the channel ID only needs to exist at bu
 
 ```cpp
 // Generated — one static per event, same pattern as shared signals
-namespace morph_mods { namespace components { namespace shopstore {
+namespace app { namespace components { namespace shopstore {
 static morph::Channel& evt_clearCart() { static morph::Channel c; return c; }
 }}}
 ```

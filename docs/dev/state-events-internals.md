@@ -24,7 +24,7 @@ Consequences (all enforced, none conventional):
 Each module gets a namespace segment so generated symbols can never collide across files:
 
 ```cpp
-namespace morph_mods {
+namespace app {
 namespace store_cart_a1b2c3d4 {   // store_{stem}_{hash8}
   static Signal<int> __shared_count;      // backing signal
   Signal<int>& shared_count() { ... }     // accessor
@@ -34,7 +34,7 @@ namespace store_cart_a1b2c3d4 {   // store_{stem}_{hash8}
 
 - `module_namespace` (`builder.rs`): stem = sanitized file stem (non-alphanumeric → `_`, extension stripped), hash = low 32 bits of **FNV-1a** over `module.display()`. The stem is readability; the hash is uniqueness (same-named files in different dirs differ).
 - `shared_signal_accessor`: `shared_{sanitized_getter}` — only getter names *within one file* must differ.
-- Both codegen backends emit the same shape: `logic_emitter.rs` writes statics/accessors/wrappers inside the namespace block; `cpp/mod.rs` references them via `shared_expr(ns, accessor)` → `morph_mods::{ns}::{accessor}()`.
+- Both codegen backends emit the same shape: `logic_emitter.rs` writes statics/accessors/wrappers inside the namespace block; `cpp/mod.rs` references them via `shared_expr(ns, accessor)` → `app::{ns}::{accessor}()`.
 
 ## Pipeline stage 1 — parse (`morph-parser`)
 
@@ -52,7 +52,7 @@ Scope linting (`linter.rs`): `mx-state-scope` (state inside components only), `m
 
 `seed_module_bindings` runs once per module per instance frame and fills two ambient maps:
 
-- `frame.vars`: `getter` → `morph_mods::{ns}::{accessor}().get()`, `setter` → `morph_mods::{ns}::{accessor}().set`. This is the *only* place user-visible names become C++ expressions — every downstream consumer (`translate_js`, `translate_logic`, reactive text) just does string substitution through `state_map`/`frame.vars`.
+- `frame.vars`: `getter` → `app::{ns}::{accessor}().get()`, `setter` → `app::{ns}::{accessor}().set`. This is the *only* place user-visible names become C++ expressions — every downstream consumer (`translate_js`, `translate_logic`, reactive text) just does string substitution through `state_map`/`frame.vars`.
 - `frame.events`: `eventName` → channel id (`evt:…`).
 
 It also appends to `ctx.shared_entries` via `register_binding`, deduped by the `key` field. Each entry is `{key, ns, accessor, type, init, getter, setter}` and becomes `WindowIR.shared_vars` (see `node.rs`, serialized in `serializer.rs`). Codegen trusts `shared_vars` as the complete list of signals to declare — if a binding is missing there, no C++ is emitted for it.
@@ -71,7 +71,7 @@ Constraints enforced here (not in the linter): unknown event name, empty/missing
 
 ## Pipeline stage 4 — C++ emission (`morph-codegen`)
 
-- `logic_emitter.rs`: emits each `shared_vars` entry as static + accessor inside its `morph_mods::<ns>` block, plus `generate_state_header` / `emit_init` wiring. Subscriptions become `morph::channel("<id>").on(<lambda>)`.
+- `logic_emitter.rs`: emits each `shared_vars` entry as static + accessor inside its `app::<ns>` block, plus `generate_state_header` / `emit_init` wiring. Subscriptions become `morph::channel("<id>").on(<lambda>)`.
 - `cpp/mod.rs`: builds `state_map` (getter→`{read}.get()`, setter→`{read}.set`, event names→`{name}()`) used by `node_emitter.rs` for reactive text, conditions, and list expressions; serializes `shared_decls` (with `ns`) into `app_main.cpp.tera`, which wraps declarations in the conditional namespace block.
 - Build and dev TUs emit the same function-local statics so hot-reload and AOT agree on identity.
 
@@ -92,7 +92,7 @@ cargo test -p morph-ir -p morph-parser -p morph-codegen   # unit + IR-shape regr
 cargo test --workspace                                     # full suite
 ```
 
-The IR-shape tests are the review: `shared_store_is_namespaced_per_file`-style tests assert the exact `shared_vars` entries and qualified accessor strings. If your change alters any expected `morph_mods::…` string, inspect the diff — a changed namespace or accessor means every existing store/event relinks. Also run `morph check` + `morph build` on `tests/runtime/component-test` and `examples/components`, which exercise cross-file shared state and event subscribe/emit end to end.
+The IR-shape tests are the review: `shared_store_is_namespaced_per_file`-style tests assert the exact `shared_vars` entries and qualified accessor strings. If your change alters any expected `app::…` string, inspect the diff — a changed namespace or accessor means every existing store/event relinks. Also run `morph check` + `morph build` on `tests/runtime/component-test` and `examples/components`, which exercise cross-file shared state and event subscribe/emit end to end.
 
 ## FAQ (why it is built this way)
 

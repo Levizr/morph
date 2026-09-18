@@ -89,7 +89,7 @@
         "keywords": [
           "morph shared state internals",
           "morph event channel codegen",
-          "morph_mods namespace",
+          "app namespace",
           "morph IR shared_vars"
         ],
         "lastUpdated": "2026-09-16",

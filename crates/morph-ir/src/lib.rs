@@ -11,7 +11,9 @@ pub mod style;
 pub mod tailwind;
 pub mod transforms;
 
-pub use builder::{binding_ident, is_instance_slot, qualified_binding_ref, IRBuilder};
+pub use builder::{
+    binding_ident, is_instance_slot, qualified_binding_ref, IRBuilder, MODULE_NS_ROOT,
+};
 pub use node::{IRAnimation, IRConditionalClassEffect, IREvent, IRKeyframe, IRNode, IRWindow};
 pub use serializer::IRSerializer;
 pub use style::IRStyle;

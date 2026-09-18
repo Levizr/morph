@@ -21,17 +21,17 @@ export function helper() { return fetchUserData() }
 // Navbar.mx
 import { loadData } from './utility.ts'
 export default function App() {
-  function refresh() { loadData() }   // rewritten: morph_mods::utility::loadData()
+  function refresh() { loadData() }   // rewritten: app::utility::loadData()
 }
 ```
 
 ```cpp
 // native.cpp — always the DEFINING namespace:
-morph_mods::utility::loadData();    // ✅ defined in utility.ts
-morph_mods::navbar::loadData();     // ❌ never exists (Navbar only imports it)
+app::utility::loadData();    // ✅ defined in utility.ts
+app::navbar::loadData();     // ❌ never exists (Navbar only imports it)
 ```
 
-If `utility.ts` uses `fetchUserData()` from `network.ts` while `Navbar.mx` defines its own `fetchUserData()`, both coexist — `morph_mods::network::fetchUserData` vs `morph_mods::navbar::fetchUserData`. No overwriting, no duplication errors, no per-file isolation discipline.
+If `utility.ts` uses `fetchUserData()` from `network.ts` while `Navbar.mx` defines its own `fetchUserData()`, both coexist — `app::network::fetchUserData` vs `app::navbar::fetchUserData`. No overwriting, no duplication errors, no per-file isolation discipline.
 
 ---
 
@@ -50,7 +50,7 @@ identity = canonical_module_path + "::" + binding_name
 | Shared | `src/cart.ts::cart` (existing) |
 | Event | `src/cart.ts::cartChanged` (existing) |
 
-Namespaces reuse the one scheme from the state/events record: entry-relative segments, lowercased, `[a-z0-9_]`, `morph_mods::<…>`, `mx-naming` hard gates (now enforced for `.ts`/`.tsx` too). The old `<stem>_logic` fragment wrapper is retired by this scheme (it was stem-only — `a/utils.ts` and `b/utils.ts` collided).
+Namespaces reuse the one scheme from the state/events record: entry-relative segments, lowercased, `[a-z0-9_]`, `app::<…>`, `mx-naming` hard gates (now enforced for `.ts`/`.tsx` too). The old `<stem>_logic` fragment wrapper is retired by this scheme (it was stem-only — `a/utils.ts` and `b/utils.ts` collided).
 
 ---
 
@@ -68,7 +68,7 @@ The parser records every exportable binding (morpher already emits functions, va
 
 `import { x } from './y'` (or default import) resolves `x` against `y`'s full inventory — component, shared, event, function, var, class:
 
-- Found → every use rewrites to `morph_mods::<ns_y>::x` (same rename machinery shared state already uses).
+- Found → every use rewrites to `app::<ns_y>::x` (same rename machinery shared state already uses).
 - Specifier matches nothing in `y` → **hard error** (no silent fall-through).
 - Same local name imported from two modules → **hard error** (existing ambiguous-import rule, now universal).
 - No re-declaration in the importing namespace: the name exists only at its definition site.
@@ -81,12 +81,12 @@ Re-exports are allowed (`export { loadData } from './utility.ts'`, `export * fro
 
 ```cpp
 // Generated for Navbar.mx re-exporting loadData from utility.ts
-namespace morph_mods { namespace navbar {
-using morph_mods::utility::loadData;
+namespace app { namespace navbar {
+using app::utility::loadData;
 }}
 ```
 
-So `morph_mods::navbar::loadData()` works **iff** `Navbar.mx` re-exports it; a plain (non-re-exporting) import creates no alias. Rules:
+So `app::navbar::loadData()` works **iff** `Navbar.mx` re-exports it; a plain (non-re-exporting) import creates no alias. Rules:
 
 - Re-export of an unknown name → hard error.
 - Re-export name colliding with a local definition → hard error (explicit beats implicit; rename one).
@@ -103,19 +103,19 @@ So `morph_mods::navbar::loadData()` works **iff** `Navbar.mx` re-exports it; a p
 #include "morph_api.h"
 
 void refreshAll() {
-    morph_mods::utility::loadData();          // defined in utility.ts
-    morph_mods::store::setToken("abc");       // defined in store.ts
-    morph_mods::models::User u("hero");       // defined in models.ts
+    app::utility::loadData();          // defined in utility.ts
+    app::store::setToken("abc");       // defined in store.ts
+    app::models::User u("hero");       // defined in models.ts
 }
 ```
 
-Decision tree addition (extends the `native-cpp.md` table): *call a TS/TSX function* → `morph_mods::<defining_module>::name()`; *find the defining module* → the `// name (path/file:line)` comment in `morph_api.h`.
+Decision tree addition (extends the `native-cpp.md` table): *call a TS/TSX function* → `app::<defining_module>::name()`; *find the defining module* → the `// name (path/file:line)` comment in `morph_api.h`.
 
 ---
 
 ## 7. `.ts` Strategy (DX + performance)
 
-- **One namespace scheme everywhere**: fragments wrap in `morph_mods::<ns>` (not `<stem>_logic`).
+- **One namespace scheme everywhere**: fragments wrap in `app::<ns>` (not `<stem>_logic`).
 - **Keep separate fragment TUs** (one `.ts.cpp` per source, as today) instead of inlining everything into `app.cpp`: parallel compilation, incremental rebuilds (unchanged files skip), and the existing `-ffunction-sections` + `--gc-sections` already dead-strip unused helpers. DX is unaffected — names are predictable and the header is the only surface that matters.
 - `.ts` → `.mx` calls work today (same binary); `.mx` → `.ts` calls route through the new import resolution (previously bare names that only linked by luck).
 
@@ -144,7 +144,7 @@ Decision tree addition (extends the `native-cpp.md` table): *call a TS/TSX funct
 | Codegen namespaced defs + full `morph_api.h` | ✅ Shipped | Func decls, var externs, moved classes, `using`-aliases; single-pass substitution (no double-qualify) |
 | Fragments of graph-member `.ts` skipped | ✅ Shipped | Builder owns graph modules; unimported files keep fragments |
 | `native-cpp.md` binding-call examples | ✅ Shipped | Decision tree + defining-namespace rules |
-| Unified `morph_mods::<ns>` fragments (retire `<stem>_logic`) | 📋 Planned | Standalone (unimported) files still use it; unify when touched |
+| Unified `app::<ns>` fragments (retire `<stem>_logic`) | 📋 Planned | Standalone (unimported) files still use it; unify when touched |
 | `import type` erasure guidance | 📋 Planned | Linter hint |
 | Top-level side-effect statements in imported `.ts` | 📋 Known limitation | Builder drops bare statements; keep init code in functions |
 
@@ -174,7 +174,7 @@ A local `const loadData` next to `import { loadData }` is an ambiguous-import ha
 | 2026-09-17 | Re-exports allowed; C++-callable via `using`-alias | Explicit re-export = explicit alias; plain imports create nothing |
 | 2026-09-17 | Default exports bind local name → qualified defining name | Matches ES semantics with zero new syntax |
 | 2026-09-17 | Keep separate `.ts` fragment TUs | Parallel + incremental builds; DX unchanged via unified namespaces |
-| 2026-09-17 | Retire `<stem>_logic` for `morph_mods::<ns>` | Stem-only namespaces collide across directories |
+| 2026-09-17 | Retire `<stem>_logic` for `app::<ns>` | Stem-only namespaces collide across directories |
 | 2026-09-17 | `import type` always fine; value-position type imports error | Types are erased; the hint teaches the escape hatch |
 
 ---

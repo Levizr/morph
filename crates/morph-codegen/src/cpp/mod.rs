@@ -467,7 +467,7 @@ fn shared_expr(ns: &str, accessor: &str) -> String {
     if ns.is_empty() {
         format!("{accessor}()")
     } else {
-        format!("morph_mods::{ns}::{accessor}()")
+        format!("{}::{ns}::{accessor}()", morph_ir::MODULE_NS_ROOT)
     }
 }
 
@@ -476,7 +476,7 @@ fn event_expr(ns: &str, accessor: &str) -> String {
     if ns.is_empty() {
         format!("{accessor}()")
     } else {
-        format!("morph_mods::{ns}::{accessor}()")
+        format!("{}::{ns}::{accessor}()", morph_ir::MODULE_NS_ROOT)
     }
 }
 
@@ -535,7 +535,7 @@ fn generate_mid_code(windows: &[IRWindow], premain_code: &str) -> String {
         if states.is_empty() {
             continue;
         }
-        out.push("namespace morph_mods {".to_string());
+        out.push(format!("namespace {} {{", morph_ir::MODULE_NS_ROOT));
         out.push(format!("namespace {ns} {{"));
         for (getter, ty, mut cases) in states {
             cases.sort_by_key(|(index, _)| *index);
@@ -618,7 +618,7 @@ fn generate_self_test(windows: &[IRWindow]) -> String {
                     if ns.is_empty() {
                         name.to_string()
                     } else {
-                        format!("morph_mods::{ns}::{name}")
+                        format!("{}::{ns}::{name}", morph_ir::MODULE_NS_ROOT)
                     }
                 };
                 lines.push(format!("    {}({});", q(setter), probe));
@@ -675,11 +675,10 @@ fn generate_self_test(windows: &[IRWindow]) -> String {
                     _ => continue,
                 };
                 let ns = a.get("ns").map_or("", String::as_str);
+                let root = morph_ir::MODULE_NS_ROOT;
+                lines.push(format!("    {root}::{ns}::set_{getter}({root}::{ns}::{c}, {probe});"));
                 lines.push(format!(
-                    "    morph_mods::{ns}::set_{getter}(morph_mods::{ns}::{c}, {probe});"
-                ));
-                lines.push(format!(
-                    "    check(morph_mods::{ns}::get_{getter}(morph_mods::{ns}::{c}) == {probe}, \"mid:{c}\");"
+                    "    check({root}::{ns}::get_{getter}({root}::{ns}::{c}) == {probe}, \"mid:{c}\");"
                 ));
             }
         }
@@ -1145,7 +1144,8 @@ fn generate_morph_api_header(
                     if target_ns.is_empty() || target_name.is_empty() {
                         continue;
                     }
-                    let target_expr = format!("morph_mods::{target_ns}::{target_name}");
+                    let target_expr =
+                        format!("{}::{target_ns}::{target_name}", morph_ir::MODULE_NS_ROOT);
                     let mut entry = vec![format!("// {name} (re-export of {target_expr})")];
                     if name == target_name {
                         entry.push(format!("using {target_expr};"));
@@ -1186,7 +1186,7 @@ fn generate_morph_api_header(
             lines.extend(member_lines);
             continue;
         }
-        lines.push("namespace morph_mods {".to_string());
+        lines.push(format!("namespace {} {{", morph_ir::MODULE_NS_ROOT));
         lines.push(format!("namespace {ns} {{"));
         lines.extend(member_lines);
         lines.push("}".to_string());
@@ -1311,10 +1311,10 @@ mod tests {
         CppEmitter::new(&windows).emit(&dir).unwrap();
         let app = std::fs::read_to_string(dir.join("app.cpp")).unwrap();
         let api = std::fs::read_to_string(dir.join("morph_api.h")).unwrap();
-        assert!(api.contains("namespace morph_mods {"), "module namespace: {api}");
+        assert!(api.contains("namespace app {"), "module namespace: {api}");
         assert!(api.contains("namespace cart_12345678 {"), "store namespace: {api}");
         assert!(
-            app.contains("morph_mods::cart_12345678::shared_cart_count().get()"),
+            app.contains("app::cart_12345678::shared_cart_count().get()"),
             "qualified read: {app}"
         );
         let _ = std::fs::remove_dir_all(&dir);
@@ -1362,11 +1362,11 @@ mod tests {
         let api = std::fs::read_to_string(dir.join("morph_api.h")).unwrap();
         assert!(!app.contains("morph::channel(\"evt:"), "no string lookup in app.cpp: {app}");
         assert!(
-            app.contains("morph_mods::store_abc123::evt_resetEvent().emit(JsObject{});"),
+            app.contains("app::store_abc123::evt_resetEvent().emit(JsObject{});"),
             "emit lowered: {app}"
         );
         assert!(
-            app.contains("morph_mods::store_abc123::evt_resetEvent().on([](const JsValue& __ch_0)"),
+            app.contains("app::store_abc123::evt_resetEvent().on([](const JsValue& __ch_0)"),
             "subscribe lowered: {app}"
         );
         assert!(
@@ -1428,7 +1428,7 @@ mod tests {
         assert!(app.contains("case 0: return __st_inst1_count.get();"), "def: {app}");
         assert!(app.contains("--morph-self-test"), "flag: {app}");
         assert!(
-            app.contains("morph_mods::counter::set_count(morph_mods::counter::MID_HERO, 7);"),
+            app.contains("app::counter::set_count(app::counter::MID_HERO, 7);"),
             "self-test: {app}"
         );
         assert!(app.contains("[morph-self-test]"), "summary: {app}");
@@ -1471,11 +1471,9 @@ mod tests {
             visible: true,
             renderer: "flash".to_string(),
             premain_functions: vec![
-                "namespace morph_mods {\nnamespace u {\nint loadData()\n{\nreturn 1;\n}\n}\n}"
-                    .to_string(),
-                "namespace morph_mods {\nnamespace u {\nstd::string token = \"abc\";\n}\n}"
-                    .to_string(),
-                "namespace morph_mods {\nnamespace u {\nclass User {\npublic:\nint x;\n};\n}\n}"
+                "namespace app {\nnamespace u {\nint loadData()\n{\nreturn 1;\n}\n}\n}".to_string(),
+                "namespace app {\nnamespace u {\nstd::string token = \"abc\";\n}\n}".to_string(),
+                "namespace app {\nnamespace u {\nclass User {\npublic:\nint x;\n};\n}\n}"
                     .to_string(),
             ],
             module_bindings: vec![fb, vb, cb, ab],
@@ -1501,7 +1499,7 @@ mod tests {
         assert!(api.contains("class User {"), "class moved: {api}");
         assert!(!app.contains("class User {"), "class left premain: {app}");
         // Same-name re-export alias via using.
-        assert!(api.contains("using morph_mods::u::loadData;"), "alias: {api}");
+        assert!(api.contains("using app::u::loadData;"), "alias: {api}");
         // Function definition itself stays namespaced in app.cpp.
         assert!(app.contains("int loadData()"), "func defn stays: {app}");
         let _ = std::fs::remove_dir_all(&dir);
