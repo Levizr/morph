@@ -19,14 +19,26 @@ static uint8_t overflowToEnum(const std::string& s) {
 static uint8_t boxSizingToEnum(const std::string& s) {
     return (s == "border-box") ? 1 : 0;
 }
-static uint8_t displayToEnum(const std::string& s) {
-    if (s == "flex")  return 1;
-    if (s == "none")  return 2;
-    if (s == "inline") return 3;
-    return 0;
+// Flattened discriminants (display 0=block,1=flex,2=none,3=inline;
+// position 0=static,1=absolute) predate the CSS enums. These string-free
+// mappings keep their exact values; batch 2 removes them with the rest.
+static uint8_t displayToFlat(CSS::Display d)
+{
+    switch (d)
+    {
+    case CSS::Display::Flex:
+        return 1;
+    case CSS::Display::None:
+        return 2;
+    case CSS::Display::Inline:
+        return 3;
+    default:
+        return 0;
+    }
 }
-static uint8_t positionToEnum(const std::string& s) {
-    return (s == "absolute") ? 1 : 0;
+static uint8_t positionToFlat(CSS::Position p)
+{
+    return (p == CSS::Position::Absolute) ? 1 : 0;
 }
 static uint8_t fontWeightToEnum(const std::string& s) {
     return (s == "bold" || s == "700" || s == "800" || s == "900") ? 1 : 0;
@@ -223,8 +235,8 @@ int MorphNode::flattenImpl(RenderFrame& frame, int parentId, float scrollOffset,
 
     fn.overflow = overflowToEnum(style.overflow);
     fn.boxSizing = boxSizingToEnum(style.boxSizing);
-    fn.display = displayToEnum(style.display);
-    fn.position = positionToEnum(style.position);
+    fn.display = displayToFlat(style.display);
+    fn.position = positionToFlat(style.position);
 
     fn.fontSize = style.fontSize;
     fn.textAlign = (style.textAlign == "center") ? (uint8_t)1 : (style.textAlign == "right" ? (uint8_t)2 : (uint8_t)0);

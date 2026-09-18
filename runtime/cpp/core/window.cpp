@@ -183,7 +183,7 @@ void MorphWindow::mouseButtonCb(GLFWwindow *win, int btn, int act, int mods)
             // drag-selection are handled by the input itself via onEvent);
             // clicking anywhere else releases focus, browser-style.
 #ifdef MORPH_FEATURE_INPUT
-            if (MorphNode::s_activePressNode && MorphNode::s_activePressNode->type == "input" && !static_cast<InputNode *>(MorphNode::s_activePressNode)->disabled)
+            if (MorphNode::s_activePressNode && MorphNode::s_activePressNode->type == NodeType::Input && !static_cast<InputNode *>(MorphNode::s_activePressNode)->disabled)
                 MorphNode::s_activePressNode->requestFocus();
             else if (MorphNode::s_focusedNode)
                 MorphNode::s_focusedNode->blur();

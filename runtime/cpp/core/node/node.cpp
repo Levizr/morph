@@ -109,7 +109,7 @@ float MorphNode::contentWidth(Renderer* r) {
     }
 
 #ifdef MORPH_FEATURE_FLEX
-    if (style.display == "flex" && style.flexDirection == "row") {
+    if (style.display == CSS::Display::Flex && style.flexDirection == "row") {
         float total = 0.0f;
         int count = 0;
         for (auto* c : children) {
@@ -128,8 +128,8 @@ float MorphNode::contentWidth(Renderer* r) {
     {
         float totalInline = 0.0f;
         for (auto* c : children) {
-            if (c->style.display == "inline" || c->style.display == "inline-block"
-                || c->type == "__text__" || c->type == "__expr__") {
+            if (c->style.display == CSS::Display::Inline || c->style.display == CSS::Display::InlineBlock
+                || c->type == NodeType::Text || c->type == NodeType::Expr) {
                 float cw = c->contentWidth(r);
                 if (cw > 0.0f)
                     totalInline += cw + c->style.margin[3] + c->style.margin[1];
@@ -144,7 +144,7 @@ float MorphNode::contentWidth(Renderer* r) {
     float maxCW = -1.0f;
     for (auto* c : children) {
 #ifdef MORPH_FEATURE_DISPLAY_NONE
-        if (c->style.display == "none") continue;
+        if (c->style.display == CSS::Display::None) continue;
 #endif
         float cw = c->contentWidth(r);
         if (cw > maxCW) maxCW = cw;

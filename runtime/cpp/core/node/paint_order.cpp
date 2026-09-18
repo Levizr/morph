@@ -20,13 +20,13 @@ void MorphNode::ensurePaintOrder() {
     m_paintOrder.clear();
 
     std::vector<MorphNode*> neg, blockFlow, inlineFlow, autoLayer, pos;
-    bool flexParent = (style.display == "flex");
+    bool flexParent = (style.display == CSS::Display::Flex);
 
     for (auto* c : children) {
 #ifdef MORPH_FEATURE_DISPLAY_NONE
-        if (c->style.display == "none") continue;
+        if (c->style.display == CSS::Display::None) continue;
 #endif
-        bool participant = (c->style.position != "static") || flexParent;
+        bool participant = (c->style.position != CSS::Position::Static) || flexParent;
         if (participant) {
             if (c->style.zIndexSet && c->style.zIndex < 0) {
                 neg.push_back(c);
@@ -36,9 +36,9 @@ void MorphNode::ensurePaintOrder() {
                 autoLayer.push_back(c);  // z-index: auto / 0
             }
         } else {
-            bool isInline = (c->style.display == "inline" ||
-                             c->style.display == "inline-block" ||
-                             c->type == "__text__" || c->type == "__expr__");
+            bool isInline = (c->style.display == CSS::Display::Inline ||
+                             c->style.display == CSS::Display::InlineBlock ||
+                             c->type == NodeType::Text || c->type == NodeType::Expr);
             if (isInline)
                 inlineFlow.push_back(c);
             else

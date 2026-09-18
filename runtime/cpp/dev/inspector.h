@@ -1245,10 +1245,10 @@ private:
         drawSectionLabel(r, px + 22, y + 6, "ELEMENT");
 
         std::string tag;
-        if (n->type == "__text__") {
+        if (n->type == NodeType::Text) {
             tag = "text";
         } else {
-            tag = n->type.empty() ? "div" : n->type;
+            tag = ::toString(n->type);
         }
         float badgeW = r.measureTextWidth("<" + tag + ">", 11.0f, "bold") + 16.0f;
         float badgeBg[4] = {0.19f, 0.17f, 0.36f, 1.0f};
@@ -1267,7 +1267,7 @@ private:
         // Breadcrumb — parent chain
         std::string trail;
         for (auto* p = n; p; p = p->parent) {
-            std::string t = p->type.empty() ? "div" : p->type;
+            std::string t = ::toString(p->type);
             if (t == "__text__") t = "text";
             if (!trail.empty()) trail = t + " / " + trail;
             else trail = t;
@@ -1307,7 +1307,7 @@ private:
         drawCard(r, cardX, y, cardW, cardH);
         drawSectionLabel(r, px + 22, y + 6, "DISPLAY");
         ry = y + 26.0f;
-        drawRow(r, px + 22, ry, "Display", s.display.c_str(), valCol); ry += 17.0f;
+        drawRow(r, px + 22, ry, "Display", CSS::toString(s.display), valCol); ry += 17.0f;
         drawRow(r, px + 22, ry, "Overflow", s.overflow.c_str(), valCol); ry += 17.0f;
         drawRow(r, px + 22, ry, "Box Sizing", s.boxSizing.c_str(), valCol);
         y += cardH + 8.0f;

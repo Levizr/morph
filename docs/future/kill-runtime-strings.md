@@ -1,6 +1,6 @@
 # Kill All Runtime Strings
 
-**Status:** `development` · **Priority:** high · **Shipped parts:** none (design record; implementation follows in batches)
+**Status:** `development` · **Priority:** high · **Shipped parts:** batch 1 (`NodeType` + `CSS::Display` + `CSS::Position`)
 
 > Every `std::string` compare, lookup, and allocation on a hot path — layout, paint, text, events, property access — replaced with integers, enums, or hashes. Strings survive only where they belong: build-time parsing, debug printing, and genuinely freeform values (font names, custom text). Companion to [State, Events & Native C++ Interop](state-events-native-interop.md) and [Universal Module Bindings](universal-module-bindings.md), which killed string *identity*; this page kills string *comparison*.
 
@@ -135,7 +135,7 @@ Layout-critical first, then the rest. Numeric properties (`opacity`, `border-rad
 
 | Batch | Content | Proof |
 |---|---|---|
-| 1 | `NodeType` + `CSS::Display` + `CSS::Position` | Fixture rebuilds, screenshots, self-tests |
+| 1 | `NodeType` + `CSS::Display` + `CSS::Position` | ✅ Shipped — fixture rebuilds, screenshots, self-tests |
 | 2 | Remaining style enums + text-path unification + converter deletion | Same + `flatten.cpp` converter absence asserted |
 | 3 | Map swap + sorted `for-in` + `stoll`-free indexing + `undefined`/`length` semantics + regression tests | Workspace tests incl. garbage-key/cycle tests, self-tests |
 
@@ -153,6 +153,12 @@ Each batch: `cargo test --workspace`, fixture rebuilds, `--morph-self-test`, `ru
 | 2026-09-17 | Plain `unordered_map` (not insertion-ordered) + sorted codegen iteration | Max point-lookup speed; today's exact sorted-iteration behavior preserved without order-dependence analysis |
 | 2026-09-17 | `undefined` (not throw) on garbage array keys; `"length"` → length | JS-correct; fixes a crash hazard |
 | 2026-09-17 | Hot-key interning deferred to measurement | Map swap already removes the dominant cost |
+| 2026-09-19 | Batch 1: `display:hidden` parses to `Block` | Replicates today's effective behavior (never matched; fell through to block paths) |
+| 2026-09-19 | Batch 1: unknown tags parse to `NodeType::Custom` | Nothing compares against them; inspector prints `custom` |
+| 2026-09-19 | Batch 1: ancestor-hover tag match via `toString` | Rule pipeline has no producer (dev IR only); reachable behavior unchanged |
+| 2026-09-19 | Batch 1: generated refs use leading `::app::` | Bare `app::X` inside namespace blocks resolves through `app::app` (pre-existing trap, broke self-referencing modules in both flows) |
+| 2026-09-19 | Batch 1: `fn.display`/`fn.position` keep uint8 via string-free mapping | Flatten discriminants are write-only; values bit-identical; removal in batch 2 |
+| 2026-09-19 | Excluded from scope: transform fn names, net response types, signal `-0` | Parse-time/cold paths (verified in source) |
 
 ---
 

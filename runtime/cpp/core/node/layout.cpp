@@ -107,7 +107,7 @@ void MorphNode::applySticky() {
 }
 
 void MorphNode::updateStickySubtree() {
-    if (style.position == "sticky") applySticky();
+    if (style.position == CSS::Position::Sticky) applySticky();
     for (auto* c : children) c->updateStickySubtree();
 }
 #endif
@@ -139,14 +139,16 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 #endif
 
 #ifdef MORPH_FEATURE_POSITION
-    bool isAbs = (style.position == "absolute" || style.position == "fixed");
-    bool isRel = (style.position == "relative" || style.position == "sticky");
+    bool isAbs = (style.position == CSS::Position::Absolute
+                   || style.position == CSS::Position::Fixed);
+    bool isRel = (style.position == CSS::Position::Relative
+                   || style.position == CSS::Position::Sticky);
 
     if (isAbs) {
         // ── Out of flow: absolute (nearest positioned ancestor's padding box)
         //    or fixed (viewport). px/py/parentW/parentH are ignored here.
         float cbx, cby, cbw, cbh;
-        if (style.position == "fixed") {
+        if (style.position == CSS::Position::Fixed) {
             cbx = 0.0f; cby = 0.0f;
             cbw = m_winW; cbh = m_winH;
         } else {
@@ -233,7 +235,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
     if (autoB) mb = 0.0f;
     if (getenv("MORPH_LAYOUT_DEBUG") && (mt != 0.0f || mb != 0.0f)) {
         printf("[layout()] type=%s px=%.2f py=%.2f mt=%.2f mb=%.2f -> y=%.2f\n",
-               type.c_str(), px, py, mt, mb, py + mt);
+               ::toString(type), px, py, mt, mb, py + mt);
     }
     m_computedMargin[3] = ml; m_computedMargin[1] = mr;
     m_computedMargin[0] = mt; m_computedMargin[2] = mb;
@@ -258,7 +260,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
     // ── Relative: offset the flow box without affecting siblings. ──
     // Sticky skips the fixed offset here — its offset is the scroll clamp
     // applied in applySticky() (called below), anchored at m_flowX/m_flowY.
-    if (style.position == "relative") {
+    if (style.position == CSS::Position::Relative) {
         float offX = 0.0f, offY = 0.0f;
         if (style.left > -1e8f) offX = style.left;
         else if (style.right > -1e8f) offX = -style.right;
@@ -273,7 +275,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 #ifdef MORPH_FEATURE_POSITION
     m_flowX = x;
     m_flowY = y;
-    if (style.position == "sticky")
+    if (style.position == CSS::Position::Sticky)
         applySticky();
 #endif
 
@@ -312,7 +314,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 #endif
 
 #ifdef MORPH_FEATURE_DISPLAY_NONE
-    if (style.display == "none") {
+    if (style.display == CSS::Display::None) {
         w = 0.0f; h = 0.0f;
         for (auto* c : children)
             c->layout(0.0f, 0.0f, 0.0f, 0.0f, r);
@@ -327,17 +329,17 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
     std::vector<MorphNode*> fixedChildren;
     for (auto* c : children) {
 #ifdef MORPH_FEATURE_POSITION
-        if (c->style.position == "absolute") {
+        if (c->style.position == CSS::Position::Absolute) {
             absChildren.push_back(c);
             continue;
         }
-        if (c->style.position == "fixed") {
+        if (c->style.position == CSS::Position::Fixed) {
             fixedChildren.push_back(c);
             continue;
         }
 #endif
 #ifdef MORPH_FEATURE_DISPLAY_NONE
-        if (c->style.display == "none") {
+        if (c->style.display == CSS::Display::None) {
             c->layout(0.0f, 0.0f, 0.0f, 0.0f, r);
             continue;
         }
@@ -363,7 +365,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 #endif
 
 #ifdef MORPH_FEATURE_FLEX
-    bool isRow = (style.display == "flex" && style.flexDirection == "row");
+    bool isRow = (style.display == CSS::Display::Flex && style.flexDirection == "row");
     bool isCol = !isRow;
 #else
     bool isRow = false;
@@ -372,7 +374,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
     int count = (int)normal.size();
 
 #ifdef MORPH_FEATURE_FLEX
-    if (style.display == "flex") {
+    if (style.display == CSS::Display::Flex) {
         struct FlexItem { MorphNode* node; float main, cross, mt, mr, mb, ml; bool mtAuto, mbAuto, mlAuto, mrAuto; };
         std::vector<FlexItem> items;
 
@@ -741,8 +743,9 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
         };
 
         for (auto* c : normal) {
-            if (c->style.display == "inline" || c->style.display == "inline-block"
-                || c->type == "__text__" || c->type == "__expr__") {
+            if (c->style.display == CSS::Display::Inline
+                || c->style.display == CSS::Display::InlineBlock
+                || c->type == NodeType::Text || c->type == NodeType::Expr) {
                 currentInline.push_back(c);
             } else {
                 flushInline();
@@ -753,7 +756,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 #ifdef MORPH_FEATURE_MARGIN_COLLAPSE
                 if (getenv("MORPH_LAYOUT_DEBUG")) {
                     printf("[layout] %s child type=%s y=%.2f curY=%.2f cy=%.2f ownMt=%.2f firstBlock=%d inlineBefore=%d pt=%g bw=%g\n",
-                           style.display.c_str(), c->type.c_str(), c->y, curY, cy, ownMt,
+                           CSS::toString(style.display), ::toString(c->type), c->y, curY, cy, ownMt,
                            firstBlockChild ? 1 : 0, inlineBeforeFirstBlock ? 1 : 0, pt, bw);
                 }
                 // A child's collapsed-through margins (m_computedMargin) are
@@ -888,7 +891,8 @@ after_children:
     }
 
 #ifdef MORPH_FEATURE_FLEX
-    if (style.display == "flex" && style.explicitWidth < 0.0f && isRow && maxRight > cx + cw) {
+    if (style.display == CSS::Display::Flex && style.explicitWidth < 0.0f && isRow
+        && maxRight > cx + cw) {
         float autoW = maxRight - x + pr + bw;
         if (autoW > w) w = autoW;
     }
@@ -916,7 +920,7 @@ after_children:
     // Pass collapsed-through margins up to our parent (parent–child margin
     // collapse), e.g. an h1's 21px margins escape a boundary-less div that
     // wraps it and become the gap around that div.
-    if (style.display != "flex" && style.explicitHeight < 0.0f) {
+    if (style.display != CSS::Display::Flex && style.explicitHeight < 0.0f) {
         if (pt == 0.0f && bw == 0.0f && firstBlockChild && !inlineBeforeFirstBlock
             && firstChildMtEff > m_computedMargin[0])
             m_computedMargin[0] = firstChildMtEff;
@@ -930,7 +934,7 @@ after_children:
     // text stays pinned to the top. When the button is taller than its
     // content (fixed height), shift the flow children down so the label sits
     // centered. Flex buttons are left alone — flexbox handles their layout.
-    if (type == "button" && style.display != "flex")
+    if (type == NodeType::Button && style.display != CSS::Display::Flex)
     {
         float btnContentH = h - pt - pb - bw * 2.0f;
         if (btnContentH > 0.0f)
@@ -940,7 +944,9 @@ after_children:
             for (auto* c : children)
             {
 #ifdef MORPH_FEATURE_POSITION
-                if (c->style.position == "absolute" || c->style.position == "fixed") continue;
+                if (c->style.position == CSS::Position::Absolute
+                    || c->style.position == CSS::Position::Fixed)
+                    continue;
 #endif
                 if (c->isWhitespaceOnly()) continue;
                 float top = c->y, bottom = c->y + c->h;
@@ -952,7 +958,9 @@ after_children:
                 if (offset > 0.0f)
                     for (auto* c : children) {
 #ifdef MORPH_FEATURE_POSITION
-                        if (c->style.position == "absolute" || c->style.position == "fixed") continue;
+                        if (c->style.position == CSS::Position::Absolute
+                    || c->style.position == CSS::Position::Fixed)
+                    continue;
 #endif
                         if (c->isWhitespaceOnly()) continue;
                         c->y += offset;

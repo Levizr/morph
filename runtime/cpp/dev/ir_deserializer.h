@@ -259,11 +259,11 @@ static void applyStyle(MorphStyle& s, const JsonValue& styleVal) {
     if (!styleVal["text_align"].isNull())
         s.textAlign = styleVal["text_align"].asString();
     if (!styleVal["display"].isNull())
-        s.display = styleVal["display"].asString();
+        s.display = CSS::parseDisplay(styleVal["display"].asString());
     if (!styleVal["overflow"].isNull())
         s.overflow = styleVal["overflow"].asString();
     if (!styleVal["position"].isNull())
-        s.position = styleVal["position"].asString();
+        s.position = CSS::parsePosition(styleVal["position"].asString());
     if (!styleVal["cursor"].isNull())
         s.cursor = styleVal["cursor"].asString();
     if (!styleVal["box_sizing"].isNull())
@@ -396,7 +396,7 @@ static MorphNode* deserializeNode(const JsonValue& val,
     } else {
         node = new RectNode(0, 0, 0, 0);
     }
-    node->type = type;
+    node->type = parseNodeType(type);
     if (val.has("id") && !val["id"].isNull())
         node->nodeId = val["id"].asString();
     if (!node->nodeId.empty())

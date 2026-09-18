@@ -1,6 +1,54 @@
 use morph_ir::{IRNode, IRStyle};
 use std::fmt::Write as _;
 
+/// Keyword → C++ enum literal for style/node-type emission. Mirrors the
+/// `parse*` functions in `runtime/cpp/style/css_enums.h` exactly
+/// (case-sensitive, unknown → default).
+/// `None` = default/unknown → skip emission (the field default matches).
+pub(crate) fn style_enum_literal(prop: &str, value: &str) -> Option<&'static str> {
+    match (prop, value) {
+        ("display", "flex") => Some("CSS::Display::Flex"),
+        ("display", "none") => Some("CSS::Display::None"),
+        ("display", "inline") => Some("CSS::Display::Inline"),
+        ("display", "inline-block") => Some("CSS::Display::InlineBlock"),
+        ("position", "absolute") => Some("CSS::Position::Absolute"),
+        ("position", "relative") => Some("CSS::Position::Relative"),
+        ("position", "fixed") => Some("CSS::Position::Fixed"),
+        ("position", "sticky") => Some("CSS::Position::Sticky"),
+        _ => None,
+    }
+}
+
+/// Keyword property → C++ enum literal for dynamic style effects.
+/// Only converted properties map here (batch 1: display/position);
+/// the rest fall through to raw strings until their batch lands.
+fn keyword_literal(field: &str, value: &str) -> Option<&'static str> {
+    match field {
+        "display" => Some(style_enum_literal("display", value).unwrap_or("CSS::Display::Block")),
+        "position" => {
+            Some(style_enum_literal("position", value).unwrap_or("CSS::Position::Static"))
+        }
+        _ => None,
+    }
+}
+
+/// Node type → C++ enum literal. Total (unknown tags → `Custom`),
+/// mirroring `parseNodeType` in `runtime/cpp/style/css_enums.h`.
+pub(crate) fn node_type_literal(node_type: &str) -> &'static str {
+    match node_type {
+        "button" => "NodeType::Button",
+        "input" => "NodeType::Input",
+        "img" => "NodeType::Img",
+        "__text__" => "NodeType::Text",
+        "__expr__" => "NodeType::Expr",
+        "__conditional__" => "NodeType::Conditional",
+        "__list__" => "NodeType::List",
+        "__fragment__" => "NodeType::Fragment",
+        "div" => "NodeType::Div",
+        _ => "NodeType::Custom",
+    }
+}
+
 pub fn fmt(v: f32) -> String {
     if !v.is_finite() {
         return "0.0f".into();
@@ -492,7 +540,8 @@ pub fn emit_node_with_state(
         }
         // Runtime type drives inline grouping, inline width, and paint
         // order (the dev deserializer sets it too — keep both paths equal).
-        lines.push(format!("{}{}->type = \"{}\";", indent, node.node_id, node.node_type));
+        let type_lit = node_type_literal(&node.node_type);
+        lines.push(format!("{}{}->type = {};", indent, node.node_id, type_lit));
         lines.push(format!("{}{}->x = {};", indent, node.node_id, fmt(node.x)));
         lines.push(format!("{}{}->y = {};", indent, node.node_id, fmt(node.y)));
         lines.push(format!("{}{}->w = {};", indent, node.node_id, fmt(node.w)));
@@ -521,7 +570,12 @@ pub fn emit_node_with_state(
     match node.node_type.as_str() {
         "button" => {
             lines.push(format!("ButtonNode* {} = new ButtonNode();", node.node_id));
-            lines.push(format!("{}{}->type = \"button\";", indent, node.node_id));
+            lines.push(format!(
+                "{}{}->type = {};",
+                indent,
+                node.node_id,
+                node_type_literal("button")
+            ));
         }
         "input" => {
             lines.push(format!("InputNode* {} = new InputNode();", node.node_id));
@@ -829,10 +883,12 @@ fn set_style(
         lines.push(format!("{ind}.overflow = \"{}\";", s.overflow));
     }
     if s.display != "block" {
-        lines.push(format!("{ind}.display = \"{}\";", s.display));
+        let lit = style_enum_literal("display", &s.display).unwrap_or("CSS::Display::Block");
+        lines.push(format!("{ind}.display = {lit};"));
     }
     if s.position != "static" {
-        lines.push(format!("{ind}.position = \"{}\";", s.position));
+        let lit = style_enum_literal("position", &s.position).unwrap_or("CSS::Position::Static");
+        lines.push(format!("{ind}.position = {lit};"));
     }
     if s.box_sizing != "content-box" {
         lines.push(format!("{ind}.boxSizing = \"{}\";", s.box_sizing));
@@ -1051,13 +1107,17 @@ fn emit_hover_style(
         o.push(format!("{hv}->explicitHeight = {};", fmt(s.height.unwrap())));
     }
     if s.display != "block" && s.display != base.display {
-        o.push(format!("{hv}->display = \"{}\";", s.display));
+        // Unknown values behave as the default everywhere; emit it
+        // explicitly so diffs against non-default bases still reset.
+        let lit = style_enum_literal("display", &s.display).unwrap_or("CSS::Display::Block");
+        o.push(format!("{hv}->display = {lit};"));
     }
     if s.overflow != "visible" && s.overflow != base.overflow {
         o.push(format!("{hv}->overflow = \"{}\";", s.overflow));
     }
     if s.position != "static" && s.position != base.position {
-        o.push(format!("{hv}->position = \"{}\";", s.position));
+        let lit = style_enum_literal("position", &s.position).unwrap_or("CSS::Position::Static");
+        o.push(format!("{hv}->position = {lit};"));
     }
     if s.box_sizing != "content-box" && s.box_sizing != base.box_sizing {
         o.push(format!("{hv}->boxSizing = \"{}\";", s.box_sizing));
@@ -1403,7 +1463,7 @@ pub(crate) fn css_field_reset(node_var: &str, field_name: &str, indent: &str) ->
         ],
         "fontWeight" => vec![format!("{indent}        {prefix} = \"normal\";")],
         "textAlign" => vec![format!("{indent}        {prefix} = \"left\";")],
-        "display" => vec![format!("{indent}        {prefix} = \"block\";")],
+        "display" => vec![format!("{indent}        {prefix} = CSS::Display::Block;")],
         "flexDirection" => vec![format!("{indent}        {prefix} = \"row\";")],
         "flexWrap" => vec![format!("{indent}        {prefix} = \"nowrap\";")],
         "justifyContent" => vec![format!("{indent}        {prefix} = \"flex-start\";")],
@@ -1412,7 +1472,7 @@ pub(crate) fn css_field_reset(node_var: &str, field_name: &str, indent: &str) ->
         "borderStyle" => vec![format!("{indent}        {prefix} = \"none\";")],
         "boxSizing" => vec![format!("{indent}        {prefix} = \"content-box\";")],
         "overflow" => vec![format!("{indent}        {prefix} = \"visible\";")],
-        "position" => vec![format!("{indent}        {prefix} = \"static\";")],
+        "position" => vec![format!("{indent}        {prefix} = CSS::Position::Static;")],
         "flexBasis" => vec![format!("{indent}        {prefix} = \"auto\";")],
         _ => vec![],
     };
@@ -1447,8 +1507,12 @@ pub(crate) fn css_val_to_cpp(
             ]
         }
         "string" => {
-            let esc = css_val.replace('\\', "\\\\").replace('"', "\\\"");
-            vec![format!("{indent}        {prefix} = \"{esc}\";")]
+            if let Some(lit) = keyword_literal(field_name, css_val) {
+                vec![format!("{indent}        {prefix} = {lit};")]
+            } else {
+                let esc = css_val.replace('\\', "\\\\").replace('"', "\\\"");
+                vec![format!("{indent}        {prefix} = \"{esc}\";")]
+            }
         }
         "color" => match parse_color_val(css_val) {
             Some((r, g, b, a)) => vec![
@@ -1746,6 +1810,48 @@ fn raw_prop_to_enum(prop: &str) -> Option<&'static str> {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn style_enum_literals_mirror_cpp_parse_tables() {
+        assert_eq!(style_enum_literal("display", "flex"), Some("CSS::Display::Flex"));
+        assert_eq!(style_enum_literal("display", "none"), Some("CSS::Display::None"));
+        assert_eq!(style_enum_literal("display", "inline"), Some("CSS::Display::Inline"));
+        assert_eq!(
+            style_enum_literal("display", "inline-block"),
+            Some("CSS::Display::InlineBlock")
+        );
+        assert_eq!(style_enum_literal("display", "block"), None);
+        assert_eq!(style_enum_literal("display", "hidden"), None);
+        assert_eq!(style_enum_literal("display", "garbage"), None);
+        assert_eq!(style_enum_literal("display", "Flex"), None);
+        assert_eq!(style_enum_literal("position", "absolute"), Some("CSS::Position::Absolute"));
+        assert_eq!(style_enum_literal("position", "sticky"), Some("CSS::Position::Sticky"));
+        assert_eq!(style_enum_literal("position", "static"), None);
+        assert_eq!(style_enum_literal("overflow", "auto"), None);
+    }
+
+    #[test]
+    fn node_type_literals_cover_all_ir_types() {
+        assert_eq!(node_type_literal("div"), "NodeType::Div");
+        assert_eq!(node_type_literal("button"), "NodeType::Button");
+        assert_eq!(node_type_literal("input"), "NodeType::Input");
+        assert_eq!(node_type_literal("img"), "NodeType::Img");
+        assert_eq!(node_type_literal("__text__"), "NodeType::Text");
+        assert_eq!(node_type_literal("__expr__"), "NodeType::Expr");
+        assert_eq!(node_type_literal("__conditional__"), "NodeType::Conditional");
+        assert_eq!(node_type_literal("__list__"), "NodeType::List");
+        assert_eq!(node_type_literal("__fragment__"), "NodeType::Fragment");
+        assert_eq!(node_type_literal("body"), "NodeType::Custom");
+        assert_eq!(node_type_literal(""), "NodeType::Custom");
+    }
+
+    #[test]
+    fn keyword_literal_only_maps_converted_fields() {
+        assert!(keyword_literal("display", "flex").is_some());
+        assert!(keyword_literal("position", "fixed").is_some());
+        assert_eq!(keyword_literal("overflow", "auto"), None);
+        assert_eq!(keyword_literal("cursor", "pointer"), None);
+    }
 
     fn cart_map() -> HashMap<String, String> {
         let mut m = HashMap::new();

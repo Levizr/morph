@@ -46,6 +46,18 @@ User C++ includes one header: `morph_api.h`. Two headers are generated per proje
 
 Generated code spells references absolute (`::app::cartstore::...`): inside namespace blocks a leading `app::` would resolve through `app::app`. Your own C++ at global scope can write plain `app::...`; use the `::app::` form if you nest code in your own namespaces.
 
+### Styling from C++
+
+Style keyword fields are scoped enums, not strings — assign enum literals from native code:
+
+```cpp
+node->style.display = CSS::Display::Flex;
+node->style.position = CSS::Position::Absolute;
+node->type = NodeType::Button;
+```
+
+A string assignment (`node->style.display = "flex"`) fails at compile time pointing at the line. Parse helpers (`CSS::parseDisplay(...)`, `parseNodeType(...)`) exist for string input; `toString(...)` prints back on debug paths.
+
 ### Dev mode (`morph dev`)
 
 `morph dev` regenerates `morph_api.h` on **every rebuild** — same namespaces and wrapper names as `morph build`, bound to dev-TU definitions (string-registry channels, TU-local signals) instead of static ones. It is written to both `.morph/cache/` (what the dev logic TU compiles against) and `.morph/output/` (the stable path below), so bodies may differ from a build depending on which flow ran last — declarations never do.

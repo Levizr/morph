@@ -115,7 +115,7 @@ public:
     // Normal-flow position after relative offset, before any sticky clamp.
     float m_flowX = 0, m_flowY = 0;
 
-    bool isPositioned() const { return style.position != "static"; }
+    bool isPositioned() const { return style.position != CSS::Position::Static; }
     MorphNode* nearestScrollContainer() {
         for (MorphNode* p = parent; p; p = p->parent)
             if (p->scrollEnabled) return p;
@@ -154,8 +154,7 @@ public:
     // of them instead of optically centering each run's own ink (which puts
     // siblings like "Cheers: " and "0" on slightly different baselines).
     bool m_centerInk = true;
-    std::string type = "div";
-
+    NodeType type = NodeType::Div;
     // Scroll state (always present — zero overhead when unused)
     float scrollY = 0;
     float contentH = 0;

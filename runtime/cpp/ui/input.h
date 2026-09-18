@@ -44,7 +44,7 @@ public:
     }
 
     InputNode() {
-        type = "input";
+        type = NodeType::Input;
         style.cursor = "text";
         liveSet().insert(this);
     }

@@ -103,9 +103,9 @@ static void applyStyleDelta(MorphStyle& target, const MorphStyle& delta) {
     if (delta.fontSize != 16.0f)     target.fontSize = delta.fontSize;
     if (delta.fontWeight != "normal") target.fontWeight = delta.fontWeight;
     if (delta.textAlign != "left")    target.textAlign = delta.textAlign;
-    if (delta.display != "block")     target.display = delta.display;
+    if (delta.display != CSS::Display::Block) target.display = delta.display;
     if (delta.overflow != "visible")  target.overflow = delta.overflow;
-    if (delta.position != "static")   target.position = delta.position;
+    if (delta.position != CSS::Position::Static) target.position = delta.position;
     if (delta.boxSizing != "content-box") target.boxSizing = delta.boxSizing;
     if (delta.padding[0] != 0.0f || delta.padding[1] != 0.0f || delta.padding[2] != 0.0f || delta.padding[3] != 0.0f)
         memcpy(target.padding, delta.padding, sizeof(float)*4);
@@ -465,7 +465,7 @@ void MorphNode::_applyAncestorHover(bool state) {
     for (auto* child : children) {
         child->_applyAncestorHover(state);
         for (auto& rule : child->m_ancestorHoverRules) {
-            if (rule.ancestorTag.empty() || type == rule.ancestorTag) {
+            if (rule.ancestorTag.empty() || ::toString(type) == rule.ancestorTag) {
                 _applyOneAncestorRule(child, rule, child->m_ancestorHoverTransition, state);
             }
         }
@@ -476,7 +476,7 @@ void MorphNode::_applyAncestorActive(bool state) {
     for (auto* child : children) {
         child->_applyAncestorActive(state);
         for (auto& rule : child->m_ancestorActiveRules) {
-            if (rule.ancestorTag.empty() || type == rule.ancestorTag) {
+            if (rule.ancestorTag.empty() || ::toString(type) == rule.ancestorTag) {
                 _applyOneAncestorRule(child, rule, child->m_ancestorActiveTransition, state);
             }
         }
