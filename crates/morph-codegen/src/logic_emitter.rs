@@ -946,8 +946,10 @@ const fn is_ident_char(b: u8) -> bool {
 
 /// Build the `_morph_state.h` content for native mode (mirrors
 /// `generate_state_header`): extern signals, JSX state wrappers and JSX
-/// function declarations. Per-instance signals are skipped; shared-store
-/// wrappers use the accessor in build mode, the backing static in dev mode.
+/// function declarations. Per-instance signals are skipped; wrappers live
+/// in their defining module's namespace (`app::<ns>::setX()`), with legacy
+/// namespace-less slots staying global. Shared-store wrappers use the
+/// accessor in build mode, the backing static in dev mode.
 pub fn generate_state_header(windows: &[IRWindow], premain: &[String]) -> String {
     let mut lines = vec![
         "#pragma once".to_string(),
@@ -967,7 +969,7 @@ pub fn generate_state_header(windows: &[IRWindow], premain: &[String]) -> String
             }
         }
     }
-    let mut signals: Vec<(String, String)> = Vec::new();
+    let mut signals: Vec<(String, String, String, String)> = Vec::new();
     let mut seen_signals = HashSet::new();
     for w in windows {
         for sv in &w.state_vars {
@@ -979,25 +981,59 @@ pub fn generate_state_header(windows: &[IRWindow], premain: &[String]) -> String
                 continue;
             }
             let init = sv.get("init").map_or("0", String::as_str);
-            signals.push((format!("__st_{getter}"), infer_cpp_type(init)));
+            signals.push((
+                format!("__st_{getter}"),
+                infer_cpp_type(init),
+                sv.get("setter").map_or("", String::as_str).to_string(),
+                sv.get("ns").map_or("", String::as_str).to_string(),
+            ));
         }
     }
     if !signals.is_empty() {
         lines.push("// ── morphState signals (defined in the generated TU) ──".to_string());
-        for (signal, cpp_type) in &signals {
+        for (signal, cpp_type, _, _) in &signals {
             lines.push(format!("extern morph::Signal<{cpp_type}> {signal};"));
         }
         lines.push(String::new());
-        lines.push("// ── JSX state wrappers — call from C++ like setState() ──".to_string());
-        for (signal, cpp_type) in &signals {
-            let base = signal.strip_prefix("__st_").unwrap_or(signal);
-            if !jsx_names.contains(base) {
-                lines.push(format!("inline {cpp_type} {base}() {{ return {signal}.get(); }}"));
+        lines.push("// ── JSX state wrappers — call from C++ as app::<ns>::setX() ──".to_string());
+        // Legacy slots without a module namespace stay global; module
+        // slots emit inside their namespace block (globals first).
+        let mut ns_order: Vec<&str> = Vec::new();
+        for (_, _, _, ns) in &signals {
+            if !ns_order.contains(&ns.as_str()) {
+                ns_order.push(ns);
             }
-            let upper = base[..1].to_uppercase();
-            let setter = format!("set{upper}{}", &base[1..]);
-            if !jsx_names.contains(setter.as_str()) {
-                lines.push(format!("inline void {setter}({cpp_type} v) {{ {signal}.set(v); }}"));
+        }
+        ns_order.sort_by_key(|ns| !ns.is_empty());
+        for ns in ns_order {
+            let in_ns = !ns.is_empty();
+            if in_ns {
+                lines.push(format!("namespace {} {{", morph_ir::MODULE_NS_ROOT));
+                lines.push(format!("namespace {ns} {{"));
+            }
+            for (signal, cpp_type, setter, slot_ns) in &signals {
+                if slot_ns != ns {
+                    continue;
+                }
+                let base = signal.strip_prefix("__st_").unwrap_or(signal);
+                if !jsx_names.contains(base) {
+                    lines.push(format!("inline {cpp_type} {base}() {{ return {signal}.get(); }}"));
+                }
+                let setter_name = if setter.is_empty() {
+                    let upper = base[..1].to_uppercase();
+                    format!("set{upper}{}", &base[1..])
+                } else {
+                    setter.clone()
+                };
+                if !jsx_names.contains(setter_name.as_str()) {
+                    lines.push(format!(
+                        "inline void {setter_name}({cpp_type} v) {{ {signal}.set(v); }}"
+                    ));
+                }
+            }
+            if in_ns {
+                lines.push("}".to_string());
+                lines.push("}".to_string());
             }
         }
         lines.push(String::new());
@@ -1707,6 +1743,21 @@ mod tests {
         assert!(!build_h.contains("app::store_deadbeef::shared_cart_count().get()"), "{build_h}");
         let dev_h = generate_state_header(&windows, &[]);
         assert!(!dev_h.contains("app::store_deadbeef::__shared_cart_count.get()"), "{dev_h}");
+    }
+
+    #[test]
+    fn state_wrappers_live_in_module_namespace() {
+        let mut sv = HashMap::new();
+        sv.insert("getter".to_string(), "status".to_string());
+        sv.insert("setter".to_string(), "setStatus".to_string());
+        sv.insert("init".to_string(), "'idle'".to_string());
+        sv.insert("ns".to_string(), "app".to_string());
+        let window = IRWindow { state_vars: vec![sv], ..Default::default() };
+        let h = generate_state_header(&[window], &[]);
+        assert!(h.contains("extern morph::Signal<std::string> __st_status;"), "{h}");
+        assert!(h.contains("namespace app {\nnamespace app {"), "{h}");
+        assert!(h.contains("inline void setStatus(std::string v) { __st_status.set(v); }"), "{h}");
+        assert_eq!(h.matches("inline void setStatus").count(), 1, "single definition: {h}");
     }
 
     #[test]

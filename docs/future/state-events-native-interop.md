@@ -84,7 +84,7 @@ Name note: the runtime ships a base header also called `morph_api.h` (JS value t
   namespace components::counter {
       constexpr uint32_t MID_HERO = 0;   // <Counter mid="hero"> (App.mx:16)
       constexpr uint32_t MID_FIVES = 1;  // <Counter mid="fives"> (App.mx:17)
-      inline void set_count(uint32_t mid, int v) {
+      inline void setCount(uint32_t mid, int v) {
           if (mid < 2 && (s_alive & (1u << mid))) s_count[mid].set(v);
       }
   }
@@ -119,7 +119,7 @@ components::shop::shopstore::evt_cartChanged().on([](const JsValue& p) { ... });
 ```cpp
 // User wrote: <Counter mid="hero" /> in TSX
 void resetHeroCounter() {
-    components::counter::set_count(components::counter::MID_HERO, 0);
+    components::counter::setCount(components::counter::MID_HERO, 0);
 }
 ```
 
@@ -139,7 +139,7 @@ int doubleIt(int x) { return x * 2; }   // zero plumbing, always
 | Emit event | `evt_<name>().emit(payload)` | `evt_cartChanged().emit({});` |
 | Read another component's local | **Don't.** Emit event; let that component reset its own local. | `evt_resetEvent().emit({});` / `resetEvent.on(() => setCount(0))` |
 | C++ produces value for local | Return it; TSX handler writes its own local. | `int compute();` / `<button onClick={() => setCount(compute())}>` |
-| **Native initiates write to specific instance** | Tag `<Comp mid="tag" />`; use `MID_TAG` constant. | `set_count(MID_HERO, 0)` |
+| **Native initiates write to specific instance** | Tag `<Comp mid="tag" />`; use `MID_TAG` constant. | `setCount(MID_HERO, 0)` |
 | List items | **Hard error** — per-item state not yet supported. | — |
 
 ---
@@ -240,7 +240,7 @@ The old syntax you're imagining — a bare `setState()` callable from anywhere �
 
 ```cpp
 // native.cpp — only works for instances that opted in
-components::counter::set_count(components::counter::MID_HERO, 0);
+components::counter::setCount(components::counter::MID_HERO, 0);
 ```
 
 If you don't need native code to poke a specific instance, don't add `mid` — the component stays purely self-contained. This is the "pay for what you use" principle: no overhead, no registry, no lifetime bugs for components that don't need cross-instance access.

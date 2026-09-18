@@ -367,7 +367,8 @@ impl IRBuilder {
         ctx.modules_emitted.insert(entry_mod.path.clone());
 
         for sv in &root_comp.state_vars {
-            ctx.states.push(state_slot(&sv.getter, &sv.setter, &sv.init, false));
+            let entry_ns = ns_of(graph, &entry_mod.path).unwrap_or_default();
+            ctx.states.push(state_slot(&sv.getter, &sv.setter, &sv.init, false, &entry_ns));
             if !sv.getter.is_empty() {
                 Self::seed_state_var(
                     &mut frame, &sv.getter, &sv.setter, &sv.init, &sv.getter, &sv.setter,
@@ -1641,7 +1642,13 @@ impl IRBuilder {
         for sv in &comp.state_vars {
             let getter = format!("{prefix}_{}", sv.getter);
             let setter = format!("{prefix}_{}", sv.setter);
-            ctx.states.push(state_slot(&getter, &setter, &sv.init, true));
+            ctx.states.push(state_slot(
+                &getter,
+                &setter,
+                &sv.init,
+                true,
+                &ns_of(graph, &target_module).unwrap_or_default(),
+            ));
             if !sv.getter.is_empty() {
                 Self::seed_state_var(
                     &mut frame, &sv.getter, &sv.setter, &sv.init, &getter, &setter,
@@ -2497,14 +2504,24 @@ impl<'a> BuilderCtx<'a> {
 
 /// A `window.state_vars` entry. The emitter derives `__st_<getter>` from the
 /// getter, so instance signals only need mangled names. The `instance` mark
-/// keeps them out of the native interop header (ambiguous across instances).
-fn state_slot(getter: &str, setter: &str, init: &str, instance: bool) -> HashMap<String, String> {
+/// keeps them out of the native interop header (ambiguous across instances);
+/// `ns` (empty for legacy slots) selects the wrapper namespace in the header.
+fn state_slot(
+    getter: &str,
+    setter: &str,
+    init: &str,
+    instance: bool,
+    ns: &str,
+) -> HashMap<String, String> {
     let mut m = HashMap::new();
     m.insert("getter".into(), getter.to_string());
     m.insert("setter".into(), setter.to_string());
     m.insert("init".into(), init.to_string());
     if instance {
         m.insert("instance".into(), "1".to_string());
+    }
+    if !ns.is_empty() {
+        m.insert("ns".into(), ns.to_string());
     }
     m
 }

@@ -480,10 +480,19 @@ fn event_expr(ns: &str, accessor: &str) -> String {
     }
 }
 
+/// Accessor names for a `mid`-indexed state: the exact JSX suffix
+/// names (`setCount`/`count`), falling back to `set_<getter>` only when
+/// the suffix setter is absent (never in practice — `morphState`
+/// always declares one).
+fn mid_fn_names(getter: &str, setter: &str) -> (String, String) {
+    let set_fn = if setter.is_empty() { format!("set_{getter}") } else { setter.to_string() };
+    (set_fn, getter.to_string())
+}
+
 /// Definitions for the `mid` declarations in `morph_api.h`: switch
 /// dispatch over per-instance `__st_` statics, emitted in `app.cpp`
 /// after the state signals. Bounds-safe by construction (unknown index
-/// → no-op; `get_` returns `T{}`). Instance statics are build-time
+/// → no-op; the getter returns `T{}`). Instance statics are build-time
 /// constants with no dynamic lifetime, so no liveness mask is needed:
 /// a write to a detached (conditionally unmounted) instance updates
 /// its own static harmlessly and never touches another instance.
@@ -509,8 +518,8 @@ fn generate_mid_code(windows: &[IRWindow], premain_code: &str) -> String {
     let mut out = Vec::new();
     for ns in ns_order {
         let assigns = &by_ns[&ns];
-        // Distinct states: getter → (type, [(index, signal)]).
-        let mut states: Vec<(&str, String, Vec<(usize, String)>)> = Vec::new();
+        // Distinct states: getter → (setter, type, [(index, signal)]).
+        let mut states: Vec<(&str, &str, String, Vec<(usize, String)>)> = Vec::new();
         let mut state_idx: std::collections::HashMap<String, usize> =
             std::collections::HashMap::new();
         for a in assigns {
@@ -518,6 +527,7 @@ fn generate_mid_code(windows: &[IRWindow], premain_code: &str) -> String {
             if getter.is_empty() {
                 continue;
             }
+            let setter = a.get("setter").map_or("", String::as_str);
             let ty = infer_cpp_type(a.get("init").map_or("0", String::as_str));
             if ty == "auto" {
                 continue;
@@ -525,10 +535,10 @@ fn generate_mid_code(windows: &[IRWindow], premain_code: &str) -> String {
             let index = a.get("index").map_or("0", String::as_str).parse::<usize>().unwrap_or(0);
             let signal = a.get("signal").map_or("", String::as_str).to_string();
             match state_idx.get(getter) {
-                Some(&i) => states[i].2.push((index, signal)),
+                Some(&i) => states[i].3.push((index, signal)),
                 None => {
                     state_idx.insert(getter.to_string(), states.len());
-                    states.push((getter, ty, vec![(index, signal)]));
+                    states.push((getter, setter, ty, vec![(index, signal)]));
                 }
             }
         }
@@ -537,10 +547,9 @@ fn generate_mid_code(windows: &[IRWindow], premain_code: &str) -> String {
         }
         out.push(format!("namespace {} {{", morph_ir::MODULE_NS_ROOT));
         out.push(format!("namespace {ns} {{"));
-        for (getter, ty, mut cases) in states {
+        for (getter, setter, ty, mut cases) in states {
             cases.sort_by_key(|(index, _)| *index);
-            let set_fn = format!("set_{getter}");
-            let get_fn = format!("get_{getter}");
+            let (set_fn, get_fn) = mid_fn_names(getter, setter);
             if !taken.contains(set_fn.as_str()) {
                 out.push(format!("void {set_fn}(uint32_t mid, {ty} v) {{"));
                 out.push("    switch (mid) {".to_string());
@@ -676,9 +685,11 @@ fn generate_self_test(windows: &[IRWindow]) -> String {
                 };
                 let ns = a.get("ns").map_or("", String::as_str);
                 let root = morph_ir::MODULE_NS_ROOT;
-                lines.push(format!("    {root}::{ns}::set_{getter}({root}::{ns}::{c}, {probe});"));
+                let (set_fn, get_fn) =
+                    mid_fn_names(getter, a.get("setter").map_or("", String::as_str));
+                lines.push(format!("    {root}::{ns}::{set_fn}({root}::{ns}::{c}, {probe});"));
                 lines.push(format!(
-                    "    check({root}::{ns}::get_{getter}({root}::{ns}::{c}) == {probe}, \"mid:{c}\");"
+                    "    check({root}::{ns}::{get_fn}({root}::{ns}::{c}) == {probe}, \"mid:{c}\");"
                 ));
             }
         }
@@ -1057,7 +1068,7 @@ fn generate_morph_api_header(
                     consts.iter().position(|(_, cc, _, _)| cc == c).unwrap_or(0)
                 ));
             }
-            // One set_/get_ pair per distinct state (suffix getter).
+            // One accessor pair per distinct state (exact JSX suffix names).
             let mut states: Vec<(&str, &str, &str)> = Vec::new(); // (getter, setter, init)
             let mut seen_states = std::collections::HashSet::new();
             for a in assigns {
@@ -1071,13 +1082,12 @@ fn generate_morph_api_header(
                     a.get("init").map_or("0", String::as_str),
                 ));
             }
-            for (getter, _, init) in states {
+            for (getter, setter, init) in states {
                 let ty = infer_cpp_type(init);
                 if ty == "auto" {
                     continue;
                 }
-                let set_fn = format!("set_{getter}");
-                let get_fn = format!("get_{getter}");
+                let (set_fn, get_fn) = mid_fn_names(getter, setter);
                 if !taken.contains(set_fn.as_str()) {
                     entry.push(format!("void {set_fn}(uint32_t mid, {ty} v);"));
                 }
@@ -1422,13 +1432,13 @@ mod tests {
         let api = std::fs::read_to_string(dir.join("morph_api.h")).unwrap();
         assert!(api.contains("constexpr uint32_t MID_HERO = 0;"), "const: {api}");
         assert!(api.contains("// <Counter mid=\"hero\"> (/proj/Counter.mx:5:7)"), "comment: {api}");
-        assert!(api.contains("void set_count(uint32_t mid, int v);"), "decl: {api}");
-        assert!(api.contains("int get_count(uint32_t mid);"), "decl: {api}");
+        assert!(api.contains("void setCount(uint32_t mid, int v);"), "decl: {api}");
+        assert!(api.contains("int count(uint32_t mid);"), "decl: {api}");
         assert!(app.contains("case 0: __st_inst1_count.set(v); break;"), "def: {app}");
         assert!(app.contains("case 0: return __st_inst1_count.get();"), "def: {app}");
         assert!(app.contains("--morph-self-test"), "flag: {app}");
         assert!(
-            app.contains("app::counter::set_count(app::counter::MID_HERO, 7);"),
+            app.contains("app::counter::setCount(app::counter::MID_HERO, 7);"),
             "self-test: {app}"
         );
         assert!(app.contains("[morph-self-test]"), "summary: {app}");

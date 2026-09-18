@@ -46,7 +46,7 @@ double area(double w, double h) {
 | Call a re-exported function | Re-exporting namespace (via `using`-alias) | `app::mid::loadData()` |
 | Read another component's local | **Don't.** Emit an event; let that component reset its own local | `evt_resetEvent().emit({});` / `resetEvent.on(() => setCount(0))` |
 | C++ produces a value for a local | Return it; the TSX handler writes its own local | `int compute();` / `<button onClick={() => setCount(compute())}>` |
-| **Native initiates a write to a specific instance** | Tag `<Comp mid="tag" />`; use the `MID_TAG` constant | `set_count(MID_HERO, 0)` |
+| **Native initiates a write to a specific instance** | Tag `<Comp mid="tag" />`; use the `MID_TAG` constant | `setCount(MID_HERO, 0)` |
 | Pure compute | Plain function, zero plumbing, always | `int doubleIt(int x) { return x * 2; }` |
 
 ## Calling TS / TSX Bindings from C++
@@ -121,11 +121,11 @@ Tag the instances native code may address — untagged instances stay purely loc
 
 ```cpp
 void resetHeroCounter() {
-    app::counter::set_count(app::counter::MID_HERO, 0);
+    app::counter::setCount(app::counter::MID_HERO, 0);
 }
 
 int heroCountNative() {
-    return app::counter::get_count(app::counter::MID_HERO);
+    return app::counter::count(app::counter::MID_HERO);
 }
 ```
 
@@ -135,15 +135,17 @@ Rules: `mid` is a string literal (`mid="hero"`, never `mid={x}`), letters-only (
 
 ## C++ → JSX State (any thread)
 
-`set...()` wrappers are mutex-protected; effects re-run on the main loop:
+`set...()` wrappers are mutex-protected; effects re-run on the main loop.
+Every call is namespace-qualified — the entry module's own state lives at
+`app::app::` (entry `App.mx` → namespace `app` under root `app::`):
 
 ```cpp
 void runAsync(int start) {
-    setStatus("working...");
+    app::app::setStatus("working...");
     std::thread([start]() {
         std::this_thread::sleep_for(std::chrono::milliseconds(60));
-        setCount(start + 100);
-        setStatus("done");
+        app::app::setCount(start + 100);
+        app::app::setStatus("done");
     }).detach();
 }
 ```
@@ -160,7 +162,7 @@ function jsxHelper(x: int): int {
 ```cpp
 // Declared in the generated headers; defined in the generated TU.
 int callJsxFromCpp(int x) {
-    return jsxHelper(x);
+    return app::app::jsxHelper(x);
 }
 ```
 
