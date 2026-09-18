@@ -38,9 +38,8 @@ A normal `.mx` component. The `windowConfig` export is **optional** — it provi
 
 ```tsx
 // src/auth/login/route.mx
-import { CSS, morphState } from 'morph'
-
-CSS.load("./login.css")
+import { morphState } from 'morph'
+import "./login.css"
 
 export const windowConfig: WindowConfig = { title: "Login", width: 400, height: 320 }
 

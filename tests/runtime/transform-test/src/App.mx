@@ -1,5 +1,5 @@
-import { CSS, morphState } from "morph"
-CSS.load("./style.css")
+import { morphState } from "morph"
+import "./style.css"
 
 export const windowConfig = { title: "Transform Test", width: 900, height: 720 }
 

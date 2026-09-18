@@ -1,6 +1,6 @@
-import { CSS, morphState } from 'morph'
+import { morphState } from 'morph'
 
-CSS.load("style.css")
+import "style.css"
 
 export const windowConfig = {
   title: "Morph Studio — Dynamic Styles",

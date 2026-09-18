@@ -35,6 +35,15 @@ double area(double w, double h) {
 3. Functions are callable directly from JSX event handlers
 4. `morph_api.h` is generated with signal/channel definitions plus thin wrappers, so C++ can read/write state, emit events, and address tagged instances
 
+## Generated Headers
+
+User C++ includes one header: `morph_api.h`. Two headers are generated per project, split by ownership:
+
+- **`_morph_state.h`** — window state and its accessors: `extern __st_*` signal declarations plus the `morphState` wrappers (`app::<ns>::count()` / `app::<ns>::setCount(v)`). The entry module's own state lives at `app::app::`.
+- **`morph_api.h`** — module bindings native code can discover: shared-store accessors, event channels + `emit_`/`notify_` wrappers, `MID_*` constants with indexed `setCount(mid, v)`/`count(mid)` accessors, and module function/var/class declarations.
+
+`_morph_state.h` includes `morph_api.h`, and the generated TU includes both — user C++ never includes `_morph_state.h` directly and never reads `app.cpp`.
+
 ## Decision Tree
 
 | Need | Route | Code |
@@ -212,12 +221,11 @@ The [runtime self-test script](../../tests/runtime/run-selftests.sh) rebuilds th
 ## Example
 
 ```tsx
-import { CSS, morphState } from 'morph'
+import { morphState } from 'morph'
 import { doubleIt, area, runAsync, resetCartNative } from './native.cpp'
 import { cart } from './CartStore.mx'
 import Counter from './Counter.mx'
-
-CSS.load("style.css")
+import "./style.css"
 
 export const windowConfig = { title: "Interop", width: 640, height: 400 }
 

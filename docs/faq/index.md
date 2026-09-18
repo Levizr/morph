@@ -21,6 +21,7 @@ The questions people actually ask — each answered in detail on its own page.
 | **What are the new morph commands?** | [Q: CLI commands](q-cli-commands.md) |
 | **How do I deploy/distribute my app?** | [Q: Deployment](q-deployment.md) |
 | **How do I debug a Morph app?** | [Q: Debugging](q-debugging.md) |
+| **Why two generated headers (`_morph_state.h` vs `morph_api.h`)?** | [Q: Headers?](q-headers.md) |
 
 ## Ask a new question
 

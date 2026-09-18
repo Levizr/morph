@@ -1,6 +1,4 @@
-import { CSS } from 'morph'
-
-CSS.load("style.css")
+import "style.css"
 
 export const windowConfig = {
   title: "Z-Index Test",

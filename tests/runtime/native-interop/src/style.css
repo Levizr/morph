@@ -1,4 +1,4 @@
-body { padding: 24px; font-family: sans-serif; }
+body { padding: 24px; font-family: sans-serif; overflow:auto; }
 .title { font-size: 20px; font-weight: bold; margin-bottom: 20px; }
 .card {
   border: 1px solid #ddd; border-radius: 10px; padding: 14px 18px;

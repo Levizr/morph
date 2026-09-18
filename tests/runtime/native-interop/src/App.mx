@@ -1,10 +1,9 @@
-import { CSS } from 'morph'
 import { doubleIt, area, callJsxFromCpp, runAsync } from './native.cpp'
 import { cart, setCart, cartChanged } from './CartStore.mx'
 import { resetCartNative, getCartNative, resetHeroCounter, heroCountNative } from './native.cpp'
 import Counter from './Counter.mx'
 
-CSS.load("style.css")
+import "style.css"
 
 export const windowConfig = { title: "Native Interop Test", width: 640, height: 560 }
 

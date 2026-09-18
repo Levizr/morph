@@ -26,9 +26,8 @@ my-app/
 The entry point. An `.mx` file is a JSX-like format that combines your component logic and markup in a single file. The default export is the root component:
 
 ```tsx
-import { CSS, morphState } from 'morph'
-
-CSS.load("./style.css")
+import { morphState } from 'morph'
+import "./style.css"
 
 export const windowConfig = { title: "My App", width: 800, height: 600 }
 
@@ -45,7 +44,7 @@ export default function App() {
 }
 ```
 
-- `CSS.load("./style.css")` — loads a stylesheet (intercepted by the compiler)
+- `import "./style.css"` — loads a stylesheet (intercepted by the compiler)
 - `windowConfig` — optional export that overrides `morph.config.json` window settings
 - `export default function App()` — the root component rendered into the window
 
@@ -101,24 +100,23 @@ src/
 
 ```tsx
 // src/App.mx
-CSS.load("./components/Header.css")
-CSS.load("./components/Card.css")
+import "./components/Header.css"
+import "./components/Card.css"
 ```
 
 ### CSS
 
-Load stylesheets with `CSS.load()`:
+Load stylesheets with a plain import:
 
 ```tsx
-import { CSS } from 'morph'
-CSS.load("./style.css")
-CSS.load("./components/Header.css")
+import "./style.css"
+import "./components/Header.css"
 ```
 
 Remote stylesheets work too — pass a URL and Morph fetches it, MD5-caches it in `.morph/cache/css/`, and downloads any `@font-face` font files it references:
 
 ```tsx
-CSS.load("https://cdn.example.com/theme.css")
+import "https://cdn.example.com/theme.css"
 ```
 
 Clear the cache with `morph cache`.

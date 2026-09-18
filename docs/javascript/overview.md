@@ -75,7 +75,7 @@ Binary (`+`, `-`, `*`, `/`, `===`, `!==`, `==`, `!=`, `<`, `>`, etc.), unary (`!
 
 - Destructuring assignments
 - Spread/rest operators in all contexts
-- `import` from other `.mx` files (use `CSS.load` or C++ imports)
+- `import` from other `.mx` files (CSS: `import "./x.css"`; native code: C++ imports)
 - `class` extends across files
 - Generics beyond basic usage
 - `async`/`await` in non-event-handler contexts

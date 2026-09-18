@@ -52,10 +52,9 @@ The final binary contains **zero Rust** (compiler only), **zero Python**, and **
 An `.mx` file is a single file containing JSX markup with TypeScript/JavaScript logic and CSS imports:
 
 ```tsx
-import { CSS, morphState } from 'morph'
+import { morphState } from 'morph'
 import { compute } from './math.cpp'    // C++ import
-
-CSS.load("./style.css")
+import "./style.css"
 
 export const windowConfig = { title: "App", width: 800, height: 600 }
 

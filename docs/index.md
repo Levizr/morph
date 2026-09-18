@@ -12,9 +12,8 @@ Write familiar `.mx` files (JSX + CSS + TypeScript). Morph compiles them directl
 
 ```tsx
 // src/App.mx
-import { CSS, morphState } from 'morph'
-
-CSS.load("./style.css")
+import { morphState } from 'morph'
+import "./style.css"
 
 export const windowConfig = { title: "My App", width: 800, height: 600 }
 

@@ -2156,6 +2156,26 @@
         "publishedAt": "2026-09-05",
         "priority": 0.7,
         "changefreq": "monthly"
+      },
+      {
+        "title": "Why Two Generated Headers? (_morph_state.h vs morph_api.h)",
+        "slug": "faq/q-headers",
+        "file": "faq/q-headers",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Why Morph generates _morph_state.h and morph_api.h instead of one header, which one user C++ includes, why entry state lives at app::app, and why the entry component's own state never uses mid.",
+        "keywords": [
+          "morph headers",
+          "morph_api.h",
+          "_morph_state.h",
+          "morph app::app",
+          "morph mid entry component",
+          "morph native header"
+        ],
+        "lastUpdated": "2026-09-18",
+        "publishedAt": "2026-09-18",
+        "priority": 0.7,
+        "changefreq": "monthly"
       }
     ]
   }

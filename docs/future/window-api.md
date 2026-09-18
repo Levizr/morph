@@ -132,7 +132,7 @@ Constructors take a config object; `Window` additionally takes a route id for th
 
 | Piece | State |
 |---|---|
-| `CSS.load()` | ✅ Shipped |
+| CSS import (`import "./x.css"`; `CSS.load()` deprecated) | ✅ Shipped |
 | `windowConfig` export + `<morph-window>` | ✅ Shipped (declarative) |
 | `WindowManager` (register/close/allClosed) | ✅ Shipped |
 | `Window` / `App` classes, `useWindow` hook | ❌ Not built |
