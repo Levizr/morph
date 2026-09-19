@@ -238,7 +238,7 @@ Every build embeds headless runtime assertions (shared roundtrips, event deliver
 
 ```sh
 ./.morph/output/<app> --morph-self-test
-# [morph-self-test] 3 checks, 0 failures
+# [morph-self-test] 11 checks, 0 failures
 ```
 
 The [runtime self-test script](../../tests/runtime/run-selftests.sh) rebuilds the fixtures and runs this automatically.

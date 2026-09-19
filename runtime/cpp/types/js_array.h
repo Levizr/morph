@@ -2,6 +2,7 @@
 #include <memory>
 #include <vector>
 #include <cstdint>
+#include <string>
 #include <initializer_list>
 
 struct JsValue;
@@ -44,6 +45,12 @@ struct JsArray {
     JsValue& operator[](int64_t idx);
     JsValue operator[](const JsNumber& idx) const;
     JsValue& operator[](const JsNumber& idx);
+
+    // String keys (same routing as JsValue: digits → index, "length" →
+    // length, anything else → undefined, never throws). Defined in
+    // js_value.h after JsValue is complete.
+    JsValue operator[](const std::string& key) const;
+    JsValue& operator[](const std::string& key);
 
     // ── Range-for support (for...of) ──
     auto begin() const { return elements->begin(); }

@@ -709,6 +709,29 @@ fn generate_self_test(windows: &[IRWindow]) -> String {
             }
         }
     }
+    // JsObject/JsArray value semantics: hashed lookups, sorted
+    // enumeration, no-insert-on-read, no-throw string indexing.
+    {
+        lines.push("    JsObject __st_obj;".to_string());
+        lines.push("    __st_obj.set(\"b\", JsValue(2));".to_string());
+        lines.push("    __st_obj.set(\"a\", JsValue(1));".to_string());
+        lines.push(
+            "    check(__st_obj.get(\"missing\").is_undefined(), \"obj:missing-undefined\");"
+                .to_string(),
+        );
+        lines.push("    check(!__st_obj.has(\"missing\"), \"obj:no-insert-on-read\");".to_string());
+        lines.push("    check(__st_obj.sorted_keys() == std::vector<std::string>{\"a\", \"b\"}, \"obj:sorted-keys\");".to_string());
+        lines.push("    JsArray __st_arr{JsValue(10), JsValue(20), JsValue(30)};".to_string());
+        lines.push("    check(__st_arr[\"length\"] == JsValue(3), \"arr:length\");".to_string());
+        lines.push("    check(__st_arr[\"1\"] == JsValue(20), \"arr:digit-index\");".to_string());
+        lines.push(
+            "    check(__st_arr[\"01\"].is_undefined(), \"arr:leading-zero-named\");".to_string(),
+        );
+        lines.push("    check(__st_arr[\"9\"].is_undefined(), \"arr:oob-undefined\");".to_string());
+        lines.push(
+            "    check(__st_arr[\"zzz\"].is_undefined(), \"arr:garbage-undefined\");".to_string(),
+        );
+    }
     lines.push(
         "    printf(\"[morph-self-test] %d checks, %d failures\\n\", checks, failures);"
             .to_string(),

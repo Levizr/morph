@@ -1479,7 +1479,7 @@ impl<'a> CppTranslator<'a> {
         } else {
             false
         };
-        let iter = if is_obj { format!("{}.keys()", right) } else { right };
+        let iter = if is_obj { format!("{}.sorted_keys()", right) } else { right };
         let body = self.emit_statement(&f.body).unwrap_or_else(|| "{}".to_string());
         format!("{}for (auto {} : {}) {}", self.indent(), left, iter, body)
     }
@@ -4431,6 +4431,27 @@ impl<'a> CppTranslator<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn for_in_over_object_iterates_sorted_keys() {
+        use oxc_allocator::Allocator;
+        use oxc_parser::Parser;
+        let allocator = Allocator::default();
+        let source = "for (const k in obj) { use(k); }";
+        let source_type =
+            oxc_span::SourceType::from_path("file.ts").unwrap_or_default().with_typescript(true);
+        let parsed = Parser::new(&allocator, source, source_type).parse();
+        assert!(parsed.diagnostics.is_empty());
+        let stmt = parsed.program.body.first().expect("one statement");
+        let Statement::ForInStatement(f) = stmt else {
+            panic!("expected for-in, got {stmt:?}");
+        };
+        let mut t = CppTranslator::new(source, 0, crate::codegen::context::TypeMode::Infer, None);
+        t.ctx.var_types.insert("obj".to_string(), "JsObject".to_string());
+        let out = t.emit_for_in(f);
+        assert!(out.contains("obj.sorted_keys()"), "{out}");
+        assert!(!out.contains(".keys()"), "{out}");
+    }
 
     #[test]
     fn quotes_and_backslashes_escape() {

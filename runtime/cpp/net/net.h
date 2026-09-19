@@ -164,7 +164,7 @@ inline morph::Result<JsString> fetch(const std::string& url, const JsValue& init
         }
         if (obj.has("headers") && obj.get("headers").is_object()) {
             auto hobj = std::get<JsObject>(obj.get("headers").inner);
-            for (auto& k : hobj.keys()) {
+            for (auto& k : hobj.sorted_keys()) {
                 auto v = hobj.get(k);
                 if (v.is_string()) state->requestHeaders.set(k, std::get<JsString>(v.inner).value);
             }
@@ -227,7 +227,7 @@ inline detail::HttpAwaitable fetch_response(const std::string& url, const JsValu
         }
         if (obj.has("headers") && obj.get("headers").is_object()) {
             auto hobj = std::get<JsObject>(obj.get("headers").inner);
-            for (auto& k : hobj.keys()) {
+            for (auto& k : hobj.sorted_keys()) {
                 auto v = hobj.get(k);
                 if (v.is_string()) state->requestHeaders.set(k, std::get<JsString>(v.inner).value);
             }

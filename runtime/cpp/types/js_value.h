@@ -28,6 +28,23 @@ struct JsNull {
 
 // ── JsValue: top-level variant ──
 
+// Array string keys (JS semantics, never throws): canonical all-digit
+// keys are indices — a lone "0" is index 0, but "01" is a named
+// property (ToString(ToUint32("01")) is "1", not "01"). Capped,
+// bounds-checked by the caller. "", "-1", "1.5" are never indices.
+static bool array_key_index(const std::string& key, size_t& idx) {
+    if (key.empty()) return false;
+    if (key.size() > 1 && key[0] == '0') return false;
+    size_t v = 0;
+    for (unsigned char c : key) {
+        if (c < '0' || c > '9') return false;
+        v = v * 10 + (size_t)(c - '0');
+        if (v >= (size_t)INT64_MAX) return false;
+    }
+    idx = v;
+    return true;
+}
+
 struct JsValue {
     std::variant<
         JsUndefined,
@@ -151,7 +168,16 @@ struct JsValue {
     }
 
     JsValue operator[](const std::string& key) const {
-        return get(key);
+        if (is_object()) return std::get<JsObject>(inner).get(key);
+        if (is_array()) {
+            const auto& arr = std::get<JsArray>(inner);
+            if (key == "length") return JsValue(JsNumber((int64_t)arr.length()));
+            size_t idx = 0;
+            // Bounds-checked below: OOB digits read undefined, never throw.
+            if (array_key_index(key, idx)) return arr[(int64_t)idx];
+            return JsValue(JsUndefined{});
+        }
+        return JsValue(JsUndefined{});
     }
 
     JsValue operator[](int64_t idx) const {
@@ -161,7 +187,19 @@ struct JsValue {
     // Non-const access: returns mutable reference for chained mutation (obj["a"]["b"] = v)
     JsValue& operator[](const std::string& key) {
         if (is_object()) return std::get<JsObject>(inner)[key];
-        if (is_array()) return std::get<JsArray>(inner)[std::stoll(key)];
+        if (is_array()) {
+            auto& arr = std::get<JsArray>(inner);
+            // Length reads through a scratch (writes to it are dropped;
+            // mirrors the OOB-write limitation on indexed access below).
+            static thread_local JsValue length_scratch;
+            if (key == "length") {
+                length_scratch = JsValue(JsNumber((int64_t)arr.length()));
+                return length_scratch;
+            }
+            size_t idx = 0;
+            if (array_key_index(key, idx)) return arr[(int64_t)idx];
+            return get_mutable_dummy();
+        }
         return get_mutable_dummy();
     }
 
@@ -268,6 +306,14 @@ private:
         static JsValue dummy;
         return dummy;
     }
+
+public:
+    // Sorted keys for `for-in` (objects only; anything else enumerates
+    // nothing). Same order the old std::map iteration produced.
+    std::vector<std::string> sorted_keys() const {
+        if (is_object()) return std::get<JsObject>(inner).sorted_keys();
+        return {};
+    }
 };
 
 // ── JsString methods that depend on JsValue ──
@@ -368,9 +414,28 @@ inline JsValue& JsArray::operator[](const JsNumber& idx) {
     return (*this)[idx.as_int()];
 }
 
+inline JsValue JsArray::operator[](const std::string& key) const {
+    if (key == "length") return JsValue(JsNumber((int64_t)length()));
+    size_t idx = 0;
+    if (array_key_index(key, idx)) return (*this)[(int64_t)idx];
+    return JsValue(JsUndefined{});
+}
+
+inline JsValue& JsArray::operator[](const std::string& key) {
+    static thread_local JsValue length_scratch;
+    static thread_local JsValue missing;
+    if (key == "length") {
+        length_scratch = JsValue(JsNumber((int64_t)length()));
+        return length_scratch;
+    }
+    size_t idx = 0;
+    if (array_key_index(key, idx)) return (*this)[(int64_t)idx];
+    return missing;
+}
+
 // Default constructors live here (not in js_array.h / js_object.h) because
-// make_shared<vector<JsValue>> / make_shared<map<string, JsValue>> need a
-// complete JsValue — clang rejects the instantiation from the earlier point.
+// make_shared<vector<JsValue>> / make_shared<unordered_map<string, JsValue>>
+// need a complete JsValue — clang rejects the instantiation from the earlier point.
 inline JsArray::JsArray()
     : elements(std::make_shared<std::vector<JsValue>>()) {}
 
@@ -404,7 +469,7 @@ inline void JsObject::set(const std::string& key, const JsValue& val) {
 inline void JsObject::clear() { properties->clear(); }
 
 inline JsObject::JsObject()
-    : properties(std::make_shared<std::map<std::string, JsValue>>()) {}
+    : properties(std::make_shared<std::unordered_map<std::string, JsValue>>()) {}
 
 inline JsObject::JsObject(std::initializer_list<std::pair<const char*, JsValue>> init)
     : JsObject() {
@@ -428,6 +493,12 @@ inline JsValue& JsObject::operator[](const std::string& key) {
 inline std::vector<std::string> JsObject::keys() const {
     std::vector<std::string> k;
     for (const auto& [key, _] : *properties) k.push_back(key);
+    return k;
+}
+
+inline std::vector<std::string> JsObject::sorted_keys() const {
+    auto k = keys();
+    std::sort(k.begin(), k.end());
     return k;
 }
 

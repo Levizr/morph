@@ -1,6 +1,6 @@
 # Kill All Runtime Strings
 
-**Status:** `development` · **Priority:** high · **Shipped parts:** batch 1 (`NodeType` + `CSS::Display` + `CSS::Position`), batch 2 (remaining style enums + text path + converter deletion)
+**Status:** `complete` · **Priority:** high · **Shipped parts:** batches 1–3 (all)
 
 > Every `std::string` compare, lookup, and allocation on a hot path — layout, paint, text, events, property access — replaced with integers, enums, or hashes. Strings survive only where they belong: build-time parsing, debug printing, and genuinely freeform values (font names, custom text). Companion to [State, Events & Native C++ Interop](state-events-native-interop.md) and [Universal Module Bindings](universal-module-bindings.md), which killed string *identity*; this page kills string *comparison*.
 
@@ -137,7 +137,7 @@ Layout-critical first, then the rest. Numeric properties (`opacity`, `border-rad
 |---|---|---|
 | 1 | `NodeType` + `CSS::Display` + `CSS::Position` | ✅ Shipped — fixture rebuilds, screenshots, self-tests |
 | 2 | Remaining style enums + text-path unification + converter deletion | ✅ Shipped — same + converter absence (`grep ToEnum` empty outside dead `widgets/`) |
-| 3 | Map swap + sorted `for-in` + `stoll`-free indexing + `undefined`/`length` semantics + regression tests | Workspace tests incl. garbage-key/cycle tests, self-tests |
+| 3 | Map swap + sorted `for-in` + `stoll`-free indexing + `undefined`/`length` semantics + regression tests | ✅ Shipped — 8 object checks in every self-test, morpher for-in test, sweeps green |
 
 Each batch: `cargo test --workspace`, fixture rebuilds, `--morph-self-test`, `run-selftests.sh`, screenshots for visual batches. Deferred to measurement: hot-key interning (`"value"`, `"id"`) — the map swap removes tree compares; intern only if profiling justifies it.
 
@@ -166,6 +166,11 @@ Each batch: `cargo test --workspace`, fixture rebuilds, `--morph-self-test`, `ru
 | 2026-09-19 | Batch 2: atlas key is `{size, weight}` struct, no heap string per lookup | `atlasKey()` string concat ran per text measurement |
 | 2026-09-19 | Batch 2: `resolvePct` inspects the unit suffix in place | Same acceptance, no per-tick heap string; full unit pre-parsing deferred to measurement |
 | 2026-09-19 | Batch 2: `flexBasis` stays a string, dead `widgets/` untouched | Zero value-compares on `flexBasis`; zero references to `widgets/` repo-wide (deletion is separate cleanup) |
+| 2026-09-19 | Batch 3: plain `unordered_map`, sorted iteration at use sites | Max point-lookup speed; `keys()` order now unspecified, `sorted_keys()` preserves old order for `for-in`/net |
+| 2026-09-19 | Batch 3: canonical-index rule (`"01"` is named, lone `"0"` is index 0) | Matches JS `ToString(ToUint32)` identity; self-test pins it |
+| 2026-09-19 | Batch 3: non-const `["length"]` reads via thread-local scratch | Writes to it are dropped (mirrors the OOB-write limitation); setting `.length` properly is future work |
+| 2026-09-19 | Batch 3: `has`+`get` double lookup audited, kept | Collapsing it would conflate null vs missing; two hashes are the honest cost |
+| 2026-09-19 | Batch 3: operator `[]` semantics unchanged (const→`get`, non-const inserts) | Standard map behavior; reads should prefer `get()`; relied upon by mutation chains |
 | 2026-09-19 | Batch 2: list `item`/`index` params thread through IR to factories | `item.name` → `__it["name"]`, effect captures `&__it`; custom param names included (pre-existing gap, fixed to unblock verification) |
 | 2026-09-19 | Batch 2: `flexBasis` stays a string | Zero value-compares (write-only); nothing to kill |
 | 2026-09-19 | Batch 2: dead `runtime/cpp/widgets/` untouched | Zero references repo-wide; deletion is a separate cleanup call |
