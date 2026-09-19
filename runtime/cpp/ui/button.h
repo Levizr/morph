@@ -13,9 +13,9 @@ public:
         float rad = m_isTransitioning ? (style.borderRadius > 0.0f ? style.borderRadius : 6.0f) : snapRadius(style.borderRadius > 0.0f ? style.borderRadius : 6.0f);
         DrawOp bg;
 #ifdef MORPH_FEATURE_BORDER
-        if (style.borderWidth > 0.0f && style.borderStyle == "solid") {
+        if (style.borderWidth > 0.0f && style.borderStyle == CSS::BorderStyle::Solid) {
             float bw = m_isTransitioning ? style.borderWidth : snapBorderWidth(style.borderWidth);
-            bool inner = (style.boxSizing == "border-box");
+            bool inner = (style.boxSizing == CSS::BoxSizing::BorderBox);
             if (inner)
                 bg.setBordered(sx, sy, sw, sh, rad, style.bgColor, bw, style.borderColor);
             else
@@ -54,7 +54,7 @@ public:
         bool needRadiusClip = rad > 0.0f;
 #ifdef MORPH_FEATURE_SCROLL
         bool scrolling = scrollEnabled && contentH > sh;
-        bool needRectClip = scrolling || style.overflow == "hidden" || style.overflow == "auto";
+        bool needRectClip = scrolling || style.overflow == CSS::Overflow::Hidden || style.overflow == CSS::Overflow::Auto;
 #else
         bool needRectClip = false;
 #endif
@@ -104,9 +104,9 @@ public:
         bool pushedSelf = pushSelfTransform(r, sx, sy);
 #endif
 #ifdef MORPH_FEATURE_BORDER
-        if (style.borderWidth > 0.0f && style.borderStyle == "solid") {
+        if (style.borderWidth > 0.0f && style.borderStyle == CSS::BorderStyle::Solid) {
             float bw = m_isTransitioning ? style.borderWidth : snapBorderWidth(style.borderWidth);
-            bool inner = (style.boxSizing == "border-box");
+            bool inner = (style.boxSizing == CSS::BoxSizing::BorderBox);
             if (inner)
                 r.drawBorderedRoundedRect(sx, sy, sw, sh, rad, style.bgColor,
                                           bw, style.borderColor);

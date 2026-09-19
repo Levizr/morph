@@ -28,8 +28,8 @@ struct StateVarInfo {
 struct InheritedStyle {
     float color[4] = {0,0,0,1};
     float fontSize = 16.0f;
-    std::string fontWeight = "normal";
-    std::string textAlign = "left";
+    CSS::FontWeight fontWeight = CSS::FontWeight::Normal;
+    CSS::TextAlign textAlign = CSS::TextAlign::Left;
 };
 
 static bool isDefaultColor(const float* c) {
@@ -42,9 +42,9 @@ static void inheritStyle(MorphStyle& s, const InheritedStyle& parent) {
         memcpy(s.color, parent.color, sizeof(float) * 4);
     if (s.fontSize == 16.0f && parent.fontSize != 16.0f)
         s.fontSize = parent.fontSize;
-    if (s.fontWeight == "normal" && parent.fontWeight != "normal")
+    if (s.fontWeight == CSS::FontWeight::Normal && parent.fontWeight != CSS::FontWeight::Normal)
         s.fontWeight = parent.fontWeight;
-    if (s.textAlign == "left" && parent.textAlign != "left")
+    if (s.textAlign == CSS::TextAlign::Left && parent.textAlign != CSS::TextAlign::Left)
         s.textAlign = parent.textAlign;
 }
 
@@ -53,8 +53,8 @@ static InheritedStyle resolvedStyle(const MorphStyle& s, const InheritedStyle& p
     InheritedStyle r = parent;
     if (!isDefaultColor(s.color)) memcpy(r.color, s.color, sizeof(float) * 4);
     if (s.fontSize != 16.0f) r.fontSize = s.fontSize;
-    if (s.fontWeight != "normal") r.fontWeight = s.fontWeight;
-    if (s.textAlign != "left") r.textAlign = s.textAlign;
+    if (s.fontWeight != CSS::FontWeight::Normal) r.fontWeight = s.fontWeight;
+    if (s.textAlign != CSS::TextAlign::Left) r.textAlign = s.textAlign;
     return r;
 }
 
@@ -255,19 +255,19 @@ static void applyStyle(MorphStyle& s, const JsonValue& styleVal) {
         s.fontSize = styleVal["font_size"].asFloat();
 
     if (!styleVal["font_weight"].isNull())
-        s.fontWeight = styleVal["font_weight"].asString();
+        s.fontWeight = CSS::parseFontWeight(styleVal["font_weight"].asString());
     if (!styleVal["text_align"].isNull())
-        s.textAlign = styleVal["text_align"].asString();
+        s.textAlign = CSS::parseTextAlign(styleVal["text_align"].asString());
     if (!styleVal["display"].isNull())
         s.display = CSS::parseDisplay(styleVal["display"].asString());
     if (!styleVal["overflow"].isNull())
-        s.overflow = styleVal["overflow"].asString();
+        s.overflow = CSS::parseOverflow(styleVal["overflow"].asString());
     if (!styleVal["position"].isNull())
         s.position = CSS::parsePosition(styleVal["position"].asString());
     if (!styleVal["cursor"].isNull())
-        s.cursor = styleVal["cursor"].asString();
+        s.cursor = CSS::parseCursor(styleVal["cursor"].asString());
     if (!styleVal["box_sizing"].isNull())
-        s.boxSizing = styleVal["box_sizing"].asString();
+        s.boxSizing = CSS::parseBoxSizing(styleVal["box_sizing"].asString());
 
 #ifdef MORPH_FEATURE_TRANSFORM
     // Serialized only when the feature is compiled in; a null value means
@@ -291,16 +291,16 @@ static void applyStyle(MorphStyle& s, const JsonValue& styleVal) {
     }
 #endif
     if (!styleVal["border_style"].isNull())
-        s.borderStyle = styleVal["border_style"].asString();
+        s.borderStyle = CSS::parseBorderStyle(styleVal["border_style"].asString());
     if (!styleVal["flex_wrap"].isNull())
-        s.flexWrap = styleVal["flex_wrap"].asString();
+        s.flexWrap = CSS::parseFlexWrap(styleVal["flex_wrap"].asString());
 
     if (!styleVal["flex_dir"].isNull())
-        s.flexDirection = styleVal["flex_dir"].asString();
+        s.flexDirection = CSS::parseFlexDirection(styleVal["flex_dir"].asString());
     if (!styleVal["justify_content"].isNull())
-        s.justifyContent = styleVal["justify_content"].asString();
+        s.justifyContent = CSS::parseJustifyContent(styleVal["justify_content"].asString());
     if (!styleVal["align_items"].isNull())
-        s.alignItems = styleVal["align_items"].asString();
+        s.alignItems = CSS::parseAlignItems(styleVal["align_items"].asString());
 
     if (!styleVal["flex_grow"].isNull())
         s.flexGrow = styleVal["flex_grow"].asFloat();

@@ -159,20 +159,15 @@ void GLRenderer::createTextBuffers()
     glBindVertexArray(0);
 }
 
-const std::string &GLRenderer::fontPathForWeight(const std::string &weight)
+const std::string &GLRenderer::fontPathForWeight(CSS::FontWeight weight)
 {
     if (m_fontPath.empty())
         m_fontPath = morphResolveFont(kRegularFontCandidates);
     if (m_fontPathBold.empty())
         m_fontPathBold = morphResolveFont(kBoldFontCandidates);
-    if (weight == "bold" || weight == "700" || weight == "800" || weight == "900")
+    if (weight == CSS::FontWeight::Bold)
         return m_fontPathBold;
     return m_fontPath;
-}
-
-std::string GLRenderer::atlasKey(int fontSize, const std::string &fontWeight)
-{
-    return fontWeight + ":" + std::to_string(fontSize);
 }
 
 unsigned int GLRenderer::utf8ToCodepoint(const std::string &text, size_t &pos)
@@ -208,9 +203,9 @@ unsigned int GLRenderer::utf8ToCodepoint(const std::string &text, size_t &pos)
     return 0;
 }
 
-GLRenderer::FontAtlas &GLRenderer::getOrCreateAtlas(int fontSize, const std::string &fontWeight)
+GLRenderer::FontAtlas &GLRenderer::getOrCreateAtlas(int fontSize, CSS::FontWeight fontWeight)
 {
-    std::string key = atlasKey(fontSize, fontWeight);
+    AtlasKey key{fontSize, fontWeight};
     auto it = m_atlases.find(key);
     if (it != m_atlases.end())
         return it->second;
@@ -528,7 +523,7 @@ void GLRenderer::shapeText(const std::string &text, FontAtlas &atlas,
 }
 
 float GLRenderer::measureTextWidth(const std::string &text, float fontSize,
-                                   const std::string &fontWeight)
+                                   CSS::FontWeight fontWeight)
 {
     if (text.empty() || fontSize < 1)
         return 0;
@@ -547,7 +542,7 @@ float GLRenderer::measureTextWidth(const std::string &text, float fontSize,
 void GLRenderer::drawText(const std::string &text, float x, float y,
                           float color[4], TextAlign align,
                           float fontSize,
-                          const std::string &fontWeight,
+                          CSS::FontWeight fontWeight,
                           bool centerInk)
 {
     if (text.empty() || fontSize < 1)
@@ -622,7 +617,7 @@ void GLRenderer::drawText(const std::string &text, float x, float y,
     else if (align == TextAlign::Right)
         penX -= totalW;
 
-    auto &batch = m_textBatches[atlasKey(fs, fontWeight)];
+    auto &batch = m_textBatches[AtlasKey{fs, fontWeight}];
 
     for (auto &sg : shaped)
     {

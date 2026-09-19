@@ -461,7 +461,8 @@ fn emit_list_wiring(lines: &mut Vec<String>, node: &IRNode, maps: &AmbientMaps, 
     lines.push(format!("{indent}    lc->arrayFn = [&]() {{ return {array_expr}; }};"));
     lines.push(format!("{indent}    lc->itemFactory = __list_factory_{id};"));
     if !node.list_key_expr.is_empty() {
-        let key_expr = translate_list_key(&node.list_key_expr);
+        let key_expr =
+            translate_list_key(&node.list_key_expr, &node.list_item_param, &node.list_index_param);
         lines.push(format!(
             "{indent}    lc->keyFn = [&](const JsValue& __it, int __index) -> std::string {{"
         ));
@@ -841,7 +842,17 @@ fn dev_features() -> HashSet<String> {
 fn emit_list_factory(node: &IRNode, maps: &AmbientMaps) -> Option<String> {
     let tmpl = node.item_template.as_deref()?;
     let features = dev_features();
-    let body = emit_node_with_state(tmpl, None, &features, &maps.vars, None);
+    // Same item-parameter scoping as the build factory (see cpp/mod.rs).
+    let mut tmpl_vars = maps.vars.clone();
+    if node.list_item_param.is_empty() {
+        tmpl_vars.insert("item".to_string(), "__it".to_string());
+    } else {
+        tmpl_vars.insert(node.list_item_param.clone(), "__it".to_string());
+    }
+    if !node.list_index_param.is_empty() {
+        tmpl_vars.insert(node.list_index_param.clone(), "__index".to_string());
+    }
+    let body = emit_node_with_state(tmpl, None, &features, &tmpl_vars, None);
     let mut caps = String::new();
     if body.contains("__it") {
         caps.push_str(", &__it");

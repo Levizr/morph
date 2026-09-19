@@ -1,8 +1,10 @@
 #pragma once
 #include <string>
 
+#include "../css_enums.h"
+
 #ifdef MORPH_FEATURE_CURSOR
 struct CursorStyle {
-    std::string cursor = "default";
+    CSS::Cursor cursor = CSS::Cursor::Default;
 };
 #endif

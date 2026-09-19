@@ -7,6 +7,7 @@
 #include <cmath>
 #include "draw_op.h"
 #include "event.h"
+#include "../style/css_enums.h"
 
 enum class Easing : uint8_t {
     Linear,
@@ -50,16 +51,16 @@ struct FlatRenderNode {
     float borderRadius;
     float borderWidth;
     float borderColor[4];
-    uint8_t borderStyle;    // 0=none, 1=solid
+    CSS::BorderStyle borderStyle = CSS::BorderStyle::None;
 
-    uint8_t overflow;       // 0=visible, 1=hidden, 2=scroll, 3=auto
-    uint8_t boxSizing;      // 0=content-box, 1=border-box
-    uint8_t display;        // 0=block, 1=flex, 2=none, 3=inline
-    uint8_t position;       // 0=static, 1=absolute
+    CSS::Overflow overflow = CSS::Overflow::Visible;
+    CSS::BoxSizing boxSizing = CSS::BoxSizing::ContentBox;
+    CSS::Display display = CSS::Display::Block;
+    CSS::Position position = CSS::Position::Static;
 
     float fontSize;
-    uint8_t textAlign;      // 0=left, 1=center, 2=right
-    uint8_t fontWeight;     // 0=normal, 1=bold
+    CSS::TextAlign textAlign = CSS::TextAlign::Left;
+    CSS::FontWeight fontWeight = CSS::FontWeight::Normal;
 
     // Scroll
     float scrollY;
@@ -128,9 +129,9 @@ struct FlatTextOp {
     std::string text;
     float x, y;
     float color[4];
-    uint8_t align;      // 0=left, 1=center, 2=right
+    CSS::TextAlign align = CSS::TextAlign::Left;
     float fontSize;
-    uint8_t fontWeight; // 0=normal, 1=bold
+    CSS::FontWeight fontWeight = CSS::FontWeight::Normal;
     uint8_t centerInk;  // 0=shared-line em baseline, 1=optical per-run
 };
 

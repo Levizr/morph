@@ -20,9 +20,9 @@ public:
         // Background rect + border (only rendering ops — no clip/scroll state)
         DrawOp bg;
 #ifdef MORPH_FEATURE_BORDER
-        if (style.borderWidth > 0.0f && style.borderStyle == "solid") {
+        if (style.borderWidth > 0.0f && style.borderStyle == CSS::BorderStyle::Solid) {
             float bw = m_isTransitioning ? style.borderWidth : snapBorderWidth(style.borderWidth);
-            if (style.boxSizing == "border-box") {
+            if (style.boxSizing == CSS::BoxSizing::BorderBox) {
                 bg.setBordered(sx, sy, sw, sh, rad, style.bgColor, bw, style.borderColor);
             } else {
                 bg.setBordered(sx - bw, sy - bw, sw + 2.0f * bw, sh + 2.0f * bw,
@@ -69,7 +69,7 @@ public:
         }
 
         // 2. Clip setup (from node state — correct interleaving)
-        bool needClip = (style.overflow == "hidden" || style.overflow == "scroll" || style.overflow == "auto");
+        bool needClip = (style.overflow == CSS::Overflow::Hidden || style.overflow == CSS::Overflow::Scroll || style.overflow == CSS::Overflow::Auto);
         bool needRadiusClip = rad > 0.0f;
         bool scrolling = scrollEnabled && contentH > sh;
 
@@ -126,9 +126,9 @@ public:
         bool pushedSelf = pushSelfTransform(r, sx, sy);
 #endif
 #ifdef MORPH_FEATURE_BORDER
-        if (style.borderWidth > 0.0f && style.borderStyle == "solid") {
+        if (style.borderWidth > 0.0f && style.borderStyle == CSS::BorderStyle::Solid) {
             float bw = m_isTransitioning ? style.borderWidth : snapBorderWidth(style.borderWidth);
-            if (style.boxSizing == "border-box") {
+            if (style.boxSizing == CSS::BoxSizing::BorderBox) {
                 r.drawBorderedRoundedRect(sx, sy, sw, sh, rad,
                                           style.bgColor, bw, style.borderColor);
             } else {
@@ -147,9 +147,9 @@ public:
             r.drawRect(sx, sy, sw, sh, style.bgColor);
 
         // ── 2. Children (clipped when overflow is non-visible) ────
-        bool overflowClipped = (style.overflow == "hidden" ||
-                                style.overflow == "scroll" ||
-                                style.overflow == "auto");
+        bool overflowClipped = (style.overflow == CSS::Overflow::Hidden ||
+                                style.overflow == CSS::Overflow::Scroll ||
+                                style.overflow == CSS::Overflow::Auto);
         bool needRectClip = overflowClipped;
         bool needRadiusClip = rad > 0.0f;
 #ifdef MORPH_FEATURE_SCROLL

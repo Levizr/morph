@@ -45,7 +45,7 @@ public:
 
     InputNode() {
         type = NodeType::Input;
-        style.cursor = "text";
+        style.cursor = CSS::Cursor::Text;
         liveSet().insert(this);
     }
 
@@ -442,7 +442,7 @@ public:
     bool m_showPlaceholder = false;
     float m_textX = 0.0f, m_textY = 0.0f;
     float m_fsCache = 16.0f;
-    std::string m_fwCache = "normal";
+    CSS::FontWeight m_fwCache = CSS::FontWeight::Normal;
     float m_phColor[4] = {0.0f, 0.0f, 0.0f, 1.0f};
     // Edit overlay geometry (flatten-time absolute coords; -1 = hidden).
     // NaN = hidden sentinel (x can be legitimately negative when scrolled).
@@ -469,7 +469,7 @@ public:
         mixF(x); mixF(y); mixF(w); mixF(h);
         mixF(scrollX);
         mixF(effFontSize());
-        mixStr(effFontWeight());
+        { unsigned char v = static_cast<unsigned char>(effFontWeight()); mix(&v, 1); }
         mix(style.color, sizeof(float) * 4);
         mixB(focused); mixB(disabled); mixB(m_caretOn);
         uint64_t c = (uint64_t)caret, a = (uint64_t)selAnchor;
@@ -582,11 +582,10 @@ public:
         fto.color[0] = col[0]; fto.color[1] = col[1];
         fto.color[2] = col[2]; fto.color[3] = col[3];
         fto.color[3] *= fn.opacity;   // group opacity, like TextNode
-        fto.align = 0;                // TextAlign::Left
+        fto.align = CSS::TextAlign::Left;
         fto.centerInk = 1;            // input text is always a solo run
         fto.fontSize = m_fsCache;
-        fto.fontWeight = (m_fwCache == "bold" || m_fwCache == "700" ||
-                          m_fwCache == "800" || m_fwCache == "900") ? 1 : 0;
+        fto.fontWeight = m_fwCache;
         frame.textOps.push_back(fto);
         return 1;
     }
@@ -600,9 +599,9 @@ public:
         float rad = m_isTransitioning ? (style.borderRadius > 0.0f ? style.borderRadius : 6.0f) : snapRadius(style.borderRadius > 0.0f ? style.borderRadius : 6.0f);
         DrawOp bg;
 #ifdef MORPH_FEATURE_BORDER
-        if (style.borderWidth > 0.0f && style.borderStyle == "solid") {
+        if (style.borderWidth > 0.0f && style.borderStyle == CSS::BorderStyle::Solid) {
             float bw = m_isTransitioning ? style.borderWidth : snapBorderWidth(style.borderWidth);
-            bool inner = (style.boxSizing == "border-box");
+            bool inner = (style.boxSizing == CSS::BoxSizing::BorderBox);
             if (inner)
                 bg.setBordered(sx, sy, sw, sh, rad, style.bgColor, bw, style.borderColor);
             else
@@ -647,7 +646,7 @@ public:
         bool needRadiusClip = rad > 0.0f;
 #ifdef MORPH_FEATURE_SCROLL
         bool scrolling = scrollEnabled && contentH > sh;
-        bool needRectClip = scrolling || style.overflow == "hidden" || style.overflow == "auto";
+        bool needRectClip = scrolling || style.overflow == CSS::Overflow::Hidden || style.overflow == CSS::Overflow::Auto;
 #else
         bool needRectClip = false;
 #endif
@@ -703,9 +702,9 @@ public:
         bool pushedSelf = pushSelfTransform(r, sx, sy);
 #endif
 #ifdef MORPH_FEATURE_BORDER
-        if (style.borderWidth > 0.0f && style.borderStyle == "solid") {
+        if (style.borderWidth > 0.0f && style.borderStyle == CSS::BorderStyle::Solid) {
             float bw = m_isTransitioning ? style.borderWidth : snapBorderWidth(style.borderWidth);
-            bool inner = (style.boxSizing == "border-box");
+            bool inner = (style.boxSizing == CSS::BoxSizing::BorderBox);
             if (inner)
                 r.drawBorderedRoundedRect(sx, sy, sw, sh, rad, style.bgColor,
                                           bw, style.borderColor);
@@ -939,7 +938,7 @@ private:
         if (!r || m_dispCache.empty()) return 0;
         float relX = clickX - (x + kPadX) + scrollX;
         float fs = m_fsCache;
-        const std::string& fw = m_fwCache;
+        CSS::FontWeight fw = m_fwCache;
         size_t best = 0;                       // boundary before first char
         float bestDist = relX < 0 ? -relX : relX;
         float acc = 0.0f;
@@ -983,9 +982,9 @@ private:
         float pfs = parent->style.fontSize;
         return (pfs != 16.0f) ? pfs : style.fontSize;
     }
-    const std::string& effFontWeight() const {
-        if (style.fontWeight != "normal" || !parent) return style.fontWeight;
-        return (parent->style.fontWeight != "normal") ? parent->style.fontWeight : style.fontWeight;
+    CSS::FontWeight effFontWeight() const {
+        if (style.fontWeight != CSS::FontWeight::Normal || !parent) return style.fontWeight;
+        return (parent->style.fontWeight != CSS::FontWeight::Normal) ? parent->style.fontWeight : style.fontWeight;
     }
 
     static int utf8Encode(unsigned int cp, char out[5]) {

@@ -7,29 +7,80 @@ use std::fmt::Write as _;
 /// `None` = default/unknown → skip emission (the field default matches).
 pub(crate) fn style_enum_literal(prop: &str, value: &str) -> Option<&'static str> {
     match (prop, value) {
+        ("display", "block") => Some("CSS::Display::Block"),
         ("display", "flex") => Some("CSS::Display::Flex"),
         ("display", "none") => Some("CSS::Display::None"),
         ("display", "inline") => Some("CSS::Display::Inline"),
         ("display", "inline-block") => Some("CSS::Display::InlineBlock"),
+        ("position", "static") => Some("CSS::Position::Static"),
         ("position", "absolute") => Some("CSS::Position::Absolute"),
         ("position", "relative") => Some("CSS::Position::Relative"),
         ("position", "fixed") => Some("CSS::Position::Fixed"),
         ("position", "sticky") => Some("CSS::Position::Sticky"),
+        ("textAlign", "left") => Some("CSS::TextAlign::Left"),
+        ("textAlign", "center") => Some("CSS::TextAlign::Center"),
+        ("textAlign", "right") => Some("CSS::TextAlign::Right"),
+        ("textAlign", "justify") => Some("CSS::TextAlign::Justify"),
+        ("fontWeight", "normal") => Some("CSS::FontWeight::Normal"),
+        ("fontWeight", "bold")
+        | ("fontWeight", "700")
+        | ("fontWeight", "800")
+        | ("fontWeight", "900") => Some("CSS::FontWeight::Bold"),
+        ("flexDirection", "row") => Some("CSS::FlexDirection::Row"),
+        ("flexDirection", "column") => Some("CSS::FlexDirection::Column"),
+        ("flexDirection", "row-reverse") => Some("CSS::FlexDirection::RowReverse"),
+        ("flexDirection", "column-reverse") => Some("CSS::FlexDirection::ColumnReverse"),
+        ("justifyContent", "center") => Some("CSS::JustifyContent::Center"),
+        ("justifyContent", "flex-end") => Some("CSS::JustifyContent::FlexEnd"),
+        ("justifyContent", "space-between") => Some("CSS::JustifyContent::SpaceBetween"),
+        ("justifyContent", "space-around") => Some("CSS::JustifyContent::SpaceAround"),
+        ("justifyContent", "flex-start") => Some("CSS::JustifyContent::FlexStart"),
+        ("alignItems", "center") => Some("CSS::AlignItems::Center"),
+        ("alignItems", "flex-end") => Some("CSS::AlignItems::FlexEnd"),
+        ("alignItems", "stretch") => Some("CSS::AlignItems::Stretch"),
+        ("alignItems", "flex-start") => Some("CSS::AlignItems::FlexStart"),
+        ("flexWrap", "nowrap") => Some("CSS::FlexWrap::Nowrap"),
+        ("flexWrap", "wrap") => Some("CSS::FlexWrap::Wrap"),
+        ("flexWrap", "wrap-reverse") => Some("CSS::FlexWrap::WrapReverse"),
+        ("cursor", "default") => Some("CSS::Cursor::Default"),
+        ("cursor", "default") => Some("CSS::Cursor::Default"),
+        ("cursor", "pointer") => Some("CSS::Cursor::Pointer"),
+        ("cursor", "text") => Some("CSS::Cursor::Text"),
+        ("borderStyle", "none") => Some("CSS::BorderStyle::None"),
+        ("borderStyle", "solid") => Some("CSS::BorderStyle::Solid"),
+        ("overflow", "visible") => Some("CSS::Overflow::Visible"),
+        ("overflow", "hidden") => Some("CSS::Overflow::Hidden"),
+        ("overflow", "scroll") => Some("CSS::Overflow::Scroll"),
+        ("overflow", "auto") => Some("CSS::Overflow::Auto"),
+        ("boxSizing", "content-box") => Some("CSS::BoxSizing::ContentBox"),
+        ("boxSizing", "border-box") => Some("CSS::BoxSizing::BorderBox"),
         _ => None,
     }
 }
 
 /// Keyword property → C++ enum literal for dynamic style effects.
-/// Only converted properties map here (batch 1: display/position);
-/// the rest fall through to raw strings until their batch lands.
+/// Converted properties map here with their behavioral fallback
+/// (unknown values behave as the fallback everywhere); the rest fall
+/// through to raw strings until their batch lands.
 fn keyword_literal(field: &str, value: &str) -> Option<&'static str> {
-    match field {
-        "display" => Some(style_enum_literal("display", value).unwrap_or("CSS::Display::Block")),
-        "position" => {
-            Some(style_enum_literal("position", value).unwrap_or("CSS::Position::Static"))
-        }
-        _ => None,
-    }
+    let (prop, fallback) = match field {
+        "display" => ("display", "CSS::Display::Block"),
+        "position" => ("position", "CSS::Position::Static"),
+        "textAlign" => ("textAlign", "CSS::TextAlign::Left"),
+        "fontWeight" => ("fontWeight", "CSS::FontWeight::Normal"),
+        // Garbage flex-direction takes the column path (only "row" sets isRow).
+        "flexDirection" => ("flexDirection", "CSS::FlexDirection::Column"),
+        "justifyContent" => ("justifyContent", "CSS::JustifyContent::FlexStart"),
+        // Garbage align-items takes the else-branches, like flex-start.
+        "alignItems" => ("alignItems", "CSS::AlignItems::FlexStart"),
+        "flexWrap" => ("flexWrap", "CSS::FlexWrap::Nowrap"),
+        "cursor" => ("cursor", "CSS::Cursor::Default"),
+        "borderStyle" => ("borderStyle", "CSS::BorderStyle::None"),
+        "overflow" => ("overflow", "CSS::Overflow::Visible"),
+        "boxSizing" => ("boxSizing", "CSS::BoxSizing::ContentBox"),
+        _ => return None,
+    };
+    Some(style_enum_literal(prop, value).unwrap_or(fallback))
 }
 
 /// Node type → C++ enum literal. Total (unknown tags → `Custom`),
@@ -47,6 +98,21 @@ pub(crate) fn node_type_literal(node_type: &str) -> &'static str {
         "div" => "NodeType::Div",
         _ => "NodeType::Custom",
     }
+}
+
+/// Capture list for an effect lambda: the node plus the list-factory
+/// bindings (`__it` / `__index`) when a translated body references them.
+/// Factories declare each binding iff the template body mentions it, so
+/// capture and declaration always agree.
+fn effect_captures(id: &str, bodies: &[&str]) -> String {
+    let mut caps = id.to_string();
+    if bodies.iter().any(|b| b.contains("__it")) {
+        caps.push_str(", &__it");
+    }
+    if bodies.iter().any(|b| b.contains("__index")) {
+        caps.push_str(", &__index");
+    }
+    caps
 }
 
 pub fn fmt(v: f32) -> String {
@@ -132,6 +198,7 @@ pub(crate) fn translate_js<S: std::hash::BuildHasher>(
         s = res;
     }
     s = normalize_value_access(&s);
+    s = normalize_item_access(&s);
     s = s.replace("===", "==");
     s = s.replace("!==", "!=");
     let s = translate_dynamic_expr(&s);
@@ -152,6 +219,46 @@ pub(crate) fn translate_js<S: std::hash::BuildHasher>(
 /// build-mode output for identical input.
 pub(crate) fn normalize_value_access(s: &str) -> String {
     s.replace("e.value", "e[\"value\"]").replace(".value", "[\"value\"]")
+}
+
+/// Normalize list-item member access to subscripting: `__it.name` →
+/// `__it["name"]`. The factory binds `__it` to a JsValue, which has no
+/// dotted members (the `__it` name is reserved for list factories).
+/// Single level (mirrors `translate_list_key`); bare `__it` and
+/// existing `__it[...]` forms pass through untouched.
+pub(crate) fn normalize_item_access(s: &str) -> String {
+    fn is_word(b: u8) -> bool {
+        (b as char).is_ascii_alphanumeric() || b == b'_' || b == b'$'
+    }
+    let bytes = s.as_bytes();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let prev_ok = i == 0 || !is_word(bytes[i - 1]);
+        if prev_ok && s[i..].starts_with("__it.") {
+            let mut j = i + 5;
+            while j < bytes.len() && is_word(bytes[j]) {
+                j += 1;
+            }
+            if j > i + 5 {
+                out.push_str("__it[\"");
+                out.push_str(&s[i + 5..j]);
+                out.push_str("\"]");
+                i = j;
+                continue;
+            }
+        }
+        // ASCII fast path; multibyte chars fall through whole.
+        if bytes[i] < 0x80 {
+            out.push(bytes[i] as char);
+            i += 1;
+        } else {
+            let len = s[i..].chars().next().map_or(1, |c| c.len_utf8());
+            out.push_str(&s[i..i + len]);
+            i += len;
+        }
+    }
+    out
 }
 
 // ── Dynamic JS expression → C++ ──────────────────────────────────────
@@ -553,9 +660,10 @@ pub fn emit_node_with_state(
         if !node.reactive_text.is_empty() {
             let cpp_expr = translate_js(&node.reactive_text, state_map);
             let expr = cpp_expr.trim().trim_end_matches(';').to_string();
+            let caps = effect_captures(&node.node_id, &[&expr]);
             lines.push(format!(
                 "{}->m_associatedEffects.push_back(morph::create_effect([{}]() {{",
-                node.node_id, node.node_id
+                node.node_id, caps
             ));
             lines.push(format!("{}{}->setText(morph::str({}));", indent, node.node_id, expr));
             lines.push("}));".into());
@@ -754,25 +862,31 @@ fn emit_list(
     lines.push(format!("{}->arrayFn = []() {{ return {}; }};", node.node_id, array_expr));
     lines.push(format!("{}->itemFactory = __list_factory_{};", node.node_id, node.node_id));
     if !node.list_key_expr.is_empty() {
-        let key_expr = translate_list_key(&node.list_key_expr);
+        let key_expr =
+            translate_list_key(&node.list_key_expr, &node.list_item_param, &node.list_index_param);
         lines.push(format!("{}->keyFn = [](const JsValue& __it, int __index) -> std::string {{ return morph::list_key({}, __index); }};", node.node_id, key_expr));
     }
     lines.push(format!("{}->m_associatedEffects.push_back(morph::create_effect([{}]() {{ {}->reconcile({}->arrayFn()); }}));", node.node_id, node.node_id, node.node_id, node.node_id));
     lines.join("\n")
 }
 
-/// Translate a JSX `key={expr}` where the map variable (`item`) refers to the
-/// current list element, held in `__it` (a JsValue). JavaScript property access
-/// `item.id` -> `__it["id"]`; simple `item` -> `__it`.
-pub(crate) fn translate_list_key(expr: &str) -> String {
+/// Translate a JSX `key={expr}` where the map callback's parameters
+/// refer to the current list element, held in `__it` (a JsValue) and
+/// `__index` (an int). JavaScript property access `item.id` ->
+/// `__it["id"]`; bare `item` -> `__it` (index param likewise).
+pub(crate) fn translate_list_key(expr: &str, item_param: &str, index_param: &str) -> String {
     let s = expr.trim();
-    if let Some(rest) = s.strip_prefix("item.") {
-        format!("__it[\"{rest}\"]")
-    } else if s == "item" {
-        "__it".to_string()
-    } else {
-        s.to_string()
+    let item = if item_param.is_empty() { "item" } else { item_param };
+    if let Some(rest) = s.strip_prefix(&format!("{item}.")) {
+        return format!("__it[\"{rest}\"]");
     }
+    if s == item {
+        return "__it".to_string();
+    }
+    if !index_param.is_empty() && s == index_param {
+        return "__index".to_string();
+    }
+    s.to_string()
 }
 
 /// Port of Python `_set_style`: emits every style field whose feature is on.
@@ -818,7 +932,8 @@ fn set_style(
             .unwrap_or_else(|| "normal".into())
     };
     if fw != "normal" {
-        lines.push(format!("{ind}.fontWeight = \"{fw}\";"));
+        let lit = keyword_literal("fontWeight", &fw).unwrap();
+        lines.push(format!("{ind}.fontWeight = {lit};"));
     }
     // color: text nodes use their own color; others inherit unless explicitly set.
     let c = if is_text {
@@ -880,21 +995,24 @@ fn set_style(
         lines.push(format!("{ind}.maxHeight = {};", fmt(v)));
     }
     if s.overflow != "visible" {
-        lines.push(format!("{ind}.overflow = \"{}\";", s.overflow));
+        let lit = keyword_literal("overflow", &s.overflow).unwrap();
+        lines.push(format!("{ind}.overflow = {lit};"));
     }
     if s.display != "block" {
-        let lit = style_enum_literal("display", &s.display).unwrap_or("CSS::Display::Block");
+        let lit = keyword_literal("display", &s.display).unwrap();
         lines.push(format!("{ind}.display = {lit};"));
     }
     if s.position != "static" {
-        let lit = style_enum_literal("position", &s.position).unwrap_or("CSS::Position::Static");
+        let lit = keyword_literal("position", &s.position).unwrap();
         lines.push(format!("{ind}.position = {lit};"));
     }
     if s.box_sizing != "content-box" {
-        lines.push(format!("{ind}.boxSizing = \"{}\";", s.box_sizing));
+        let lit = keyword_literal("boxSizing", &s.box_sizing).unwrap();
+        lines.push(format!("{ind}.boxSizing = {lit};"));
     }
     if s.text_align != "left" {
-        lines.push(format!("{ind}.textAlign = \"{}\";", s.text_align));
+        let lit = keyword_literal("textAlign", &s.text_align).unwrap();
+        lines.push(format!("{ind}.textAlign = {lit};"));
     }
 
     // ── TRANSFORM ──
@@ -917,19 +1035,23 @@ fn set_style(
     // ── FLEX ──
     if features.contains("flex") {
         if s.display == "flex" && s.flex_dir != "row" {
-            lines.push(format!("{ind}.flexDirection = \"{}\";", s.flex_dir));
+            let lit = keyword_literal("flexDirection", &s.flex_dir).unwrap();
+            lines.push(format!("{ind}.flexDirection = {lit};"));
         }
         if s.gap > 0.0 {
             lines.push(format!("{ind}.gap = {};", fmt(s.gap)));
         }
         if s.justify_content != "flex-start" {
-            lines.push(format!("{ind}.justifyContent = \"{}\";", s.justify_content));
+            let lit = keyword_literal("justifyContent", &s.justify_content).unwrap();
+            lines.push(format!("{ind}.justifyContent = {lit};"));
         }
         if s.align_items != "stretch" {
-            lines.push(format!("{ind}.alignItems = \"{}\";", s.align_items));
+            let lit = keyword_literal("alignItems", &s.align_items).unwrap();
+            lines.push(format!("{ind}.alignItems = {lit};"));
         }
         if s.flex_wrap != "nowrap" {
-            lines.push(format!("{ind}.flexWrap = \"{}\";", s.flex_wrap));
+            let lit = keyword_literal("flexWrap", &s.flex_wrap).unwrap();
+            lines.push(format!("{ind}.flexWrap = {lit};"));
         }
         if s.flex_grow != 0.0 {
             lines.push(format!("{ind}.flexGrow = {};", fmt(s.flex_grow)));
@@ -973,7 +1095,8 @@ fn set_style(
 
     // ── CURSOR ──
     if features.contains("cursor") && s.cursor != "default" && !s.cursor.is_empty() {
-        lines.push(format!("{ind}.cursor = \"{}\";", s.cursor));
+        let lit = keyword_literal("cursor", &s.cursor).unwrap();
+        lines.push(format!("{ind}.cursor = {lit};"));
     }
 
     // ── BORDER ──
@@ -988,7 +1111,8 @@ fn set_style(
             lines.push(format!("{ind}.borderColor[3] = {:.4}f;", s.border_color[3]));
         }
         if s.border_style != "none" && !s.border_style.is_empty() {
-            lines.push(format!("{ind}.borderStyle = \"{}\";", s.border_style));
+            let lit = keyword_literal("borderStyle", &s.border_style).unwrap();
+            lines.push(format!("{ind}.borderStyle = {lit};"));
         }
     }
 
@@ -1086,7 +1210,8 @@ fn emit_hover_style(
     }
     if s.border_style != "none" && !s.border_style.is_empty() && s.border_style != base.border_style
     {
-        o.push(format!("{hv}->borderStyle = \"{}\";", s.border_style));
+        let lit = keyword_literal("borderStyle", &s.border_style).unwrap();
+        o.push(format!("{hv}->borderStyle = {lit};"));
     }
     if s.padding != [0.0, 0.0, 0.0, 0.0] && s.padding != base.padding {
         o.push(format!("{hv}->padding[0] = {};", fmt(s.padding[0])));
@@ -1098,7 +1223,8 @@ fn emit_hover_style(
         o.push(format!("{hv}->fontSize = {};", fmt(s.font_size)));
     }
     if s.font_weight != "normal" && !s.font_weight.is_empty() && s.font_weight != base.font_weight {
-        o.push(format!("{hv}->fontWeight = \"{}\";", s.font_weight));
+        let lit = keyword_literal("fontWeight", &s.font_weight).unwrap();
+        o.push(format!("{hv}->fontWeight = {lit};"));
     }
     if s.width.is_some() && s.width != base.width {
         o.push(format!("{hv}->explicitWidth = {};", fmt(s.width.unwrap())));
@@ -1113,30 +1239,36 @@ fn emit_hover_style(
         o.push(format!("{hv}->display = {lit};"));
     }
     if s.overflow != "visible" && s.overflow != base.overflow {
-        o.push(format!("{hv}->overflow = \"{}\";", s.overflow));
+        let lit = keyword_literal("overflow", &s.overflow).unwrap();
+        o.push(format!("{hv}->overflow = {lit};"));
     }
     if s.position != "static" && s.position != base.position {
         let lit = style_enum_literal("position", &s.position).unwrap_or("CSS::Position::Static");
         o.push(format!("{hv}->position = {lit};"));
     }
     if s.box_sizing != "content-box" && s.box_sizing != base.box_sizing {
-        o.push(format!("{hv}->boxSizing = \"{}\";", s.box_sizing));
+        let lit = keyword_literal("boxSizing", &s.box_sizing).unwrap();
+        o.push(format!("{hv}->boxSizing = {lit};"));
     }
     if features.contains("flex") {
         if s.flex_dir != "row" && s.flex_dir != base.flex_dir {
-            o.push(format!("{hv}->flexDirection = \"{}\";", s.flex_dir));
+            let lit = keyword_literal("flexDirection", &s.flex_dir).unwrap();
+            o.push(format!("{hv}->flexDirection = {lit};"));
         }
         if s.gap > 0.0 && s.gap != base.gap {
             o.push(format!("{hv}->gap = {};", fmt(s.gap)));
         }
         if s.justify_content != "flex-start" && s.justify_content != base.justify_content {
-            o.push(format!("{hv}->justifyContent = \"{}\";", s.justify_content));
+            let lit = keyword_literal("justifyContent", &s.justify_content).unwrap();
+            o.push(format!("{hv}->justifyContent = {lit};"));
         }
         if s.align_items != "stretch" && s.align_items != base.align_items {
-            o.push(format!("{hv}->alignItems = \"{}\";", s.align_items));
+            let lit = keyword_literal("alignItems", &s.align_items).unwrap();
+            o.push(format!("{hv}->alignItems = {lit};"));
         }
         if s.flex_wrap != "nowrap" && s.flex_wrap != base.flex_wrap {
-            o.push(format!("{hv}->flexWrap = \"{}\";", s.flex_wrap));
+            let lit = keyword_literal("flexWrap", &s.flex_wrap).unwrap();
+            o.push(format!("{hv}->flexWrap = {lit};"));
         }
     }
     if features.contains("position") {
@@ -1168,7 +1300,8 @@ fn emit_hover_style(
         && !s.cursor.is_empty()
         && s.cursor != base.cursor
     {
-        o.push(format!("{hv}->cursor = \"{}\";", s.cursor));
+        let lit = keyword_literal("cursor", &s.cursor).unwrap();
+        o.push(format!("{hv}->cursor = {lit};"));
     }
     if features.contains("transform") {
         if let Some(m) = s.transform_matrix {
@@ -1461,17 +1594,19 @@ pub(crate) fn css_field_reset(node_var: &str, field_name: &str, indent: &str) ->
             format!("{indent}        {prefix} = 0;"),
             format!("{indent}        {node_var}->style.zIndexSet = false;"),
         ],
-        "fontWeight" => vec![format!("{indent}        {prefix} = \"normal\";")],
-        "textAlign" => vec![format!("{indent}        {prefix} = \"left\";")],
+        "fontWeight" => vec![format!("{indent}        {prefix} = CSS::FontWeight::Normal;")],
+        "textAlign" => vec![format!("{indent}        {prefix} = CSS::TextAlign::Left;")],
         "display" => vec![format!("{indent}        {prefix} = CSS::Display::Block;")],
-        "flexDirection" => vec![format!("{indent}        {prefix} = \"row\";")],
-        "flexWrap" => vec![format!("{indent}        {prefix} = \"nowrap\";")],
-        "justifyContent" => vec![format!("{indent}        {prefix} = \"flex-start\";")],
-        "alignItems" => vec![format!("{indent}        {prefix} = \"stretch\";")],
-        "cursor" => vec![format!("{indent}        {prefix} = \"default\";")],
-        "borderStyle" => vec![format!("{indent}        {prefix} = \"none\";")],
-        "boxSizing" => vec![format!("{indent}        {prefix} = \"content-box\";")],
-        "overflow" => vec![format!("{indent}        {prefix} = \"visible\";")],
+        "flexDirection" => vec![format!("{indent}        {prefix} = CSS::FlexDirection::Row;")],
+        "flexWrap" => vec![format!("{indent}        {prefix} = CSS::FlexWrap::Nowrap;")],
+        "justifyContent" => {
+            vec![format!("{indent}        {prefix} = CSS::JustifyContent::FlexStart;")]
+        }
+        "alignItems" => vec![format!("{indent}        {prefix} = CSS::AlignItems::Stretch;")],
+        "cursor" => vec![format!("{indent}        {prefix} = CSS::Cursor::Default;")],
+        "borderStyle" => vec![format!("{indent}        {prefix} = CSS::BorderStyle::None;")],
+        "boxSizing" => vec![format!("{indent}        {prefix} = CSS::BoxSizing::ContentBox;")],
+        "overflow" => vec![format!("{indent}        {prefix} = CSS::Overflow::Visible;")],
         "position" => vec![format!("{indent}        {prefix} = CSS::Position::Static;")],
         "flexBasis" => vec![format!("{indent}        {prefix} = \"auto\";")],
         _ => vec![],
@@ -1582,9 +1717,10 @@ fn emit_reactive_effects(
     let mut lines = Vec::new();
     let id = &node.node_id;
 
-    let open_effect = |captures: &str| {
+    let open_effect = |id: &str, cpp: &str| {
         format!(
-            "{indent}{id}->m_associatedEffects.push_back(morph::create_effect([{captures}]() {{"
+            "{indent}{id}->m_associatedEffects.push_back(morph::create_effect([{}]() {{",
+            effect_captures(id, &[cpp])
         )
     };
     let close_effect = "}));";
@@ -1599,7 +1735,7 @@ fn emit_reactive_effects(
             let cpp = cpp.trim().trim_end_matches(';').to_string();
             match val_type {
                 "float" => {
-                    lines.push(open_effect(id));
+                    lines.push(open_effect(id, &cpp));
                     lines.push(format!("{indent}    {id}->interruptStateTransitions();"));
                     lines.push(format!("{indent}    {id}->style.{field_name} = (float)({cpp});"));
                     lines.push(format!("{indent}    {id}->markDirty(LayoutDirty);"));
@@ -1607,7 +1743,7 @@ fn emit_reactive_effects(
                     lines.push(close_effect.to_string());
                 }
                 "string" => {
-                    lines.push(open_effect(id));
+                    lines.push(open_effect(id, &cpp));
                     lines.push(format!("{indent}    {id}->interruptStateTransitions();"));
                     lines
                         .push(format!("{indent}    {id}->style.{field_name} = morph::str({cpp});"));
@@ -1615,7 +1751,7 @@ fn emit_reactive_effects(
                     lines.push(close_effect.to_string());
                 }
                 "color" => {
-                    lines.push(open_effect(id));
+                    lines.push(open_effect(id, &cpp));
                     lines.push(format!("{indent}    {id}->interruptStateTransitions();"));
                     lines.push(format!(
                         "{indent}    morph::setColor({id}->style.{field_name}, morph::str({cpp}));"
@@ -1624,7 +1760,7 @@ fn emit_reactive_effects(
                     lines.push(close_effect.to_string());
                 }
                 "transform" => {
-                    lines.push(open_effect(id));
+                    lines.push(open_effect(id, &cpp));
                     lines.push(format!("{indent}    {id}->interruptStateTransitions();"));
                     lines.push(format!("{indent}    morph::setCssTransform({id}->style, morph::str({cpp}), {id}->w, {id}->h);"));
                     lines.push(format!("{indent}    {id}->markDirty(PaintDirty);"));
@@ -1643,7 +1779,7 @@ fn emit_reactive_effects(
             if child.node_type != "__text__" {
                 continue;
             }
-            lines.push(open_effect(id));
+            lines.push(open_effect(id, &cpp));
             lines.push(format!("{indent}    {}->interruptStateTransitions();", child.node_id));
             lines.push(format!("{indent}    {}->style.fontSize = (float)({cpp});", child.node_id));
             lines.push(format!("{indent}    {}->markDirty(LayoutDirty);", child.node_id));
@@ -1659,7 +1795,7 @@ fn emit_reactive_effects(
         for (attr_key, raw_expr) in attrs {
             let cpp = translate_js(raw_expr, state_map);
             let cpp = cpp.trim().trim_end_matches(';').to_string();
-            lines.push(open_effect(id));
+            lines.push(open_effect(id, &cpp));
             if attr_key == "src" && node.node_type == "img" {
                 lines.push(format!("{indent}    auto* img = static_cast<ImageNode*>({id});"));
                 lines.push(format!("{indent}    std::string _src = morph::str({cpp});"));
@@ -1683,7 +1819,7 @@ fn emit_reactive_effects(
     // builder; used verbatim like Python's `morph::str(<expr>)` contract) ──
     if !node.reactive_class.is_empty() {
         let cpp = node.reactive_class.trim().trim_end_matches(';').trim();
-        lines.push(open_effect(id));
+        lines.push(open_effect(id, &cpp));
         lines.push(format!("{indent}    {id}->setClassName(morph::str({cpp}));"));
         lines.push(close_effect.to_string());
     }
@@ -1694,7 +1830,7 @@ fn emit_reactive_effects(
             // Conditions arrive translated from the builder (ambient state
             // already mapped); use verbatim so C++ is never re-translated.
             let cond_cpp = eff.condition.trim().trim_end_matches(';').trim().to_string();
-            lines.push(open_effect(id));
+            lines.push(open_effect(id, &cond_cpp));
             lines.push(format!("{indent}    {id}->interruptStateTransitions();"));
             lines.push(format!("{indent}    if ({cond_cpp}) {{"));
             let mut on_props: Vec<(&String, &String)> = eff.on_styles.iter().collect();
@@ -1820,14 +1956,49 @@ mod tests {
             style_enum_literal("display", "inline-block"),
             Some("CSS::Display::InlineBlock")
         );
-        assert_eq!(style_enum_literal("display", "block"), None);
+        assert_eq!(style_enum_literal("display", "block"), Some("CSS::Display::Block"));
         assert_eq!(style_enum_literal("display", "hidden"), None);
         assert_eq!(style_enum_literal("display", "garbage"), None);
         assert_eq!(style_enum_literal("display", "Flex"), None);
         assert_eq!(style_enum_literal("position", "absolute"), Some("CSS::Position::Absolute"));
         assert_eq!(style_enum_literal("position", "sticky"), Some("CSS::Position::Sticky"));
-        assert_eq!(style_enum_literal("position", "static"), None);
-        assert_eq!(style_enum_literal("overflow", "auto"), None);
+        assert_eq!(style_enum_literal("position", "static"), Some("CSS::Position::Static"));
+        assert_eq!(style_enum_literal("textAlign", "center"), Some("CSS::TextAlign::Center"));
+        assert_eq!(style_enum_literal("textAlign", "justify"), Some("CSS::TextAlign::Justify"));
+        assert_eq!(style_enum_literal("textAlign", "left"), Some("CSS::TextAlign::Left"));
+        assert_eq!(style_enum_literal("fontWeight", "bold"), Some("CSS::FontWeight::Bold"));
+        assert_eq!(style_enum_literal("fontWeight", "900"), Some("CSS::FontWeight::Bold"));
+        assert_eq!(style_enum_literal("fontWeight", "normal"), Some("CSS::FontWeight::Normal"));
+        assert_eq!(style_enum_literal("fontWeight", "600"), None);
+        assert_eq!(
+            style_enum_literal("flexDirection", "column"),
+            Some("CSS::FlexDirection::Column")
+        );
+        assert_eq!(style_enum_literal("flexDirection", "row"), Some("CSS::FlexDirection::Row"));
+        assert_eq!(
+            style_enum_literal("justifyContent", "space-between"),
+            Some("CSS::JustifyContent::SpaceBetween")
+        );
+        assert_eq!(
+            style_enum_literal("justifyContent", "flex-start"),
+            Some("CSS::JustifyContent::FlexStart")
+        );
+        assert_eq!(style_enum_literal("alignItems", "stretch"), Some("CSS::AlignItems::Stretch"));
+        assert_eq!(
+            style_enum_literal("flexWrap", "wrap-reverse"),
+            Some("CSS::FlexWrap::WrapReverse")
+        );
+        assert_eq!(style_enum_literal("cursor", "pointer"), Some("CSS::Cursor::Pointer"));
+        assert_eq!(style_enum_literal("cursor", "default"), Some("CSS::Cursor::Default"));
+        assert_eq!(style_enum_literal("borderStyle", "solid"), Some("CSS::BorderStyle::Solid"));
+        assert_eq!(style_enum_literal("borderStyle", "none"), Some("CSS::BorderStyle::None"));
+        assert_eq!(style_enum_literal("overflow", "auto"), Some("CSS::Overflow::Auto"));
+        assert_eq!(style_enum_literal("overflow", "visible"), Some("CSS::Overflow::Visible"));
+        assert_eq!(
+            style_enum_literal("boxSizing", "border-box"),
+            Some("CSS::BoxSizing::BorderBox")
+        );
+        assert_eq!(style_enum_literal("flexBasis", "auto"), None);
     }
 
     #[test]
@@ -1846,11 +2017,17 @@ mod tests {
     }
 
     #[test]
-    fn keyword_literal_only_maps_converted_fields() {
+    fn keyword_literal_maps_every_converted_field() {
         assert!(keyword_literal("display", "flex").is_some());
         assert!(keyword_literal("position", "fixed").is_some());
-        assert_eq!(keyword_literal("overflow", "auto"), None);
-        assert_eq!(keyword_literal("cursor", "pointer"), None);
+        assert!(keyword_literal("overflow", "auto").is_some());
+        assert!(keyword_literal("cursor", "pointer").is_some());
+        assert!(keyword_literal("flexDirection", "column").is_some());
+        // Behavioral fallbacks for unknown values.
+        assert_eq!(keyword_literal("flexDirection", "garbage"), Some("CSS::FlexDirection::Column"));
+        assert_eq!(keyword_literal("alignItems", "garbage"), Some("CSS::AlignItems::FlexStart"));
+        assert_eq!(keyword_literal("display", "garbage"), Some("CSS::Display::Block"));
+        assert_eq!(keyword_literal("flexBasis", "auto"), None);
     }
 
     fn cart_map() -> HashMap<String, String> {
@@ -1887,5 +2064,28 @@ mod tests {
         let out = translate_js("(reloadData())", &m);
         assert_eq!(out.matches("app").count(), 1, "{out}");
         assert!(out.contains("app::utility::loadData()"), "{out}");
+    }
+
+    #[test]
+    fn list_key_uses_actual_callback_params() {
+        assert_eq!(translate_list_key("item.id", "item", ""), "__it[\"id\"]");
+        assert_eq!(translate_list_key("item", "item", ""), "__it");
+        assert_eq!(translate_list_key("it.id", "it", ""), "__it[\"id\"]");
+        assert_eq!(translate_list_key("i", "it", "i"), "__index");
+        assert_eq!(translate_list_key("count", "item", ""), "count");
+        // Empty param (hand-built IR) falls back to `item`.
+        assert_eq!(translate_list_key("item.id", "", ""), "__it[\"id\"]");
+    }
+
+    #[test]
+    fn item_member_access_normalizes_to_subscript() {
+        assert_eq!(normalize_item_access("__it.name"), "__it[\"name\"]");
+        assert_eq!(normalize_item_access("__it"), "__it");
+        assert_eq!(normalize_item_access("__it[\"name\"]"), "__it[\"name\"]");
+        assert_eq!(normalize_item_access("morph::str(__it.name)"), "morph::str(__it[\"name\"])");
+        // End-to-end through translate_js with the factory mapping.
+        let mut m = HashMap::new();
+        m.insert("item".to_string(), "__it".to_string());
+        assert_eq!(translate_js("item.name", &m), "__it[\"name\"];");
     }
 }

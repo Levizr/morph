@@ -44,7 +44,7 @@ public:
         m_displayList.push_back(tex);
 
 #ifdef MORPH_FEATURE_BORDER
-        if (style.borderWidth > 0.0f && style.borderStyle == "solid") {
+        if (style.borderWidth > 0.0f && style.borderStyle == CSS::BorderStyle::Solid) {
             float bw = m_isTransitioning ? style.borderWidth : snapBorderWidth(style.borderWidth);
             DrawOp brr;
             brr.setBordered(sx, sy, sw, sh, br, style.bgColor,
@@ -100,7 +100,7 @@ public:
             r.drawTexture(textureId, sx, sy, sw, sh);
 
 #ifdef MORPH_FEATURE_BORDER
-            if (style.borderWidth > 0.0f && style.borderStyle == "solid") {
+            if (style.borderWidth > 0.0f && style.borderStyle == CSS::BorderStyle::Solid) {
                 float bw = m_isTransitioning ? style.borderWidth : snapBorderWidth(style.borderWidth);
                 r.drawBorderRing(sx, sy, sw, sh, br,
                                  bw, style.borderColor);

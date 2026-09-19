@@ -219,9 +219,21 @@ private:
     GLuint m_textShader = 0;
     GLint m_textUProj = -1;
     GLint m_textUAtlas = -1, m_textUColorAtlas = -1;
-    std::unordered_map<std::string, std::vector<TextInstance>> m_textBatches;
+    // Atlas key: no heap strings on the lookup path.
+    struct AtlasKey {
+        int size = 0;
+        CSS::FontWeight weight = CSS::FontWeight::Normal;
+        bool operator==(const AtlasKey& o) const { return size == o.size && weight == o.weight; }
+    };
+    struct AtlasKeyHash {
+        size_t operator()(const AtlasKey& k) const noexcept {
+            return (std::hash<int>{}(k.size) * 31u)
+                 ^ static_cast<size_t>(static_cast<uint8_t>(k.weight));
+        }
+    };
+    std::unordered_map<AtlasKey, std::vector<TextInstance>, AtlasKeyHash> m_textBatches;
     FT_Library m_ft = nullptr;
-    std::unordered_map<std::string, FontAtlas> m_atlases;
+    std::unordered_map<AtlasKey, FontAtlas, AtlasKeyHash> m_atlases;
 
     // Emoji font atlas (shared across all sizes, re-created per size on demand)
     std::unordered_map<int, FontAtlas> m_emojiAtlases; // keyed by fontSize
@@ -247,11 +259,10 @@ private:
     void createQuadBuffers();
 #ifdef MORPH_FEATURE_TEXT
     void createTextBuffers();
-    const std::string &fontPathForWeight(const std::string &weight);
-    static std::string atlasKey(int fontSize, const std::string &fontWeight);
+    const std::string &fontPathForWeight(CSS::FontWeight weight);
 
     // Atlas management
-    FontAtlas &getOrCreateAtlas(int fontSize, const std::string &fontWeight = "normal");
+    FontAtlas &getOrCreateAtlas(int fontSize, CSS::FontWeight weight = CSS::FontWeight::Normal);
     FontAtlas &getOrCreateEmojiAtlas(int fontSize);
     void ensureGlyph(FontAtlas &atlas, unsigned int codepoint);
     void growAtlas(FontAtlas &atlas, bool isColor);
@@ -416,11 +427,11 @@ public:
 
 #ifdef MORPH_FEATURE_TEXT
     float measureTextWidth(const std::string &text, float fontSize,
-                           const std::string &fontWeight) override;
+                           CSS::FontWeight fontWeight) override;
     void drawText(const std::string &text, float x, float y,
                   float color[4], TextAlign align,
                   float fontSize,
-                  const std::string &fontWeight,
+                  CSS::FontWeight fontWeight,
                   bool centerInk = true) override;
 #endif
 

@@ -17,10 +17,21 @@ public:
         float color[4];
         TextAlign align;
         float fontSize;
-        std::string fontWeight;
+        CSS::FontWeight fontWeight = CSS::FontWeight::Normal;
         bool centerInk = true;
     };
     std::vector<TextOp> m_textOps;
+
+    // Renderer alignment → style alignment at the FlatTextOp boundary
+    // (values coincide; Justify never originates here).
+    static CSS::TextAlign cssAlign(TextAlign a)
+    {
+        if (a == TextAlign::Center)
+            return CSS::TextAlign::Center;
+        if (a == TextAlign::Right)
+            return CSS::TextAlign::Right;
+        return CSS::TextAlign::Left;
+    }
 
     TextNode(const std::string& text) : text(text) {}
 
@@ -46,10 +57,10 @@ public:
         float py = y;
         for (auto& line : lines) {
             float lx = x;
-            if (_effTextAlign() == "center") {
+            if (_effTextAlign() == CSS::TextAlign::Center) {
                 float tw = r.measureTextWidth(line, _effFontSize(), _effFontWeight());
                 if (tw < w) lx = x + (w - tw) * 0.5f;
-            } else if (_effTextAlign() == "right") {
+            } else if (_effTextAlign() == CSS::TextAlign::Right) {
                 float tw = r.measureTextWidth(line, _effFontSize(), _effFontWeight());
                 lx = x + w - tw;
             }
@@ -198,10 +209,10 @@ public:
             // Group opacity: the flat node's `opacity` already holds the
             // product of every ancestor's opacity (own opacity is 1 on text).
             fto.color[3] *= fn.opacity;
-            fto.align = (uint8_t)top.align;
+            fto.align = cssAlign(top.align);
             fto.centerInk = top.centerInk ? (uint8_t)1 : (uint8_t)0;
             fto.fontSize = top.fontSize;
-            fto.fontWeight = (top.fontWeight == "bold" || top.fontWeight == "700" || top.fontWeight == "800" || top.fontWeight == "900") ? (uint8_t)1 : (uint8_t)0;
+            fto.fontWeight = top.fontWeight;
             frame.textOps.push_back(fto);
             count++;
         }
@@ -216,10 +227,10 @@ public:
         float py = y;
         for (auto& line : lines) {
             float lx = x;
-            if (_effTextAlign() == "center") {
+            if (_effTextAlign() == CSS::TextAlign::Center) {
                 float tw = r.measureTextWidth(line, _effFontSize(), _effFontWeight());
                 if (tw < w) lx = x + (w - tw) * 0.5f;
-            } else if (_effTextAlign() == "right") {
+            } else if (_effTextAlign() == CSS::TextAlign::Right) {
                 float tw = r.measureTextWidth(line, _effFontSize(), _effFontWeight());
                 lx = x + w - tw;
             }
@@ -272,12 +283,12 @@ private:
         float pfs = parent->style.fontSize;
         return (pfs != 16.0f) ? pfs : style.fontSize;
     }
-    const std::string& _effFontWeight() const {
-        if (style.fontWeight != "normal" || !parent) return style.fontWeight;
-        return (parent->style.fontWeight != "normal") ? parent->style.fontWeight : style.fontWeight;
+    CSS::FontWeight _effFontWeight() const {
+        if (style.fontWeight != CSS::FontWeight::Normal || !parent) return style.fontWeight;
+        return (parent->style.fontWeight != CSS::FontWeight::Normal) ? parent->style.fontWeight : style.fontWeight;
     }
-    const std::string& _effTextAlign() const {
-        if (style.textAlign != "left" || !parent) return style.textAlign;
-        return (parent->style.textAlign != "left") ? parent->style.textAlign : style.textAlign;
+    CSS::TextAlign _effTextAlign() const {
+        if (style.textAlign != CSS::TextAlign::Left || !parent) return style.textAlign;
+        return (parent->style.textAlign != CSS::TextAlign::Left) ? parent->style.textAlign : style.textAlign;
     }
 };

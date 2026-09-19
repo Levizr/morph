@@ -10,43 +10,6 @@ void MorphNode::executeDisplayList(Renderer& r) {
     draw(r);
 }
 
-static uint8_t overflowToEnum(const std::string& s) {
-    if (s == "hidden") return 1;
-    if (s == "scroll") return 2;
-    if (s == "auto")   return 3;
-    return 0;
-}
-static uint8_t boxSizingToEnum(const std::string& s) {
-    return (s == "border-box") ? 1 : 0;
-}
-// Flattened discriminants (display 0=block,1=flex,2=none,3=inline;
-// position 0=static,1=absolute) predate the CSS enums. These string-free
-// mappings keep their exact values; batch 2 removes them with the rest.
-static uint8_t displayToFlat(CSS::Display d)
-{
-    switch (d)
-    {
-    case CSS::Display::Flex:
-        return 1;
-    case CSS::Display::None:
-        return 2;
-    case CSS::Display::Inline:
-        return 3;
-    default:
-        return 0;
-    }
-}
-static uint8_t positionToFlat(CSS::Position p)
-{
-    return (p == CSS::Position::Absolute) ? 1 : 0;
-}
-static uint8_t fontWeightToEnum(const std::string& s) {
-    return (s == "bold" || s == "700" || s == "800" || s == "900") ? 1 : 0;
-}
-static uint8_t borderStyleToEnum(const std::string& s) {
-    return (s == "solid") ? 1 : 0;
-}
-
 int MorphNode::flattenExtra(RenderFrame& frame, FlatRenderNode& fn) {
     (void)frame; (void)fn;
     return 0;
@@ -180,8 +143,8 @@ int MorphNode::flattenImpl(RenderFrame& frame, int parentId, float scrollOffset,
 #endif
     if (offscreen)
     {
-        bool clips = style.overflow == "hidden" || style.overflow == "scroll" ||
-                     style.overflow == "auto" || style.borderRadius > 0.0f;
+        bool clips = style.overflow == CSS::Overflow::Hidden || style.overflow == CSS::Overflow::Scroll ||
+                     style.overflow == CSS::Overflow::Auto || style.borderRadius > 0.0f;
         // Clipping nodes fully contain their descendants. If nothing in the
         // subtree can move (running animation/transition), it can never
         // become visible — drop the whole subtree. Non-clipping nodes still
@@ -207,11 +170,11 @@ int MorphNode::flattenImpl(RenderFrame& frame, int parentId, float scrollOffset,
     fn.borderRadius = style.borderRadius;
     fn.borderWidth = 0.0f;
     fn.borderColor[0] = fn.borderColor[1] = fn.borderColor[2] = 0.0f; fn.borderColor[3] = 1.0f;
-    fn.borderStyle = 0;
+    fn.borderStyle = CSS::BorderStyle::None;
 #ifdef MORPH_FEATURE_BORDER
     fn.borderWidth = style.borderWidth;
     memcpy(fn.borderColor, style.borderColor, sizeof(float)*4);
-    fn.borderStyle = borderStyleToEnum(style.borderStyle);
+    fn.borderStyle = style.borderStyle;
 #endif
 
     // ── Opacity: multiply every paint color by the accumulated opacity ──
@@ -233,14 +196,14 @@ int MorphNode::flattenImpl(RenderFrame& frame, int parentId, float scrollOffset,
         fn.borderColor[3] *= opac;
     }
 
-    fn.overflow = overflowToEnum(style.overflow);
-    fn.boxSizing = boxSizingToEnum(style.boxSizing);
-    fn.display = displayToFlat(style.display);
-    fn.position = positionToFlat(style.position);
+    fn.overflow = style.overflow;
+    fn.boxSizing = style.boxSizing;
+    fn.display = style.display;
+    fn.position = style.position;
 
     fn.fontSize = style.fontSize;
-    fn.textAlign = (style.textAlign == "center") ? (uint8_t)1 : (style.textAlign == "right" ? (uint8_t)2 : (uint8_t)0);
-    fn.fontWeight = fontWeightToEnum(style.fontWeight);
+    fn.textAlign = style.textAlign;
+    fn.fontWeight = style.fontWeight;
 
     fn.scrollY = scrollY;
     fn.contentH = contentH;

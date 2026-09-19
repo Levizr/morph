@@ -266,11 +266,24 @@ impl<'a> CppEmitter<'a> {
             }
             for n in logic_emitter::collect_list_nodes(&w.nodes) {
                 if let Some(ref tmpl) = n.item_template {
+                    // Item templates resolve the map callback's parameters
+                    // (`item`/`index`, whatever the user named them) to the
+                    // factory's `__it` / `__index`. Scoped clone: the outer
+                    // map must not see these bindings.
+                    let mut tmpl_map = state_map.clone();
+                    if n.list_item_param.is_empty() {
+                        tmpl_map.insert("item".to_string(), "__it".to_string());
+                    } else {
+                        tmpl_map.insert(n.list_item_param.clone(), "__it".to_string());
+                    }
+                    if !n.list_index_param.is_empty() {
+                        tmpl_map.insert(n.list_index_param.clone(), "__index".to_string());
+                    }
                     let body = node_emitter::emit_node_with_state(
                         tmpl,
                         None,
                         &fs.features,
-                        &state_map,
+                        &tmpl_map,
                         None,
                     );
                     let mut caps = String::new();
@@ -1785,6 +1798,54 @@ mod tests {
             module_bindings: vec![fb, vb, cb, ab],
             ..Default::default()
         }
+    }
+
+    fn list_window() -> IRWindow {
+        use morph_ir::IRNode;
+        let tmpl = IRNode {
+            node_id: "node_0002".to_string(),
+            node_type: "__text__".to_string(),
+            reactive_text: "item.name".to_string(),
+            ..Default::default()
+        };
+        let list = IRNode {
+            node_id: "node_0001".to_string(),
+            node_type: "__list__".to_string(),
+            list_expr: "items".to_string(),
+            list_key_expr: "item.id".to_string(),
+            item_template: Some(Box::new(tmpl)),
+            list_item_param: "item".to_string(),
+            list_index_param: String::new(),
+            ..Default::default()
+        };
+        IRWindow {
+            window_id: "main".to_string(),
+            title: "Test".to_string(),
+            width: 800,
+            height: 600,
+            visible: true,
+            renderer: "flash".to_string(),
+            nodes: vec![list],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn list_factory_binds_item_param_and_captures() {
+        let windows = vec![list_window()];
+        let dir = std::env::temp_dir().join(format!("morph_list_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        CppEmitter::new(&windows).emit(&dir).unwrap();
+        let app = std::fs::read_to_string(dir.join("app.cpp")).unwrap();
+        // Item member access lowers to subscripting on the factory binding.
+        assert!(app.contains("__it[\"name\"]"), "item lowers: {app}");
+        assert!(!app.contains("item.name"), "no raw item: {app}");
+        // Effects referencing the binding capture it; the factory declares it.
+        assert!(app.contains("&__it"), "capture: {app}");
+        assert!(app.contains("JsValue& __it = __b.item;"), "binding decl: {app}");
+        // Key expression uses the same binding.
+        assert!(app.contains("__it[\"id\"]"), "key lowers: {app}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

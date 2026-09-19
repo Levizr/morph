@@ -2350,10 +2350,26 @@ impl IRBuilder {
                 }
                 Ok(node)
             }
-            morph_parser::JsxNode::List { array_expr, key_expr, item_template, .. } => {
+            morph_parser::JsxNode::List {
+                array_expr,
+                key_expr,
+                item_template,
+                item_param,
+                index_param,
+                ..
+            } => {
                 let mut node = IRNode {
                     node_id: self.next_id(),
                     node_type: "__list__".into(),
+                    // Preserve the map callback's parameter names
+                    // (`items.map((it, i) => ...)`): codegen binds them to
+                    // `__it` / `__index` in item factories.
+                    list_item_param: if item_param.is_empty() {
+                        "item".to_string()
+                    } else {
+                        item_param.clone()
+                    },
+                    list_index_param: index_param.clone(),
                     ..Default::default()
                 };
                 node.list_expr = capture_raw(array_expr, frame);

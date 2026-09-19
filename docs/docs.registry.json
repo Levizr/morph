@@ -1662,6 +1662,24 @@
         "publishedAt": "2026-09-17",
         "priority": "0.9",
         "changefreq": "monthly"
+      },
+      {
+        "title": "Dynamic Styles & Classes (Runtime Path)",
+        "slug": "future/dynamic-styles",
+        "file": "future/dynamic-styles",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "State-driven :style values on keyword fields and fully-dynamic :class bindings: what resolves at compile time, the runtime gap, performance analysis, and the scheduled fix plan.",
+        "keywords": [
+          "morph dynamic styles",
+          "reactive style runtime",
+          "dynamic className",
+          "keyword parse wrapper"
+        ],
+        "lastUpdated": "2026-09-19",
+        "publishedAt": "2026-09-19",
+        "priority": 0.6,
+        "changefreq": "monthly"
       }
     ]
   },

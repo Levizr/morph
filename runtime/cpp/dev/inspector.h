@@ -353,9 +353,9 @@ private:
         r.drawRoundedRect(x + 8, y + 9, 4, h - 18, 2, edge);
 
         float tc[4] = {0.90f, 0.91f, 0.95f, 1.0f};
-        drawTextAt(r, m_toastText, x + 20, y + 13.0f, tc, 12.0f, "normal");
+        drawTextAt(r, m_toastText, x + 20, y + 13.0f, tc, 12.0f, CSS::FontWeight::Normal);
         float hint[4] = {0.50f, 0.52f, 0.62f, 1.0f};
-        drawTextAt(r, "Press F12 for details", x + 20, y + 29.0f, hint, 10.0f, "normal");
+        drawTextAt(r, "Press F12 for details", x + 20, y + 29.0f, hint, 10.0f, CSS::FontWeight::Normal);
     }
 
     void drawOverlay(GLRenderer& r, MorphNode* n) {
@@ -420,7 +420,7 @@ private:
     // The visible glyphs sit ~2-3px below y (due to baseline offset).
     static void drawTextAt(GLRenderer& r, const std::string& text,
                            float x, float y, float color[4],
-                           float fontSize, const std::string& fontWeight) {
+                           float fontSize, CSS::FontWeight fontWeight) {
         r.drawText(text, x, y, color, TextAlign::Left, fontSize, fontWeight);
     }
 
@@ -435,14 +435,14 @@ private:
         float accent[4] = {0.486f, 0.416f, 0.961f, 1.0f};
         r.drawRoundedRect(x, y + 2, 3, 12, 1.5f, accent);
         float lbl[4] = {0.55f, 0.58f, 0.68f, 1.0f};
-        drawTextAt(r, label, x + 9, y, lbl, 9.0f, "bold");
+        drawTextAt(r, label, x + 9, y, lbl, 9.0f, CSS::FontWeight::Bold);
     }
 
     static void drawRow(GLRenderer& r, float x, float y, const char* label,
                         const char* val, float valCol[4]) {
         float lbl[4] = {0.55f, 0.57f, 0.66f, 1.0f};
-        drawTextAt(r, label, x, y, lbl, 11.0f, "normal");
-        drawTextAt(r, val, x + 90.0f, y, valCol, 11.0f, "normal");
+        drawTextAt(r, label, x, y, lbl, 11.0f, CSS::FontWeight::Normal);
+        drawTextAt(r, val, x + 90.0f, y, valCol, 11.0f, CSS::FontWeight::Normal);
     }
 
     static void formatColor(char* buf, size_t n, float c[4]) {
@@ -521,22 +521,22 @@ private:
         // Logo mark
         float logoBg[4] = {0.486f, 0.416f, 0.961f, 1.0f};
         r.drawRoundedRect(px + 12, 11, 28, 28, 8, logoBg);
-        float mw = r.measureTextWidth("m", 17.0f, "bold");
+        float mw = r.measureTextWidth("m", 17.0f, CSS::FontWeight::Bold);
         float white[4] = {1.0f, 1.0f, 1.0f, 1.0f};
-        drawTextAt(r, "m", px + 12 + (28.0f - mw) * 0.5f, 15.0f, white, 17.0f, "bold");
+        drawTextAt(r, "m", px + 12 + (28.0f - mw) * 0.5f, 15.0f, white, 17.0f, CSS::FontWeight::Bold);
 
         // Wordmark + subtitle
         float word[4] = {0.94f, 0.95f, 0.98f, 1.0f};
-        drawTextAt(r, "morph", px + 50, 9.0f, word, 17.0f, "bold");
+        drawTextAt(r, "morph", px + 50, 9.0f, word, 17.0f, CSS::FontWeight::Bold);
         float sub[4] = {0.49f, 0.52f, 0.62f, 1.0f};
-        drawTextAt(r, "DEVELOPER TOOLS", px + 51, 31.0f, sub, 9.0f, "bold");
+        drawTextAt(r, "DEVELOPER TOOLS", px + 51, 31.0f, sub, 9.0f, CSS::FontWeight::Bold);
 
         // F12 key-cap chip
         float chipBg[4] = {0.12f, 0.13f, 0.17f, 1.0f};
         float chipBorder[4] = {0.18f, 0.20f, 0.26f, 1.0f};
         r.drawBorderedRoundedRect(px + pw - 58, 13, 44, 22, 6, chipBg, 1.0f, chipBorder);
         float chipCol[4] = {0.55f, 0.58f, 0.68f, 1.0f};
-        drawTextAt(r, "F12", px + pw - 53, 17.0f, chipCol, 10.0f, "bold");
+        drawTextAt(r, "F12", px + pw - 53, 17.0f, chipCol, 10.0f, CSS::FontWeight::Bold);
     }
 
     // ── Segmented pill tab control ──
@@ -552,7 +552,7 @@ private:
                 float pill[4] = {0.486f, 0.416f, 0.961f, 1.0f};
                 r.drawRoundedRect(pillX, kTabY + 3, segW, kTabH - 6, 6, pill);
             }
-            float tw = r.measureTextWidth(labels[i], 11.0f, "bold");
+            float tw = r.measureTextWidth(labels[i], 11.0f, CSS::FontWeight::Bold);
             float col[4];
             if (m_activeTab == i) {
                 col[0] = 1.0f; col[1] = 1.0f; col[2] = 1.0f; col[3] = 1.0f;
@@ -560,7 +560,7 @@ private:
                 col[0] = 0.50f; col[1] = 0.53f; col[2] = 0.64f; col[3] = 1.0f;
             }
             drawTextAt(r, labels[i], pillX + (segW - tw) * 0.5f, kTabY + 5.0f,
-                       col, 11.0f, "bold");
+                       col, 11.0f, CSS::FontWeight::Bold);
         }
     }
 
@@ -577,7 +577,7 @@ private:
         float btnBorder[4] = {0.17f, 0.19f, 0.24f, 1.0f};
         r.drawBorderedRoundedRect(px + 10, y0, pw - 20, 34, 8, btnBg, 1.0f, btnBorder);
         drawTextAt(r, inspecting ? "Inspecting  \xC2\xB7  Esc to stop" : "Inspect Element  \xC2\xB7  F2",
-                   px + 18, y0 + 9.0f, btnCol, 12.0f, "bold");
+                   px + 18, y0 + 9.0f, btnCol, 12.0f, CSS::FontWeight::Bold);
 
         float cy = y0 + 42.0f;
         if (selectedNode) {
@@ -587,9 +587,9 @@ private:
         } else {
             drawCard(r, px + 10, cy, pw - 20, 76);
             float hintCol[4] = {0.46f, 0.49f, 0.59f, 1.0f};
-            drawTextAt(r, "Hover over an element", px + 22, cy + 14, hintCol, 11.0f, "normal");
-            drawTextAt(r, "to inspect it live", px + 22, cy + 31, hintCol, 11.0f, "normal");
-            drawTextAt(r, "Click to lock the selection", px + 22, cy + 48, hintCol, 11.0f, "normal");
+            drawTextAt(r, "Hover over an element", px + 22, cy + 14, hintCol, 11.0f, CSS::FontWeight::Normal);
+            drawTextAt(r, "to inspect it live", px + 22, cy + 31, hintCol, 11.0f, CSS::FontWeight::Normal);
+            drawTextAt(r, "Click to lock the selection", px + 22, cy + 48, hintCol, 11.0f, CSS::FontWeight::Normal);
         }
     }
 
@@ -668,7 +668,7 @@ private:
         float ty = winH - 46.0f;
         drawCard(r, cardX, ty, cardW, 30);
         float lbl[4] = {0.80f, 0.82f, 0.89f, 1.0f};
-        drawTextAt(r, "Highlight repaints", px + 22, ty + 8.0f, lbl, 11.0f, "normal");
+        drawTextAt(r, "Highlight repaints", px + 22, ty + 8.0f, lbl, 11.0f, CSS::FontWeight::Normal);
         drawSwitch(r, px + pw - 58.0f, ty + 6.0f, m_highlightRepaints);
     }
 
@@ -680,11 +680,11 @@ private:
 
         // Active renderer label
         float lbl[4] = {0.55f, 0.57f, 0.66f, 1.0f};
-        drawTextAt(r, "Active renderer", px + 22, y0 + 28, lbl, 11.0f, "normal");
+        drawTextAt(r, "Active renderer", px + 22, y0 + 28, lbl, 11.0f, CSS::FontWeight::Normal);
 
         // Status pill
         const char* name = isForge ? "Forge" : "Flash";
-        float tw = r.measureTextWidth(name, 11.0f, "bold");
+        float tw = r.measureTextWidth(name, 11.0f, CSS::FontWeight::Bold);
         float pillW = tw + 20.0f;
         float pillX = px + pw - 22.0f - pillW;
         float pillBg[4];
@@ -695,7 +695,7 @@ private:
         }
         r.drawRoundedRect(pillX, y0 + 27, pillW, 20, 10, pillBg);
         float pillText[4] = {1.0f, 1.0f, 1.0f, 1.0f};
-        drawTextAt(r, name, pillX + 10, y0 + 30, pillText, 11.0f, "bold");
+        drawTextAt(r, name, pillX + 10, y0 + 30, pillText, 11.0f, CSS::FontWeight::Bold);
 
 #ifdef MORPH_FEATURE_DEV_RENDERER_SWITCH
         // Segmented Flash | Forge control
@@ -703,11 +703,11 @@ private:
         drawRendererSegmented(r, px, segY, pw, isForge);
         const char* desc = isForge ? "Damage-limited retained-FBO" : "Full-frame rasterizer";
         float descCol[4] = {0.46f, 0.49f, 0.59f, 1.0f};
-        drawTextAt(r, desc, px + 22, segY + 34.0f, descCol, 9.5f, "normal");
+        drawTextAt(r, desc, px + 22, segY + 34.0f, descCol, 9.5f, CSS::FontWeight::Normal);
 #else
         const char* fixed = isForge ? "Forge  (compile-time)" : "Flash  (compile-time)";
         float descCol[4] = {0.46f, 0.49f, 0.59f, 1.0f};
-        drawTextAt(r, fixed, px + 22, y0 + 60.0f, descCol, 10.0f, "normal");
+        drawTextAt(r, fixed, px + 22, y0 + 60.0f, descCol, 10.0f, CSS::FontWeight::Normal);
 #endif
     }
 
@@ -730,14 +730,14 @@ private:
                 }
                 r.drawRoundedRect(bx, y + 3, half, h - 6, 5, pill);
             }
-            float tw = r.measureTextWidth(labels[i], 11.0f, "bold");
+            float tw = r.measureTextWidth(labels[i], 11.0f, CSS::FontWeight::Bold);
             float tc[4];
             if (sel) {
                 tc[0] = 1.0f; tc[1] = 1.0f; tc[2] = 1.0f; tc[3] = 1.0f;
             } else {
                 tc[0] = 0.45f; tc[1] = 0.48f; tc[2] = 0.58f; tc[3] = 1.0f;
             }
-            drawTextAt(r, labels[i], bx + (half - tw) * 0.5f, y + 6.0f, tc, 11.0f, "bold");
+            drawTextAt(r, labels[i], bx + (half - tw) * 0.5f, y + 6.0f, tc, 11.0f, CSS::FontWeight::Bold);
         }
     }
 
@@ -785,11 +785,11 @@ private:
             size_t j = text.find(' ', i);
             if (j == std::string::npos) j = text.size();
             std::string word = text.substr(i, j - i);
-            float wordW = r.measureTextWidth(word, fontSize, "normal");
+            float wordW = r.measureTextWidth(word, fontSize, CSS::FontWeight::Normal);
 
             if (wordW > maxWidth && cur.empty()) {
                 for (char c : word) {
-                    float cw = r.measureTextWidth(std::string(1, c), fontSize, "normal");
+                    float cw = r.measureTextWidth(std::string(1, c), fontSize, CSS::FontWeight::Normal);
                     if (curW + cw > maxWidth && !cur.empty()) {
                         lines.push_back(cur);
                         cur.clear();
@@ -799,7 +799,7 @@ private:
                     curW += cw;
                 }
             } else {
-                float spaceW = cur.empty() ? 0.0f : r.measureTextWidth(" ", fontSize, "normal");
+                float spaceW = cur.empty() ? 0.0f : r.measureTextWidth(" ", fontSize, CSS::FontWeight::Normal);
                 if (!cur.empty() && curW + spaceW + wordW > maxWidth) {
                     lines.push_back(cur);
                     cur = word;
@@ -824,7 +824,7 @@ private:
         float clearBorder[4] = {0.17f, 0.19f, 0.24f, 1.0f};
         r.drawBorderedRoundedRect(px + pw - 78.0f, y0, 66.0f, 22.0f, 6, clearBg, 1.0f, clearBorder);
         float clearCol[4] = {0.72f, 0.74f, 0.82f, 1.0f};
-        drawTextAt(r, "Clear", px + pw - 64.0f, y0 + 5.0f, clearCol, 10.0f, "bold");
+        drawTextAt(r, "Clear", px + pw - 64.0f, y0 + 5.0f, clearCol, 10.0f, CSS::FontWeight::Bold);
 
         float top = y0 + 30.0f;
         float bottom = winH - 8.0f;
@@ -878,8 +878,8 @@ private:
 
             for (size_t li = 0; li < lines.size(); li++) {
                 if (li == 0)
-                    drawTextAt(r, logTimestamp(e.time), px + 16, lineY, colTime, 10.0f, "normal");
-                drawTextAt(r, lines[li], textX, lineY, col, 10.0f, "normal");
+                    drawTextAt(r, logTimestamp(e.time), px + 16, lineY, colTime, 10.0f, CSS::FontWeight::Normal);
+                drawTextAt(r, lines[li], textX, lineY, col, 10.0f, CSS::FontWeight::Normal);
                 lineY += 16.0f;
             }
         }
@@ -924,12 +924,12 @@ private:
 
     static std::string truncateText(GLRenderer& r, const std::string& s,
                                     float maxW, float fontSize) {
-        if (r.measureTextWidth(s, fontSize, "normal") <= maxW) return s;
+        if (r.measureTextWidth(s, fontSize, CSS::FontWeight::Normal) <= maxW) return s;
         std::string t = s;
         const std::string ell = "\xE2\x80\xA6";
         while (t.size() > 1) {
             t.pop_back();
-            if (r.measureTextWidth(t + ell, fontSize, "normal") <= maxW) break;
+            if (r.measureTextWidth(t + ell, fontSize, CSS::FontWeight::Normal) <= maxW) break;
         }
         return t + ell;
     }
@@ -950,7 +950,7 @@ private:
         float clearBorder[4] = {0.17f, 0.19f, 0.24f, 1.0f};
         r.drawBorderedRoundedRect(px + pw - 78.0f, y0, 66.0f, 22.0f, 6, clearBg, 1.0f, clearBorder);
         float clearCol[4] = {0.72f, 0.74f, 0.82f, 1.0f};
-        drawTextAt(r, "Clear", px + pw - 64.0f, y0 + 5.0f, clearCol, 10.0f, "bold");
+        drawTextAt(r, "Clear", px + pw - 64.0f, y0 + 5.0f, clearCol, 10.0f, CSS::FontWeight::Bold);
 
         // ── Summary card ──
         auto entries = devNetSnapshot();
@@ -968,14 +968,14 @@ private:
         float sumVal[4] = {0.80f, 0.82f, 0.89f, 1.0f};
         float sumErr[4] = {0.95f, 0.34f, 0.26f, 1.0f};
         snprintf(buf, sizeof(buf), "%d req", total);
-        drawTextAt(r, buf, px + 20, y0 + 32, sumVal, 10.0f, "bold");
+        drawTextAt(r, buf, px + 20, y0 + 32, sumVal, 10.0f, CSS::FontWeight::Bold);
         snprintf(buf, sizeof(buf), "%d ok", ok);
-        drawTextAt(r, buf, px + 84, y0 + 32, sumVal, 10.0f, "bold");
+        drawTextAt(r, buf, px + 84, y0 + 32, sumVal, 10.0f, CSS::FontWeight::Bold);
         snprintf(buf, sizeof(buf), "%d err", failed);
-        drawTextAt(r, buf, px + 142, y0 + 32, failed ? sumErr : sumVal, 10.0f, "bold");
+        drawTextAt(r, buf, px + 142, y0 + 32, failed ? sumErr : sumVal, 10.0f, CSS::FontWeight::Bold);
         std::string tot = fmtBytes(bytes);
-        float totW = r.measureTextWidth(tot, 10.0f, "bold");
-        drawTextAt(r, tot, px + pw - 20.0f - totW, y0 + 32, sumVal, 10.0f, "bold");
+        float totW = r.measureTextWidth(tot, 10.0f, CSS::FontWeight::Bold);
+        drawTextAt(r, tot, px + pw - 20.0f - totW, y0 + 32, sumVal, 10.0f, CSS::FontWeight::Bold);
 
         // ── Request list ──
         float top = logViewTop();
@@ -994,9 +994,9 @@ private:
 
         if (total == 0) {
             float hintCol[4] = {0.46f, 0.49f, 0.59f, 1.0f};
-            drawTextAt(r, "No network requests yet", px + 22, top + 16, hintCol, 11.0f, "normal");
-            drawTextAt(r, "Requests made with fetch()", px + 22, top + 33, hintCol, 10.0f, "normal");
-            drawTextAt(r, "will appear here", px + 22, top + 50, hintCol, 10.0f, "normal");
+            drawTextAt(r, "No network requests yet", px + 22, top + 16, hintCol, 11.0f, CSS::FontWeight::Normal);
+            drawTextAt(r, "Requests made with fetch()", px + 22, top + 33, hintCol, 10.0f, CSS::FontWeight::Normal);
+            drawTextAt(r, "will appear here", px + 22, top + 50, hintCol, 10.0f, CSS::FontWeight::Normal);
         } else {
             float colStatus[4]  = {0.75f, 0.78f, 0.85f, 1.0f};
             float colPending[4] = {0.44f, 0.46f, 0.55f, 1.0f};
@@ -1033,23 +1033,23 @@ private:
                 // Status code
                 float* codeCol = bad ? colErr : (e.status == 0 ? colPending : colStatus);
                 std::string code = e.status ? std::to_string(e.status) : (e.done ? "--" : "...");
-                drawTextAt(r, code, px + 28, rowY + 6.0f, codeCol, 10.0f, "bold");
+                drawTextAt(r, code, px + 28, rowY + 6.0f, codeCol, 10.0f, CSS::FontWeight::Bold);
 
                 // Method + URL (flow together so they can't overlap)
-                float methodW = r.measureTextWidth(e.method, 10.0f, "bold");
+                float methodW = r.measureTextWidth(e.method, 10.0f, CSS::FontWeight::Bold);
                 float urlX = contentX + methodW + 6.0f;
                 float urlMaxW = rightEnd - urlX - 2.0f;
-                drawTextAt(r, e.method, contentX, rowY + 6.0f, colMethod, 10.0f, "bold");
+                drawTextAt(r, e.method, contentX, rowY + 6.0f, colMethod, 10.0f, CSS::FontWeight::Bold);
                 std::string url = truncateText(r, e.url, urlMaxW, 10.0f);
-                drawTextAt(r, url, urlX, rowY + 6.0f, colUrl, 10.0f, "normal");
+                drawTextAt(r, url, urlX, rowY + 6.0f, colUrl, 10.0f, CSS::FontWeight::Normal);
 
                 // Duration + size (right-aligned)
                 std::string dur = fmtMs(e.done ? e.duration : 0.0);
                 std::string sz = e.done ? fmtBytes(e.bytes) : "--";
-                float durW = r.measureTextWidth(dur, 9.0f, "normal");
-                float szW = r.measureTextWidth(sz, 9.0f, "normal");
-                drawTextAt(r, dur, px + pw - 14.0f - durW, rowY + 7.0f, colDim, 9.0f, "normal");
-                drawTextAt(r, sz, px + pw - 20.0f - durW - szW, rowY + 7.0f, colDim, 9.0f, "normal");
+                float durW = r.measureTextWidth(dur, 9.0f, CSS::FontWeight::Normal);
+                float szW = r.measureTextWidth(sz, 9.0f, CSS::FontWeight::Normal);
+                drawTextAt(r, dur, px + pw - 14.0f - durW, rowY + 7.0f, colDim, 9.0f, CSS::FontWeight::Normal);
+                drawTextAt(r, sz, px + pw - 20.0f - durW - szW, rowY + 7.0f, colDim, 9.0f, CSS::FontWeight::Normal);
 
                 rowY += rowH;
             }
@@ -1077,7 +1077,7 @@ private:
         float bbBorder[4] = {0.17f, 0.19f, 0.24f, 1.0f};
         r.drawBorderedRoundedRect(px + 10, y0, 64.0f, 22.0f, 6, bbBg, 1.0f, bbBorder);
         float bbCol[4] = {0.72f, 0.74f, 0.82f, 1.0f};
-        drawTextAt(r, "\xC2\xAB Back", px + 20, y0 + 5.0f, bbCol, 10.0f, "bold");
+        drawTextAt(r, "\xC2\xAB Back", px + 20, y0 + 5.0f, bbCol, 10.0f, CSS::FontWeight::Bold);
 
         float* stCol;
         bool bad = (e.error.size() || (e.done && e.status == 0));
@@ -1088,7 +1088,7 @@ private:
         std::string status = e.error.empty()
             ? std::to_string(e.status)
             : "ERR";
-        drawTextAt(r, status, px + 86, y0 + 5.0f, stCol, 10.0f, "bold");
+        drawTextAt(r, status, px + 86, y0 + 5.0f, stCol, 10.0f, CSS::FontWeight::Bold);
 
         float top = logViewTop();
         float bottom = winH - 8.0f;
@@ -1180,7 +1180,7 @@ private:
             bool first = true;
             for (auto& l : lines) {
                 float* c = first ? valCol : dim;
-                drawTextAt(r, l, textX, ry, c, 10.0f, "normal");
+                drawTextAt(r, l, textX, ry, c, 10.0f, CSS::FontWeight::Normal);
                 first = false;
                 ry += 16.0f;
             }
@@ -1191,7 +1191,7 @@ private:
         drawSectionLabel(r, px + 22, y + 6, "RESPONSE HEADERS");
         ry = y + 26.0f;
         for (auto& l : respLines) {
-            drawTextAt(r, l, textX, ry, valCol, 10.0f, "normal");
+            drawTextAt(r, l, textX, ry, valCol, 10.0f, CSS::FontWeight::Normal);
             ry += 16.0f;
         }
         y += respH + 8.0f;
@@ -1200,7 +1200,7 @@ private:
         drawSectionLabel(r, px + 22, y + 6, "REQUEST HEADERS");
         ry = y + 26.0f;
         for (auto& l : reqLines) {
-            drawTextAt(r, l, textX, ry, valCol, 10.0f, "normal");
+            drawTextAt(r, l, textX, ry, valCol, 10.0f, CSS::FontWeight::Normal);
             ry += 16.0f;
         }
         y += reqH + 8.0f;
@@ -1209,7 +1209,7 @@ private:
         drawSectionLabel(r, px + 22, y + 6, "BODY");
         ry = y + 26.0f;
         for (auto& l : bodyLines) {
-            drawTextAt(r, l, textX, ry, valCol, 10.0f, "normal");
+            drawTextAt(r, l, textX, ry, valCol, 10.0f, CSS::FontWeight::Normal);
             ry += 16.0f;
         }
         y += bodyH + 8.0f;
@@ -1250,18 +1250,18 @@ private:
         } else {
             tag = ::toString(n->type);
         }
-        float badgeW = r.measureTextWidth("<" + tag + ">", 11.0f, "bold") + 16.0f;
+        float badgeW = r.measureTextWidth("<" + tag + ">", 11.0f, CSS::FontWeight::Bold) + 16.0f;
         float badgeBg[4] = {0.19f, 0.17f, 0.36f, 1.0f};
         float badgeBorder[4] = {0.486f, 0.416f, 0.961f, 0.55f};
         r.drawBorderedRoundedRect(px + 22, y + 22, badgeW, 22, 6, badgeBg, 1.0f, badgeBorder);
-        drawTextAt(r, "<" + tag + ">", px + 30, y + 26, white, 11.0f, "bold");
+        drawTextAt(r, "<" + tag + ">", px + 30, y + 26, white, 11.0f, CSS::FontWeight::Bold);
 
         // Clear selection button
         if (n == selectedNode) {
             float cbBg[4] = {0.11f, 0.12f, 0.15f, 1.0f};
             r.drawRoundedRect(px + pw - 44.0f, y + 22, 24, 22, 6, cbBg);
             float cbCol[4] = {0.75f, 0.45f, 0.45f, 1.0f};
-            drawTextAt(r, "\xC3\x97", px + pw - 36.0f, y + 25, cbCol, 14.0f, "bold");
+            drawTextAt(r, "\xC3\x97", px + pw - 36.0f, y + 25, cbCol, 14.0f, CSS::FontWeight::Bold);
         }
 
         // Breadcrumb — parent chain
@@ -1275,13 +1275,13 @@ private:
         }
         if (trail.size() > 60) trail = trail.substr(trail.size() - 60);
         float trailCol[4] = {0.62f, 0.64f, 0.72f, 1.0f};
-        drawTextAt(r, trail, px + 22, y + 52, trailCol, 9.0f, "normal");
+        drawTextAt(r, trail, px + 22, y + 52, trailCol, 9.0f, CSS::FontWeight::Normal);
 
         std::string idc;
         if (!n->nodeId.empty()) idc += "#" + n->nodeId;
         if (!n->className.empty()) idc += "." + n->className;
         float idCol[4] = {0.55f, 0.57f, 0.66f, 1.0f};
-        drawTextAt(r, idc.empty() ? "div" : idc, px + 22, y + 68, idCol, 10.0f, "normal");
+        drawTextAt(r, idc.empty() ? "div" : idc, px + 22, y + 68, idCol, 10.0f, CSS::FontWeight::Normal);
         y += cardH + 8.0f;
 
         // ── LAYOUT card ──
@@ -1308,8 +1308,8 @@ private:
         drawSectionLabel(r, px + 22, y + 6, "DISPLAY");
         ry = y + 26.0f;
         drawRow(r, px + 22, ry, "Display", CSS::toString(s.display), valCol); ry += 17.0f;
-        drawRow(r, px + 22, ry, "Overflow", s.overflow.c_str(), valCol); ry += 17.0f;
-        drawRow(r, px + 22, ry, "Box Sizing", s.boxSizing.c_str(), valCol);
+        drawRow(r, px + 22, ry, "Overflow", CSS::toString(s.overflow), valCol); ry += 17.0f;
+        drawRow(r, px + 22, ry, "Box Sizing", CSS::toString(s.boxSizing), valCol);
         y += cardH + 8.0f;
 
         // ── STYLE card ──
@@ -1321,21 +1321,21 @@ private:
         float lbl[4] = {0.55f, 0.57f, 0.66f, 1.0f};
         float swatchX = px + pw - 34.0f;
 
-        drawTextAt(r, "Color", px + 22, ry, lbl, 11.0f, "normal");
+        drawTextAt(r, "Color", px + 22, ry, lbl, 11.0f, CSS::FontWeight::Normal);
         drawSwatch(r, swatchX, ry + 1, s.color);
         formatColor(buf, sizeof(buf), s.color);
-        drawTextAt(r, buf, px + 112, ry, valCol, 11.0f, "normal");
+        drawTextAt(r, buf, px + 112, ry, valCol, 11.0f, CSS::FontWeight::Normal);
         ry += 17.0f;
 
-        drawTextAt(r, "Background", px + 22, ry, lbl, 11.0f, "normal");
+        drawTextAt(r, "Background", px + 22, ry, lbl, 11.0f, CSS::FontWeight::Normal);
         drawSwatch(r, swatchX, ry + 1, s.bgColor);
         formatColor(buf, sizeof(buf), s.bgColor);
-        drawTextAt(r, buf, px + 112, ry, valCol, 11.0f, "normal");
+        drawTextAt(r, buf, px + 112, ry, valCol, 11.0f, CSS::FontWeight::Normal);
         ry += 17.0f;
 
         snprintf(buf, sizeof(buf), "%.0fpx", s.fontSize);
         drawRow(r, px + 22, ry, "Font Size", buf, valCol); ry += 17.0f;
-        drawRow(r, px + 22, ry, "Weight", s.fontWeight.c_str(), valCol); ry += 17.0f;
-        drawRow(r, px + 22, ry, "Align", s.textAlign.c_str(), valCol);
+        drawRow(r, px + 22, ry, "Weight", CSS::toString(s.fontWeight), valCol); ry += 17.0f;
+        drawRow(r, px + 22, ry, "Align", CSS::toString(s.textAlign), valCol);
     }
 };

@@ -350,18 +350,20 @@ void MorphWindow::cursorPosCb(GLFWwindow *win, double mx, double my)
 
 #ifdef MORPH_FEATURE_CURSOR
     auto *target = newHover;
-    const std::string *cur = nullptr;
+    const CSS::Cursor *cur = nullptr;
     for (auto *n = target; n; n = n->parent)
     {
-        if (n->style.cursor != "default")
+        // Exact parity: garbage values stop the walk like any non-default
+        // (they resolve to nullptr below), matching today's string check.
+        if (std::string_view(CSS::toString(n->style.cursor)) != "default")
         {
             cur = &n->style.cursor;
             break;
         }
     }
-    if (cur && *cur == "pointer")
+    if (cur && *cur == CSS::Cursor::Pointer)
         glfwSetCursor(win, self->m_handCursor);
-    else if (cur && *cur == "text")
+    else if (cur && *cur == CSS::Cursor::Text)
         glfwSetCursor(win, self->m_textCursor);
     else
         glfwSetCursor(win, nullptr);
@@ -611,7 +613,7 @@ void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx,
     float sw = sc(node.w);
     float sh = sc(node.h);
 
-    bool overflowClipped = (node.overflow == 1 || node.overflow == 2 || node.overflow == 3);
+    bool overflowClipped = (node.overflow != CSS::Overflow::Visible);
     bool radiusClip = node.borderRadius > 0.0f;
     bool scrolling = node.scrollEnabled && node.contentH > sh;
 
@@ -783,9 +785,15 @@ void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx,
         const auto &to = frame->textOps[i];
         float tx = to.x + node.animOffsetX;
         float ty = to.y + node.animOffsetY;
+        // Renderer alignment has no Justify (behaves as left, per CSS docs).
+        TextAlign align = TextAlign::Left;
+        if (to.align == CSS::TextAlign::Center)
+            align = TextAlign::Center;
+        else if (to.align == CSS::TextAlign::Right)
+            align = TextAlign::Right;
         m_renderer.drawText(to.text, tx, ty, const_cast<float *>(to.color),
-                            (TextAlign)to.align, to.fontSize,
-                            to.fontWeight ? "bold" : "normal",
+                            align, to.fontSize,
+                            to.fontWeight,
                             to.centerInk != 0);
     }
     if (inputClip)

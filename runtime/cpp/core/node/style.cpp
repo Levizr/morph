@@ -101,12 +101,12 @@ static void applyStyleDelta(MorphStyle& target, const MorphStyle& delta) {
         memcpy(target.color, delta.color, sizeof(float)*4);
     if (delta.borderRadius != 0.0f) target.borderRadius = delta.borderRadius;
     if (delta.fontSize != 16.0f)     target.fontSize = delta.fontSize;
-    if (delta.fontWeight != "normal") target.fontWeight = delta.fontWeight;
-    if (delta.textAlign != "left")    target.textAlign = delta.textAlign;
+    if (delta.fontWeight != CSS::FontWeight::Normal) target.fontWeight = delta.fontWeight;
+    if (delta.textAlign != CSS::TextAlign::Left) target.textAlign = delta.textAlign;
     if (delta.display != CSS::Display::Block) target.display = delta.display;
-    if (delta.overflow != "visible")  target.overflow = delta.overflow;
+    if (delta.overflow != CSS::Overflow::Visible)  target.overflow = delta.overflow;
     if (delta.position != CSS::Position::Static) target.position = delta.position;
-    if (delta.boxSizing != "content-box") target.boxSizing = delta.boxSizing;
+    if (delta.boxSizing != CSS::BoxSizing::ContentBox) target.boxSizing = delta.boxSizing;
     if (delta.padding[0] != 0.0f || delta.padding[1] != 0.0f || delta.padding[2] != 0.0f || delta.padding[3] != 0.0f)
         memcpy(target.padding, delta.padding, sizeof(float)*4);
     if (delta.margin[0] != 0.0f || delta.margin[1] != 0.0f || delta.margin[2] != 0.0f || delta.margin[3] != 0.0f)
@@ -120,11 +120,11 @@ static void applyStyleDelta(MorphStyle& target, const MorphStyle& delta) {
     if (delta.minHeight >= 0.0f)      target.minHeight = delta.minHeight;
     if (delta.maxHeight >= 0.0f)      target.maxHeight = delta.maxHeight;
 #ifdef MORPH_FEATURE_FLEX
-    if (delta.flexDirection != "row")  target.flexDirection = delta.flexDirection;
+    if (delta.flexDirection != CSS::FlexDirection::Row) target.flexDirection = delta.flexDirection;
     if (delta.gap != 0.0f)             target.gap = delta.gap;
-    if (delta.justifyContent != "flex-start") target.justifyContent = delta.justifyContent;
-    if (delta.alignItems != "stretch") target.alignItems = delta.alignItems;
-    if (delta.flexWrap != "nowrap")    target.flexWrap = delta.flexWrap;
+    if (delta.justifyContent != CSS::JustifyContent::FlexStart) target.justifyContent = delta.justifyContent;
+    if (delta.alignItems != CSS::AlignItems::Stretch) target.alignItems = delta.alignItems;
+    if (delta.flexWrap != CSS::FlexWrap::Nowrap) target.flexWrap = delta.flexWrap;
     if (delta.flexGrow != 0.0f)        target.flexGrow = delta.flexGrow;
     if (delta.flexShrink != 1.0f)      target.flexShrink = delta.flexShrink;
     if (delta.flexBasis != "auto")     target.flexBasis = delta.flexBasis;
@@ -145,13 +145,13 @@ static void applyStyleDelta(MorphStyle& target, const MorphStyle& delta) {
     if (delta.opacity != 1.0f) target.opacity = delta.opacity;
 #endif
 #ifdef MORPH_FEATURE_CURSOR
-    if (delta.cursor != "default") target.cursor = delta.cursor;
+    if (delta.cursor != CSS::Cursor::Default) target.cursor = delta.cursor;
 #endif
 #ifdef MORPH_FEATURE_BORDER
     if (delta.borderWidth > 0.0f) target.borderWidth = delta.borderWidth;
     if (delta.borderColor[0] != 0.0f || delta.borderColor[1] != 0.0f || delta.borderColor[2] != 0.0f || delta.borderColor[3] != 1.0f)
         memcpy(target.borderColor, delta.borderColor, sizeof(float)*4);
-    if (delta.borderStyle != "none") target.borderStyle = delta.borderStyle;
+    if (delta.borderStyle != CSS::BorderStyle::None) target.borderStyle = delta.borderStyle;
 #endif
 #ifdef MORPH_FEATURE_SCROLL
     if (delta.scrollbarWidth != 8.0f) target.scrollbarWidth = delta.scrollbarWidth;

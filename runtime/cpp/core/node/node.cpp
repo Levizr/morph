@@ -101,7 +101,7 @@ float MorphNode::contentWidth(Renderer* r) {
 
     if (style.explicitWidth >= 0.0f) {
 #ifdef MORPH_FEATURE_BORDER_BOX
-        if (style.boxSizing == "border-box") {
+        if (style.boxSizing == CSS::BoxSizing::BorderBox) {
             return style.explicitWidth;
         }
 #endif
@@ -109,7 +109,7 @@ float MorphNode::contentWidth(Renderer* r) {
     }
 
 #ifdef MORPH_FEATURE_FLEX
-    if (style.display == CSS::Display::Flex && style.flexDirection == "row") {
+    if (style.display == CSS::Display::Flex && style.flexDirection == CSS::FlexDirection::Row) {
         float total = 0.0f;
         int count = 0;
         for (auto* c : children) {

@@ -53,10 +53,13 @@ Style keyword fields are scoped enums, not strings — assign enum literals from
 ```cpp
 node->style.display = CSS::Display::Flex;
 node->style.position = CSS::Position::Absolute;
+node->style.overflow = CSS::Overflow::Auto;
+node->style.textAlign = CSS::TextAlign::Center;
+node->style.fontWeight = CSS::FontWeight::Bold;
 node->type = NodeType::Button;
 ```
 
-A string assignment (`node->style.display = "flex"`) fails at compile time pointing at the line. Parse helpers (`CSS::parseDisplay(...)`, `parseNodeType(...)`) exist for string input; `toString(...)` prints back on debug paths.
+A string assignment (`node->style.display = "flex"`) fails at compile time pointing at the line. Parse helpers (`CSS::parseDisplay(...)`, `parseNodeType(...)`, … — one per keyword property) exist for string input; `toString(...)` prints back on debug paths. Text measurement and drawing take `CSS::FontWeight` directly.
 
 ### Dev mode (`morph dev`)
 

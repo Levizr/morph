@@ -5,7 +5,7 @@
 
 static float hBonus(const MorphStyle& s) {
 #ifdef MORPH_FEATURE_BORDER_BOX
-    if (s.boxSizing == "border-box") return 0.0f;
+    if (s.boxSizing == CSS::BoxSizing::BorderBox) return 0.0f;
 #endif
     float pl = s.padding[3], pr = s.padding[1];
 #ifdef MORPH_FEATURE_BORDER
@@ -17,7 +17,7 @@ static float hBonus(const MorphStyle& s) {
 
 static float vBonus(const MorphStyle& s) {
 #ifdef MORPH_FEATURE_BORDER_BOX
-    if (s.boxSizing == "border-box") return 0.0f;
+    if (s.boxSizing == CSS::BoxSizing::BorderBox) return 0.0f;
 #endif
     float pt = s.padding[0], pb = s.padding[2];
 #ifdef MORPH_FEATURE_BORDER
@@ -160,7 +160,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
         if (style.explicitWidth >= 0.0f) {
             w = style.explicitWidth;
 #ifdef MORPH_FEATURE_BORDER_BOX
-            if (style.boxSizing != "border-box")
+            if (style.boxSizing != CSS::BoxSizing::BorderBox)
 #endif
                 w += pl + pr + bw * 2.0f;
         } else {
@@ -184,7 +184,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
         if (style.explicitHeight >= 0.0f) {
             h = style.explicitHeight;
 #ifdef MORPH_FEATURE_BORDER_BOX
-            if (style.boxSizing != "border-box")
+            if (style.boxSizing != CSS::BoxSizing::BorderBox)
 #endif
                 h += pt + pb + bw * 2.0f;
         } else {
@@ -211,7 +211,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 
     if (style.explicitWidth >= 0.0f) {
 #ifdef MORPH_FEATURE_BORDER_BOX
-        if (style.boxSizing == "border-box") {
+        if (style.boxSizing == CSS::BoxSizing::BorderBox) {
             w = style.explicitWidth;
         } else
 #endif
@@ -245,7 +245,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 
     if (style.explicitHeight >= 0.0f) {
 #ifdef MORPH_FEATURE_BORDER_BOX
-        if (style.boxSizing == "border-box") {
+        if (style.boxSizing == CSS::BoxSizing::BorderBox) {
             h = style.explicitHeight;
         } else
 #endif
@@ -365,7 +365,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 #endif
 
 #ifdef MORPH_FEATURE_FLEX
-    bool isRow = (style.display == CSS::Display::Flex && style.flexDirection == "row");
+    bool isRow = (style.display == CSS::Display::Flex && style.flexDirection == CSS::FlexDirection::Row);
     bool isCol = !isRow;
 #else
     bool isRow = false;
@@ -397,7 +397,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
         }
 
         float mainAvail = isCol ? ch : cw;
-        bool flexWrap = style.flexWrap == "wrap";
+        bool flexWrap = style.flexWrap == CSS::FlexWrap::Wrap;
 
         struct FlexLine { std::vector<FlexItem*> fItems; float crossSize = 0.0f; float totalMain = 0.0f; };
         std::vector<FlexLine> lines;
@@ -492,14 +492,14 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 
             float offset = 0.0f;
             float itemGap = style.gap;
-            if (style.justifyContent == "center") {
+            if (style.justifyContent == CSS::JustifyContent::Center) {
                 offset = free * 0.5f;
-            } else if (style.justifyContent == "flex-end") {
+            } else if (style.justifyContent == CSS::JustifyContent::FlexEnd) {
                 offset = free;
-            } else if (style.justifyContent == "space-between") {
+            } else if (style.justifyContent == CSS::JustifyContent::SpaceBetween) {
                 offset = 0.0f;
                 itemGap = (line.fItems.size() > 1) ? style.gap + free / (line.fItems.size() - 1) : 0.0f;
-            } else if (style.justifyContent == "space-around") {
+            } else if (style.justifyContent == CSS::JustifyContent::SpaceAround) {
                 offset = line.fItems.size() > 0 ? free / (line.fItems.size() * 2) : 0.0f;
                 itemGap = line.fItems.size() > 0 ? style.gap + free / line.fItems.size() : 0.0f;
             }
@@ -515,10 +515,10 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                 float posCross = cursorCross + (isCol ? ci->ml : ci->mt);
 
                 if (lineCross > crossDim) {
-                    if (style.alignItems == "center") {
+                    if (style.alignItems == CSS::AlignItems::Center) {
                         float marginCross = isCol ? (ci->ml + ci->mr) : (ci->mt + ci->mb);
                         posCross = cursorCross + (isCol ? ci->ml : ci->mt) + (lineCross - (crossDim + marginCross)) * 0.5f;
-                    } else if (style.alignItems == "flex-end") {
+                    } else if (style.alignItems == CSS::AlignItems::FlexEnd) {
                         posCross = cursorCross + lineCross - crossDim;
                         posCross -= (isCol ? ci->mr : ci->mb);
                     }
@@ -526,18 +526,18 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 
                 float childX = isCol ? posCross : posMain;
                 float childY = isCol ? posMain : posCross;
-                float childPW = isCol ? ((style.alignItems == "stretch") ? crossSize : crossDim) : childMain;
-                float childPH = isCol ? childMain : ((style.alignItems == "stretch") ? lineCross : crossDim);
+                float childPW = isCol ? ((style.alignItems == CSS::AlignItems::Stretch) ? crossSize : crossDim) : childMain;
+                float childPH = isCol ? childMain : ((style.alignItems == CSS::AlignItems::Stretch) ? lineCross : crossDim);
 
-                if (style.alignItems != "stretch" && ci->node->style.explicitWidth < 0.0f && isCol) {
+                if (style.alignItems != CSS::AlignItems::Stretch && ci->node->style.explicitWidth < 0.0f && isCol) {
                     float cwVal = ci->node->contentWidth(r);
                     if (cwVal > 0.0f && cwVal < childPW) {
                         crossDim = cwVal;
                         childPW = cwVal;
                         if (lineCross > crossDim) {
-                            if (style.alignItems == "center")
+                            if (style.alignItems == CSS::AlignItems::Center)
                                 posCross = cursorCross + (lineCross - crossDim) * 0.5f;
-                            else if (style.alignItems == "flex-end")
+                            else if (style.alignItems == CSS::AlignItems::FlexEnd)
                                 posCross = cursorCross + lineCross - crossDim;
                             childX = isCol ? posCross : posMain;
                             childY = isCol ? posMain : posCross;
@@ -555,12 +555,12 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                 ci->node->m_computedMargin[2] = savedCM[2];
                 ci->node->m_computedMargin[3] = savedCM[3];
 
-                if (style.alignItems == "stretch" && ci->node->style.explicitWidth < 0.0f && isCol) {
+                if (style.alignItems == CSS::AlignItems::Stretch && ci->node->style.explicitWidth < 0.0f && isCol) {
                     float availW = lineCross - ci->ml - ci->mr;
                     if (availW < 0.0f) availW = 0.0f;
                     if (availW > ci->node->w) ci->node->w = availW;
                 }
-                if (style.alignItems == "stretch" && ci->node->style.explicitHeight < 0.0f && isRow) {
+                if (style.alignItems == CSS::AlignItems::Stretch && ci->node->style.explicitHeight < 0.0f && isRow) {
                     float availH = lineCross - ci->mt - ci->mb;
                     if (availH < 0.0f) availH = 0.0f;
                     if (availH > ci->node->h) ci->node->h = availH;
@@ -644,7 +644,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
             }
             for (size_t i = (size_t)firstVis; i <= (size_t)lastVis; i++) {
                 if (items[i].ws) {
-                    items[i].w = r ? r->measureTextWidth(" ", items[i].node->style.fontSize, "normal") : 4.0f;
+                    items[i].w = r ? r->measureTextWidth(" ", items[i].node->style.fontSize, CSS::FontWeight::Normal) : 4.0f;
                     items[i].h = 0.0f;
                 }
             }
@@ -674,10 +674,10 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                 // Line alignment comes from THIS container's text-align,
                 // not from the first inline item (e.g. a button with
                 // text-align:center must not center the whole line).
-                if (lineStart > 0 || style.textAlign == "center" || style.textAlign == "right") {
-                    if (style.textAlign == "center")
+                if (lineStart > 0 || style.textAlign == CSS::TextAlign::Center || style.textAlign == CSS::TextAlign::Right) {
+                    if (style.textAlign == CSS::TextAlign::Center)
                         alignX = cx + (cw - lineW) * 0.5f;
-                    else if (style.textAlign == "right")
+                    else if (style.textAlign == CSS::TextAlign::Right)
                         alignX = cx + cw - lineW;
                 }
                 float itemX = alignX;
@@ -904,7 +904,7 @@ after_children:
 #endif
 
     if (style.explicitHeight < 0.0f &&
-        (style.overflow == "auto" || style.overflow == "scroll") &&
+        (style.overflow == CSS::Overflow::Auto || style.overflow == CSS::Overflow::Scroll) &&
         parentH > 0.0f && h > parentH) {
         h = parentH;
     }
@@ -969,8 +969,8 @@ after_children:
         }
     }
 
-    scrollEnabled = (style.overflow == "scroll") ||
-                    (style.overflow == "auto" && contentH > h);
+    scrollEnabled = (style.overflow == CSS::Overflow::Scroll) ||
+                    (style.overflow == CSS::Overflow::Auto && contentH > h);
     if (scrollEnabled) {
         if (scrollY > contentH - h) scrollY = contentH - h;
         if (scrollY < 0) scrollY = 0;

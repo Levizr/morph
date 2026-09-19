@@ -30,6 +30,7 @@ Everything on Morph's roadmap, documented in detail. Each feature page covers wh
 | **State, Events & Native C++ Interop** | [State/Events/Native](state-events-native-interop.md) | High | Rust Compiler |
 | **Universal Module Bindings** (import/export/native calls for functions, vars, classes) | [Module Bindings](universal-module-bindings.md) | High | State/Events/Native |
 | **Kill All Runtime Strings** (CSS/node/value enums, hash lookups) | [Kill Strings](kill-runtime-strings.md) | High | State/Events/Native |
+| **Dynamic Styles & Classes** (state-driven keyword styles, dynamic className) | [Dynamic Styles](dynamic-styles.md) | Medium | Kill Strings |
 
 **Status meanings:** `production` — shipped and stable · `beta` — shipped, known bugs · `development` — under active construction · `future` — planned, not built yet.
 

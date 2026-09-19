@@ -18,10 +18,10 @@ struct StyleBase {
     float minHeight = -1.0f;
     float maxHeight = -1.0f;
 
-    std::string fontWeight = "normal";
-    std::string overflow = "visible";
+    CSS::FontWeight fontWeight = CSS::FontWeight::Normal;
+    CSS::Overflow overflow = CSS::Overflow::Visible;
     CSS::Display display = CSS::Display::Block;
     CSS::Position position = CSS::Position::Static;
-    std::string textAlign = "left";
-    std::string boxSizing = "content-box";
+    CSS::TextAlign textAlign = CSS::TextAlign::Left;
+    CSS::BoxSizing boxSizing = CSS::BoxSizing::ContentBox;
 };

@@ -32,15 +32,17 @@ inline const KeyframeValue* findValue(const Keyframe& kf,
     return nullptr;
 }
 
-// Resolve a raw % length against a base size.
+// Resolve a raw % length against a base size. Inspects the unit suffix
+// in place — no heap string per tick. Acceptance matches the old
+// `std::string unit` compares exactly (case-sensitive, no trailing junk).
 inline bool resolvePct(const std::string& css, float base, float& out) {
     const char* s = css.c_str();
     char* end = nullptr;
     double v = std::strtod(s, &end);
     if (end == s) return false;
-    std::string unit = end;
-    if (unit == "%") { out = (float)(v / 100.0 * base); return true; }
-    if (unit.empty() || unit == "px") { out = (float)v; return true; }
+    if (end[0] == '%' && end[1] == '\0') { out = (float)(v / 100.0 * base); return true; }
+    if (end[0] == '\0') { out = (float)v; return true; }
+    if (end[0] == 'p' && end[1] == 'x' && end[2] == '\0') { out = (float)v; return true; }
     return false;
 }
 

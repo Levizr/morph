@@ -1,6 +1,8 @@
 #pragma once
 #include <string>
 
+#include "../style/css_enums.h"
+
 enum class TextAlign { Left, Center, Right };
 
 class Renderer {
@@ -21,11 +23,11 @@ public:
                           float x, float y, float color[4],
                           TextAlign align = TextAlign::Left,
                           float fontSize = 16,
-                          const std::string& fontWeight = "normal",
+                          CSS::FontWeight fontWeight = CSS::FontWeight::Normal,
                           bool centerInk = true) {}
     virtual float measureTextWidth(const std::string& text,
                                     float fontSize,
-                                    const std::string& fontWeight = "normal") { return 0; }
+                                    CSS::FontWeight fontWeight = CSS::FontWeight::Normal) { return 0; }
     virtual void beginClip(float x, float y, float w, float h) {}
     virtual void endClip() {}
     virtual void beginRoundedClip(float x, float y, float w, float h, float radius) {}
