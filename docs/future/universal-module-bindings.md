@@ -179,4 +179,4 @@ A local `const loadData` next to `import { loadData }` is an ambiguous-import ha
 
 ---
 
-*Related: [State, Events & Native C++ Interop](state-events-native-interop.md) · [C++ / JSX Interop Guide](../guides/native-cpp.md) · [Dev Internals: State & Events](../dev/state-events-internals.md)*
+*Related: [State, Events & Native C++ Interop](state-events-native-interop.md) · [C++ / JSX Interop Guide](../guides/native-cpp.md) · [Dev Internals: State & Events](../dev/state/state-events-internals.md)*

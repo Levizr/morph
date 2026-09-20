@@ -5,7 +5,7 @@
       {
         "title": "Dev Docs: How Morph Works",
         "slug": "architecture/overview",
-        "file": "dev/overview",
+        "file": "dev/architecture/overview",
         "status": "production",
         "author": "PIYUSH",
         "description": "Contributor and internals documentation for Morph: the two pipelines, where to start by goal, and ground rules for dev docs.",
@@ -23,7 +23,7 @@
       {
         "title": "Repo Map",
         "slug": "architecture/repo-map",
-        "file": "dev/repo-map",
+        "file": "dev/architecture/repo-map",
         "status": "production",
         "author": "PIYUSH",
         "description": "Where everything lives in the Morph repo: Rust crates, Python CLI modules, C++ runtime, tests, and docs tracks.",
@@ -41,7 +41,7 @@
       {
         "title": "GUI Pipeline: Python vs Rust",
         "slug": "architecture/gui-pipeline",
-        "file": "dev/gui-pipeline",
+        "file": "dev/architecture/gui-pipeline",
         "status": "production",
         "author": "PIYUSH",
         "description": "Who owns each stage of morph build, dev, and run: Python CLI vs Rust, current parity gaps, and the exact Python removal sequence.",
@@ -55,6 +55,122 @@
         "publishedAt": "2026-09-09",
         "priority": 0.7,
         "changefreq": "monthly"
+      },
+      {
+        "title": "The Compiler Pipeline: Your .mx File's Hero Journey",
+        "slug": "architecture/compiler-pipeline",
+        "file": "dev/architecture/compiler-pipeline",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Follow one component through all three compiler acts: morph-parser facts (Oxc, lightningcss, JSX walker), morph-ir planning (IRBuilder, style, Tailwind, transforms), and morph-codegen C++ emission with a worked example.",
+        "keywords": [
+          "morph compiler pipeline",
+          "morph parser IR codegen",
+          "morph IRBuilder",
+          "mx to cpp internals"
+        ],
+        "lastUpdated": "2026-09-19",
+        "publishedAt": "2026-09-19",
+        "priority": 0.8,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Dev Mode: Hot Reload Without the Heart Attack",
+        "slug": "architecture/dev-mode",
+        "file": "dev/architecture/dev-mode",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "How morph dev hot-swaps fresh logic into a living window: watcher debounce, morph_devrt builds, per-change logic shared libraries, loopback TCP IPC, and what survives a reload.",
+        "keywords": [
+          "morph dev mode internals",
+          "morph hot reload",
+          "morph_devrt",
+          "morph loopback IPC"
+        ],
+        "lastUpdated": "2026-09-19",
+        "publishedAt": "2026-09-19",
+        "priority": 0.8,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "The Build Machine: Compilers, Fingerprints, and Tiny Binaries",
+        "slug": "architecture/build-system",
+        "file": "dev/architecture/build-system",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Inside morph-build: the Compiler driver, fingerprint skipping, UPX compression, static linking, platform handling, and why builds stay tiny.",
+        "keywords": [
+          "morph build internals",
+          "morph-build crate",
+          "morph fingerprint UPX static",
+          "morph compile flags"
+        ],
+        "lastUpdated": "2026-09-19",
+        "publishedAt": "2026-09-19",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      }
+    ]
+  },
+  {
+    "category": "Crates",
+    "items": [
+      {
+        "title": "morph-parser: The Crate That Reads",
+        "slug": "crates/parser",
+        "file": "dev/crates/crate-parser",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Deep dive on morph-parser: MxSource vocabulary, the MxWalker JSX extractor, lightningcss CSS parsing, BFS module graph resolution with mx-naming gates, and the three-level linter.",
+        "keywords": [
+          "morph-parser crate",
+          "morph MxSource",
+          "morph MxWalker",
+          "morph module graph",
+          "morph linter codes"
+        ],
+        "lastUpdated": "2026-09-19",
+        "publishedAt": "2026-09-19",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "morph-ir: The Crate That Thinks",
+        "slug": "crates/ir",
+        "file": "dev/crates/crate-ir",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Deep dive on morph-ir: IRNode, IRWindow contracts, IRStyle, the CSS registry, Tailwind lowering, transform math, the IRBuilder stage pipeline, and the dev-protocol serializer.",
+        "keywords": [
+          "morph-ir crate",
+          "morph IRBuilder",
+          "morph IRNode IRWindow",
+          "morph Tailwind resolver",
+          "morph IR serializer"
+        ],
+        "lastUpdated": "2026-09-19",
+        "publishedAt": "2026-09-19",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "morph-codegen: The Crate That Writes C++",
+        "slug": "crates/codegen",
+        "file": "dev/crates/crate-codegen",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Deep dive on morph-codegen: CppEmitter assembly line, node_emitter scene painting, logic_emitter reactive wiring, FeatureSet budget gating, and the dev vs build translation-unit split.",
+        "keywords": [
+          "morph-codegen crate",
+          "morph CppEmitter",
+          "morph node_emitter logic_emitter",
+          "morph FeatureSet",
+          "morph dev build TU split"
+        ],
+        "lastUpdated": "2026-09-19",
+        "publishedAt": "2026-09-19",
+        "priority": 0.7,
+        "changefreq": "monthly"
       }
     ]
   },
@@ -64,7 +180,7 @@
       {
         "title": "Morpher Internals",
         "slug": "morpher/internals",
-        "file": "dev/morpher-internals",
+        "file": "dev/morpher/morpher-internals",
         "status": "production",
         "author": "PIYUSH",
         "description": "Contributor's cutting guide to the morpher TS-to-C++ translator: source layout, per-declaration decision flow, and where each kind of change goes.",
@@ -76,24 +192,6 @@
         ],
         "lastUpdated": "2026-09-09",
         "publishedAt": "2026-09-09",
-        "priority": 0.7,
-        "changefreq": "monthly"
-      },
-      {
-        "title": "State & Event Internals",
-        "slug": "morpher/state-events-internals",
-        "file": "dev/state-events-internals",
-        "status": "production",
-        "author": "PIYUSH",
-        "description": "How morphState/morphShared/morphEvent travel from .mx source to C++: module-path identity, per-module namespaces, the shared_vars IR contract, and the emit/subscribe rewrite pipeline.",
-        "keywords": [
-          "morph shared state internals",
-          "morph event channel codegen",
-          "app namespace",
-          "morph IR shared_vars"
-        ],
-        "lastUpdated": "2026-09-16",
-        "publishedAt": "2026-09-16",
         "priority": 0.7,
         "changefreq": "monthly"
       },
@@ -168,6 +266,65 @@
         "publishedAt": "2026-09-16",
         "priority": 0.9,
         "changefreq": "monthly"
+      },
+      {
+        "title": "Escape Analysis: The Compiler Reads Your Variable's Diary",
+        "slug": "morpher/escape-analysis",
+        "file": "dev/morpher/escape-analysis",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Deep dive on morpher escape analysis: declared, observed, and lifetime intent, widening rules, fixpoints, storage decisions with examples, and the intent test suites guarding them.",
+        "keywords": [
+          "morph escape analysis",
+          "morph intent widening",
+          "morph EscapeKind",
+          "morph smart pointer decisions"
+        ],
+        "lastUpdated": "2026-09-19",
+        "publishedAt": "2026-09-19",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "JavaScript Wearing a C++ Costume",
+        "slug": "morpher/js-semantics",
+        "file": "dev/morpher/js-semantics",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "How TypeScript behaves like TypeScript after becoming C++: the type resolver, the js_cmp comparison matrix, string and array lowering, the Js value family, and the three-step recipe for adding a method.",
+        "keywords": [
+          "morph js semantics",
+          "morph type resolver",
+          "morph js_cmp",
+          "morph JsValue JsString"
+        ],
+        "lastUpdated": "2026-09-19",
+        "publishedAt": "2026-09-19",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      }
+    ]
+  },
+  {
+    "category": "State & Events",
+    "items": [
+      {
+        "title": "State & Event Internals",
+        "slug": "state/events-internals",
+        "file": "dev/state/state-events-internals",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "How morphState/morphShared/morphEvent travel from .mx source to C++: module-path identity, per-module namespaces, the shared_vars IR contract, and the emit/subscribe rewrite pipeline.",
+        "keywords": [
+          "morph shared state internals",
+          "morph event channel codegen",
+          "app namespace",
+          "morph IR shared_vars"
+        ],
+        "lastUpdated": "2026-09-16",
+        "publishedAt": "2026-09-16",
+        "priority": 0.7,
+        "changefreq": "monthly"
       }
     ]
   },
@@ -177,7 +334,7 @@
       {
         "title": "Runtime Layout",
         "slug": "runtime/layout",
-        "file": "dev/runtime-layout",
+        "file": "dev/runtime/runtime-layout",
         "status": "production",
         "author": "PIYUSH",
         "description": "How runtime/cpp is organized, runtime conventions including the C++17 rule, and where new helpers, types, and modules go.",
@@ -191,6 +348,166 @@
         "publishedAt": "2026-09-09",
         "priority": 0.6,
         "changefreq": "monthly"
+      },
+      {
+        "title": "The Reactivity Engine: Signals That Actually Signal",
+        "slug": "runtime/reactivity-engine",
+        "file": "dev/runtime/reactivity-engine",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Inside runtime/cpp/reactivity: auto-subscribing signals, the effect pool with once-per-frame flush, eager C++20 coroutines and timers, Result promises, channels, and the threading contract.",
+        "keywords": [
+          "morph reactivity internals",
+          "morph Signal effect",
+          "morph coroutines Task",
+          "morph channel clear_channels"
+        ],
+        "lastUpdated": "2026-09-19",
+        "publishedAt": "2026-09-19",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Pixels on Screen: Flash, Forge, and the Compositor",
+        "slug": "runtime/rendering-deep-dive",
+        "file": "dev/runtime/rendering-deep-dive",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "How frames travel from the node tree to photons: the two-thread snapshot architecture, flash vs forge commit and present paths, damage tracking, the GL batching backend, fonts, and feature gating.",
+        "keywords": [
+          "morph flash forge internals",
+          "morph compositor thread",
+          "morph render frame snapshot",
+          "morph damage tracking"
+        ],
+        "lastUpdated": "2026-09-19",
+        "publishedAt": "2026-09-19",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Layout & Style: Flexbox Without a Browser",
+        "slug": "runtime/layout-style-engine",
+        "file": "dev/runtime/layout-style-engine",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "The native CSS box engine: dirty flags, flexbox and inline flow, margin collapse, positioning, paint order, hover and active transitions, keyframe animation, and the style feature headers.",
+        "keywords": [
+          "morph layout engine internals",
+          "morph flexbox native",
+          "morph dirty flags",
+          "morph hover transition style"
+        ],
+        "lastUpdated": "2026-09-19",
+        "publishedAt": "2026-09-19",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "fetch(): HTTP in a Trench Coat",
+        "slug": "runtime/networking",
+        "file": "dev/runtime/networking",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "How await fetch() really works: the portable socket shim, detached worker threads, the HttpAwaitable resume path, the Response mirror, and DevTools network logging.",
+        "keywords": [
+          "morph fetch internals",
+          "morph net worker thread",
+          "morph HttpAwaitable",
+          "morph Response"
+        ],
+        "lastUpdated": "2026-09-19",
+        "publishedAt": "2026-09-19",
+        "priority": 0.6,
+        "changefreq": "monthly"
+      }
+    ]
+  },
+  {
+    "category": "Build & CLI",
+    "items": [
+      {
+        "title": "Meet morph: Every Command, No Small Talk",
+        "slug": "build-cli/cli-tour",
+        "file": "dev/build-cli/cli-tour",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Tour of the morph binary: one file per command in the morphc crate, project mode vs file mode, error philosophy, and where to add a subcommand.",
+        "keywords": [
+          "morph CLI internals",
+          "morphc commands",
+          "morph new command code",
+          "add morph subcommand"
+        ],
+        "lastUpdated": "2026-09-19",
+        "publishedAt": "2026-09-19",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Config, Cache & Versions: The Boring Bits That Save You",
+        "slug": "build-cli/config-cache-versions",
+        "file": "dev/build-cli/config-cache-versions",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Morph's boring infrastructure: morph-config schema and lockfiles, the global runtime cache pantry, include rewriting, and how versions/ files drive releases.",
+        "keywords": [
+          "morph config internals",
+          "morph cache runtime",
+          "morph.lock versions",
+          "morph release workflow"
+        ],
+        "lastUpdated": "2026-09-19",
+        "publishedAt": "2026-09-19",
+        "priority": 0.6,
+        "changefreq": "monthly"
+      }
+    ]
+  },
+  {
+    "category": "Testing",
+    "items": [
+      {
+        "title": "Testing: The Fixture Hammer and the Self-Test Gauntlet",
+        "slug": "testing/overview",
+        "file": "dev/testing/testing",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "How Morph verifies itself: cargo unit tests, the tests/translate fixture hammer with Node.js ground truth, runtime self-test fixtures, examples as manual tests, and the fixture recipe.",
+        "keywords": [
+          "morph testing internals",
+          "morph fixture suite",
+          "morph self test",
+          "add morph fixture"
+        ],
+        "lastUpdated": "2026-09-19",
+        "publishedAt": "2026-09-19",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      }
+    ]
+  },
+  {
+    "category": "Bugs",
+    "items": [
+      {
+        "title": "Bug Report — 2026-09-19",
+        "slug": "bugs/2026-09-19",
+        "file": "dev/bugs/2026-09-19",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Running bug log from the budget example build: runtime cache staleness, stylesheet position not detected by the feature scanner, cpp import path anchors, morphEffect cleanup mismatch, and JsString/JsValue operator gaps.",
+        "keywords": [
+          "morph bugs",
+          "morph issues",
+          "budget example findings",
+          "morph feature set position",
+          "morph effect cleanup"
+        ],
+        "lastUpdated": "2026-09-19",
+        "publishedAt": "2026-09-19",
+        "priority": 0.8,
+        "changefreq": "monthly"
       }
     ]
   },
@@ -200,7 +517,7 @@
       {
         "title": "Contributing: Setup, Workflow, Conventions",
         "slug": "contributing/overview",
-        "file": "dev/contributing",
+        "file": "dev/contributing/contributing",
         "status": "production",
         "author": "PIYUSH",
         "description": "How to contribute to Morph: toolchain setup, highest-impact areas, code conventions, and the PR workflow.",
@@ -218,7 +535,7 @@
       {
         "title": "Docs System",
         "slug": "contributing/docs-system",
-        "file": "dev/docs-system",
+        "file": "dev/contributing/docs-system",
         "status": "production",
         "author": "PIYUSH",
         "description": "How Morph documentation flows from the repo to morph.levizr.com on both tracks, and how to add or fix a page.",
