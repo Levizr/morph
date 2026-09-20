@@ -4,6 +4,8 @@
 
 > **Note:** This is a future plan, not a commitment. The syntax and API shown here are proposals — they can be completely different when actually implemented.
 
+> **Decisions update (2026-09-20):** route ids intern to integers (**RID**, `app::routes::` consts — no runtime string lookup), duplicate-route lookup returns the **most-recently-focused** window, `navigate` is a **direct swap** (no history), and markup navigation uses **`<a href>`** (the `morph-*` actions never existed). C++ controls windows via `app::windows::*`. See [Decisions — old vs new](#decisions--old-vs-new).
+
 A route file is **both a page and a window**:
 
 - **Navigated to as a page** — rendered inside the current window (`win.navigate("/auth/login")`)
@@ -116,6 +118,43 @@ win.on('close', () => { ... })                 // fires for ANY close, including
 - Imperative and file-based windows are the same object — `new Window(routeId)` and a manifest-resolved window are indistinguishable
 - Opening the same route twice creates two independent windows (each gets its own state)
 - Navigating within a window preserves the window's identity (size, position, id) — only the page changes
+- **No string lookups at runtime.** Route literals in JSX (`"/settings"`, `href="/auth/login"`) lower to **RID** integer consts; window-id literals lower to **WID** ints (the MID pattern). The manifest owns the string→int tables; strings exist only at build time.
+- **By-route lookup is most-recently-focused.** `useWindow("/auth/login")` with two live windows on that route returns the focused one — explicit `id`s remain the precise adressing mechanism.
+
+### RID interning — the namespace trick (same as state)
+
+JSX keeps human-readable strings; generated C++ uses namespace-qualified integer consts, exactly like `app::<ns>::setter` wrappers did for state:
+
+```tsx
+// what you write
+const s = new Window("/auth/login", { data: { userId: 42 } })
+```
+```cpp
+// generated morph_routes.h — what it becomes (folder path → sanitized const)
+namespace app::routes {
+    inline constexpr int kAuthLogin = 2;   // /auth/login
+    inline constexpr int kSettings = 1;    // /settings
+}
+// call site — switch dispatch, zero hash lookups
+WindowManager::get().create_RID(app::routes::kAuthLogin, ...);
+```
+
+Two integers, two jobs: **RID** = *what* to show (compile-time constant, one per `route.mx`); **WID** = *which instance* (runtime handle, N per route). `create(RID) → WID`; `navigate(WID, RID)`. Conflating them would break "same route, two independent windows".
+
+## Navigating with `<a href>` (no `morph-*` tags)
+
+The `morph-open` / `morph-close` / `morph-navigate` attributes from early drafts were **never implemented** — markup navigation uses the browser-familiar `<a>` tag instead. The URL scheme disambiguates, so no new tag name is needed:
+
+```tsx
+<a href="/settings">Settings</a>                          {/* navigate current window (same-tab) */}
+<a href="/settings" target="_blank">Pop out</a>           {/* open route as a NEW window */}
+<a href="/settings" target="_blank" title="…" width={500} height={400}> {/* + overrides */}
+<a href="https://example.com/help">Help</a>               {/* external → OS browser, never a Morph window */}
+```
+
+- Internal `href`s are manifest-checked (`mx-route-unknown` + suggestion on typos) and lower to RID consts like everything else
+- `target="_blank"` without size overrides falls back to the route's `windowConfig`; without one, `width`/`height` are required (same rule as `new Window`)
+- External schemes (`https:`, `http:`, `mailto:`…) open via `xdg-open` / `open` / `ShellExecute` — `<a>` never renders a web page inside Morph
 
 ## Typo safety — validated at build time
 
@@ -205,7 +244,8 @@ New diagnostics following the existing `mx-*` convention:
 
 1. **Editor** — typed routes (`morph-routes.d.ts`) → TypeScript error + autocomplete
 2. **CI / build** — `morph check` rules above → `morph build` fails fast on errors
-3. **Runtime** — the safety net stays: `useWindow(id)` returns `null`, `navigate` returns `false` — a miss degrades gracefully even if dynamic code sneaks one through
+3. **C++ compiler** — `app::routes::setings` doesn't exist → the generated TU fails even if the linter is skipped
+4. **Runtime** — the safety net stays: `useWindow(id)` returns `null`, `navigate` returns `false` — a miss degrades gracefully even if dynamic code sneaks one through
 
 ## Current state
 
@@ -219,6 +259,9 @@ New diagnostics following the existing `mx-*` convention:
 | `route.mx` scan + manifest generation | ❌ Not built |
 | `new Window(routeId, config)` | ❌ Not built |
 | `useWindow` hook | ❌ Not built |
+| `<a href>` navigation (internal / `_blank` / external) | ❌ Not built — `<a>`/`href` have no handling anywhere today |
+| RID/WID interning (`morph_routes.h`, `app::routes::`) | ❌ Not built |
+| C++ window API (`app::windows::*`) | ❌ Not built |
 | `morph-routes.d.ts` typed routes | ❌ Not built |
 | Route/window naming + reference lint rules (`mx-route-*`, `mx-window-*`) | ❌ Not built |
 
@@ -227,15 +270,29 @@ New diagnostics following the existing `mx-*` convention:
 - **Source root** — route ids are relative to `src/` today; should the base be configurable (`"routes": "app"` in config)?
 - **Props typing** — `props` comes from `data`/`navigate` args; types are inferred from the component signature or declared (`interface PageProps`)
 - **Hot reload in dev** — adding/removing a `route.mx` updates the manifest live; navigating to a route mid-edit re-mounts it
-- **Window ids** — auto (route id) vs explicit (`id` in config); both must be resolvable by `useWindow`
+- **Window ids** — ~~auto (route id) vs explicit (`id` in config); both must be resolvable by `useWindow`~~ **Decided 2026-09-20:** explicit `id` in config, interned to WID; by-route lookup (`useWindow("/route")`) returns the most-recently-focused live window on that route. Duplicate explicit ids stay a build error (`mx-window-duplicate`).
+- **`<a>` prop passing** — `navigate` takes a props object; what carries props on a link? (query-like `href="/x?y=1"` vs `data={…}` attr — undecided, implementation detail)
 - **Nested folders** — `/auth/login` nests naturally; is there a limit to depth (no — same as Next.js)
 - **Dynamic segments** — not planned (native windows ≠ URL routes). Open to feedback if real apps need them: `suggestions.morph@levizr.com`
 
+## Decisions — old vs new
+
+| # | Old | New (2026-09-20) | Why |
+|---|---|---|---|
+| 1 | Route ids are build-time strings resolved through the manifest at runtime | **RID**: JSX strings lower to `app::routes::k*` int consts; manifest owns the table | Zero runtime string lookup (kill-strings ethos); C++ compiler as second typo net |
+| 2 | `useWindow("/route")` with duplicates — unspecified | **Most-recently-focused** live window wins; explicit `id`s for precision | Matches user focus intuition; ambiguity resolved without new API |
+| 3 | `navigate` history vs swap — open | **Direct swap**, no history | Simpler; history is additive |
+| 4 | `morph-open/close/navigate` JSX actions planned | **Never existed; `<a href>` instead** (`target="_blank"` = new window, external scheme = OS browser) | Browser-familiar; scheme disambiguates, no new tag name |
+| 5 | Window control JS-only | **C++ API too** (`app::windows::*`, RID in / WID out); C++ always addresses WID explicitly | Native-driven flows (tray, hotkeys); no ambient context across FFI |
+| 6 | Window ids auto vs explicit — open | **Explicit `id`**, interned to WID (MID pattern); dynamic ids = runtime fallback + `mx-window-dynamic` | Static verifiability; same rulebook as MID |
+
 ## Build steps (when picked up)
 
-1. Manifest pass: scan for `route.mx` files → `folder path → component + windowConfig`
-2. `new Window(routeId, config)` via manifest lookup + `data` → props wiring
-3. `win.navigate(routeId, props)` via node-tree swap
-4. `useWindow()` / `useWindow(id)` compiler + runtime registry
-5. Lint rules: `mx-route-*` / `mx-window-*` — reference checks against the manifest + Next.js-style naming conventions (`mx-route-case`, `mx-route-reserved`, `mx-route-private`, `mx-window-id-*`) + `morph-routes.d.ts` generation
-6. Validation app: three routes — opened as windows, navigated between, and one opened both ways at once (with deliberate typos to prove the linter catches them)
+1. Manifest pass: scan for `route.mx` files → `folder path → component + windowConfig`, assign RIDs, emit `morph_routes.h` (`app::routes::`) + `morph-routes.d.ts`
+2. `new Window(routeId, config)` via manifest lookup (RID at codegen) + `data` → props wiring
+3. `win.navigate(routeId, props)` via node-tree swap (direct swap, no history)
+4. `useWindow()` / `useWindow(id)` compiler (WID/RID lowering) + runtime registry; most-recently-focused by-route semantics
+5. `<a href>` codegen: internal → navigate (RID), `target="_blank"` → new window, external scheme → OS browser
+6. C++ `app::windows::*` + `app::routes::` in `morph_api.h`, documented in `native-cpp.md`
+7. Lint rules: `mx-route-*` / `mx-window-*` — reference checks against the manifest + Next.js-style naming conventions (`mx-route-case`, `mx-route-reserved`, `mx-route-private`, `mx-window-id-*`) + `morph-routes.d.ts` generation
+8. Validation app: three routes — opened as windows, navigated between, and one opened both ways at once (with deliberate typos to prove the linter catches them)

@@ -4,6 +4,8 @@
 
 > **Note:** This is a future plan, not a commitment. The syntax and API shown here are proposals — they can be completely different when actually implemented.
 
+> **Decisions update (2026-09-20):** ids intern to integers (**WID** for instances, **RID** for routes — MID-style, no runtime string lookup), markup navigation is **`<a href>`**, and C++ gets a first-class window API (`app::windows::*`). See [Decisions — old vs new](#decisions--old-vs-new).
+
 A programmatic API for creating and managing windows from JavaScript — `new Window(...)`, the `useWindow` hook, `App.quit()`, `App.on(...)` — layered on top of the existing declarative system. Today windows are declared via the `windowConfig` export or `<morph-window>`; this adds runtime control.
 
 ## Why it matters
@@ -56,6 +58,30 @@ class CSS {
   static load(path: string): void        // already exists today
 }
 ```
+
+Route/id strings above are what you write — at build time they lower to integers (**RID** for routes, **WID** for instances; the MID pattern). `new Window("/auth/login")` emits `create_RID(app::routes::kAuthLogin, …)`; `useWindow("login-window")` emits `useWindow_WID(3)`. No hash lookup runs per call; the string tables are consulted once at registration.
+
+### Controlling windows from C++ (`app::windows::*`)
+
+Native code (`native.cpp`) gets the same power with no JS round-trip — tray icons, global hotkeys, and C++-initiated flows. Shipped in the per-project `morph_api.h` next to the state wrappers, documented in `native-cpp.md`:
+
+```cpp
+#include "morph_api.h"
+
+// RID in, WID out — same integers the JSX lowers to
+int wid = app::windows::open(app::routes::kSettings, {.width = 500});
+app::windows::navigate(wid, app::routes::kAuthLogin);  // false if closed
+app::windows::close(wid);                             // safe no-op, like JS close()
+app::windows::on_close(wid, []{ /* fires for X-button too */ });
+app::windows::set_title(wid, "New Title");
+bool gone = app::windows::closed(wid);
+```
+
+Rules:
+
+- `data`/props cross over as `JsObject` (exists today): `app::windows::open(route, {.data = JsObject{…}})`
+- **C++ always addresses a WID explicitly.** There is no C++ `useWindow()` with no argument — a component's "current window" is compile-time context that doesn't cross the FFI. If native code needs the invoker's window, JS passes the WID in.
+- `on_close` takes a `std::function<void()>` stored in the registry; handles resolve by WID at fire time, so a closed window's callback never dangles.
 
 ### Window creation is synchronous — like Electron
 
@@ -126,7 +152,9 @@ Constructors take a config object; `Window` additionally takes a route id for th
 
 ## Compiler story
 
-`new Window(routeId, config)` calls in user JS are translated by `TSToCppTranslator` into `WindowManager` operations, exactly like the existing `morph-*` event actions. The route id is resolved through the `route.mx` manifest (see [File-Based Windows & Pages](file-routing.md)). `useWindow(...)` is resolved at compile time — the component's containing window id is threaded through the IR.
+`new Window(routeId, config)` calls in user JS are translated by `TSToCppTranslator` into `WindowManager` operations. The route id is resolved through the `route.mx` manifest (see [File-Based Windows & Pages](file-routing.md)). `useWindow(...)` is resolved at compile time — the component's containing window id is threaded through the IR.
+
+Lowering detail: string literals never reach the runtime. The manifest pass owns the string→int tables and every call site emits the interned integer (`create_RID(app::routes::kSettings, …)`, `useWindow_WID(3)`) — the same interning the MID system uses for state tags. Only non-literal (dynamic) ids keep a runtime string lookup, flagged by `mx-window-dynamic`.
 
 ## Current state
 
@@ -136,18 +164,29 @@ Constructors take a config object; `Window` additionally takes a route id for th
 | `windowConfig` export + `<morph-window>` | ✅ Shipped (declarative) |
 | `WindowManager` (register/close/allClosed) | ✅ Shipped |
 | `Window` / `App` classes, `useWindow` hook | ❌ Not built |
+| C++ `app::windows::*` + `app::routes::` in `morph_api.h` | ❌ Not built |
 | `.d.ts` for imperative API | ❌ Not built |
 
 ## Open questions
 
-- **Overlay layer** — do popups/modal windows share the parent window's GL context (compositor must switch framebuffers) or get their own context?
+- **Overlay layer** — do popups/modal windows share the parent window's GL context (compositor must switch framebuffers) or get their own context? (Independent contexts are the decided default per [multi-window.md](multi-window.md) — this asks whether *overlays* deserve an exception.)
 - **GPU cleanup** — `destroy()` must release textures, buffers, and the GL context; `WindowManager::~WindowManager` currently owns teardown.
 - **Dev-mode parity** — `logic.so` hot reload must re-wire imperatively created windows the same way it re-wires declarative ones.
 
+## Decisions — old vs new
+
+| # | Old | New (2026-09-20) | Why |
+|---|---|---|---|
+| 1 | String window/route ids with per-call registry lookup | **WID/RID integers**, MID-style interning, switch dispatch | Zero-cost calls; kill-strings consistency; build-time typos |
+| 2 | Two id kinds vague ("auto vs explicit") | **RID** = what to show (per `route.mx`, `app::routes::`); **WID** = which instance (per `new Window`, explicit `id:`) | Keeps "same route, two windows" working; `create(RID) → WID` |
+| 3 | Window control JS-only | **C++ API too** (`app::windows::*`, RID in / WID out, `JsObject` data, `on_close`) | Tray/hotkey/C++-driven flows; explicit WID keeps FFI honest |
+| 4 | `morph-*` event actions for windows (claimed "already generated" — never was) | **`<a href>`** for markup (see [file-routing.md](file-routing.md)) | Browser-familiar; nothing to migrate |
+
 ## Build steps (when picked up)
 
-1. `Window` class in C++ wrapping `MorphWindow` + registration with `WindowManager`
-2. Manifest lookup for `new Window(routeId, config)` + `WindowConfig` parsing in the TS translator + `.d.ts`
-3. `useWindow()` / `useWindow(id)` compiler + runtime registry
-4. `App` singleton (quit / ready / before-quit events)
-5. Test app: login window → button → dynamically creates a settings window (the Phase-2 validation app from the original design plan)
+1. `Window` class in C++ wrapping `MorphWindow` + registration with `WindowManager` (WID-keyed, `shared_ptr`)
+2. Manifest lookup for `new Window(routeId, config)` → RID lowering + `WindowConfig` parsing in the TS translator + `.d.ts`
+3. `useWindow()` / `useWindow(id)` compiler (WID/RID emission) + runtime registry
+4. C++ `app::windows::*` + `app::routes::` in `morph_api.h` + `native-cpp.md` docs
+5. `App` singleton (quit / ready / before-quit events)
+6. Test app: login window → button → dynamically creates a settings window (the Phase-2 validation app from the original design plan); same flow driven once from JSX and once from `native.cpp`
