@@ -6,6 +6,7 @@ mod css_parser;
 pub(crate) mod js_walker;
 pub mod linter;
 pub mod resolve;
+pub mod routes;
 
 pub use ast_types::*;
 pub use linter::{check as lint_check, lint};

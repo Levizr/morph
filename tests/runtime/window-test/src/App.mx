@@ -1,0 +1,16 @@
+import { openPopup, closePopup } from './native.cpp'
+
+export const windowConfig = { title: "Window Test", width: 640, height: 480 }
+
+export default function App() {
+  const [status, setStatus] = morphState("idle")
+
+  return (
+    <body>
+      <div className="title" id="title">window mgmt — registry pump + popup</div>
+      <button id="btn-open" onClick={() => openPopup()}>open popup</button>
+      <button id="btn-close" onClick={() => closePopup()}>close popup</button>
+      <div className="value" id="status">{status}</div>
+    </body>
+  )
+}

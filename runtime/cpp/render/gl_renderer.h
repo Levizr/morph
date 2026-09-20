@@ -275,6 +275,8 @@ private:
 public:
     GLRenderer() = default;
     ~GLRenderer();
+    // Release GL objects on the current context (see .cpp). Idempotent.
+    void shutdown();
     bool ensureReady();
 
     void setProjection(const float proj[16]) { memcpy(m_proj, proj, sizeof(m_proj)); }

@@ -29,3 +29,9 @@ temp/
 tests/translate/fixtures/*.cpp
 tests/translate/fixtures/main
 *.log
+
+# In-progress example (untracked until finished)
+examples/budget/
+
+# Generated per project on every build (route manifest types)
+morph-routes.d.ts

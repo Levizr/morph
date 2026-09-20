@@ -659,23 +659,41 @@ void GLRenderer::drawText(const std::string &text, float x, float y,
 
 GLRenderer::~GLRenderer()
 {
+    shutdown();
+}
+
+// Release all GL objects. Must run while the renderer's own context is
+// current: independent window contexts reuse the same small-integer
+// names, so deleting on a foreign context murders the surviving
+// window's VAO/shaders/atlas (white screen, alive tree). Idempotent —
+// safe as both an explicit pre-destroy step and the dtor backstop.
+void GLRenderer::shutdown()
+{
     if (m_vao)
         glDeleteVertexArrays(1, &m_vao);
+    m_vao = 0;
     if (m_vbo)
         glDeleteBuffers(1, &m_vbo);
+    m_vbo = 0;
     if (m_ibo)
         glDeleteBuffers(1, &m_ibo);
+    m_ibo = 0;
     if (m_instVBO)
         glDeleteBuffers(1, &m_instVBO);
+    m_instVBO = 0;
     if (m_shader)
         glDeleteProgram(m_shader);
+    m_shader = 0;
 #ifdef MORPH_FEATURE_TEXT
     if (m_textVAO)
         glDeleteVertexArrays(1, &m_textVAO);
+    m_textVAO = 0;
     if (m_textInstVBO)
         glDeleteBuffers(1, &m_textInstVBO);
+    m_textInstVBO = 0;
     if (m_textShader)
         glDeleteProgram(m_textShader);
+    m_textShader = 0;
     for (auto &[_, a] : m_atlases)
     {
         if (a.textureR8)
@@ -687,6 +705,7 @@ GLRenderer::~GLRenderer()
         if (a.ftFace)
             FT_Done_Face(a.ftFace);
     }
+    m_atlases.clear();
     for (auto &[_, a] : m_emojiAtlases)
     {
         if (a.textureRGBA)
@@ -694,20 +713,27 @@ GLRenderer::~GLRenderer()
         if (a.ftFace)
             FT_Done_Face(a.ftFace);
     }
+    m_emojiAtlases.clear();
     if (m_ft)
         FT_Done_FreeType(m_ft);
+    m_ft = nullptr;
 #endif
 #ifdef MORPH_FEATURE_IMAGE
     if (m_imageVAO)
         glDeleteVertexArrays(1, &m_imageVAO);
+    m_imageVAO = 0;
     if (m_imageInstVBO)
         glDeleteBuffers(1, &m_imageInstVBO);
+    m_imageInstVBO = 0;
     if (m_imageShader)
         glDeleteProgram(m_imageShader);
+    m_imageShader = 0;
     for (auto &[_, pair] : m_textureCache)
         if (pair.first)
             glDeleteTextures(1, &pair.first);
+    m_textureCache.clear();
 #endif
+    m_ready = false;
 }
 
 bool GLRenderer::ensureReady()

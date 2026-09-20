@@ -18,6 +18,7 @@
 // user functions see declarations before use. Resolves to the generated
 // output-dir header, which shadows the runtime base by include order.
 #include "morph_api.h"
+#include "morph_routes.h"
 {% for header in headers %}
 #include "{{ header }}"
 {% endfor %}
@@ -108,11 +109,11 @@ int main(int argc, char** argv) {
 {% endif %}
 {{ window_code }}
 
-    // Enable vsync so present is capped at the refresh rate when we do render.
-    glfwSwapInterval(1);
-{% for win in windows %}
-    win_{{ win.window_id }}->startCompositor(true);
-{% endfor %}
+    // Per-window vsync is set in the MorphWindow constructor on each
+    // window's own context (creation order must not matter), and the
+    // registry pump binds each context before rendering — no global
+    // context assumptions here.
+    wm.startAllCompositors(true);
 
     while (!wm.allClosed()) {
         // Block until an input event arrives, or ~16ms elapses so timers,
@@ -127,24 +128,14 @@ int main(int argc, char** argv) {
         lastFrameTime = now;
         if (dt > 0.1f) dt = 0.1f;
 
-{% for win in windows %}
-        if (win_{{ win.window_id }}->isVisible()) {
-            // Advance transitions/animations; cheap when idle.
-            win_{{ win.window_id }}->update(dt);
-            // Dirty rendering: skip layout, paint and the GL swap entirely
-            // unless something changed (input, effect, size, or animation).
-            if (win_{{ win.window_id }}->hasPendingRender()) {
-                win_{{ win.window_id }}->commitFrame();
-                win_{{ win.window_id }}->renderFrame();
-            }
-        }
-{% endfor %}
+        // Pump the registry (not a static window list) so dynamically
+        // created windows update + render; reap X-button-closed windows.
+        wm.pump(dt);
+        wm.sweepClosed();
     }
 
     morph::destroy_all_effects();
-{% for win in windows %}
-    win_{{ win.window_id }}->stopCompositor();
-{% endfor %}
+    wm.stopAllCompositors();
     // glfwTerminate() runs inside ~WindowManager after every window is
     // destroyed, so GLFW calls during teardown still see a live library.
     return 0;

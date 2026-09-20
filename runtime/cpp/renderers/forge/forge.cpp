@@ -227,8 +227,9 @@ void forgeCommit(MorphWindow& win)
     recordPaintTree(win.root(), win.renderer(), stats);
 
     // Phase 3: Flatten into render frame (no GL needed)
-    int backIdx = g_backIndex.load();
-    RenderFrame &frame = g_backFrames[backIdx];
+    auto& channel = win.frameChannel();
+    int backIdx = channel.backIndex.load();
+    RenderFrame &frame = channel.backFrames[backIdx];
     frame.nodes.clear();
     frame.drawOps.clear();
     frame.animations.clear();
@@ -245,9 +246,9 @@ void forgeCommit(MorphWindow& win)
     stats.culledCount = frame.culledCount;
 
     // Phase 4: Atomic swap — compositor interpolates, then main thread presents
-    g_frontFrame.store(&frame, std::memory_order_release);
-    g_backIndex.store((backIdx + 1) % 2, std::memory_order_release);
-    g_framePending.store(true, std::memory_order_release);
+    channel.frontFrame.store(&frame, std::memory_order_release);
+    channel.backIndex.store((backIdx + 1) % 2, std::memory_order_release);
+    channel.framePending.store(true, std::memory_order_release);
 
     win.clearPendingRender();
 }
@@ -259,11 +260,12 @@ void forgePresent(MorphWindow& win,
         return;
 
     // Wait for the compositor's interpolated frame.
-    while (!g_frameInterpolated.load(std::memory_order_acquire))
+    auto& channel = win.frameChannel();
+    while (!channel.frameInterpolated.load(std::memory_order_acquire))
         std::this_thread::yield();
-    g_frameInterpolated.store(false, std::memory_order_release);
+    channel.frameInterpolated.store(false, std::memory_order_release);
 
-    RenderFrame* frame = g_frontFrame.load(std::memory_order_acquire);
+    RenderFrame* frame = channel.frontFrame.load(std::memory_order_acquire);
     if (!frame)
         return;
 

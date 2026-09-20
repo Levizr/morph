@@ -86,11 +86,12 @@ The event emitter does **not** generate window calls today (see the struck-throu
 
 | Piece | State |
 |---|---|
-| `WindowManager` (register / close / allClosed / teardown) | ✅ Shipped |
-| `event_emitter` → `wm.open/close/navigate` | ✅ Generated |
-| `open()` | ❌ Stub — `// TODO: show window` (`window_manager.h:32`) |
-| `navigate()` | ❌ Stub — `// TODO: page navigation` (`window_manager.h:44`) |
-| Hidden-but-registered window state | ❌ Not built |
+| `WindowManager` (register / close / allClosed / teardown) | ✅ Shipped — now `shared_ptr` + WID-keyed, handles resolve by id |
+| `event_emitter` → `wm.open/close/navigate` | ✅ Generated (historical — the `morph-*` attrs never existed; `<a href>` replaces them) |
+| `open()` | ✅ Shipped (`glfwShowWindow` + hidden creation via `GLFW_VISIBLE`) |
+| `navigate()` | ❌ Stub — needs the route manifest + mount factories |
+| Hidden-but-registered window state | ✅ Shipped (proven by `window-test` popup) |
+| Per-window frame channels + context-safe teardown | ✅ Shipped (global frame state caused black screens; renderer deletes on own context) |
 | `useWindow` hook | ❌ Not built |
 
 ## Open questions

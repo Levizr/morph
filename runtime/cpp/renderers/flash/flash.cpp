@@ -23,8 +23,9 @@ void flash::flashCommit(MorphWindow& win)
     recordPaintTree(win.root(), win.renderer(), stats);
 
     // Phase 3: Flatten into render frame (no GL needed)
-    int backIdx = g_backIndex.load();
-    RenderFrame &frame = g_backFrames[backIdx];
+    auto& channel = win.frameChannel();
+    int backIdx = channel.backIndex.load();
+    RenderFrame &frame = channel.backFrames[backIdx];
     frame.nodes.clear();
     frame.drawOps.clear();
     frame.animations.clear();
@@ -41,9 +42,9 @@ void flash::flashCommit(MorphWindow& win)
     stats.culledCount = frame.culledCount;
 
     // Phase 4: Atomic swap — compositor will interpolate, then main thread renders
-    g_frontFrame.store(&frame, std::memory_order_release);
-    g_backIndex.store((backIdx + 1) % 2, std::memory_order_release);
-    g_framePending.store(true, std::memory_order_release);
+    channel.frontFrame.store(&frame, std::memory_order_release);
+    channel.backIndex.store((backIdx + 1) % 2, std::memory_order_release);
+    channel.framePending.store(true, std::memory_order_release);
 
     // This frame has been consumed; only re-render on a new dirty event.
     win.clearPendingRender();

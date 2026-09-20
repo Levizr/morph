@@ -68,7 +68,13 @@ public:
 public:
     MorphWindow(const std::string &title, int width, int height, bool visible = true);
     ~MorphWindow();
-    void addChild(MorphNode *node) { m_root = node; }
+    void addChild(MorphNode *node)
+    {
+        m_root = node;
+        // A root arriving after first paint (open-before-mount, navigate)
+        // must schedule a frame — otherwise the window stays blank.
+        m_pendingRender = true;
+    }
     void update(float dt)
     {
         if (m_root)
@@ -77,6 +83,8 @@ public:
     static void clearHoverState();
     static void clearActiveState();
     void setTitle(const std::string &title);
+    void show();
+    void hide();
     void setSize(int width, int height);
     void setConstraints(int minWidth, int minHeight, int maxWidth, int maxHeight);
     int width() const { return m_width; }
@@ -131,6 +139,10 @@ public:
     // Dirty rendering accessors (for devtools)
     DirtyStats &dirtyStats() { return m_dirtyStats; }
     GLRenderer &renderer() { return m_renderer; }
+    // Per-window compositor frame channel (double-buffered frames plus
+    // the pending/interpolated handshake). One channel per window is
+    // what lets two windows render without sharing a frame.
+    FrameChannel &frameChannel() { return m_frameChannel; }
     bool hasRoot() const { return m_root != nullptr; }
     MorphNode* root() const { return m_root; }
 
@@ -144,6 +156,7 @@ private:
                               float sx, float sy, float sw, float sh);
 
     DirtyStats m_dirtyStats;
+    FrameChannel m_frameChannel;
     bool m_prevHadDirty = true;
     bool m_pendingRender = true;
     float m_devtoolsWidth = 0.0f;

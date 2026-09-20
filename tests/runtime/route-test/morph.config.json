@@ -1,0 +1,17 @@
+{
+  "name": "route-test",
+  "entry": "src/App.mx",
+  "window": {
+    "width": 640,
+    "height": 480,
+    "title": "Route Test"
+  },
+  "dependencies": {},
+  "cpp_sources": [],
+  "build": {
+    "wayland": false,
+    "system_freetype": false,
+    "upx": false,
+    "upx_version": ""
+  }
+}

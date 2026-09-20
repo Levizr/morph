@@ -1,0 +1,24 @@
+{
+  "name": "window-test",
+  "entry": "src/App.mx",
+  "window": {
+    "width": 640,
+    "height": 480,
+    "title": "Window Test"
+  },
+  "dependencies": {},
+  "cpp_sources": [],
+  "native": {
+    "include_dirs": [],
+    "library_dirs": [],
+    "libraries": [],
+    "cflags": ["-O3"],
+    "ldflags": []
+  },
+  "build": {
+    "wayland": false,
+    "system_freetype": false,
+    "upx": false,
+    "upx_version": ""
+  }
+}

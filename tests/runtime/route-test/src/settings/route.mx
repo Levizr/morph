@@ -1,0 +1,9 @@
+export const windowConfig = { title: "Settings", width: 500, height: 400 }
+
+export default function SettingsPage() {
+  return (
+    <body>
+      <div className="title">settings</div>
+    </body>
+  )
+}

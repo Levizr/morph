@@ -165,12 +165,17 @@ struct RenderFrame {
     int culledCount = 0;
 };
 
-// ── Global double-buffered frame state (main thread writes, compositor reads) ──
-inline std::atomic<RenderFrame*> g_frontFrame{nullptr};
-inline RenderFrame g_backFrames[2];
-inline std::atomic<int> g_backIndex{0};
-inline std::atomic<bool> g_framePending{false};
-inline std::atomic<bool> g_frameInterpolated{false};
+// ── Per-window double-buffered frame state ──
+// One channel per MorphWindow (main thread writes, that window's
+// compositor thread reads). This used to be process-global, which meant
+// two live windows fought over one frame and both painted black.
+struct FrameChannel {
+    RenderFrame backFrames[2];
+    std::atomic<int> backIndex{0};
+    std::atomic<RenderFrame*> frontFrame{nullptr};
+    std::atomic<bool> framePending{false};
+    std::atomic<bool> frameInterpolated{false};
+};
 
 // ── SPSC event queues (lock-free) ──
 #include "spsc_queue.h"

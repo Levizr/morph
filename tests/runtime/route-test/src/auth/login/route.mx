@@ -1,0 +1,7 @@
+export default function LoginPage() {
+  return (
+    <body>
+      <div className="title">login</div>
+    </body>
+  )
+}

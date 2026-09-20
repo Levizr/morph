@@ -1,4 +1,5 @@
 #include "window.h"
+#include "window_manager.h"
 #include "renderers/flash/flash.h"
 #include "renderers/forge/forge.h"
 #include "renderers/forge/damage.h"
@@ -405,7 +406,10 @@ void MorphWindow::scrollCb(GLFWwindow *win, double dx, double dy)
 void MorphWindow::windowFocusCb(GLFWwindow *win, int focused)
 {
     if (focused == GLFW_TRUE)
+    {
+        WindowManager::get().noteFocus(win);
         return;
+    }
     // Losing focus ends any in-progress drag: Alt-Tab mid-thumb-drag
     // would otherwise lose the release and stick the scrollbar.
     if (MorphNode::s_mouseCapture)
@@ -428,7 +432,17 @@ MorphWindow::MorphWindow(const std::string &title, int width, int height, bool v
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    // Created-but-hidden windows (WindowManager::open shows them later):
+    // the hint must be set before glfwCreateWindow — hiding after the
+    // fact flashes a visible frame.
+    glfwWindowHint(GLFW_VISIBLE, visible ? GLFW_TRUE : GLFW_FALSE);
     m_handle = glfwCreateWindow(width, height, title.c_str(), nullptr, nullptr);
+    glfwWindowHint(GLFW_VISIBLE, GLFW_TRUE);
+    // Creating a window must not disturb the calling thread: a dynamic
+    // window can be born inside an effect handler or event dispatch while
+    // another window's context is current (its atlas uploads would land
+    // in the wrong context and paint black). Save and restore.
+    GLFWwindow* prevContext = glfwGetCurrentContext();
     if (m_handle)
     {
         glfwMakeContextCurrent(m_handle);
@@ -453,6 +467,8 @@ MorphWindow::MorphWindow(const std::string &title, int width, int height, bool v
 #endif
         // Keep context current on main thread; compositor does CPU-only work
     }
+    if (prevContext != m_handle)
+        glfwMakeContextCurrent(prevContext);
 }
 
 void MorphWindow::setTitle(const std::string &title)
@@ -460,6 +476,21 @@ void MorphWindow::setTitle(const std::string &title)
     m_title = title;
     if (m_handle)
         glfwSetWindowTitle(m_handle, title.c_str());
+}
+
+void MorphWindow::show()
+{
+    m_visible = true;
+    m_pendingRender = true;
+    if (m_handle)
+        glfwShowWindow(m_handle);
+}
+
+void MorphWindow::hide()
+{
+    m_visible = false;
+    if (m_handle)
+        glfwHideWindow(m_handle);
 }
 
 // Dirty-tree helpers are declared in window.h and shared with the flash renderer.
@@ -481,6 +512,20 @@ void MorphWindow::setConstraints(int minWidth, int minHeight, int maxWidth, int 
 MorphWindow::~MorphWindow()
 {
     stopCompositor();
+    // The clipboard window is a non-owning handle: creating a popup
+    // repoints it, so a close must not leave it dangling at the dead
+    // window (clipboard degrades to no-op until a live window exists).
+    if (s_clipboardWindow == m_handle)
+        s_clipboardWindow = nullptr;
+    if (m_handle)
+    {
+        // The renderer's GL names live in this window's context only —
+        // release them here, while it is current. Deleting them later
+        // (member destruction) or on a foreign context would free the
+        // surviving windows' same-numbered objects.
+        glfwMakeContextCurrent(m_handle);
+        m_renderer.shutdown();
+    }
     delete m_root;
     m_root = nullptr;
 #ifdef MORPH_FEATURE_CURSOR
@@ -491,6 +536,13 @@ MorphWindow::~MorphWindow()
 #endif
     if (m_handle)
         glfwDestroyWindow(m_handle);
+    // Never leave a deleted context current — pump rebinds per window.
+    // (Headless windows skip everything above: null handle, no GL.)
+    if (m_handle)
+    {
+        m_handle = nullptr;
+        glfwMakeContextCurrent(nullptr);
+    }
 }
 
 void MorphWindow::startCompositor(bool vsync)
@@ -498,7 +550,7 @@ void MorphWindow::startCompositor(bool vsync)
     if (m_compositor)
         return;
     m_vsync = vsync;
-    m_compositor = new Compositor(m_handle, m_width, m_height);
+    m_compositor = new Compositor(m_handle, m_width, m_height, &m_frameChannel);
     m_compositor->setVSync(vsync);
     m_compositor->start();
 }
@@ -866,6 +918,25 @@ void MorphWindow::renderFrame(std::function<void(GLRenderer &, DirtyStats &)> ov
     if (!m_handle)
         return;
 
+    if (!m_root)
+    {
+        // Rootless window (created but no route mounted yet): present a
+        // blank frame. Spinning on the compositor handshake instead would
+        // hang forever — no commit can complete without a tree — and a
+        // stuck main thread starves every window.
+        glViewport(0, 0, m_width, m_height);
+        m_renderer.setFBHeight(m_height);
+        float proj[16];
+        ortho(proj, 0.0f, (float)m_width, (float)m_height, 0.0f, -1.0f, 1.0f);
+        m_renderer.setClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+        m_renderer.clear();
+        m_renderer.setProjection(proj);
+        m_renderer.flush(proj);
+        glfwSwapBuffers(m_handle);
+        clearPendingRender();
+        return;
+    }
+
     if (activeRenderMode() == RenderMode::Forge)
     {
         forge::forgePresent(*this, overlayFn);
@@ -874,13 +945,13 @@ void MorphWindow::renderFrame(std::function<void(GLRenderer &, DirtyStats &)> ov
 
     // Wait for compositor to finish interpolation
     // (typically already done by the time we get here, but spin if not)
-    while (!g_frameInterpolated.load(std::memory_order_acquire))
+    while (!m_frameChannel.frameInterpolated.load(std::memory_order_acquire))
     {
         std::this_thread::yield();
     }
-    g_frameInterpolated.store(false, std::memory_order_release);
+    m_frameChannel.frameInterpolated.store(false, std::memory_order_release);
 
-    auto *frame = g_frontFrame.load(std::memory_order_acquire);
+    auto *frame = m_frameChannel.frontFrame.load(std::memory_order_acquire);
     if (!frame)
         return;
 
@@ -916,7 +987,7 @@ void MorphWindow::renderFrame(std::function<void(GLRenderer &, DirtyStats &)> ov
 
 void MorphWindow::drawFrameNodes(const DamageSet *damageClip)
 {
-    auto *frame = g_frontFrame.load(std::memory_order_acquire);
+    auto *frame = m_frameChannel.frontFrame.load(std::memory_order_acquire);
     if (!frame)
         return;
 
@@ -997,7 +1068,7 @@ void MorphWindow::bodyClearColor(float out[4]) const
 {
     // Prefer the committed frame's body node (matches what the compositor /
     // forge paths draw). Fall back to the live tree, then opaque white.
-    auto *frame = g_frontFrame.load(std::memory_order_acquire);
+    auto *frame = m_frameChannel.frontFrame.load(std::memory_order_acquire);
     if (frame)
     {
         for (const auto &n : frame->nodes)

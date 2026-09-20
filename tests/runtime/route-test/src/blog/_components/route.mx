@@ -1,0 +1,7 @@
+export default function Hidden() {
+  return (
+    <body>
+      <div className="title">never a route — private folder</div>
+    </body>
+  )
+}

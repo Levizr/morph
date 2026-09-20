@@ -3,8 +3,8 @@
 #include <thread>
 #include <cmath>
 
-Compositor::Compositor(GLFWwindow* window, int fbWidth, int fbHeight)
-    : m_window(window), m_fbWidth(fbWidth), m_fbHeight(fbHeight) {}
+Compositor::Compositor(GLFWwindow* window, int fbWidth, int fbHeight, FrameChannel* channel)
+    : m_window(window), m_fbWidth(fbWidth), m_fbHeight(fbHeight), m_channel(channel) {}
 
 Compositor::~Compositor() {
     stop();
@@ -30,16 +30,16 @@ void Compositor::run() {
         // Wait for a pending frame (CPU-only, no GL). Sleep instead of
         // spinning so idle uses ~0% CPU; interpolation latency stays under
         // ~1 ms (negligible vs the 16 ms frame period).
-        while (!g_framePending.load(std::memory_order_acquire) && m_running.load()) {
+        while (!m_channel->framePending.load(std::memory_order_acquire) && m_running.load()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
         if (!m_running.load()) break;
 
         // Consume the signal immediately so we don't re-interpolate
         // while the main thread is still rendering this frame.
-        g_framePending.store(false, std::memory_order_release);
+        m_channel->framePending.store(false, std::memory_order_release);
 
-        auto* frame = g_frontFrame.load(std::memory_order_acquire);
+        auto* frame = m_channel->frontFrame.load(std::memory_order_acquire);
         if (frame) {
             double now = getTime();
 
@@ -84,7 +84,7 @@ void Compositor::run() {
                 }
             }
 
-            g_frameInterpolated.store(true, std::memory_order_release);
+            m_channel->frameInterpolated.store(true, std::memory_order_release);
         }
     }
 }

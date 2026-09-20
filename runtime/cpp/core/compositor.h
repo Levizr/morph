@@ -6,7 +6,7 @@
 
 class Compositor {
 public:
-    Compositor(GLFWwindow* window, int fbWidth, int fbHeight);
+    Compositor(GLFWwindow* window, int fbWidth, int fbHeight, FrameChannel* channel);
     ~Compositor();
 
     void start();
@@ -18,6 +18,9 @@ private:
     void run();
 
     GLFWwindow* m_window;
+    // The owning window's frame channel (lifetime: window outlives its
+    // compositor — stopCompositor joins before destruction).
+    FrameChannel* m_channel;
     int m_fbWidth, m_fbHeight;
     bool m_vsync = true;
     std::thread m_thread;

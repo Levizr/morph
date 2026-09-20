@@ -14,7 +14,7 @@ fi
 
 pass=0
 fail=0
-for fixture in tests/runtime/component-test tests/runtime/native-interop; do
+for fixture in tests/runtime/component-test tests/runtime/native-interop tests/runtime/window-test tests/runtime/route-test; do
   name="$(basename "$fixture")"
   echo "=== $name ==="
   (cd "$ROOT/$fixture" && rm -f .morph/output/"$name"* && "$MORPH" build --no-upx > /dev/null)

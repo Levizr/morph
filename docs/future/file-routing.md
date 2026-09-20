@@ -301,15 +301,15 @@ New diagnostics following the existing `mx-*` convention:
 | `WindowManager` (register/close/allClosed) | ✅ Shipped |
 | Node-tree swap (hot reload) — the navigate primitive | ✅ Shipped |
 | `morph check` diagnostics framework (`mx-*` codes) | ✅ Shipped — the lint rules plug into this |
-| `route.mx` scan + manifest generation | ❌ Not built |
+| `route.mx` scan + manifest generation | ✅ Shipped (`morph_parser::routes::scan_routes` — sorted RIDs, sanitized consts, `_`-private skip; proven by `route-test`) |
 | `navigation.cache` page-cache policy (`0` / N / `"all"`, LRU) | ❌ Not built |
 | `[window]` app-default fallback for routes without `windowConfig` | ❌ Not built (the `[window]` config section itself ✅ exists) |
 | `new Window(routeId, config)` | ❌ Not built |
 | `useWindow` hook | ❌ Not built |
 | `<a href>` navigation (internal / `_blank` / external) | ❌ Not built — `<a>`/`href` have no handling anywhere today |
-| RID/WID interning (`morph_routes.h`, `app::routes::`) | ❌ Not built |
+| RID/WID interning (`morph_routes.h`, `app::routes::`) | ✅ Shipped (RID side — emitted every build, included by `app.cpp`, asserted via `route:*` self-test checks; WID table lands with `useWindow`) |
 | C++ window API (`app::windows::*`) | ❌ Not built |
-| `morph-routes.d.ts` typed routes | ❌ Not built |
+| `morph-routes.d.ts` typed routes | ✅ Shipped (project-root file, `MorphRoute` union; `MorphWindowId` follows with `useWindow` ids) |
 | Route/window naming + reference lint rules (`mx-route-*`, `mx-window-*`) | ❌ Not built |
 
 ## Open questions

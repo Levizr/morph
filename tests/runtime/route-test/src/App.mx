@@ -1,0 +1,12 @@
+export const windowConfig = { title: "Route Test", width: 640, height: 480 }
+
+export default function App() {
+  const [status, setStatus] = morphState("idle")
+
+  return (
+    <body>
+      <div className="title" id="title">routes — manifest scan + RID interning</div>
+      <div className="value" id="status">{status}</div>
+    </body>
+  )
+}
