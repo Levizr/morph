@@ -2194,6 +2194,27 @@
         "publishedAt": "2026-09-18",
         "priority": 0.7,
         "changefreq": "monthly"
+      },
+      {
+        "title": "Windows & Navigation \u2014 a vs morph-*, GL contexts, WID/RID, same-route windows",
+        "slug": "faq/q-windows",
+        "file": "faq/q-windows",
+        "status": "beta",
+        "author": "PIYUSH",
+        "description": "Why navigation uses <a href> instead of morph-* tags, why each window keeps an independent GL context, why ids intern to WID/RID integers, how two windows share a route independently, and why C++ names its WID explicitly.",
+        "keywords": [
+          "morph windows faq",
+          "morph <a href> navigation",
+          "morph WID RID",
+          "morph GL context per window",
+          "morph same route two windows",
+          "morph useWindow focused",
+          "app::windows C++"
+        ],
+        "lastUpdated": "2026-09-20",
+        "publishedAt": "2026-09-20",
+        "priority": 0.7,
+        "changefreq": "monthly"
       }
     ]
   }
