@@ -86,3 +86,36 @@ loginWin.navigate("/x")    // returns false instead of dereferencing a dead wind
 ```
 
 The design assumption is blunt: **every window can die at any moment, and every operation must survive that.** Reopen with `new Window(...)`; old handles stay `closed` forever. This is also why closing is the one operation that's already implemented in the runtime while `open()` and `navigate()` are still stubs — destruction safety came first.
+
+## I have thousands of routes — do they all load into memory at startup?
+
+No. Nothing pre-initializes. Opening the app mounts exactly **one** route; the other 999 cost you binary size, not heap. The full breakdown:
+
+- **Manifest (~100 bytes/route, always resident).** At startup the runtime holds a table of RID → factory pointer + `windowConfig`. Kilobytes for thousands of routes.
+- **Code (disk, not RAM).** Every route compiles into the one binary, so the executable grows — but machine code lives in the text segment, which the OS demand-pages in on first execution. Unvisited routes occupy disk sectors, not resident memory.
+- **Mounted trees (only what's open).** A route costs real heap only while mounted: its node tree + signals + layout caches. `new Window(RID)` factory-builds the tree on demand; `navigate()` destroys the old root and mounts the new one; `close()` frees the tree, the GL context, and the window chrome together.
+- **Window chrome (the actual per-window cost).** GLFW window + GL context + font atlas/textures dwarf everything above — which is why "same route, two windows" costs 2× chrome while sharing nothing else.
+
+Two consequences worth knowing: first, Morph is AOT with no dynamic route splitting planned — if your route count ever makes the binary itself a problem, compression (already supported in the build) is the lever, not lazy loading, because loading was never eager. Second, navigation **resets state by default** (see the next question) — cheap memory and fresh mounts are the same decision.
+
+## Navigating away destroys the page's state — can I keep it?
+
+By default, yes it destroys: leave a page, its tree and `morphState` are freed; coming back remounts fresh with re-initialized state and lost scroll position. That's the memory-minimal default, and it falls out of the direct-swap `navigate()` — there is no history stack keeping dead pages alive.
+
+If your app wants web-like instant revisits, opt into the keep-alive cache in `morph.config.json` — it's your decision, per app:
+
+```json
+{ "navigation": { "cache": 0 } }
+```
+
+`0` (default) is destroy-on-leave. `N` keeps the last N visited pages detached in memory with LRU eviction — re-navigation within the cache is instant with state intact. `"all"` keeps every visited page, for small apps that want everything instant. Cached pages hold tree + state only (window chrome is still freed), so they're cheap next to open windows — and passing new props always forces a fresh mount anyway, since cached state was built with old props.
+
+## Do I need a `windowConfig` export in every `route.mx`?
+
+No — only when the route wants non-default window chrome. Resolution is a three-level fallback, most-specific first:
+
+1. Call-site overrides: `new Window("/settings", { width: 500 })` or `<a href="/settings" target="_blank" width={500}>`
+2. The route file's `windowConfig` export — for routes that always want their own size/title (a 400×320 login dialog, say)
+3. The **`[window]` section of `morph.config.json`** — the app-wide defaults (`width` / `height` / `title`), which already exist today
+
+A bare `route.mx` with no export and no overrides opens at the app default size. The point of the chain: per-route boilerplate drops to zero, while a route that genuinely needs its own chrome (dialogs, splash screens, fixed-size tools) declares it once, co-located with the page, instead of repeating dimensions at every call site.

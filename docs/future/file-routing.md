@@ -80,6 +80,51 @@ await a.ready()        // only when you need the first frame
 - `data` is delivered to the page as its `props` — identical to how navigation passes props
 - Without a `windowConfig` in the route file, `new Window(routeId, ...)` must supply `width`/`height`
 
+### `windowConfig` is optional — the fallback chain
+
+A route file needs **no** `windowConfig` export unless it wants non-default window chrome. Resolution order, most-specific first:
+
+1. `new Window(routeId, config)` / `<a … width height title>` overrides
+2. the route file's `windowConfig` export (if present)
+3. the **`[window]` section of `morph.config.json`** (already exists today: `width` / `height` / `title` with app-wide defaults)
+
+A bare `route.mx` with no export and no overrides opens at the app default size — zero boilerplate per route. The old "must supply `width`/`height`" rule below is replaced by step 3.
+
+## Memory model — thousands of routes cost binary size, not heap
+
+Nothing pre-initializes. Each `MorphWindow` owns exactly one root node tree, and that tree plus the window's state *is* the per-route memory cost. Everything else is tiered:
+
+| Layer | What's held | Cost with 1,000 routes |
+|---|---|---|
+| **Manifest** (at app open) | Per route: RID + factory pointer + `windowConfig` | ~100 bytes × routes — kilobytes, always resident |
+| **Code** (all routes, compiled in) | Machine code in the binary's text segment | Disk/binary size grows; **resident RAM doesn't** — the OS demand-pages code in on first execution |
+| **Mounted tree** (only what's open) | Nodes + signals + layout caches for the live page in each open window | One live page per window (plus cache below) — `navigate()` destroys the old root and mounts the new one |
+| **Window chrome** (per open window) | GLFW window + GL context + font atlas/textures | The real per-window cost |
+
+So opening the app initializes **one** route. `new Window(RID)` factory-builds that route's tree on demand. `close()` frees chrome + tree + context. A thousand unvisited routes cost binary size, not heap.
+
+The honest caveat: Morph is AOT — every route compiles into the one binary. No dynamic route downloading/splitting is planned; if it ever becomes necessary, the lever exists (dev mode already `dlopen`s `logic.so` per rebuild, proving on-demand native loading works) — but that's future work, not this design.
+
+### Page cache — user-configurable, default off
+
+Destroy-on-leave (the default) means navigation resets state: leave a page, come back, it remounts fresh. Apps that want web-like instant revisits opt into a keep-alive cache in `morph.config.json`:
+
+```json
+{
+  "navigation": { "cache": 0 }
+}
+```
+
+- `0` (**default**): no caching — navigate away destroys tree + state; returning remounts fresh. Minimal memory.
+- `N`: keep the last N visited pages detached in memory (LRU eviction); re-navigation within the cache is instant with state intact.
+- `"all"`: keep every visited page — the escape hatch for small apps that want everything instant.
+
+Rules:
+
+- Cached pages hold **tree + state only** — window chrome (GL context, atlas) is still freed on leave, so a cached page is cheap next to an open window.
+- **New props force a fresh mount**, even on a cached page — cached state was built with old props, and silently reusing it would lie.
+- `data` on `new Window` always mounts fresh (a new instance never shares another window's cache entry).
+
 ## The `useWindow` hook
 
 Reactive access to a window handle from inside any component. By id/route it is **sync** and returns `null` when the window doesn't exist (it may have been closed by the user — see [Window lifecycle & availability](window-api.md#window-lifecycle--availability)):
@@ -153,7 +198,7 @@ The `morph-open` / `morph-close` / `morph-navigate` attributes from early drafts
 ```
 
 - Internal `href`s are manifest-checked (`mx-route-unknown` + suggestion on typos) and lower to RID consts like everything else
-- `target="_blank"` without size overrides falls back to the route's `windowConfig`; without one, `width`/`height` are required (same rule as `new Window`)
+- `target="_blank"` without size overrides falls back to the route's `windowConfig`, then to the `[window]` app defaults in `morph.config.json` (same chain as `new Window`)
 - External schemes (`https:`, `http:`, `mailto:`…) open via `xdg-open` / `open` / `ShellExecute` — `<a>` never renders a web page inside Morph
 
 ## Typo safety — validated at build time
@@ -257,6 +302,8 @@ New diagnostics following the existing `mx-*` convention:
 | Node-tree swap (hot reload) — the navigate primitive | ✅ Shipped |
 | `morph check` diagnostics framework (`mx-*` codes) | ✅ Shipped — the lint rules plug into this |
 | `route.mx` scan + manifest generation | ❌ Not built |
+| `navigation.cache` page-cache policy (`0` / N / `"all"`, LRU) | ❌ Not built |
+| `[window]` app-default fallback for routes without `windowConfig` | ❌ Not built (the `[window]` config section itself ✅ exists) |
 | `new Window(routeId, config)` | ❌ Not built |
 | `useWindow` hook | ❌ Not built |
 | `<a href>` navigation (internal / `_blank` / external) | ❌ Not built — `<a>`/`href` have no handling anywhere today |
