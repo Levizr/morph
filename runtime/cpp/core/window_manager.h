@@ -16,6 +16,16 @@
 using WID = int;
 inline constexpr WID kInvalidWid = -1;
 
+// One mounted route instance: the route's context (signals + owned
+// effects, type-erased — the route's own deleter destroys effects)
+// plus the teardown that runs before the handle is dropped. Touched
+// only on mount/unmount/navigate/close — never per frame.
+struct MountHandle {
+    int rid = -1;
+    std::shared_ptr<void> ctx;
+    std::function<void()> teardown;
+};
+
 class WindowManager {
     // Registry owns every window (shared_ptr). Handles resolve their WID
     // through the registry at every call, so an X-button / task-manager
@@ -29,6 +39,8 @@ class WindowManager {
     std::unordered_map<GLFWwindow*, WID> m_handles;
     // Close handlers per window (JS on('close') lowers to these).
     std::unordered_map<WID, std::vector<std::function<void()>>> m_closeHandlers;
+    // Mounted route per window (empty for declarative entry windows).
+    std::unordered_map<WID, MountHandle> m_mounts;
     WID m_focusedWid = kInvalidWid;
 
     // Shared close path: user X-button (via sweepClosed) and explicit
@@ -51,6 +63,7 @@ class WindowManager {
             m_handles.erase(it->second->handle());
         if (m_focusedWid == wid)
             m_focusedWid = kInvalidWid;
+        clearMount(wid);
         // ~MorphWindow binds its own context for renderer teardown and
         // detaches afterwards — no context work needed here.
         m_windows.erase(it);
@@ -59,6 +72,8 @@ class WindowManager {
 public:
     ~WindowManager()
     {
+        for (auto& [wid, _] : m_windows)
+            clearMount(wid);
         m_windows.clear();
         m_aliases.clear();
         m_handles.clear();
@@ -137,6 +152,37 @@ public:
     {
         if (exists(wid) && fn)
             m_closeHandlers[wid].push_back(std::move(fn));
+    }
+
+    // Drop a window's mount, running its teardown (effect destruction)
+    // first so no owned effect outlives its signals. Safe on empty.
+    // Runs before tree deletion in every close path (explicit close,
+    // X-close sweep, navigate-away).
+    void clearMount(WID wid)
+    {
+        auto it = m_mounts.find(wid);
+        if (it == m_mounts.end())
+            return;
+        if (it->second.teardown)
+            it->second.teardown();
+        m_mounts.erase(it);
+    }
+
+    // Record a route mount on a window (replaces any live mount after
+    // tearing it down — callers normally unmount explicitly first).
+    void setMount(WID wid, MountHandle handle)
+    {
+        if (!exists(wid))
+            return;
+        clearMount(wid);
+        m_mounts[wid] = std::move(handle);
+    }
+
+    // Mounted route id, or -1 for declarative (unmounted) windows.
+    int mountedRid(WID wid) const
+    {
+        auto it = m_mounts.find(wid);
+        return it == m_mounts.end() ? -1 : it->second.rid;
     }
 
     // Called from MorphWindow::windowFocusCb via the GLFW focus callback.

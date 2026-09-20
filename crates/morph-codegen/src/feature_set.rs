@@ -124,7 +124,7 @@ impl FeatureSet {
         }
     }
 
-    pub fn scan(&mut self, windows: &[IRWindow]) {
+    pub fn scan<'a>(&mut self, windows: impl IntoIterator<Item = &'a IRWindow>) {
         for win in windows {
             if win.renderer == "forge" {
                 self.features.insert("forge".into());
@@ -354,6 +354,7 @@ mod tests {
             extra_headers: Vec::new(),
             state_vars: Vec::new(),
             reactive_consts: Vec::new(),
+            route_props: Vec::new(),
             shared_vars: Vec::new(),
             effect_decls: Vec::new(),
             cpp_imports: Vec::new(),

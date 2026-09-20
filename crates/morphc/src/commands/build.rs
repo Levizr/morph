@@ -184,7 +184,23 @@ pub(crate) fn run(
     if !routes.is_empty() {
         crate::logger::log_key("Routes", &routes.len().to_string());
     }
-    let emitter = morph_codegen::CppEmitter::new(&windows).with_routes(&routes);
+    // Per-route IR for mount emission: one module graph rooted at each
+    // route.mx (shared components compile into every mount that uses
+    // them — same rule as the entry build, no cross-route sharing).
+    let mut routes_ir: Vec<(morph_parser::routes::RouteEntry, morph_ir::IRWindow)> = Vec::new();
+    for route in &routes {
+        let route_graph = morph_parser::resolve_graph(&route.file, &cwd).inspect_err(|_e| {
+            pb.finish_and_clear();
+        })?;
+        let route_win = builder
+            .build_route(&route_graph, route, &css_rules, &css_keyframes)
+            .inspect_err(|_e| {
+                pb.finish_and_clear();
+            })?;
+        routes_ir.push((route.clone(), route_win));
+    }
+    let emitter =
+        morph_codegen::CppEmitter::new(&windows).with_routes(&routes).with_routes_ir(&routes_ir);
     emitter.emit(&output_dir)?;
     write_routes_dts(&cwd, &routes);
     pb.finish_and_clear();

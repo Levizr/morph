@@ -82,6 +82,44 @@ struct Signal : SignalBase {
 // ── create_effect ──
 EffectNode* create_effect(std::function<void()> fn);
 
+// ── Destroy one effect (unmount path) ──
+// Marks dead (skipped by the run path), unsubscribes, removes from the
+// pool/pending queue, deletes. Unmount-only — never on a hot path.
+void destroy_effect(EffectNode* node);
+
+// ── Mount-scoped effect ownership ──
+// While a MountScope is active (route mount), create_effect_scoped
+// registers the node into the scope's list; otherwise it behaves exactly
+// like create_effect. Hot-path cost when no scope is active: one
+// predictable thread_local null check. Entry windows never pay more.
+struct MountScopeState {
+    std::vector<EffectNode*>* effects = nullptr;
+};
+extern thread_local MountScopeState g_mount_scope;
+
+inline EffectNode* create_effect_scoped(std::function<void()> fn) {
+    EffectNode* node = create_effect(std::move(fn));
+    if (g_mount_scope.effects)
+        g_mount_scope.effects->push_back(node);
+    return node;
+}
+
+class MountScope {
+public:
+    explicit MountScope(std::vector<EffectNode*>* effects)
+        : m_prev(g_mount_scope.effects) {
+        g_mount_scope.effects = effects;
+    }
+    ~MountScope() {
+        g_mount_scope.effects = m_prev;
+    }
+    MountScope(const MountScope&) = delete;
+    MountScope& operator=(const MountScope&) = delete;
+
+private:
+    std::vector<EffectNode*>* m_prev;
+};
+
 // ── Run all pending effects ──
 void run_pending_effects();
 

@@ -1,9 +1,12 @@
 export const windowConfig = { title: "Settings", width: 500, height: 400 }
 
-export default function SettingsPage() {
+export default function SettingsPage(props: { userId: number }) {
+  const [tab, setTab] = morphState("general")
+
   return (
     <body>
-      <div className="title">settings</div>
+      <div className="title" id="stitle">settings — user {props.userId}, tab {tab}</div>
+      <button id="btn-adv" onClick={() => setTab("advanced")}>advanced</button>
     </body>
   )
 }

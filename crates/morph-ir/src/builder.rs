@@ -208,6 +208,7 @@ impl IRBuilder {
             extra_headers,
             state_vars: all_state,
             reactive_consts,
+            route_props: Vec::new(),
             effect_decls: all_effects,
             // Legacy single-file path: no shared store or channels (use
             // `build_with_graph`).
@@ -371,7 +372,13 @@ impl IRBuilder {
             ctx.states.push(state_slot(&sv.getter, &sv.setter, &sv.init, false, &entry_ns));
             if !sv.getter.is_empty() {
                 Self::seed_state_var(
-                    &mut frame, &sv.getter, &sv.setter, &sv.init, &sv.getter, &sv.setter,
+                    &mut frame,
+                    &sv.getter,
+                    &sv.setter,
+                    &sv.init,
+                    &sv.getter,
+                    &sv.setter,
+                    ctx.signal_prefix,
                 );
             }
         }
@@ -472,16 +479,222 @@ impl IRBuilder {
             extra_headers,
             state_vars: ctx.states.clone(),
             reactive_consts: ctx.const_names.clone(),
+            route_props: Vec::new(),
             effect_decls: ctx.effects.clone(),
             shared_vars: ctx.shared_entries.clone(),
             event_decls: ctx.event_entries.clone(),
             channel_subs: ctx.channels.clone(),
-            mid_assignments: Self::mid_assignments(graph, &ctx)?,
+            mid_assignments: Self::mid_assignments(graph, &ctx, ctx.signal_prefix)?,
             module_bindings: ctx.module_bindings.clone(),
             cpp_imports,
             keyframes: self.convert_keyframes(css_keyframes),
         };
         Ok(vec![window])
+    }
+
+    /// Build one route file into a mountable window IR.
+    ///
+    /// Mirrors `build_with_graph` (keep the two in sync) with route deltas:
+    /// the root component **may** declare props — they bind to mount-time
+    /// `__props` locals (`__morph_prop_<name>`, converted in the mount
+    /// prologue) instead of JSX literals. State, effects, channels and
+    /// `mid` assignments record identically; codegen interprets them as
+    /// per-mount context members. Window chrome comes from the manifest
+    /// (`0`/empty = unspecified → app defaults at `new Window` time).
+    /// A missing default export is a hard error (`mx-route-no-export`).
+    pub fn build_route(
+        &self,
+        graph: &morph_parser::ModuleGraph,
+        route: &morph_parser::routes::RouteEntry,
+        css_rules: &[(String, morph_parser::CssRule)],
+        css_keyframes: &HashMap<String, Vec<morph_parser::CssKeyframe>>,
+    ) -> anyhow::Result<IRWindow> {
+        let route_mod = graph
+            .entry_module()
+            .ok_or_else(|| anyhow::anyhow!("route graph has no entry module"))?;
+        let root_comp =
+            route_mod.source.components.iter().find(|c| c.is_default).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "mx-route-no-export: route {} has no default-export component",
+                    route_mod.path.display()
+                )
+            })?;
+
+        validate_namespaces(graph)?;
+
+        let mut ctx = BuilderCtx::new(graph);
+        ctx.signal_prefix = "ctx->";
+        let mut extra_headers: Vec<String> = Vec::new();
+        let mut frame = InstanceFrame::root(route_mod.path.clone());
+
+        Self::seed_module_bindings(
+            &route_mod.source,
+            &route_mod.path,
+            graph,
+            &mut frame,
+            &mut ctx,
+        )?;
+
+        self.translate_module_globals(&route_mod.source, &frame, &mut ctx, &mut extra_headers);
+        ctx.modules_emitted.insert(route_mod.path.clone());
+
+        // Route root props bind to mount-time locals converted from the
+        // runtime `__props` object (see the mount prologue). Plain C++
+        // types flow downstream — no JsValue past this point.
+        let mut route_props: Vec<HashMap<String, String>> = Vec::new();
+        if !root_comp.props_param.is_empty() {
+            frame.props_param.clone_from(&root_comp.props_param);
+        }
+        for prop in &root_comp.props {
+            let class = ts_type_class(&prop.prop_type);
+            // Props live in the mount context like state (uniform `ctx->`
+            // access for nodes and handlers; the context also carries them
+            // across cache detach/restore). The mount prologue assigns
+            // each member from `__props` before building nodes.
+            let member = format!("ctx->{}", prop.name);
+            frame.vars.insert(prop.name.clone(), member.clone());
+            if !class.is_empty() {
+                frame.types.insert(prop.name.clone(), class.clone());
+            }
+            frame.prop_binds.insert(prop.name.clone(), format!("({member})"));
+            let mut m = HashMap::new();
+            m.insert("name".into(), prop.name.clone());
+            m.insert("class".into(), class);
+            m.insert("optional".into(), prop.optional.to_string());
+            route_props.push(m);
+        }
+        if !root_comp.props_param.is_empty() {
+            frame.vars.insert(root_comp.props_param.clone(), "__props".to_string());
+        }
+        // Whole-object access needs no prologue local (`__props` is the
+        // mount parameter) — record it only when no inline type declares
+        // individual props.
+        if root_comp.props.is_empty() && !root_comp.props_param.is_empty() {
+            let mut m = HashMap::new();
+            m.insert("name".into(), root_comp.props_param.clone());
+            m.insert("class".into(), "JsObject".to_string());
+            m.insert("optional".into(), "true".to_string());
+            route_props.push(m);
+        }
+
+        for sv in &root_comp.state_vars {
+            let route_ns = ns_of(graph, &route_mod.path).unwrap_or_default();
+            ctx.states.push(state_slot(&sv.getter, &sv.setter, &sv.init, false, &route_ns));
+            if !sv.getter.is_empty() {
+                Self::seed_state_var(
+                    &mut frame,
+                    &sv.getter,
+                    &sv.setter,
+                    &sv.init,
+                    &sv.getter,
+                    &sv.setter,
+                    ctx.signal_prefix,
+                );
+            }
+        }
+        Self::preseed_sibling_names(root_comp, &mut frame, None);
+        self.expand_component_sources(root_comp, &frame, &mut ctx, &mut extra_headers)?;
+        for log in root_comp.console_logs.iter().chain(route_mod.source.console_logs.iter()) {
+            if !ctx.logs.contains(log) {
+                ctx.logs.push(log.clone());
+            }
+        }
+
+        let root_node = self.build_node_in(
+            &root_comp.jsx,
+            css_rules,
+            0,
+            &[],
+            &frame,
+            &mut ctx,
+            &mut extra_headers,
+            css_keyframes,
+        )?;
+
+        for mod_path in &graph.order {
+            if ctx.modules_emitted.contains(mod_path) {
+                continue;
+            }
+            ctx.modules_emitted.insert(mod_path.clone());
+            if let Some(module) = graph.modules.get(mod_path) {
+                let mut neutral = InstanceFrame::root(module.path.clone());
+                Self::seed_module_bindings(
+                    &module.source,
+                    &module.path,
+                    graph,
+                    &mut neutral,
+                    &mut ctx,
+                )?;
+                let snapshot = std::mem::take(&mut ctx.premain);
+                self.translate_module_globals(
+                    &module.source,
+                    &neutral,
+                    &mut ctx,
+                    &mut extra_headers,
+                );
+                let mut added = std::mem::replace(&mut ctx.premain, snapshot);
+                added.retain(|p| !ctx.premain.contains(p));
+                ctx.premain.extend(added);
+                for log in &module.source.console_logs {
+                    if !ctx.logs.contains(log) {
+                        ctx.logs.push(log.clone());
+                    }
+                }
+            }
+        }
+
+        extra_headers.sort();
+        extra_headers.dedup();
+        let mut cpp_imports = Vec::new();
+        let mut seen_cpp = HashSet::new();
+        for module_path in &graph.order {
+            let Some(module) = graph.modules.get(module_path) else { continue };
+            if module_path != &route_mod.path && !ctx.modules_emitted.contains(module_path) {
+                continue;
+            }
+            let base = module.dir.clone();
+            for ci in &module.source.cpp_imports {
+                let path = base.join(&ci.path);
+                let abs_path = path.canonicalize().unwrap_or(path);
+                let key = abs_path.display().to_string();
+                if !seen_cpp.insert(key.clone()) {
+                    continue;
+                }
+                let mut m = HashMap::new();
+                m.insert("path".into(), key);
+                m.insert("specifiers".into(), ci.specifiers.join(", "));
+                cpp_imports.push(m);
+            }
+        }
+        let window = IRWindow {
+            window_id: format!("route:{}", route.id),
+            title: route.title.clone().unwrap_or_default(),
+            width: route.width.unwrap_or(0),
+            height: route.height.unwrap_or(0),
+            visible: true,
+            min_width: None,
+            max_width: None,
+            min_height: None,
+            max_height: None,
+            modal: false,
+            renderer: "flash".into(),
+            nodes: vec![root_node],
+            startup_logs: ctx.logs.clone(),
+            premain_functions: ctx.premain.clone(),
+            extra_headers,
+            state_vars: ctx.states.clone(),
+            reactive_consts: ctx.const_names.clone(),
+            route_props,
+            effect_decls: ctx.effects.clone(),
+            shared_vars: ctx.shared_entries.clone(),
+            event_decls: ctx.event_entries.clone(),
+            channel_subs: ctx.channels.clone(),
+            mid_assignments: Self::mid_assignments(graph, &ctx, ctx.signal_prefix)?,
+            module_bindings: ctx.module_bindings.clone(),
+            cpp_imports,
+            keyframes: self.convert_keyframes(css_keyframes),
+        };
+        Ok(window)
     }
 
     /// Translate a module's top-level helpers + globals into premain,
@@ -571,9 +784,13 @@ impl IRBuilder {
         init: &str,
         emitted_getter: &str,
         emitted_setter: &str,
+        // Signal owner expression: `"__st_"` for entry globals,
+        // `"ctx->"` for route mount contexts (documented codegen contract:
+        // the mount function names its context `ctx`).
+        signal_prefix: &str,
     ) {
-        let get_expr = format!("__st_{emitted_getter}.get()");
-        let set_expr = format!("__st_{emitted_getter}.set");
+        let get_expr = format!("{signal_prefix}{emitted_getter}.get()");
+        let set_expr = format!("{signal_prefix}{emitted_getter}.set");
         frame.vars.insert(getter.to_string(), get_expr.clone());
         frame.vars.insert(emitted_getter.to_string(), get_expr);
         if let Some(ty) = infer_state_type(init) {
@@ -1493,6 +1710,9 @@ impl IRBuilder {
     fn mid_assignments(
         graph: &morph_parser::ModuleGraph,
         ctx: &BuilderCtx,
+        // Matches `seed_state_var`: `"__st_"` for entry globals,
+        // `"ctx->"` for route mount contexts.
+        signal_prefix: &str,
     ) -> anyhow::Result<Vec<HashMap<String, String>>> {
         let mut out = Vec::new();
         let mut types: Vec<(&(PathBuf, String), &Vec<(String, usize, usize, usize, PathBuf)>)> =
@@ -1528,7 +1748,10 @@ impl IRBuilder {
                     m.insert("mid".into(), mid.clone());
                     m.insert("const".into(), Self::mid_const_name(mid));
                     m.insert("index".into(), index.to_string());
-                    m.insert("signal".into(), format!("__st_inst{instance_no}_{suffix_getter}"));
+                    m.insert(
+                        "signal".into(),
+                        format!("{signal_prefix}inst{instance_no}_{suffix_getter}"),
+                    );
                     m.insert("getter".into(), suffix_getter.clone());
                     m.insert("setter".into(), suffix_setter.clone());
                     m.insert("init".into(), init.clone());
@@ -1651,7 +1874,13 @@ impl IRBuilder {
             ));
             if !sv.getter.is_empty() {
                 Self::seed_state_var(
-                    &mut frame, &sv.getter, &sv.setter, &sv.init, &getter, &setter,
+                    &mut frame,
+                    &sv.getter,
+                    &sv.setter,
+                    &sv.init,
+                    &getter,
+                    &setter,
+                    ctx.signal_prefix,
                 );
                 // State slots backing indexed native access (`mid`).
                 ctx.mid_states.entry(instance_no).or_default().push((
@@ -2492,6 +2721,10 @@ struct BuilderCtx<'a> {
     /// Instance states for indexed native access: instance_no →
     /// [(suffix getter, suffix setter, init)].
     mid_states: HashMap<usize, Vec<(String, String, String)>>,
+    /// Signal owner expression prefix (`"__st_"` for entry globals,
+    /// `"ctx->"` for route mount contexts). Threaded to instance
+    /// seeding so shared expansion paths stay build-agnostic.
+    signal_prefix: &'static str,
 }
 
 impl<'a> BuilderCtx<'a> {
@@ -2514,6 +2747,7 @@ impl<'a> BuilderCtx<'a> {
             list_depth: 0,
             mid_tags: HashMap::new(),
             mid_states: HashMap::new(),
+            signal_prefix: "__st_",
         }
     }
 }
@@ -5525,6 +5759,99 @@ export function Badge(props: { text: number }) {
     fn build_root(root: &Path) -> Vec<IRWindow> {
         let graph = morph_parser::resolve_graph(&root.join("App.mx"), root).unwrap();
         IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).expect("build_with_graph")
+    }
+
+    fn route_entry(id: &str) -> morph_parser::routes::RouteEntry {
+        morph_parser::routes::RouteEntry {
+            id: id.to_string(),
+            rid: 0,
+            file: PathBuf::from(format!("/src{id}/route.mx")),
+            const_name: "kTest".to_string(),
+            title: None,
+            width: None,
+            height: None,
+            has_default_export: true,
+        }
+    }
+
+    const ROUTE: &str = r#"
+export default function SettingsPage(props: { userId: number }) {
+  const [tab, setTab] = morphState("general")
+  return (
+    <body>
+      <div>{props.userId}</div>
+      <div>{tab}</div>
+      <button onClick={() => setTab("advanced")}>adv</button>
+    </body>
+  )
+}
+"#;
+
+    #[test]
+    fn route_build_allows_props_and_seeds_prop_locals() {
+        let root = scratch("route_props");
+        write_file(&root, "settings/route.mx", ROUTE);
+        let graph = morph_parser::resolve_graph(&root.join("settings/route.mx"), &root).unwrap();
+        let win = IRBuilder::new()
+            .build_route(&graph, &route_entry("/settings"), &[], &HashMap::new())
+            .expect("build_route");
+        assert_eq!(win.window_id, "route:/settings");
+        assert_eq!(win.route_props.len(), 1);
+        assert_eq!(win.route_props[0]["name"], "userId");
+        assert_eq!(win.route_props[0]["class"], "double");
+        // State records identically (codegen interprets as context members).
+        assert_eq!(getters(&win), vec!["tab"]);
+        // Prop reads lower to the mount-prologue local, not a global.
+        fn texts(node: &IRNode, out: &mut Vec<String>) {
+            if !node.reactive_text.is_empty() {
+                out.push(node.reactive_text.clone());
+            }
+            for ev in &node.events {
+                out.push(ev.action.clone());
+                out.push(ev.target.clone());
+            }
+            for child in node.children.iter().chain(node.then_nodes.iter()) {
+                texts(child, out);
+            }
+        }
+        let mut found = Vec::new();
+        for node in &win.nodes {
+            texts(node, &mut found);
+        }
+        for ed in &win.effect_decls {
+            if let Some(lambda) = ed.get("lambda") {
+                found.push(lambda.clone());
+            }
+        }
+        for sub in &win.channel_subs {
+            if let Some(body) = sub.get("body") {
+                found.push(body.clone());
+            }
+        }
+        found.extend(win.premain_functions.iter().cloned());
+        assert!(found.iter().any(|t| t.contains("ctx->userId")), "{found:?}");
+        // Root state reads stay bare in node IR (like entry IR keeps
+        // `total`); the mount emission's state_map rewrites them to
+        // `ctx->` — only build-time translations (premain, effects)
+        // carry baked signal expressions.
+        assert!(found.iter().any(|t| t == "tab"), "{found:?}");
+        assert!(
+            !found.iter().any(|t| t.contains("__st_")),
+            "no entry globals in route IR: {found:?}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn route_build_rejects_missing_default_export() {
+        let root = scratch("route_noexport");
+        write_file(&root, "settings/route.mx", "export const x = 1;\n");
+        let graph = morph_parser::resolve_graph(&root.join("settings/route.mx"), &root).unwrap();
+        let err = IRBuilder::new()
+            .build_route(&graph, &route_entry("/settings"), &[], &HashMap::new())
+            .unwrap_err();
+        assert!(err.to_string().contains("mx-route-no-export"), "{err}");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     fn getters(win: &IRWindow) -> Vec<String> {

@@ -5,6 +5,7 @@
 namespace morph {
 
 thread_local EffectContext g_effect_ctx;
+thread_local MountScopeState g_mount_scope;
 
 // Global effect pool + pending queue
 static std::vector<EffectNode*> s_pool;
@@ -72,6 +73,43 @@ void run_pending_effects() {
     if (!s_pending.empty()) {
         run_pending_effects();
     }
+}
+
+void destroy_effect(EffectNode* node) {
+    if (!node)
+        return;
+    // Mark dead first (the run path skips dead nodes), then release the
+    // lock before cleanup: cleanup takes per-signal locks, and set()
+    // already holds a signal lock when taking the pool lock — nesting
+    // them the other way round would invert the lock order.
+    {
+        std::lock_guard<std::mutex> lock(s_pending_mutex);
+        node->dead = true;
+    }
+    if (node->cleanup_fn) {
+        auto fn = std::move(node->cleanup_fn);
+        node->cleanup_fn = nullptr;
+        fn();
+    }
+    node->cleanup();
+    {
+        std::lock_guard<std::mutex> lock(s_pending_mutex);
+        for (size_t i = 0; i < s_pool.size(); i++) {
+            if (s_pool[i] == node) {
+                s_pool[i] = s_pool.back();
+                s_pool.pop_back();
+                break;
+            }
+        }
+        for (size_t i = 0; i < s_pending.size(); i++) {
+            if (s_pending[i] == node) {
+                s_pending[i] = s_pending.back();
+                s_pending.pop_back();
+                break;
+            }
+        }
+    }
+    delete node;
 }
 
 void destroy_all_effects() {

@@ -93,6 +93,12 @@ pub struct IRWindow {
     pub extra_headers: Vec<String>,
     pub state_vars: Vec<HashMap<String, String>>,
     pub reactive_consts: Vec<String>,
+    /// Route root prop declarations (empty for entry windows): one entry
+    /// per declared prop — `name`, `class` (C++ type class), `optional`.
+    /// Props are context members (`ctx-><name>`, like state); the mount
+    /// prologue assigns each from the runtime `__props` object.
+    #[serde(default)]
+    pub route_props: Vec<HashMap<String, String>>,
     pub effect_decls: Vec<HashMap<String, String>>,
     /// morphShared declarations, one entry per declaration site.
     pub shared_vars: Vec<HashMap<String, String>>,

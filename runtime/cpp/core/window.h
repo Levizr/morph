@@ -75,6 +75,14 @@ public:
         // must schedule a frame — otherwise the window stays blank.
         m_pendingRender = true;
     }
+    // Detach + delete the root tree (navigate-away, unmount). The window
+    // (chrome, GL context, WID) survives — only the page dies.
+    void clearRoot()
+    {
+        delete m_root;
+        m_root = nullptr;
+        m_pendingRender = true;
+    }
     void update(float dt)
     {
         if (m_root)

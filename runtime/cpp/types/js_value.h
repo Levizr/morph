@@ -121,6 +121,45 @@ struct JsValue {
     explicit operator bool() const { return truthy(); }
     bool operator!() const { return !truthy(); }
 
+    // ── Total coercions (never throw; unconvertible types yield zero values)
+    //
+    // Numbers and booleans convert freely; strings convert only via
+    // as_string (a string is never silently parsed as a number — that
+    // hides caller bugs). Used by route prop extraction and any future
+    // dynamic reads; copies of JsArray/JsObject share (no deep copy).
+
+    int64_t as_int() const {
+        if (is_number()) return std::get<JsNumber>(inner).as_int();
+        if (is_boolean()) return std::get<JsBoolean>(inner).value ? 1 : 0;
+        return 0;
+    }
+
+    double as_double() const {
+        if (is_number()) return std::get<JsNumber>(inner).as_double();
+        if (is_boolean()) return std::get<JsBoolean>(inner).value ? 1.0 : 0.0;
+        return 0.0;
+    }
+
+    bool as_bool() const { return truthy(); }
+
+    std::string as_string() const {
+        if (is_string()) return std::get<JsString>(inner).value;
+        if (is_number()) return std::get<JsNumber>(inner).as_string();
+        if (is_boolean()) return std::get<JsBoolean>(inner).value ? "true" : "false";
+        if (is_null()) return "null";
+        return "";
+    }
+
+    JsArray as_array() const {
+        if (is_array()) return std::get<JsArray>(inner);
+        return JsArray{};
+    }
+
+    JsObject as_object() const {
+        if (is_object()) return std::get<JsObject>(inner);
+        return JsObject{};
+    }
+
     // ── Equality (JS == semantics simplified) ──
 
     bool operator==(const JsValue& o) const {

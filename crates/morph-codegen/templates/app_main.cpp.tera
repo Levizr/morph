@@ -88,6 +88,9 @@ inline void setColor(float rgba[4], const std::string& c) {
 // generated assertions below (no display needed) and exits 0/1.
 {{ self_test_code }}
 
+// ── Route mounts: per-route Context + mount/unmount + mid dispatch ──
+{{ route_mounts }}
+
 int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--morph-self-test") == 0) {

@@ -1,3 +1,5 @@
+import { mountSettings, unmountSettings } from './native.cpp'
+
 export const windowConfig = { title: "Route Test", width: 640, height: 480 }
 
 export default function App() {
@@ -6,6 +8,8 @@ export default function App() {
   return (
     <body>
       <div className="title" id="title">routes — manifest scan + RID interning</div>
+      <button id="btn-mount" onClick={() => mountSettings()}>mount settings</button>
+      <button id="btn-unmount" onClick={() => unmountSettings()}>unmount settings</button>
       <div className="value" id="status">{status}</div>
     </body>
   )

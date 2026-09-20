@@ -12,11 +12,14 @@ const TEMPLATE: &str = include_str!("../../templates/app_main.cpp.tera");
 pub struct CppEmitter<'a> {
     windows: &'a [IRWindow],
     routes: &'a [RouteEntry],
+    /// Route IR, positionally paired with `routes` by rid (built per
+    /// route graph in the build command; empty when routes aren't built).
+    routes_ir: &'a [(RouteEntry, IRWindow)],
 }
 
 impl<'a> CppEmitter<'a> {
     pub const fn new(windows: &'a [IRWindow]) -> Self {
-        Self { windows, routes: &[] }
+        Self { windows, routes: &[], routes_ir: &[] }
     }
 
     /// Attach the route manifest (RID table). Chained before `emit`.
@@ -25,11 +28,20 @@ impl<'a> CppEmitter<'a> {
         self
     }
 
+    /// Attach built route IR for mount emission. Chained before `emit`.
+    pub fn with_routes_ir(mut self, routes_ir: &'a [(RouteEntry, IRWindow)]) -> Self {
+        self.routes_ir = routes_ir;
+        self
+    }
+
     pub fn emit(&self, output_dir: &Path) -> Result<()> {
         std::fs::create_dir_all(output_dir)?;
 
         let mut fs = FeatureSet::new();
         fs.scan(self.windows);
+        // Route trees can enable features the entry never touches
+        // (input, scroll, …) — scan their nodes too.
+        fs.scan(self.routes_ir.iter().map(|(_, w)| w));
         let headers = fs.required_headers();
         let defines = fs.required_defines();
 
@@ -54,11 +66,12 @@ impl<'a> CppEmitter<'a> {
         }
 
         // Event declarations for static channel emission + morph_api.h.
-        // Deduped by identity key (module path + event name).
+        // Deduped by identity key (module path + event name). Route
+        // events join: channels are app-global, one static each.
         let mut event_decls: Vec<std::collections::HashMap<String, String>> = Vec::new();
         {
             let mut seen_keys = std::collections::HashSet::new();
-            for w in self.windows {
+            for w in self.windows.iter().chain(self.routes_ir.iter().map(|(_, w)| w)) {
                 for ev in &w.event_decls {
                     let key = ev.get("key").cloned().unwrap_or_default();
                     if key.is_empty() || !seen_keys.insert(key.clone()) {
@@ -332,29 +345,55 @@ impl<'a> CppEmitter<'a> {
 
         // Keyframe registration (per-window keyframes are app-global) — port of
         // Python emitter.py which registers them once before any window.
+        // Route keyframes join; identical registrations dedupe (shared
+        // components animate the same way in every tree).
         let mut keyframe_parts = Vec::new();
-        for w in self.windows {
+        for w in self.windows.iter().chain(self.routes_ir.iter().map(|(_, w)| w)) {
             let kf = node_emitter::keyframe_registration_code(&w.keyframes, &fs.features);
-            if !kf.is_empty() {
+            if !kf.is_empty() && !keyframe_parts.contains(&kf) {
                 keyframe_parts.push(kf);
             }
         }
         let keyframe_code = keyframe_parts.join("\n");
 
         // Extra headers (dedup)
-        let mut extra_headers: Vec<String> =
-            self.windows.iter().flat_map(|w| w.extra_headers.clone()).collect();
+        let mut extra_headers: Vec<String> = self
+            .windows
+            .iter()
+            .chain(self.routes_ir.iter().map(|(_, w)| w))
+            .flat_map(|w| w.extra_headers.clone())
+            .collect();
         extra_headers.sort();
         extra_headers.dedup();
 
         // Premain entries, raw (pre-join) for definition lookup.
-        let premain_entries: Vec<String> =
+        let mut premain_entries: Vec<String> =
             self.windows.iter().flat_map(|w| w.premain_functions.clone()).collect();
+        // Route module globals join the app-global premain (route
+        // functions are app-global by design). Exact duplicates
+        // (helpers shared with the entry) emit once. Anything referencing
+        // mount context (`ctx->`) is a build error — namespace-scope code
+        // has no context; helpers take explicit parameters instead.
+        for (route, win) in self.routes_ir {
+            for entry in &win.premain_functions {
+                if entry.contains("ctx->") {
+                    anyhow::bail!(
+                        "route {} references route state/props from module scope ({}); move it into the component body or pass explicit parameters",
+                        route.id,
+                        entry.lines().next().unwrap_or("?").trim()
+                    );
+                }
+                if !premain_entries.contains(entry) {
+                    premain_entries.push(entry.clone());
+                }
+            }
+        }
         // Universal module bindings across windows, deduped by identity.
+        // Route bindings join (definitions live once at their namespace).
         let mut module_bindings_all: Vec<std::collections::HashMap<String, String>> = Vec::new();
         {
             let mut seen_keys = std::collections::HashSet::new();
-            for w in self.windows {
+            for w in self.windows.iter().chain(self.routes_ir.iter().map(|(_, w)| w)) {
                 for b in &w.module_bindings {
                     let key = b.get("key").cloned().unwrap_or_default();
                     if key.is_empty() || !seen_keys.insert(key.clone()) {
@@ -386,7 +425,7 @@ impl<'a> CppEmitter<'a> {
         // Native mode: user C++ imports via `import "./file.cpp"`
         let mut cpp_includes: Vec<serde_json::Value> = Vec::new();
         let mut seen_paths = std::collections::HashSet::new();
-        for w in self.windows {
+        for w in self.windows.iter().chain(self.routes_ir.iter().map(|(_, w)| w)) {
             for import in &w.cpp_imports {
                 if let Some(path) = import.get("path") {
                     if !path.is_empty() && seen_paths.insert(path.clone()) {
@@ -406,6 +445,10 @@ impl<'a> CppEmitter<'a> {
         // (main loop pumps the WindowManager registry — no per-window
         // template vars needed)
         ctx.insert("window_code", &window_code);
+        // Route mounts (Context + mount/unmount + per-route mid dispatch
+        // per route.mx). Channel placeholders lower like window code.
+        let route_mounts = generate_route_mounts(self.routes_ir, &fs.features, &channel_lower);
+        ctx.insert("route_mounts", &lower_channels(route_mounts));
         ctx.insert("keyframe_code", &keyframe_code);
         ctx.insert("list_factory_code", &list_factory_code);
         ctx.insert("headers", &headers);
@@ -439,6 +482,7 @@ impl<'a> CppEmitter<'a> {
             kept_entries.iter().filter_map(|e| logic_emitter::split_module_ns(e)).collect();
         let api_header = generate_morph_api_header(
             self.windows,
+            self.routes_ir.iter().map(|(_, w)| w),
             &premain_code,
             &event_decls,
             &module_bindings_all,
@@ -450,7 +494,15 @@ impl<'a> CppEmitter<'a> {
         // Route manifest: RID consts for every route.mx (`app::routes::`).
         // Always generated so `#include "morph_routes.h"` never dangles —
         // an empty manifest is just kRouteCount = 0.
-        let routes_header = generate_morph_routes_header(self.routes);
+        let mount_ns: Vec<String> =
+            self.routes_ir.iter().map(|(route, _)| route_ns_name(&route.id)).collect();
+        let mount_decls: Vec<(&str, &str)> = self
+            .routes_ir
+            .iter()
+            .zip(mount_ns.iter())
+            .map(|((route, _), ns)| (ns.as_str(), route.const_name.as_str()))
+            .collect();
+        let routes_header = generate_morph_routes_header(self.routes, &mount_decls);
         std::fs::write(output_dir.join("morph_routes.h"), routes_header)?;
 
         // Generate _morph_state.h for native mode (signals + JSX wrappers;
@@ -617,15 +669,445 @@ pub(crate) fn generate_mid_code(windows: &[IRWindow], premain_code: &str) -> Str
     out.join("\n")
 }
 
+/// Route namespace ident: `/auth/login` → `auth_login`, `/` → `root`.
+/// Lowercase alphanumeric + `_` only (joins the `app::routes::` scope).
+pub fn route_ns_name(route_id: &str) -> String {
+    let mut parts = Vec::new();
+    for segment in route_id.split('/') {
+        if segment.is_empty() {
+            continue;
+        }
+        let clean: String = segment
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
+            .collect();
+        let clean = clean.trim_matches('_').to_string();
+        if !clean.is_empty() {
+            parts.push(clean);
+        }
+    }
+    if parts.is_empty() {
+        return "root".to_string();
+    }
+    parts.join("_")
+}
+
+/// Retarget lambda captures for route mount bodies. Every capture list
+/// gains explicit `ctx, __wid, win` copies (effects/handlers outlive the
+/// mount call — bare `[&]` would dangle; explicit captures keep the
+/// context alive). `[=]` already copies everything and passes through;
+/// string literals are skipped so user text like `"[]"` survives; lists
+/// already naming `ctx` (the teardown closure) pass through.
+///
+/// A `[` opens a capture only in expression position (after `= ( , ;`
+/// `{`, `return`, or at the start); after an identifier, digit, `)`,
+/// `]`, or quote it is an array subscript (`padding[0]`) and passes
+/// through untouched.
+pub(crate) fn retarget_captures(code: &str) -> String {
+    let mut res = String::with_capacity(code.len());
+    let bytes = code.as_bytes();
+    let mut i = 0;
+    // Last significant (non-whitespace) byte before position i.
+    let mut prev_sig: Option<u8> = None;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'"' || b == b'\'' {
+            let mut j = i + 1;
+            while j < bytes.len() {
+                if bytes[j] == b'\\' {
+                    j += 2;
+                    continue;
+                }
+                if bytes[j] == b {
+                    j += 1;
+                    break;
+                }
+                j += 1;
+            }
+            res.push_str(&code[i..j.min(bytes.len())]);
+            i = j.min(bytes.len());
+            prev_sig = Some(b'"');
+            continue;
+        }
+        if b == b'[' {
+            let capture_position = match prev_sig {
+                None => true,
+                Some(p) => {
+                    !(p.is_ascii_alphanumeric()
+                        || p == b'_'
+                        || p == b'$'
+                        || p == b')'
+                        || p == b']'
+                        || p == b'"'
+                        || p == b'\'')
+                }
+            };
+            if capture_position {
+                let mut j = i + 1;
+                while j < bytes.len() && bytes[j] != b']' {
+                    j += 1;
+                }
+                if j < bytes.len() {
+                    let inner = code[i + 1..j].trim();
+                    let has_ctx = inner
+                        .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+                        .any(|w| w == "ctx");
+                    if !has_ctx && !inner.contains('=') {
+                        if inner.is_empty() || inner == "&" {
+                            res.push_str("[&, ctx, __wid, win]");
+                        } else {
+                            res.push_str(&format!("[{inner}, ctx, __wid, win]"));
+                        }
+                        i = j + 1;
+                        prev_sig = Some(b']');
+                        continue;
+                    }
+                }
+            }
+        }
+        if !b.is_ascii_whitespace() {
+            prev_sig = Some(b);
+        }
+        let ch_len = code[i..].chars().next().map_or(1, char::len_utf8);
+        res.push_str(&code[i..i + ch_len]);
+        i += ch_len;
+    }
+    res
+}
+
+/// Mount-prologue extraction for one declared prop: plain C++ out of the
+/// runtime `props` object (the only JsValue touchpoint — see
+/// route-mounts.md). Returns (member declaration, assignment statement).
+fn route_prop_extract(name: &str, class: &str, optional: bool) -> (String, String) {
+    let decl = match class {
+        "int" => format!("int {name};"),
+        "double" => format!("double {name};"),
+        "bool" => format!("bool {name};"),
+        "std::string" => format!("std::string {name};"),
+        "JsArray" => format!("JsArray {name};"),
+        "JsObject" => format!("JsObject {name};"),
+        _ => format!("JsValue {name};"),
+    };
+    let read = match class {
+        "int" => format!("static_cast<int>(props.get(\"{name}\").as_int())"),
+        "double" => format!("props.get(\"{name}\").as_double()"),
+        "bool" => format!("props.get(\"{name}\").as_bool()"),
+        "std::string" => format!("props.get(\"{name}\").as_string()"),
+        "JsArray" => format!("props.get(\"{name}\").as_array()"),
+        "JsObject" => format!("props.get(\"{name}\").as_object()"),
+        _ => format!("props.get(\"{name}\")"),
+    };
+    let mut assign = String::new();
+    if !optional {
+        assign.push_str(&format!(
+            "    if (!props.has(\"{name}\")) fprintf(stderr, \"[morph] route missing required prop `{name}`\\n\");\n"
+        ));
+    }
+    assign.push_str(&format!("    ctx->{name} = {read};"));
+    (decl, assign)
+}
+
+/// Zero value expression for a Context member class.
+fn route_zero_value(class: &str) -> &'static str {
+    match class {
+        "int" => "0",
+        "double" => "0.0",
+        "bool" => "false",
+        _ => "{}",
+    }
+}
+
+/// Per-route mount functions: `Context` (props as plain C++ members,
+/// state as signals, owned effects + channel subs), `mount_*` factory,
+/// `unmount_*` teardown, and per-route `mid` dispatch over context
+/// members. Lambda captures retarget to `[&, ctx, __wid, win]` so
+/// handlers/effects outlive the mount call.
+pub fn generate_route_mounts(
+    routes_ir: &[(RouteEntry, IRWindow)],
+    features: &std::collections::HashSet<String>,
+    channel_table: &[(String, String, String)],
+) -> String {
+    let mut out = Vec::new();
+    for (route, win) in routes_ir {
+        let ns = route_ns_name(&route.id);
+        let mut code = vec![format!("namespace app::routes::{ns} {{")];
+        // ── Context ──
+        code.push("struct Context {".to_string());
+        for prop in &win.route_props {
+            let name = prop.get("name").map_or("", String::as_str);
+            let class = prop.get("class").map_or("", String::as_str);
+            if name.is_empty() {
+                continue;
+            }
+            let (decl, _) = route_prop_extract(name, class, true);
+            code.push(format!("    {decl}"));
+        }
+        for sv in &win.state_vars {
+            let getter = sv.get("getter").map_or("", String::as_str);
+            if getter.is_empty() {
+                continue;
+            }
+            let mut ty = infer_cpp_type(sv.get("init").map_or("0", String::as_str));
+            if ty == "auto" {
+                ty = "JsValue".to_string();
+            }
+            code.push(format!("    morph::Signal<{ty}> {getter}{{{}}};", route_zero_value(&ty)));
+        }
+        code.push("    std::vector<morph::EffectNode*> effects;".to_string());
+        code.push("    std::vector<std::pair<morph::Channel*, size_t>> subs;".to_string());
+        code.push("}; // struct Context".to_string());
+        // ── mount ──
+        code.push(format!(
+            "std::shared_ptr<Context> mount_{}(MorphWindow* win, WID wid, const JsObject& props) {{",
+            route.const_name
+        ));
+        code.push("    auto ctx = std::make_shared<Context>();".to_string());
+        code.push("    const WID __wid = wid;".to_string());
+        code.push("    (void)__wid;".to_string());
+        if win.route_props.is_empty() {
+            code.push("    (void)props;".to_string());
+        }
+        for prop in &win.route_props {
+            let name = prop.get("name").map_or("", String::as_str);
+            let class = prop.get("class").map_or("", String::as_str);
+            let optional = prop.get("optional").is_some_and(|v| v == "true");
+            if name.is_empty() {
+                continue;
+            }
+            let (_, assign) = route_prop_extract(name, class, optional);
+            code.push(assign);
+        }
+        for sv in &win.state_vars {
+            let getter = sv.get("getter").map_or("", String::as_str);
+            if getter.is_empty() {
+                continue;
+            }
+            let init = sv.get("init").cloned().unwrap_or_else(|| "0".into());
+            let init = if infer_cpp_type(&init) == "JsArray" && is_array_literal(&init) {
+                "JsArray{}".to_string()
+            } else {
+                init
+            };
+            code.push(format!("    ctx->{getter}.set({init});"));
+        }
+        code.push("    morph::MountScope __scope(&ctx->effects);".to_string());
+        // Route state map: bare reads rewrite to context members (baked
+        // `ctx->` refs survive via the member-access guard in translate_js).
+        let mut state_map = std::collections::HashMap::new();
+        for sv in &win.state_vars {
+            if let (Some(getter), Some(_)) = (sv.get("getter"), sv.get("setter")) {
+                state_map.insert(getter.clone(), format!("ctx->{getter}.get()"));
+                if let Some(setter) = sv.get("setter") {
+                    state_map.insert(setter.clone(), format!("ctx->{getter}.set"));
+                }
+            }
+        }
+        for sv in &win.shared_vars {
+            if let (Some(getter), Some(accessor)) = (sv.get("getter"), sv.get("accessor")) {
+                let ns = sv.get("ns").map_or("", String::as_str);
+                let read = shared_expr(ns, accessor);
+                state_map.insert(getter.clone(), format!("{read}.get()"));
+                if let Some(setter) = sv.get("setter") {
+                    state_map.insert(setter.clone(), format!("{read}.set"));
+                }
+            }
+        }
+        for b in &win.module_bindings {
+            let kind = b.get("kind").map_or("", String::as_str);
+            if kind == "import" {
+                if let (Some(local), Some(expr)) = (b.get("local"), b.get("expr")) {
+                    if !local.is_empty() && !expr.is_empty() {
+                        state_map.insert(local.clone(), expr.clone());
+                    }
+                }
+                continue;
+            }
+            if kind != "function" && kind != "var" && kind != "class" {
+                continue;
+            }
+            if let (Some(ns), Some(name)) = (b.get("ns"), b.get("name")) {
+                if !ns.is_empty() && !name.is_empty() {
+                    state_map.insert(name.clone(), morph_ir::qualified_binding_ref(ns, name));
+                }
+            }
+        }
+        for name in &win.reactive_consts {
+            state_map.insert(name.clone(), format!("{name}()"));
+        }
+        for node in &win.nodes {
+            let c =
+                node_emitter::emit_node_with_state(node, Some("win"), features, &state_map, None);
+            if !c.is_empty() {
+                code.push(c);
+            }
+        }
+        for ed in &win.effect_decls {
+            let lambda = ed.get("lambda").map_or("", String::as_str);
+            if lambda.is_empty() {
+                continue;
+            }
+            let deps = ed.get("deps").map_or("", |d| d.trim());
+            if deps == "[]" {
+                code.push("    { // morphEffect (run once)".to_string());
+                code.push(format!("        auto __ef_fn = {lambda};"));
+                code.push("        __ef_fn();".to_string());
+                code.push("    }".to_string());
+            } else {
+                code.push(format!("    morph::create_effect_scoped({lambda});"));
+            }
+        }
+        for sub in &win.channel_subs {
+            let channel = sub.get("channel").map_or("", String::as_str);
+            let body = sub.get("body").map_or("", String::as_str);
+            if channel.is_empty() || body.is_empty() {
+                continue;
+            }
+            let target = channel_table
+                .iter()
+                .find(|(raw, _, _)| raw == channel)
+                .map(|(_, _, expr)| expr.clone())
+                .unwrap_or_else(|| {
+                    let escaped = channel.replace('\\', "\\\\").replace('"', "\\\"");
+                    format!("morph::channel(\"{escaped}\")")
+                });
+            code.push("    {".to_string());
+            code.push(format!("        morph::Channel& __ch = {target};"));
+            code.push(format!("        ctx->subs.emplace_back(&__ch, __ch.on({body}));"));
+            code.push("    }".to_string());
+        }
+        for log in &win.startup_logs {
+            code.push(format!(
+                "    fprintf(stderr, \"{}\\n\");",
+                log.replace('\\', "\\\\").replace('"', "\\\"")
+            ));
+        }
+        code.push(format!("    auto __teardown_{} = [ctx] {{", route.const_name));
+        code.push(
+            "        for (morph::EffectNode* e : ctx->effects) morph::destroy_effect(e);"
+                .to_string(),
+        );
+        code.push("        ctx->effects.clear();".to_string());
+        code.push(
+            "        for (auto& sub : ctx->subs) { if (sub.first) sub.first->off(sub.second); }"
+                .to_string(),
+        );
+        code.push("        ctx->subs.clear();".to_string());
+        code.push("    };".to_string());
+        code.push(format!(
+            "    WindowManager::get().setMount(wid, MountHandle{{{rid}, ctx, __teardown_{}}});",
+            route.const_name,
+            rid = route.rid
+        ));
+        code.push("    return ctx;".to_string());
+        code.push("}".to_string());
+        // ── unmount ──
+        code.push(format!("void unmount_{}(WID wid) {{", route.const_name));
+        code.push("    auto& wm = WindowManager::get();".to_string());
+        code.push("    auto win = wm.get(wid);".to_string());
+        code.push("    wm.clearMount(wid);".to_string());
+        code.push("    if (win) win->clearRoot();".to_string());
+        code.push("}".to_string());
+        // ── per-route mid dispatch (context members; same grouping as
+        // the global fns, one namespace per route so indices never clash
+        // across routes sharing a component) ──
+        {
+            let mut by_ns: std::collections::HashMap<
+                String,
+                Vec<&std::collections::HashMap<String, String>>,
+            > = std::collections::HashMap::new();
+            let mut ns_order: Vec<String> = Vec::new();
+            for a in &win.mid_assignments {
+                let ns = a.get("ns").map_or("", String::as_str);
+                if ns.is_empty() {
+                    continue;
+                }
+                if !by_ns.contains_key(ns) {
+                    ns_order.push(ns.to_string());
+                }
+                by_ns.entry(ns.to_string()).or_default().push(a);
+            }
+            for ns in ns_order {
+                let assigns = &by_ns[&ns];
+                let mut states: Vec<(&str, &str, String, Vec<(usize, String)>)> = Vec::new();
+                let mut state_idx: std::collections::HashMap<String, usize> =
+                    std::collections::HashMap::new();
+                for a in assigns {
+                    let getter = a.get("getter").map_or("", String::as_str);
+                    if getter.is_empty() {
+                        continue;
+                    }
+                    let setter = a.get("setter").map_or("", String::as_str);
+                    let ty = infer_cpp_type(a.get("init").map_or("0", String::as_str));
+                    if ty == "auto" {
+                        continue;
+                    }
+                    let index =
+                        a.get("index").map_or("0", String::as_str).parse::<usize>().unwrap_or(0);
+                    let signal = a.get("signal").map_or("", String::as_str).to_string();
+                    match state_idx.get(getter) {
+                        Some(&i) => states[i].3.push((index, signal)),
+                        None => {
+                            state_idx.insert(getter.to_string(), states.len());
+                            states.push((getter, setter, ty, vec![(index, signal)]));
+                        }
+                    }
+                }
+                if states.is_empty() {
+                    continue;
+                }
+                code.push(format!("namespace {ns} {{"));
+                for (getter, setter, ty, mut cases) in states {
+                    cases.sort_by_key(|(index, _)| *index);
+                    let (set_fn, get_fn) = mid_fn_names(getter, setter);
+                    code.push(format!("void {set_fn}(Context& ctx, uint32_t mid, {ty} v) {{"));
+                    code.push("    switch (mid) {".to_string());
+                    for (index, signal) in &cases {
+                        code.push(format!("        case {index}: {signal}.set(v); break;"));
+                    }
+                    code.push("        default: break;".to_string());
+                    code.push("    }".to_string());
+                    code.push("}".to_string());
+                    code.push(format!("{ty} {get_fn}(Context& ctx, uint32_t mid) {{"));
+                    code.push("    switch (mid) {".to_string());
+                    for (index, signal) in &cases {
+                        code.push(format!("        case {index}: return {signal}.get();"));
+                    }
+                    code.push(format!("        default: return {ty}{{}};"));
+                    code.push("    }".to_string());
+                    code.push("}".to_string());
+                }
+                code.push("}".to_string());
+            }
+        }
+        code.push(format!("}} // namespace app::routes::{ns}"));
+        // Captures retargeted last (string-literal safe).
+        out.push(retarget_captures(&code.join("\n")));
+    }
+    out.join("\n\n")
+}
+
 /// Route manifest header (`morph_routes.h`): one `app::routes::` int
 /// const per `route.mx` (the RID — what the JSX strings lower to), plus
 /// the route count. Constexpr only: zero binary cost, and the C++
 /// compiler independently rejects typos (`app::routes::kSetings`
 /// doesn't exist) even if the linter is skipped.
-pub fn generate_morph_routes_header(routes: &[RouteEntry]) -> String {
+/// Route manifest header (`morph_routes.h`): one `app::routes::` int
+/// const per `route.mx` (the RID — what the JSX strings lower to), plus
+/// the route count. Constexpr only: zero binary cost, and the C++
+/// compiler independently rejects typos (`app::routes::kSetings`
+/// doesn't exist) even if the linter is skipped.
+///
+/// `mounts` carries (namespace, const-name) per route with built IR;
+/// mount/unmount factories are forward-declared here (defined in
+/// app.cpp) so user C++ (`native.cpp`, included mid-TU) can drive
+/// mounts before their definitions.
+pub fn generate_morph_routes_header(routes: &[RouteEntry], mounts: &[(&str, &str)]) -> String {
     let mut out = vec![
         "// Generated by Morph — route manifest (RID interning). Do not edit.".to_string(),
         "#pragma once".to_string(),
+        String::new(),
+        "#include \"core/window_manager.h\"".to_string(),
+        "struct JsObject;".to_string(),
         String::new(),
         "namespace app::routes {".to_string(),
     ];
@@ -637,6 +1119,15 @@ pub fn generate_morph_routes_header(routes: &[RouteEntry]) -> String {
     }
     out.push(format!("inline constexpr int kRouteCount = {}; // indexed routes", routes.len()));
     out.push("} // namespace app::routes".to_string());
+    for (ns, const_name) in mounts {
+        out.push(format!("namespace app::routes::{ns} {{"));
+        out.push("struct Context;".to_string());
+        out.push(format!(
+            "std::shared_ptr<Context> mount_{const_name}(MorphWindow* win, WID wid, const JsObject& props);"
+        ));
+        out.push(format!("void unmount_{const_name}(WID wid);"));
+        out.push("}".to_string());
+    }
     out.join("\n") + "\n"
 }
 
@@ -780,6 +1271,25 @@ fn generate_self_test(windows: &[IRWindow], routes: &[RouteEntry]) -> String {
         lines.push("    check(__st_arr[\"9\"].is_undefined(), \"arr:oob-undefined\");".to_string());
         lines.push(
             "    check(__st_arr[\"zzz\"].is_undefined(), \"arr:garbage-undefined\");".to_string(),
+        );
+        lines.push("    check(JsValue().as_int() == 0, \"coerce:undef-int\");".to_string());
+        lines.push("    check(JsValue(7).as_int() == 7, \"coerce:num-int\");".to_string());
+        lines.push("    check(JsValue(true).as_int() == 1, \"coerce:bool-int\");".to_string());
+        lines.push(
+            "    check(JsValue(\"42\").as_int() == 0, \"coerce:str-int-strict\");".to_string(),
+        );
+        lines.push(
+            "    check(JsValue(\"hi\").as_string() == \"hi\", \"coerce:str-str\");".to_string(),
+        );
+        lines.push("    check(JsValue(8).as_string() == \"8\", \"coerce:num-str\");".to_string());
+        lines.push("    check(JsValue().as_bool() == false, \"coerce:undef-bool\");".to_string());
+        lines.push(
+            "    check(JsValue(__st_obj).as_object().has(\"a\"), \"coerce:obj-passthrough\");"
+                .to_string(),
+        );
+        lines.push(
+            "    check(JsValue(1).as_array().length() == 0, \"coerce:num-array-empty\");"
+                .to_string(),
         );
     }
     // Route manifest: every indexed route's RID const reads back its
@@ -1160,14 +1670,18 @@ fn mid_header_entries(
 /// `inline` keeps them safe across translation units. `app.cpp` complexity
 /// is irrelevant; this header's DX is sacred: thin wrappers + mapping
 /// comments, zero string plumbing.
-fn generate_morph_api_header(
-    windows: &[IRWindow],
+fn generate_morph_api_header<'w>(
+    windows: impl IntoIterator<Item = &'w IRWindow>,
+    routes_ir: impl IntoIterator<Item = &'w IRWindow>,
     premain_code: &str,
     event_decls: &[std::collections::HashMap<String, String>],
     module_bindings: &[std::collections::HashMap<String, String>],
     moved_classes: &[(String, String)],
     wrapped: &[(String, String)],
 ) -> String {
+    // Collect borrowed refs once (shared + mid groupings both iterate).
+    let windows: Vec<&IRWindow> = windows.into_iter().collect();
+    let routes_ir: Vec<&IRWindow> = routes_ir.into_iter().collect();
     let mut lines = vec![
         "#pragma once".to_string(),
         "// Generated by Morph — do not edit. This is the native developer's".to_string(),
@@ -1185,10 +1699,11 @@ fn generate_morph_api_header(
     // (namespace, lines) groups preserving first-seen order.
     let mut blocks = NsBlocks::new();
 
-    // Shared stores: definition + get_/set_ wrappers.
+    // Shared stores: definition + get_/set_ wrappers. Route stores
+    // join (app-global by design); entry-first order keeps indices stable.
     {
         let mut seen_keys = std::collections::HashSet::new();
-        for w in windows {
+        for w in windows.iter().copied().chain(routes_ir.iter().copied()) {
             for sv in &w.shared_vars {
                 let key = sv.get("key").map_or("", String::as_str);
                 let accessor = sv.get("accessor").map_or("", String::as_str);
@@ -1683,6 +2198,7 @@ mod tests {
             extra_headers: Vec::new(),
             state_vars: Vec::new(),
             reactive_consts: Vec::new(),
+            route_props: Vec::new(),
             shared_vars: Vec::new(),
             effect_decls: vec![
                 [
@@ -1767,6 +2283,38 @@ mod tests {
     }
 
     #[test]
+    fn route_ns_names_sanitize() {
+        assert_eq!(route_ns_name("/auth/login"), "auth_login");
+        assert_eq!(route_ns_name("/settings"), "settings");
+        assert_eq!(route_ns_name("/"), "root");
+        assert_eq!(route_ns_name("/a-b/(group)"), "a_b_group");
+    }
+
+    #[test]
+    fn captures_retarget_without_touching_strings() {
+        assert_eq!(retarget_captures("[](int x) { f(); }"), "[&, ctx, __wid, win](int x) { f(); }");
+        assert_eq!(retarget_captures("[&]() { g(); }"), "[&, ctx, __wid, win]() { g(); }");
+        assert_eq!(
+            retarget_captures("[node_1]() { h(node_1); }"),
+            "[node_1, ctx, __wid, win]() { h(node_1); }"
+        );
+        assert_eq!(retarget_captures("[=]() { k(); }"), "[=]() { k(); }");
+        assert_eq!(retarget_captures("[ctx] { t(); }"), "[ctx] { t(); }");
+        assert_eq!(
+            retarget_captures("node->style.padding[0] = 8.0f;"),
+            "node->style.padding[0] = 8.0f;"
+        );
+        assert_eq!(
+            retarget_captures("auto f = [](int x) { return x; };"),
+            "auto f = [&, ctx, __wid, win](int x) { return x; };"
+        );
+        assert_eq!(
+            retarget_captures("TextNode* t = new TextNode(\"[]\");"),
+            "TextNode* t = new TextNode(\"[]\");"
+        );
+    }
+
+    #[test]
     fn routes_header_interns_rids_and_empty_manifest() {
         let routes = vec![
             RouteEntry {
@@ -1790,7 +2338,7 @@ mod tests {
                 has_default_export: true,
             },
         ];
-        let header = generate_morph_routes_header(&routes);
+        let header = generate_morph_routes_header(&routes, &[]);
         assert!(header.contains("namespace app::routes {"), "routes ns: {header}");
         assert!(
             header.contains("inline constexpr int kAuthLogin = 0; // /auth/login"),
@@ -1799,9 +2347,19 @@ mod tests {
         assert!(header.contains("inline constexpr int kSettings = 1;"), "rid 1: {header}");
         assert!(header.contains("inline constexpr int kRouteCount = 2;"), "count: {header}");
 
-        let empty = generate_morph_routes_header(&[]);
+        let empty = generate_morph_routes_header(&[], &[]);
         assert!(empty.contains("inline constexpr int kRouteCount = 0;"), "empty: {empty}");
         assert!(!empty.contains("kAuthLogin"), "no consts: {empty}");
+
+        let mounted = generate_morph_routes_header(
+            &routes,
+            &[("auth_login", "kAuthLogin"), ("settings", "kSettings")],
+        );
+        assert!(
+            mounted.contains("std::shared_ptr<Context> mount_kAuthLogin(MorphWindow* win, WID wid, const JsObject& props);"),
+            "mount decl: {mounted}"
+        );
+        assert!(mounted.contains("void unmount_kSettings(WID wid);"), "unmount decl: {mounted}");
     }
 
     #[test]

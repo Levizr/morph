@@ -4,7 +4,7 @@
 
 > **Note:** This is a future plan, not a commitment. The syntax and API shown here are proposals — they can be completely different when actually implemented.
 
-> **Decisions update (2026-09-20):** route ids intern to integers (**RID**, `app::routes::` consts — no runtime string lookup), duplicate-route lookup returns the **most-recently-focused** window, `navigate` is a **direct swap** (no history), and markup navigation uses **`<a href>`** (the `morph-*` actions never existed). C++ controls windows via `app::windows::*`. See [Decisions — old vs new](#decisions--old-vs-new). The reasoning behind these calls is answered in detail in [Q: Windows?](../faq/q-windows.md).
+> **Decisions update (2026-09-20):** route ids intern to integers (**RID**, `app::routes::` consts — no runtime string lookup), duplicate-route lookup returns the **most-recently-focused** window, `navigate` is a **direct swap** (no history), and markup navigation uses **`<a href>`** (the `morph-*` actions never existed). C++ controls windows via `app::windows::*`. Mounting design (per-instance state) lives in [Route Mounts & Per-Instance State](route-mounts.md). See [Decisions — old vs new](#decisions--old-vs-new). The reasoning behind these calls is answered in detail in [Q: Windows?](../faq/q-windows.md).
 
 A route file is **both a page and a window**:
 
