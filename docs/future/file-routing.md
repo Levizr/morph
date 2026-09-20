@@ -4,7 +4,7 @@
 
 > **Note:** This is a future plan, not a commitment. The syntax and API shown here are proposals — they can be completely different when actually implemented.
 
-> **Decisions update (2026-09-20):** route ids intern to integers (**RID**, `app::routes::` consts — no runtime string lookup), duplicate-route lookup returns the **most-recently-focused** window, `navigate` is a **direct swap** (no history), and markup navigation uses **`<a href>`** (the `morph-*` actions never existed). C++ controls windows via `app::windows::*`. See [Decisions — old vs new](#decisions--old-vs-new).
+> **Decisions update (2026-09-20):** route ids intern to integers (**RID**, `app::routes::` consts — no runtime string lookup), duplicate-route lookup returns the **most-recently-focused** window, `navigate` is a **direct swap** (no history), and markup navigation uses **`<a href>`** (the `morph-*` actions never existed). C++ controls windows via `app::windows::*`. See [Decisions — old vs new](#decisions--old-vs-new). The reasoning behind these calls is answered in detail in [Q: Windows?](../faq/q-windows.md).
 
 A route file is **both a page and a window**:
 
@@ -87,7 +87,7 @@ Reactive access to a window handle from inside any component. By id/route it is 
 ```ts
 const win = useWindow()                      // current window — sync, always valid
 const win = useWindow("login-window")        // by id — null if not running
-const win = useWindow("/auth/login")         // or by route id — null if not running
+const win = useWindow("/auth/login")         // or by route id — most-recently-focused live window on that route
 if (!win) return
 ```
 
@@ -109,9 +109,9 @@ win.on('close', () => { ... })                 // fires for ANY close, including
 ## How it will work
 
 1. **Compiler pass** — at build time, scan the project for files named `route.mx` and add each to the **manifest** (`folder path → component + windowConfig`). Nothing else is indexed — components never become routes accidentally
-2. **`new Window(routeId, config)`** — resolved through the manifest at runtime: construct the window from the route's `windowConfig`, apply the constructor overrides, mount the component with `data` as props
+2. **`new Window(routeId, config)`** — resolved through the manifest at codegen time: the route literal lowers to its RID const, the window is constructed from the route's `windowConfig`, constructor overrides applied, component mounted with `data` as props
 3. **`win.navigate(routeId, props)`** — mounts the target route's component into the window's existing root layout tree (reusing the node-tree swap machinery hot reload already uses), passing `props`
-4. **`useWindow()`** — compile-time: the component's containing window id is threaded through the IR; runtime: a registry lookup returns the live handle
+4. **`useWindow()`** — compile-time: the component's containing window id is threaded through the IR and literal ids lower to WID/RID ints; runtime: WID switch dispatch (or a registry lookup for dynamic ids) returns the live handle
 
 ### Runtime bridge requirements
 
@@ -119,7 +119,7 @@ win.on('close', () => { ... })                 // fires for ANY close, including
 - Opening the same route twice creates two independent windows (each gets its own state)
 - Navigating within a window preserves the window's identity (size, position, id) — only the page changes
 - **No string lookups at runtime.** Route literals in JSX (`"/settings"`, `href="/auth/login"`) lower to **RID** integer consts; window-id literals lower to **WID** ints (the MID pattern). The manifest owns the string→int tables; strings exist only at build time.
-- **By-route lookup is most-recently-focused.** `useWindow("/auth/login")` with two live windows on that route returns the focused one — explicit `id`s remain the precise adressing mechanism.
+- **By-route lookup is most-recently-focused.** `useWindow("/auth/login")` with two live windows on that route returns the focused one — explicit `id`s remain the precise addressing mechanism.
 
 ### RID interning — the namespace trick (same as state)
 
@@ -158,7 +158,7 @@ The `morph-open` / `morph-close` / `morph-navigate` attributes from early drafts
 
 ## Typo safety — validated at build time
 
-Route ids and window ids are strings, and strings get typos. The manifest makes every reference **statically checkable** — typos and naming violations die at build time, never at runtime:
+Route ids and window ids are strings in source, and strings get typos. The manifest makes every reference **statically checkable** — typos and naming violations die at build time, never at runtime (and at runtime they aren't strings at all — see [RID interning](#rid-interning--the-namespace-trick-same-as-state)):
 
 ```ts
 const a = new Window("/auth/loign", {...})   // ✗ typo — caught by morph check before shipping
@@ -219,7 +219,7 @@ New diagnostics following the existing `mx-*` convention:
 | `mx-route-chars` | forbidden characters in a segment (spaces, dots, `\`, `?`, …) | error |
 | `mx-route-reserved` | segment uses a reserved name (`route`, `layout`, `loading`, …) | error |
 | `mx-route-private` | referencing a `_`-prefixed (private) folder as a route | error |
-| `mx-window-unknown` | id string matches no declared window id (`useWindow("x")`, `morph-open="x"`) | error |
+| `mx-window-unknown` | id string matches no declared window id (`useWindow("x")`) | error |
 | `mx-window-id-chars` | id contains `/`, spaces, dots, or other forbidden chars | error |
 | `mx-window-id-edge` | id starts with a digit / `-` / `_` / `.`, or ends with `-` / `_` | error |
 | `mx-window-id-reserved` | id is a reserved word (`main`, `root`, `window`, …) | error |
@@ -227,7 +227,7 @@ New diagnostics following the existing `mx-*` convention:
 | `mx-window-dynamic` | non-literal id (`useWindow(someVar)`) — can't be verified statically | warning |
 | `mx-window-duplicate` | two windows declaring the same explicit `id`, or a window id colliding with a route id | error |
 | `mx-route-no-export` | a `route.mx` file without a default export | error |
-| `mx-window-attr` | `morph-open` / `morph-close` / `morph-navigate` attributes referencing unknown routes/ids | error |
+| `mx-link-unknown` | `<a href="…">` referencing an unknown route (`href="/auth/loign"`) | error |
 
 **How it works:** the check pass collects every route id from the manifest scan + every explicit window id from `new Window(..., { id: "..." })` literals, then cross-references all route/window string literals across `.mx` files. Naming rules run on the declared ids themselves; close matches use edit distance for `mx-route-suggestion`. Rules are configurable in `morph.config` — teams can relax a severity or change the length cap:
 
