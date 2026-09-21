@@ -8,7 +8,7 @@
         "file": "index",
         "status": "production",
         "author": "PIYUSH",
-        "description": "What is Morph and how is it different from Electron? Build native desktop apps by compiling .mx files (JSX + TypeScript + CSS) directly into OpenGL binaries \u2014 no browser, no WebView, no runtime.",
+        "description": "What is Morph and how is it different from Electron? Build native desktop apps by compiling .mx files (JSX + TypeScript + CSS) directly into OpenGL binaries — no browser, no WebView, no runtime.",
         "keywords": [
           "what is morph",
           "morph vs electron",
@@ -26,7 +26,7 @@
         "file": "getting-started/installation",
         "status": "production",
         "author": "PIYUSH",
-        "description": "How to install Morph on Linux with zero runtime: no Python or Node.js \u2014 the one-line curl installer or cargo install morphc, a C++23 toolchain, and every step to set up OpenGL, GLFW, and your first native build.",
+        "description": "How to install Morph on Linux with zero runtime: no Python or Node.js — the one-line curl installer or cargo install morphc, a C++23 toolchain, and every step to set up OpenGL, GLFW, and your first native build.",
         "keywords": [
           "install morph linux",
           "install morph",
@@ -208,7 +208,7 @@
         "file": "concepts/how-it-works",
         "status": "production",
         "author": "PIYUSH",
-        "description": "How Morph works under the hood: the source to binary pipeline \u2014 Oxc parsing, IR building, layout, and C++ codegen that links into a single native binary.",
+        "description": "How Morph works under the hood: the source to binary pipeline — Oxc parsing, IR building, layout, and C++ codegen that links into a single native binary.",
         "keywords": [
           "how morph compiles mx",
           "morph compiler pipeline",
@@ -289,7 +289,7 @@
         "file": "elements/overview",
         "status": "production",
         "author": "PIYUSH",
-        "description": "Which HTML-like elements Morph supports \u2014 div, span, button, input, headings, and more \u2014 and how they compile to native OpenGL nodes instead of a browser DOM.",
+        "description": "Which HTML-like elements Morph supports — div, span, button, input, headings, and more — and how they compile to native OpenGL nodes instead of a browser DOM.",
         "keywords": [
           "morph html elements",
           "morph div span button",
@@ -390,7 +390,7 @@
         "file": "css/properties",
         "status": "production",
         "author": "PIYUSH",
-        "description": "Which CSS properties Morph supports \u2014 layout, sizing, colors, and typography \u2014 applied at compile time to native OpenGL rendering, with all supported units explained.",
+        "description": "Which CSS properties Morph supports — layout, sizing, colors, and typography — applied at compile time to native OpenGL rendering, with all supported units explained.",
         "keywords": [
           "morph css properties",
           "morph supported css units",
@@ -466,7 +466,7 @@
         "file": "css/flexbox",
         "status": "production",
         "author": "PIYUSH",
-        "description": "How to lay out Morph UI with CSS Flexbox \u2014 the same display:flex model you know from the web, compiled to native with a two-pass layout engine.",
+        "description": "How to lay out Morph UI with CSS Flexbox — the same display:flex model you know from the web, compiled to native with a two-pass layout engine.",
         "keywords": [
           "morph flexbox layout",
           "morph display flex",
@@ -485,7 +485,7 @@
         "file": "css/tailwind",
         "status": "production",
         "author": "PIYUSH",
-        "description": "How to style Morph with Tailwind: use 500+ utility classes directly in className with a built-in resolver \u2014 no Node.js or Tailwind install required.",
+        "description": "How to style Morph with Tailwind: use 500+ utility classes directly in className with a built-in resolver — no Node.js or Tailwind install required.",
         "keywords": [
           "morph tailwind",
           "morph utility classes",
@@ -898,7 +898,7 @@
         "file": "guides/intent-based-codegen",
         "status": "production",
         "author": "PIYUSH",
-        "description": "How Morph compiles TypeScript to native C++ by default: escape analysis, proven-range integers, trusted annotations, and smart pointers only where semantically required \u2014 no garbage collector needed.",
+        "description": "How Morph compiles TypeScript to native C++ by default: escape analysis, proven-range integers, trusted annotations, and smart pointers only where semantically required — no garbage collector needed.",
         "keywords": [
           "morph intent-based codegen",
           "morph escape analysis",
@@ -1041,7 +1041,7 @@
         "file": "rendering/index",
         "status": "production",
         "author": "PIYUSH",
-        "description": "Which Morph renderer to pick \u2014 flash (lightweight direct) or forge (hybrid retained compositor) \u2014 how selection works and how each paints pixels to screen.",
+        "description": "Which Morph renderer to pick — flash (lightweight direct) or forge (hybrid retained compositor) — how selection works and how each paints pixels to screen.",
         "keywords": [
           "morph renderer flash forge",
           "morph dual renderer",
@@ -1060,7 +1060,7 @@
         "file": "rendering/flash",
         "status": "production",
         "author": "PIYUSH",
-        "description": "How the flash renderer in Morph works: a lightweight direct renderer that clears and redraws the full window each frame \u2014 the production default.",
+        "description": "How the flash renderer in Morph works: a lightweight direct renderer that clears and redraws the full window each frame — the production default.",
         "keywords": [
           "morph flash renderer",
           "morph direct rendering",
@@ -1119,6 +1119,727 @@
     ]
   },
   {
+    "category": "Errors",
+    "items": [
+      {
+        "title": "Morph Error Reference",
+        "slug": "errors/overview",
+        "file": "errors/index",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Index of every Morph mx-* error code: what each diagnostic means, why Morph raises it, and how to fix it.",
+        "keywords": [
+          "morph errors",
+          "morph error codes",
+          "mx error reference",
+          "morph check errors",
+          "morph build failed"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.8,
+        "changefreq": "weekly"
+      },
+      {
+        "title": "mx-export — Missing or Duplicate Default Export",
+        "slug": "errors/mx-export",
+        "file": "errors/mx-export",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-export: every .mx file needs exactly one export default function component, with broken and fixed examples.",
+        "keywords": [
+          "mx-export",
+          "morph missing default export",
+          "multiple default exports morph"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-component-unknown — Unknown Component",
+        "slug": "errors/mx-component-unknown",
+        "file": "errors/mx-component-unknown",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-component-unknown: when a capitalized tag is not defined or imported, with default vs named import fixes.",
+        "keywords": [
+          "mx-component-unknown",
+          "morph unknown component",
+          "morph import component"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-component-prop — Unknown Prop on a Component",
+        "slug": "errors/mx-component-prop",
+        "file": "errors/mx-component-prop",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-component-prop: passing a prop a Morph component does not declare, typo vs declaration fixes.",
+        "keywords": [
+          "mx-component-prop",
+          "morph unknown prop",
+          "morph component props"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-component-required — Missing Required Prop",
+        "slug": "errors/mx-component-required",
+        "file": "errors/mx-component-required",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-component-required: calling a Morph component without a required prop, pass it or mark it optional.",
+        "keywords": [
+          "mx-component-required",
+          "morph required prop missing",
+          "morph props"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-window-missing — No Window Created",
+        "slug": "errors/mx-window-missing",
+        "file": "errors/mx-window-missing",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-window-missing: entry file has no windowConfig export and morph.config.json has no window values.",
+        "keywords": [
+          "mx-window-missing",
+          "morph no window",
+          "morph windowConfig missing"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-windowconfig-key — Invalid windowConfig Key",
+        "slug": "errors/mx-windowconfig-key",
+        "file": "errors/mx-windowconfig-key",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-windowconfig-key: unknown key in the windowConfig export, valid keys and typo fixes.",
+        "keywords": [
+          "mx-windowconfig-key",
+          "morph windowConfig keys",
+          "morph window config"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-windowconfig-type — Invalid windowConfig Value Type",
+        "slug": "errors/mx-windowconfig-type",
+        "file": "errors/mx-windowconfig-type",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-windowconfig-type: windowConfig value with the wrong type, numbers in braces and boolean flags.",
+        "keywords": [
+          "mx-windowconfig-type",
+          "morph windowConfig types",
+          "morph window width type"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-tag — Unknown Element Tag",
+        "slug": "errors/mx-tag",
+        "file": "errors/mx-tag",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-tag: lowercase tag that is not a supported Morph element, suggestions and component confusion fixes.",
+        "keywords": [
+          "mx-tag",
+          "morph unknown tag",
+          "morph supported elements"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-tag-stub — Unimplemented Element",
+        "slug": "errors/mx-tag-stub",
+        "file": "errors/mx-tag-stub",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Understand mx-tag-stub: registered input select textarea elements without full native behavior, and workarounds.",
+        "keywords": [
+          "mx-tag-stub",
+          "morph select textarea",
+          "morph input element"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-prop — Invalid or Misspelled Prop",
+        "slug": "errors/mx-prop",
+        "file": "errors/mx-prop",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-prop: class vs className, wrong event names, and prop typos on native Morph elements.",
+        "keywords": [
+          "mx-prop",
+          "morph className class",
+          "morph unknown prop onClick"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-img-src — img Without src",
+        "slug": "errors/mx-img-src",
+        "file": "errors/mx-img-src",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-img-src: img element without a src attribute, local asset and remote URL fixes.",
+        "keywords": [
+          "mx-img-src",
+          "morph img src",
+          "morph image not showing"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-event-value — Event Handler Is Not a Function",
+        "slug": "errors/mx-event-value",
+        "file": "errors/mx-event-value",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-event-value: event props given a non-function value, including the onClick fn() call-during-render bug.",
+        "keywords": [
+          "mx-event-value",
+          "morph onClick not working",
+          "morph event handler function"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-key-misuse — key Used Outside a List",
+        "slug": "errors/mx-key-misuse",
+        "file": "errors/mx-key-misuse",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-key-misuse: key prop outside a .map list template where reconciliation never reads it.",
+        "keywords": [
+          "mx-key-misuse",
+          "morph key prop",
+          "morph list key"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-dup-class — class and className Used Together",
+        "slug": "errors/mx-dup-class",
+        "file": "errors/mx-dup-class",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-dup-class: merging competing class and className into one className with template literals.",
+        "keywords": [
+          "mx-dup-class",
+          "morph class className",
+          "morph duplicate class"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-style-prop — Unsupported Inline Style Property",
+        "slug": "errors/mx-style-prop",
+        "file": "errors/mx-style-prop",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-style-prop: inline style property Morph does not support, with Flexbox and supported-list alternatives.",
+        "keywords": [
+          "mx-style-prop",
+          "morph unsupported style",
+          "morph css float flexbox"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-style-value — Invalid Inline Style Value",
+        "slug": "errors/mx-style-value",
+        "file": "errors/mx-style-value",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-style-value: supported style property with an invalid value, typed values and unit fixes.",
+        "keywords": [
+          "mx-style-value",
+          "morph invalid style value",
+          "morph css units"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-tailwind-class — Unresolvable Tailwind Class",
+        "slug": "errors/mx-tailwind-class",
+        "file": "errors/mx-tailwind-class",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-tailwind-class: className token that resolves to no Tailwind utility, spelling and fallback fixes.",
+        "keywords": [
+          "mx-tailwind-class",
+          "morph tailwind class unknown",
+          "morph tailwind not working"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-css-prop — Unsupported CSS File Property",
+        "slug": "errors/mx-css-prop",
+        "file": "errors/mx-css-prop",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-css-prop: stylesheet property Morph drops at compile time, file line lookup and rewrites.",
+        "keywords": [
+          "mx-css-prop",
+          "morph css property unsupported",
+          "morph stylesheet"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-css-file-missing — Imported CSS File Not Found",
+        "slug": "errors/mx-css-file-missing",
+        "file": "errors/mx-css-file-missing",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-css-file-missing: CSS import pointing at a file that does not exist, relative path fixes.",
+        "keywords": [
+          "mx-css-file-missing",
+          "morph css file not found",
+          "morph css import"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-css-load-deprecated — CSS.load() Is Deprecated",
+        "slug": "errors/mx-css-load-deprecated",
+        "file": "errors/mx-css-load-deprecated",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-css-load-deprecated: migrate CSS.load() calls to static import statements.",
+        "keywords": [
+          "mx-css-load-deprecated",
+          "morph CSS.load deprecated",
+          "morph import css"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-import-morph — Invalid Import from morph",
+        "slug": "errors/mx-import-morph",
+        "file": "errors/mx-import-morph",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-import-morph: importing a name the morph module does not export, export list and removed-API migration.",
+        "keywords": [
+          "mx-import-morph",
+          "morph import error",
+          "morph morphState import"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-no-morph-import — Morph API Used Without Import",
+        "slug": "errors/mx-no-morph-import",
+        "file": "errors/mx-no-morph-import",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-no-morph-import: calling morphState and other Morph APIs without importing them from morph.",
+        "keywords": [
+          "mx-no-morph-import",
+          "morph morphState not imported",
+          "morph import from morph"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-undefined — Undefined Name",
+        "slug": "errors/mx-undefined",
+        "file": "errors/mx-undefined",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-undefined: referencing a name that is not declared or imported, typos scope and missing imports.",
+        "keywords": [
+          "mx-undefined",
+          "morph undefined variable",
+          "morph not defined"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-import-type — Unsupported Import Type",
+        "slug": "errors/mx-import-type",
+        "file": "errors/mx-import-type",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-import-type: importing JSON npm or URL modules Morph cannot resolve, .ts fetch and .cpp alternatives.",
+        "keywords": [
+          "mx-import-type",
+          "morph import json",
+          "morph import unsupported"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-naming — Invalid Module File or Directory Name",
+        "slug": "errors/mx-naming",
+        "file": "errors/mx-naming",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-naming: lowercase namespace gates and normalized collisions in Morph module paths.",
+        "keywords": [
+          "mx-naming",
+          "morph module naming",
+          "morph namespace collision"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-state-scope — morphState Outside a Component",
+        "slug": "errors/mx-state-scope",
+        "file": "errors/mx-state-scope",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-state-scope: morphState called at module scope or in handlers, move it or switch to morphShared.",
+        "keywords": [
+          "mx-state-scope",
+          "morph morphState outside component",
+          "morph state scope"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-shared-scope — morphShared Not at Exported Module Scope",
+        "slug": "errors/mx-shared-scope",
+        "file": "errors/mx-shared-scope",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-shared-scope: morphShared inside a component or missing export, placement and morphState alternatives.",
+        "keywords": [
+          "mx-shared-scope",
+          "morph morphShared scope",
+          "morph shared state export"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-event-scope — morphEvent Not at Exported Module Scope",
+        "slug": "errors/mx-event-scope",
+        "file": "errors/mx-event-scope",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-event-scope: morphEvent channel created inside a component or never exported.",
+        "keywords": [
+          "mx-event-scope",
+          "morph morphEvent scope",
+          "morph event channel export"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-api-removed — Removed String-Key API",
+        "slug": "errors/mx-api-removed",
+        "file": "errors/mx-api-removed",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-api-removed: migrate string-key morphShared morphEvent morphOn morphEmit to binding-based APIs.",
+        "keywords": [
+          "mx-api-removed",
+          "morph morphOn removed",
+          "morph string key api migration"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-state-pattern — morphState Destructuring Pattern",
+        "slug": "errors/mx-state-pattern",
+        "file": "errors/mx-state-pattern",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-state-pattern: morphState must destructure as const [value, setValue] pair.",
+        "keywords": [
+          "mx-state-pattern",
+          "morph morphState destructure",
+          "morph usestate pattern"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-effect-cb — morphEffect First Argument Must Be a Function",
+        "slug": "errors/mx-effect-cb",
+        "file": "errors/mx-effect-cb",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-effect-cb: wrapping effect work in a callback instead of calling it in argument position.",
+        "keywords": [
+          "mx-effect-cb",
+          "morph morphEffect function",
+          "morph useEffect callback"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-effect-deps — Effect Dependencies Should Be State",
+        "slug": "errors/mx-effect-deps",
+        "file": "errors/mx-effect-deps",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-effect-deps: dependency arrays that list non-state values, stale closures and loop fixes.",
+        "keywords": [
+          "mx-effect-deps",
+          "morph effect dependencies",
+          "morph effect loop stale"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-transpile — JavaScript That Cannot Compile to C++",
+        "slug": "errors/mx-transpile",
+        "file": "errors/mx-transpile",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-transpile: rewriting JavaScript with no native lowering, with rewrite table and .cpp escape hatch.",
+        "keywords": [
+          "mx-transpile",
+          "morph cannot translate to C++",
+          "morph js not supported"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-js-global — Browser Global With No Native Counterpart",
+        "slug": "errors/mx-js-global",
+        "file": "errors/mx-js-global",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-js-global: replacing document window localStorage alert and friends with Morph-native equivalents.",
+        "keywords": [
+          "mx-js-global",
+          "morph document is not defined",
+          "morph localStorage window"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-js-member — Unsupported Builtin Member Access",
+        "slug": "errors/mx-js-member",
+        "file": "errors/mx-js-member",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-js-member: Math JSON Date RegExp console members Morph does not implement, and .cpp alternatives.",
+        "keywords": [
+          "mx-js-member",
+          "morph JSON.parse",
+          "morph Math Date unsupported"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-js-method — Unimplemented Method",
+        "slug": "errors/mx-js-method",
+        "file": "errors/mx-js-method",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-js-method: value methods the runtime types do not implement, equivalents and native helpers.",
+        "keywords": [
+          "mx-js-method",
+          "morph method not implemented",
+          "morph string array methods"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-js-op — Unemittable Operator",
+        "slug": "errors/mx-js-op",
+        "file": "errors/mx-js-op",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-js-op: rewriting typeof instanceof delete and compound assignment with no C++ lowering.",
+        "keywords": [
+          "mx-js-op",
+          "morph typeof instanceof",
+          "morph operator not supported"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-js-syntax — Unhandleable Syntax Construct",
+        "slug": "errors/mx-js-syntax",
+        "file": "errors/mx-js-syntax",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-js-syntax: rewriting optional chaining spread destructuring generators and for-of loops.",
+        "keywords": [
+          "mx-js-syntax",
+          "morph optional chaining",
+          "morph spread destructuring"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-list-key — List Item Without key",
+        "slug": "errors/mx-list-key",
+        "file": "errors/mx-list-key",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-list-key: adding stable unique keys to .map list roots to stop state mismatches.",
+        "keywords": [
+          "mx-list-key",
+          "morph list key",
+          "morph map key warning"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-route-unknown — Unknown Route ID",
+        "slug": "errors/mx-route-unknown",
+        "file": "errors/mx-route-unknown",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-route-unknown: route string missing from the manifest, did-you-mean list and literal-id rules.",
+        "keywords": [
+          "mx-route-unknown",
+          "morph unknown route",
+          "morph navigate route id"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-route-no-export — Route File Without Default Export",
+        "slug": "errors/mx-route-no-export",
+        "file": "errors/mx-route-no-export",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-route-no-export: adding the default-export component a route.mx mount needs.",
+        "keywords": [
+          "mx-route-no-export",
+          "morph route no default export",
+          "morph route.mx"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      }
+    ]
+  },
+  {
     "category": "Examples",
     "items": [
       {
@@ -1127,7 +1848,7 @@
         "file": "examples/calculator",
         "status": "production",
         "author": "PIYUSH",
-        "description": "A calculator app built with Morph: buttons, state, and layout all in a single native binary \u2014 a complete example to learn from.",
+        "description": "A calculator app built with Morph: buttons, state, and layout all in a single native binary — a complete example to learn from.",
         "keywords": [
           "morph calculator example",
           "morph example app",
@@ -1163,7 +1884,7 @@
         "file": "examples/ipchecker",
         "status": "production",
         "author": "PIYUSH",
-        "description": "An IP checker app built with Morph that fetches and displays data in a native window \u2014 a working example of async and networking in action.",
+        "description": "An IP checker app built with Morph that fetches and displays data in a native window — a working example of async and networking in action.",
         "keywords": [
           "morph fetch example app",
           "morph ip checker",
@@ -1181,7 +1902,7 @@
         "file": "examples/login",
         "status": "production",
         "author": "PIYUSH",
-        "description": "A login app built with Morph: controlled text inputs, password masking, validation errors, and screen swapping by unmount \u2014 all native.",
+        "description": "A login app built with Morph: controlled text inputs, password masking, validation errors, and screen swapping by unmount — all native.",
         "keywords": [
           "morph login example",
           "morph form input",
@@ -1205,7 +1926,7 @@
         "file": "roadmap/under-construction",
         "status": "development",
         "author": "PIYUSH",
-        "description": "What's under active construction in Morph right now \u2014 features being built in parallel, with honest progress and what works today.",
+        "description": "What's under active construction in Morph right now — features being built in parallel, with honest progress and what works today.",
         "keywords": [
           "morph in progress",
           "morph under construction",
@@ -1224,7 +1945,7 @@
         "file": "future/index",
         "status": "future",
         "author": "PIYUSH",
-        "description": "Morph's full future roadmap \u2014 every planned feature documented in detail with priorities, dependencies, and what comes next in the framework.",
+        "description": "Morph's full future roadmap — every planned feature documented in detail with priorities, dependencies, and what comes next in the framework.",
         "keywords": [
           "morph roadmap",
           "morph planned features",
@@ -1937,7 +2658,7 @@
         "file": "faq/q-electron",
         "status": "production",
         "author": "PIYUSH",
-        "description": "Is Morph just Electron with extra steps? No \u2014 it's the opposite: no browser, no Chromium; your code compiles to native machine code.",
+        "description": "Is Morph just Electron with extra steps? No — it's the opposite: no browser, no Chromium; your code compiles to native machine code.",
         "keywords": [
           "morph vs electron",
           "is morph electron",
@@ -1955,7 +2676,7 @@
         "file": "faq/q-cpp",
         "status": "production",
         "author": "PIYUSH",
-        "description": "Do you need to know C++ to use Morph? No \u2014 you write .mx files; C++ is an implementation detail, optional if you want to go deeper.",
+        "description": "Do you need to know C++ to use Morph? No — you write .mx files; C++ is an implementation detail, optional if you want to go deeper.",
         "keywords": [
           "do i need c++ for morph",
           "morph c++ requirement",
@@ -1973,7 +2694,7 @@
         "file": "faq/q-react",
         "status": "production",
         "author": "PIYUSH",
-        "description": "Is Morph React? It's React-inspired \u2014 JSX, state, effects \u2014 but there's no virtual DOM; state changes re-render native nodes directly.",
+        "description": "Is Morph React? It's React-inspired — JSX, state, effects — but there's no virtual DOM; state changes re-render native nodes directly.",
         "keywords": [
           "is morph react",
           "morph react state",
@@ -1992,7 +2713,7 @@
         "file": "faq/q-virtual-dom",
         "status": "production",
         "author": "PIYUSH",
-        "description": "Does Morph use a virtual DOM like React? No \u2014 signals, dirty flags, and damage tracking re-render native nodes directly; there's no DOM and no diffing.",
+        "description": "Does Morph use a virtual DOM like React? No — signals, dirty flags, and damage tracking re-render native nodes directly; there's no DOM and no diffing.",
         "keywords": [
           "morph virtual dom",
           "morph vdom",
@@ -2011,7 +2732,7 @@
         "file": "faq/q-reactivity",
         "status": "production",
         "author": "PIYUSH",
-        "description": "Reactivity in Morph is signals pushing into a native tree: morphState signals, automatic effects, dirty flags, and damage tracking \u2014 and why this was chosen over a virtual DOM.",
+        "description": "Reactivity in Morph is signals pushing into a native tree: morphState signals, automatic effects, dirty flags, and damage tracking — and why this was chosen over a virtual DOM.",
         "keywords": [
           "morph reactivity",
           "morph signals",
@@ -2030,7 +2751,7 @@
         "file": "faq/q-games",
         "status": "production",
         "author": "PIYUSH",
-        "description": "Is Morph for games? It's for apps \u2014 a UI framework for native desktop applications, with an embedded OpenGL canvas for 2D and 3D content.",
+        "description": "Is Morph for games? It's for apps — a UI framework for native desktop applications, with an embedded OpenGL canvas for 2D and 3D content.",
         "keywords": [
           "morph games or apps",
           "morph for apps",
@@ -2048,7 +2769,7 @@
         "file": "faq/q-web",
         "status": "production",
         "author": "PIYUSH",
-        "description": "Can you build websites with Morph? No \u2014 it builds native desktop binaries; the web already has the best web tooling in existence.",
+        "description": "Can you build websites with Morph? No — it builds native desktop binaries; the web already has the best web tooling in existence.",
         "keywords": [
           "build website with morph",
           "morph web support",
@@ -2066,7 +2787,7 @@
         "file": "faq/q-js-runtime",
         "status": "production",
         "author": "PIYUSH",
-        "description": "What happens to your JavaScript at runtime in Morph? It's compiled to C++ \u2014 no interpreter, no JIT, no VM; your logic runs as native code.",
+        "description": "What happens to your JavaScript at runtime in Morph? It's compiled to C++ — no interpreter, no JIT, no VM; your logic runs as native code.",
         "keywords": [
           "morph javascript runtime",
           "morph compiled not interpreted",
@@ -2084,7 +2805,7 @@
         "file": "faq/q-npm",
         "status": "production",
         "author": "PIYUSH",
-        "description": "Can you use npm packages in Morph? Not yet \u2014 but a Morph registry for UI and native C++ modules is planned, with a security-first approach.",
+        "description": "Can you use npm packages in Morph? Not yet — but a Morph registry for UI and native C++ modules is planned, with a security-first approach.",
         "keywords": [
           "morph npm packages",
           "morph registry",
@@ -2120,7 +2841,7 @@
         "file": "faq/q-production",
         "status": "production",
         "author": "PIYUSH",
-        "description": "Is Morph production-ready? Not yet \u2014 the roadmap is honest about what's missing: platform support, accessibility, signing, and more.",
+        "description": "Is Morph production-ready? Not yet — the roadmap is honest about what's missing: platform support, accessibility, signing, and more.",
         "keywords": [
           "morph production ready",
           "morph stable release",
@@ -2234,7 +2955,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "Windows & Navigation \u2014 a vs morph-*, GL contexts, WID/RID, same-route windows",
+        "title": "Windows & Navigation — a vs morph-*, GL contexts, WID/RID, same-route windows",
         "slug": "faq/q-windows",
         "file": "faq/q-windows",
         "status": "beta",
