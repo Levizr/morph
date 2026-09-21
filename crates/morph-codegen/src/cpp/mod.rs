@@ -811,9 +811,9 @@ fn lookup_route<'r>(routes: &'r [RouteEntry], id: &str) -> anyhow::Result<&'r Ro
     };
     match best {
         Some((suggestion, score)) if score > 0.7 => anyhow::bail!(
-            "mx-route-unknown: unknown route `{id}` — did you mean `{suggestion}`? Known routes: {known_list}"
+            "mx-route-unknown: unknown route `{id}` — did you mean `{suggestion}`? Known routes: {known_list}\nLearn more: https://morph.levizr.com/docs/errors/mx-route-unknown"
         ),
-        _ => anyhow::bail!("mx-route-unknown: unknown route `{id}`. Known routes: {known_list}"),
+        _ => anyhow::bail!("mx-route-unknown: unknown route `{id}`. Known routes: {known_list}\nLearn more: https://morph.levizr.com/docs/errors/mx-route-unknown"),
     }
 }
 
@@ -1407,6 +1407,28 @@ pub fn generate_window_helpers(
     out.push("    win->clearRoot();".to_string());
     out.push("    return __morph_mount_into(win.get(), wid, rid, props);".to_string());
     out.push("}".to_string());
+    // Native `app::windows::open/navigate` (declared in window_api.h,
+    // defined here — they need the route table + mount switch).
+    out.push("namespace app::windows {".to_string());
+    out.push("WID open(int rid) {".to_string());
+    out.push("    return __morph_create_window(rid, JsObject{});".to_string());
+    out.push("}".to_string());
+    out.push("WID open(int rid, const OpenConfig& cfg) {".to_string());
+    out.push("    JsObject opts;".to_string());
+    out.push("    if (cfg.width > 0) opts.set(\"width\", JsValue(cfg.width));".to_string());
+    out.push("    if (cfg.height > 0) opts.set(\"height\", JsValue(cfg.height));".to_string());
+    out.push("    if (!cfg.title.empty()) opts.set(\"title\", JsValue(cfg.title));".to_string());
+    out.push("    if (!cfg.id.empty()) opts.set(\"id\", JsValue(cfg.id));".to_string());
+    out.push("    opts.set(\"data\", JsValue(cfg.data));".to_string());
+    out.push("    return __morph_create_window(rid, opts);".to_string());
+    out.push("}".to_string());
+    out.push("bool navigate(WID wid, int rid) {".to_string());
+    out.push("    return __morph_navigate_window(wid, rid, JsObject{});".to_string());
+    out.push("}".to_string());
+    out.push("bool navigate(WID wid, int rid, const JsObject& props) {".to_string());
+    out.push("    return __morph_navigate_window(wid, rid, props);".to_string());
+    out.push("}".to_string());
+    out.push("} // namespace app::windows".to_string());
     out.join("\n")
 }
 
@@ -2012,6 +2034,7 @@ fn generate_morph_api_header<'w>(
         "#include \"types/js_object.h\"".to_string(),
         "#include \"reactivity/signal.h\"".to_string(),
         "#include \"reactivity/channel.h\"".to_string(),
+        "#include \"core/window_api.h\"".to_string(),
         String::new(),
     ];
     let taken = premain_names(premain_code);
@@ -2263,6 +2286,7 @@ pub fn generate_morph_api_header_dev(windows: &[IRWindow], premain_parts: &[Stri
         "#include \"types/js_object.h\"".to_string(),
         "#include \"reactivity/signal.h\"".to_string(),
         "#include \"reactivity/channel.h\"".to_string(),
+        "#include \"core/window_api.h\"".to_string(),
         String::new(),
     ];
     let premain_code = premain_parts.join("\n\n");

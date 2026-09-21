@@ -169,7 +169,7 @@ Lowering detail: string literals never reach the runtime. The manifest pass owns
 | `WindowManager` (register/close/allClosed) | ✅ Shipped |
 | `new Window` / `useWindow` / `navigate` / `close` / `show` / `hide` / `closed` / `title` / `on('close')` | ✅ Shipped ([main docs](../api/windows.md)) |
 | `Window` / `App` classes (full surface: `ready`, `load`, `id`, `width`/`height` props, `resize`/`focus` events) | ❌ Not built |
-| C++ `app::windows::*` + `app::routes::` in `morph_api.h` | ❌ Not built |
+| C++ `app::windows::*` + `app::routes::` in `morph_api.h` | ✅ Shipped (`open`/`navigate` generated per-project; `close`/`show`/`hide`/`title`/`closed`/`on_close` in `core/window_api.h`; proven via `native.cpp` in `route-test`) |
 | `.d.ts` for imperative API | ❌ Not built |
 
 ## Open questions
@@ -189,7 +189,6 @@ Lowering detail: string literals never reach the runtime. The manifest pass owns
 
 ## Build steps (remaining)
 
-1. C++ `app::windows::*` + `app::routes::` in `morph_api.h` + `native-cpp.md` docs
-2. `App` singleton (quit / ready / before-quit events)
+1. `App` singleton (quit / ready / before-quit events)
 3. `Window.ready()`, `resize`/`focus` events, `.d.ts`, full `Window` object surface
 4. Test app: login window → button → dynamically creates a settings window (the Phase-2 validation app from the original design plan); same flow driven once from JSX and once from `native.cpp`

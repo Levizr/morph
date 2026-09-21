@@ -38,3 +38,32 @@ void unmountSettings() {
     WindowManager::get().close(kSettingsWin);
     app::app::setStatus("settings gone");
 }
+
+// ── app::windows::* contract proof (docs/guides/native-cpp.md) ──
+// Same integers JSX lowers to; explicit WIDs; JsObject data.
+namespace {
+WID g_cppSettings = kInvalidWid;
+}
+
+void openSettingsCpp() {
+    if (!app::windows::closed(g_cppSettings)) {
+        app::windows::show(g_cppSettings);
+        return;
+    }
+    JsObject data;
+    data.set("userId", JsValue(7));
+    g_cppSettings = app::windows::open(app::routes::kSettings, {
+        .width = 500,
+        .height = 400,
+        .id = "cpp-settings",
+        .data = data,
+    });
+    app::windows::on_close(g_cppSettings, [] { app::app::setStatus("cpp settings closed"); });
+    app::app::setStatus("cpp settings open");
+}
+
+void closeSettingsCpp() {
+    if (app::windows::close(g_cppSettings)) {
+        app::app::setStatus("cpp settings closed");
+    }
+}

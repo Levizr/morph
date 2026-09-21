@@ -167,6 +167,41 @@ Rules: `mid` is a string literal (`mid="hero"`, never `mid={x}`), letters-only (
 
 `morph_api.h` carries a mapping comment per constant (`// <Counter mid="hero"> (App.mx:5:7)`), and deleting a tagged component breaks native compilation loudly — the UI contract changing forces native code to follow.
 
+## Windows (`app::windows::*`)
+
+Drive windows from `native.cpp` with no JS round-trip — tray icons, global hotkeys, C++-initiated flows. Same integers JSX lowers to: route ids in, window ids out.
+
+```cpp
+#include "morph_api.h"
+
+// RID in, WID out — open with app defaults
+WID wid = app::windows::open(app::routes::kSettings);
+
+// With overrides (any subset; the rest falls back like `new Window`):
+WID login = app::windows::open(app::routes::kAuthLogin, {
+    .width = 400, .height = 320,
+    .title = "Sign in",
+    .id = "login-a",              // addressable: useWindow("login-a")
+    .data = JsObject{{"userId", 42}},
+});
+
+app::windows::navigate(wid, app::routes::kAuthLogin);  // false if closed
+app::windows::close(wid);          // safe no-op, returns whether it closed
+app::windows::show(wid);
+app::windows::hide(wid);
+app::windows::set_title(wid, "New Title");
+std::string t = app::windows::title(wid);   // "" when missing
+bool gone = app::windows::closed(wid);      // true when missing
+app::windows::on_close(wid, [] { /* fires for X-button too */ });
+```
+
+Rules:
+
+- **C++ always addresses a WID explicitly.** There is no C++ `useWindow()` with no argument — a component's "current window" is compile-time context that doesn't cross the FFI. If native code needs the invoker's window, JS passes the WID in.
+- `data` crosses over as `JsObject` — the same object `new Window(route, { data })` would carry.
+- `on_close` takes a `std::function<void()>`; handles resolve by WID at fire time, so a closed window's callback never dangles.
+- Missing windows read safe (`closed` → `true`, `title` → `""`, `navigate` → `false`, `close` → `false`).
+
 ## C++ → JSX State (any thread)
 
 `set...()` wrappers are mutex-protected; effects re-run on the main loop.
