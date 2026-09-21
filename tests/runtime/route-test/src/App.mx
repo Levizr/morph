@@ -18,6 +18,9 @@ export default function App() {
       <button id="btn-cpp-close" onClick={() => closeSettingsCpp()}>close C++ one</button>
       <button id="btn-title" onClick={() => { const w = useWindow(); w.title = "Route Test!" }}>retitle (useWindow)</button>
       <button id="btn-go" onClick={() => { const w = useWindow(); w.navigate("/auth/login") }}>go login (navigate)</button>
+      <a id="link-login" href="/auth/login">go login (link)</a>
+      <a id="link-popup" href="/settings" target="_blank" width={500} data={{ userId: 7 }}>settings popup (link)</a>
+      <a id="link-help" href="https://example.com/help">help (external link)</a>
       <div className="value" id="status">{status}</div>
     </body>
   )
