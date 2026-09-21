@@ -1,3 +1,5 @@
+import { morphShared, morphEvent } from 'morph'
+
 export const [total, setTotal] = morphShared<number>(0)
 
 export const resetEvent = morphEvent<{ total: number }>()

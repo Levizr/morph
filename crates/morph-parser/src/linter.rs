@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::ast_types::{JsxNode, LintError, MxImportKind, MxSource};
 use oxc_ast::ast::*;
 use oxc_ast_visit::Visit;
+use oxc_span::GetSpan;
 
 #[allow(dead_code)]
 fn offset_to_line_col(source: &str, offset: u32) -> (usize, usize) {
@@ -19,6 +20,148 @@ fn offset_to_line_col(source: &str, offset: u32) -> (usize, usize) {
         }
     }
     (line, offset.saturating_sub(last) + 1)
+}
+
+/// Names usable without import or declaration (runtime-supported globals).
+const NATIVE_GLOBALS: &[&str] = &[
+    "undefined",
+    "NaN",
+    "Infinity",
+    "console",
+    "Promise",
+    "Error",
+    "fetch",
+    "setTimeout",
+    "setInterval",
+    "clearTimeout",
+    "clearInterval",
+];
+
+/// Morph APIs that must be imported from 'morph' (bare use is an error).
+const MORPH_BUILTINS: &[&str] =
+    &["morphState", "morphEffect", "morphShared", "morphEvent", "useWindow", "Window", "CSS"];
+
+/// AST positions that are never value references: lowercase JSX tag
+/// starts (`<div>`) and type-name ranges (`x: int`, `as Foo`,
+/// generics). A real variable sharing an intrinsic's name is still
+/// checked — only its own tag-position span is skipped.
+struct SkipSpans {
+    intrinsics: std::collections::HashSet<u32>,
+    type_ranges: Vec<(u32, u32)>,
+}
+
+fn collect_skip_spans(program: &Program) -> SkipSpans {
+    struct Collector {
+        out: SkipSpans,
+    }
+    impl<'a> Visit<'a> for Collector {
+        fn visit_jsx_element_name(&mut self, name: &JSXElementName<'a>) {
+            if let JSXElementName::Identifier(id) = name {
+                let tag = id.name.as_str();
+                if tag.starts_with(|c: char| c.is_ascii_lowercase()) {
+                    self.out.intrinsics.insert(id.span.start);
+                }
+            }
+            // Continue into member expressions (`<Foo.Bar>` resolves Foo).
+            oxc_ast_visit::walk::walk_jsx_element_name(self, name);
+        }
+        fn visit_ts_type_reference(&mut self, ty: &TSTypeReference<'a>) {
+            let span = ty.type_name.span();
+            self.out.type_ranges.push((span.start, span.end));
+            oxc_ast_visit::walk::walk_ts_type_reference(self, ty);
+        }
+    }
+    let mut collector = Collector {
+        out: SkipSpans { intrinsics: std::collections::HashSet::new(), type_ranges: Vec::new() },
+    };
+    collector.visit_program(program);
+    collector.out
+}
+
+/// Lowercase JSX tag positions (`<div>`, `<span>`): intrinsic elements,
+/// never identifier references. Collected from the AST so a real
+/// variable that merely shares a name is still checked at its own spans.
+fn jsx_intrinsic_spans(program: &Program) -> std::collections::HashSet<u32> {
+    collect_skip_spans(program).intrinsics
+}
+
+/// `mx-undefined` / `mx-no-morph-import`: every referenced name must be
+/// declared (locals, params, imports, components) or imported from
+/// 'morph' (for Morph APIs) or a supported native global. Uses real
+/// scope resolution — shadowing, params, and imports all count.
+fn check_unresolved(program: &Program, file_path: &str, offsets: &[usize]) -> Vec<LintError> {
+    let mut out = Vec::new();
+    let semantic =
+        oxc_semantic::SemanticBuilder::new().with_build_nodes(true).build(program).semantic;
+    let scoping = semantic.scoping();
+    let skip = collect_skip_spans(program);
+    let declared: Vec<&str> = scoping.symbol_names().collect();
+    let mut seen = std::collections::HashSet::new();
+    let mut names: Vec<(&str, Vec<oxc_span::Span>)> = Vec::new();
+    for (atom, refs) in scoping.root_unresolved_references() {
+        let mut spans = Vec::new();
+        for ref_id in refs.iter() {
+            let node_id = scoping.get_reference(*ref_id).node_id();
+            spans.push(semantic.nodes().get_node(node_id).span());
+        }
+        names.push((atom, spans));
+    }
+    names.sort_by(|a, b| a.0.cmp(b.0));
+    for (name, spans) in names {
+        if name.contains('-') {
+            continue;
+        }
+        for span in spans {
+            if skip.intrinsics.contains(&span.start) {
+                continue;
+            }
+            if skip.type_ranges.iter().any(|(s, e)| span.start >= *s && span.end <= *e) {
+                continue;
+            }
+            if !seen.insert((name.to_string(), span.start)) {
+                continue;
+            }
+            let (line, col) = offset_to_line_col_fast(offsets, span.start);
+            if MORPH_BUILTINS.contains(&name) {
+                out.push(LintError {
+                    severity: "error".into(),
+                    code: "mx-no-morph-import".into(),
+                    message: format!("`{name}` is used but never imported"),
+                    suggestion: Some(format!("Add `import {{ {name} }} from 'morph'`")),
+                    file_path: file_path.into(),
+                    line,
+                    col,
+                });
+                continue;
+            }
+            if NATIVE_GLOBALS.contains(&name) {
+                continue;
+            }
+            let mut best: Option<(&str, f64)> = None;
+            for candidate in
+                declared.iter().chain(NATIVE_GLOBALS.iter()).chain(MORPH_BUILTINS.iter())
+            {
+                let score = strsim::jaro_winkler(name, candidate);
+                if score > best.map_or(0.0, |(_, s)| s) {
+                    best = Some((candidate, score));
+                }
+            }
+            let suggestion = match best {
+                Some((s, score)) if score > 0.7 => Some(format!("Did you mean `{s}`?")),
+                _ => None,
+            };
+            out.push(LintError {
+                severity: "error".into(),
+                code: "mx-undefined".into(),
+                message: format!("`{name}` is not defined here and not imported"),
+                suggestion,
+                file_path: file_path.into(),
+                line,
+                col,
+            });
+        }
+    }
+    out
 }
 
 fn build_line_offsets(source: &str) -> Vec<usize> {
@@ -76,6 +219,15 @@ pub fn check(source: &str, file_path: &str) -> Vec<LintError> {
             col: 1,
         });
         return errors;
+    }
+
+    // Unresolved identifiers: real scope analysis (imports, params,
+    // shadowing all count as declared). Morph APIs without their
+    // 'morph' import get their own code; lowercase JSX intrinsics
+    // (`<div>`) are excluded by span. Skipped when parsing failed —
+    // the semantic builder assumes a well-formed tree.
+    if ret.diagnostics.is_empty() {
+        errors.extend(check_unresolved(&ret.program, file_path, &offsets));
     }
 
     // Walk program to build MxSource for semantic lints (even with parse errors, program is partial)
@@ -2127,6 +2279,44 @@ mod tests {
 
     fn codes(errors: &[LintError]) -> Vec<&str> {
         errors.iter().map(|e| e.code.as_str()).collect()
+    }
+
+    #[test]
+    fn bare_morph_builtin_needs_its_import() {
+        let content = "export default function App() {\n  const [count, setCount] = morphState(0)\n  return (<div>{count}</div>)\n}\n";
+        let errs = check(content, "App.mx");
+        assert!(codes(&errs).contains(&"mx-no-morph-import"), "{errs:?}");
+        let err = errs.iter().find(|e| e.code == "mx-no-morph-import").unwrap();
+        assert!(
+            err.suggestion.as_deref().unwrap().contains("import { morphState } from 'morph'"),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn imported_morph_builtin_is_clean() {
+        let content = "import { morphState } from 'morph'\nexport default function App() {\n  const [count, setCount] = morphState(0)\n  return (<div>{count}</div>)\n}\n";
+        let errs = check(content, "App.mx");
+        assert!(!codes(&errs).contains(&"mx-no-morph-import"), "{errs:?}");
+        assert!(!codes(&errs).contains(&"mx-undefined"), "{errs:?}");
+    }
+
+    #[test]
+    fn undefined_name_errors_with_suggestion() {
+        let content = "import { morphState } from 'morph'\nexport default function App() {\n  const [count, setCount] = morphState(0)\n  return (<div>{cont}</div>)\n}\n";
+        let errs = check(content, "App.mx");
+        assert!(codes(&errs).contains(&"mx-undefined"), "{errs:?}");
+        let err = errs.iter().find(|e| e.code == "mx-undefined").unwrap();
+        assert!(err.suggestion.as_deref().unwrap().contains("count"), "{err:?}");
+    }
+
+    #[test]
+    fn natives_and_intrinsics_are_clean() {
+        let content = "import { morphState } from 'morph'\nexport default function App() {\n  const [count, setCount] = morphState(0)\n  morphEffect(() => { console.log(count) })\n  return (<div><span>{count}</span></div>)\n}\n";
+        // morphEffect bare → exactly one mx-no-morph-import; console/<div>/<span> clean.
+        let errs = check(content, "App.mx");
+        assert_eq!(errs.iter().filter(|e| e.code == "mx-no-morph-import").count(), 1, "{errs:?}");
+        assert!(!codes(&errs).contains(&"mx-undefined"), "{errs:?}");
     }
 
     #[test]

@@ -1,3 +1,4 @@
+import { morphState } from 'morph'
 import { doubleIt, area, callJsxFromCpp, runAsync } from './native.cpp'
 import { cart, setCart, cartChanged } from './CartStore.mx'
 import { resetCartNative, getCartNative, resetHeroCounter, heroCountNative } from './native.cpp'

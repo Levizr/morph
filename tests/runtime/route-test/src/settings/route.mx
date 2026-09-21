@@ -1,3 +1,5 @@
+import { morphState } from 'morph'
+
 export const windowConfig = { title: "Settings", width: 500, height: 400 }
 
 export default function SettingsPage(props: { userId: number }) {

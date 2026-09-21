@@ -1,3 +1,5 @@
+import { morphShared, morphEvent } from 'morph'
+
 export const [cart, setCart] = morphShared<number>(0)
 
 export const clearCart = morphEvent<{ cart: number }>()

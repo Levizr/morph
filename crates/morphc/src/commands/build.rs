@@ -98,6 +98,40 @@ pub(crate) fn run(
     pb.finish_and_clear();
     crate::logger::log_success(&format!("Parsed {} ({} module(s))", entry, graph.len()));
 
+    // ── Lint gate: unresolved identifiers are hard errors ──
+    // `morph check` reports them; `morph build` refuses to compile them.
+    // Every module in the graph is checked (imports count as declared).
+    {
+        let mut lint_errors = 0;
+        for mod_path in graph.all_paths() {
+            let content = match std::fs::read_to_string(mod_path) {
+                Ok(content) => content,
+                Err(e) => anyhow::bail!("reading {}: {e}", mod_path.display()),
+            };
+            for err in morph_parser::linter::check(&content, &mod_path.display().to_string()) {
+                if err.severity == "error" {
+                    lint_errors += 1;
+                    crate::logger::log_error(&format!(
+                        "{}: {}: {} ({}:{})",
+                        err.code,
+                        err.message,
+                        mod_path.display(),
+                        err.line,
+                        err.col
+                    ));
+                    if let Some(hint) = &err.suggestion {
+                        crate::logger::log_dim(&format!("  hint: {hint}"));
+                    }
+                }
+            }
+        }
+        if lint_errors > 0 {
+            anyhow::bail!(
+                "build blocked by {lint_errors} lint error(s) — run `morph check` for details"
+            );
+        }
+    }
+
     // Report what we found
     if let Some(ref wc) = parsed.window_config {
         crate::logger::log_key("Window", &format!("\"{}\" {}x{}", wc.title, wc.width, wc.height));
@@ -183,6 +217,37 @@ pub(crate) fn run(
     let routes = morph_parser::routes::scan_routes(&src_root);
     if !routes.is_empty() {
         crate::logger::log_key("Routes", &routes.len().to_string());
+    }
+    // Route files aren't in the import graph — lint them explicitly.
+    {
+        let mut lint_errors = 0;
+        for route in &routes {
+            let content = match std::fs::read_to_string(&route.file) {
+                Ok(content) => content,
+                Err(e) => anyhow::bail!("reading {}: {e}", route.file.display()),
+            };
+            for err in morph_parser::linter::check(&content, &route.file.display().to_string()) {
+                if err.severity == "error" {
+                    lint_errors += 1;
+                    crate::logger::log_error(&format!(
+                        "{}: {}: {} ({}:{})",
+                        err.code,
+                        err.message,
+                        route.file.display(),
+                        err.line,
+                        err.col
+                    ));
+                    if let Some(hint) = &err.suggestion {
+                        crate::logger::log_dim(&format!("  hint: {hint}"));
+                    }
+                }
+            }
+        }
+        if lint_errors > 0 {
+            anyhow::bail!(
+                "build blocked by {lint_errors} lint error(s) — run `morph check` for details"
+            );
+        }
     }
     // Per-route IR for mount emission: one module graph rooted at each
     // route.mx (shared components compile into every mount that uses

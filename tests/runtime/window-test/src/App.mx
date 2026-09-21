@@ -1,3 +1,4 @@
+import { morphState } from 'morph'
 import { openPopup, closePopup } from './native.cpp'
 
 export const windowConfig = { title: "Window Test", width: 640, height: 480 }

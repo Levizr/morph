@@ -21,7 +21,6 @@ runtime/cpp/dev/.devrt_source_hash
 
 my-app
 test.py
-AGENTS.md
 morph/bin/morph_devrt
 morph/bin/morph_devrt*
 morph/bin/.devrt_source_hash
