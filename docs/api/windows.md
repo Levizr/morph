@@ -72,7 +72,7 @@ if (win.closed) return   // missing or closed — every operation below degrades
 
 | Operation | Description |
 |---|---|
-| `win.navigate("/settings", { theme: "dark" })` | Swap this window's page. Returns `false` if closed. The old page's state is destroyed (fresh mount); the window itself (size, position, id) is untouched. |
+| `win.navigate("/settings", { theme: "dark" })` | Swap this window's page. Returns `false` if closed. By default the old page's state is destroyed (fresh mount); with [`navigation.cache`](../guides/windows-and-routing.md#page-cache) the old page is detached and restores on return. The window itself (size, position, id) is untouched. |
 | `win.close()` | Destroy the window. Safe no-op if already closed. |
 | `win.show()` / `win.hide()` | Visibility without destroying. |
 | `win.closed` | `true` once closed — by you **or** by the user (X button, task manager). |

@@ -87,7 +87,7 @@ Shared stores (`morphShared`) and events (`morphEvent`) are deliberately **globa
 ## Lifecycle
 
 - A window is created hidden, mounted, then shown. Closing destroys the page, the GL context, and the registration — in that order, safely.
-- Navigating swaps the page inside a living window: the old tree and its state are destroyed, the new page mounts fresh. Size, position, and id survive — only content changes.
+- Navigating swaps the page inside a living window: by default the old tree and its state are destroyed and the new page mounts fresh ([page cache](#page-cache) keeps detached pages for instant restore). Size, position, and id survive — only content changes.
 - The user can close any window at any time (X button, task manager). Handles never dangle: `closed` flips, `on('close')` fires, further calls no-op. See [`Window` / `useWindow`](../api/windows.md#window-lifecycle).
 
 ## Memory: thousands of routes cost binary size, not heap
@@ -98,12 +98,59 @@ Nothing pre-initializes. Opening the app mounts exactly one route:
 |---|---|
 | **Manifest** (RID + factory pointer + `windowConfig` per route) | Kilobytes, always resident |
 | **Code** (all routes compiled in) | Disk/binary size grows; resident RAM doesn't — the OS demand-pages code on first execution |
-| **Mounted trees** (only what's open) | One live page per window — `navigate()` destroys the old root and mounts the new one |
+| **Mounted trees** (only what's open) | One live page per window — `navigate()` destroys the old root and mounts the new one (or detaches it into the [page cache](#page-cache)) |
 | **Window chrome** (GLFW window + GL context + textures) | The real per-window cost |
+
+### Navigating: what actually happens
+
+`win.navigate("/settings", { userId: 7 })` swaps the page inside a living window. The window itself (size, position, id, GL context) is untouched — only content changes, in three steps:
+
+1. **Unmount the old page** — its effects are destroyed, its event/channel subscriptions are removed, then its tree is deleted.
+2. **Clear the window root.**
+3. **Mount the new page** — fresh state seeded from `props`, effects created, tree built and attached.
+
+With the default (`navigation.cache: 0`) that is the whole story: leaving a page destroys it, coming back remounts from scratch. Local state (`morphState`) dies with the page; shared stores (`morphShared`) and events survive because they were never per-page — they're app-global by design.
+
+```tsx
+// Settings tab is "advanced"; user navigates away and back:
+win.navigate("/auth/login")     // settings page destroyed (cache: 0)
+win.navigate("/settings", { userId: 7 })  // fresh mount — tab is "general" again
+```
 
 ### Page cache
 
-Destroy-on-leave is the default: navigating away frees the page, and coming back remounts fresh. `navigation.cache` (in `morph.config.json`) opts into keep-alive — `0` (default), `N` last pages per window (LRU), or `"all"`. Cached pages hold tree + state only (no GL chrome), so they're cheap next to open windows. A window only ever restores its own pages (no cross-window state leaks), new props always remount fresh, and closing a window drops its cached pages.
+`navigation.cache` (in `morph.config.json`) opts a project into keep-alive. It is read at build time — changing it requires a rebuild:
+
+```json
+{ "navigation": { "cache": 2 } }
+```
+
+| Value | Behavior |
+|---|---|
+| `0` (default) | Destroy on leave. No cache, no overhead. |
+| `N` | Keep the `N` last pages **per window** (LRU). |
+| `"all"` | Unbounded — every left page is kept. |
+
+**What is held.** A cached page is its tree plus its state context — no window chrome (GLFW window, GL context, textures are always freed on navigate). That makes cached pages cheap next to open windows, but they are not free: trees and signals stay in RAM until evicted.
+
+**What restores.** Navigating back hits the cache only when all three match:
+
+1. **Same window** — a window only ever restores its own pages. A settings page detached by a popup is invisible to the main window (and vice versa); closing a window drops its cached pages with effect teardown.
+2. **Same route** — `/settings` never restores as `/auth/login`.
+3. **Structurally equal props** — `{ userId: 7 }` restores for `{ userId: 7 }`, compared by value (key-by-key, including nested objects), not by how the object was built.
+
+Anything else remounts fresh — and as the [Props](#props) section says, new props always mount fresh, since cached state was built with old props:
+
+```tsx
+// cache: 2, popup window:
+win.navigate("/auth/login")                  // settings{userId:7} detached (tab "advanced" kept)
+win.navigate("/settings", { userId: 7 })     // HIT — tab is still "advanced"
+win.navigate("/settings", { userId: 8 })     // MISS — fresh mount for user 8; the user-7 page stays cached
+```
+
+**While cached, effects stay subscribed.** A cached page's signals are alive in its held context, so nothing dangles and nothing needs suspend/resume machinery — restore is a reattach, not a replay. The cost to know about: an effect subscribed to a *global* signal (shared store, event channel) still re-runs on every global `set()` while cached. Effects on purely local signals can never fire while their page is detached (zero cost). So large caches combined with heavy global subscriptions are the one combination to watch; `0` (the default) means nobody pays unless they opt in.
+
+**Eviction.** Past the cap, the least-recently-used page is destroyed (effect teardown, then tree delete). Closing a window destroys all of its cached pages immediately — a dead window can never be back-navigated to, so its pages are garbage, not cache.
 
 ## Typo safety
 

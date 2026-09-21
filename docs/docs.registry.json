@@ -738,7 +738,9 @@
           "morph useWindow",
           "morph new Window",
           "morph navigate",
-          "morph window handle"
+          "morph window handle",
+          "morph page cache",
+          "morph navigation.cache"
         ],
         "lastUpdated": "2026-09-21",
         "publishedAt": "2026-09-21",
@@ -923,7 +925,9 @@
           "morph route.mx",
           "morph windows guide",
           "morph navigation",
-          "morph windowConfig"
+          "morph windowConfig",
+          "morph page cache",
+          "morph navigation.cache"
         ],
         "lastUpdated": "2026-09-21",
         "publishedAt": "2026-09-21",
