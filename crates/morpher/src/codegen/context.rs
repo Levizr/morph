@@ -58,6 +58,10 @@ pub struct Ctx {
     pub event_handler: bool,
     pub state_vars: HashMap<String, String>,
     pub js_object_params: HashSet<String>,
+    /// Locals holding Window handles (WID ints): `useWindow()` /
+    /// `new Window()` results. Method/property lowering applies only
+    /// to these names — user objects with same-named methods are untouched.
+    pub window_vars: HashSet<String>,
     pub async_fns: HashSet<String>,
     pub fn_return_types: HashMap<String, String>,
     pub current_fn: Option<String>,
@@ -86,6 +90,7 @@ impl Default for Ctx {
             event_handler: false,
             state_vars: HashMap::new(),
             js_object_params: HashSet::new(),
+            window_vars: HashSet::new(),
             async_fns: HashSet::new(),
             fn_return_types: HashMap::new(),
             current_fn: None,
@@ -120,6 +125,7 @@ impl Ctx {
             event_handler: self.event_handler,
             state_vars: self.state_vars.clone(),
             js_object_params: self.js_object_params.clone(),
+            window_vars: self.window_vars.clone(),
             async_fns: self.async_fns.clone(),
             fn_return_types: self.fn_return_types.clone(),
             current_fn: self.current_fn.clone(),

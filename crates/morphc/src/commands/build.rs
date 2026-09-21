@@ -199,8 +199,10 @@ pub(crate) fn run(
             })?;
         routes_ir.push((route.clone(), route_win));
     }
-    let emitter =
-        morph_codegen::CppEmitter::new(&windows).with_routes(&routes).with_routes_ir(&routes_ir);
+    let emitter = morph_codegen::CppEmitter::new(&windows)
+        .with_routes(&routes)
+        .with_routes_ir(&routes_ir)
+        .with_app_window(config.window.title.clone(), config.window.width, config.window.height);
     emitter.emit(&output_dir)?;
     write_routes_dts(&cwd, &routes);
     pb.finish_and_clear();

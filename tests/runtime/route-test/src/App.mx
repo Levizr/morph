@@ -10,6 +10,9 @@ export default function App() {
       <div className="title" id="title">routes — manifest scan + RID interning</div>
       <button id="btn-mount" onClick={() => mountSettings()}>mount settings</button>
       <button id="btn-unmount" onClick={() => unmountSettings()}>unmount settings</button>
+      <button id="btn-login" onClick={() => { const w = new Window("/auth/login", { width: 420, height: 300 }) }}>open login (JSX)</button>
+      <button id="btn-title" onClick={() => { const w = useWindow(); w.title = "Route Test!" }}>retitle (useWindow)</button>
+      <button id="btn-go" onClick={() => { const w = useWindow(); w.navigate("/auth/login") }}>go login (navigate)</button>
       <div className="value" id="status">{status}</div>
     </body>
   )

@@ -5,6 +5,7 @@
 #include <vector>
 #include <memory>
 #include <functional>
+#include <cstdlib>
 #include <GLFW/glfw3.h>
 
 #include "window.h"
@@ -42,6 +43,42 @@ class WindowManager {
     // Mounted route per window (empty for declarative entry windows).
     std::unordered_map<WID, MountHandle> m_mounts;
     WID m_focusedWid = kInvalidWid;
+    // Focus recency (front = most recent). Backs by-route lookup
+    // (`useWindow("/r")` picks the first live window on that route).
+    // Touched only on focus/destroy — never per frame.
+    std::vector<WID> m_focusOrder;
+    // Runtime-minted WIDs start far above codegen-assigned ones
+    // (declaration order from 0) and manual native ids (< 1M by
+    // convention) so the three schemes never collide.
+    WID m_nextMinted = 1000000;
+
+    void noteFocusedLocked(WID wid)
+    {
+        m_focusedWid = wid;
+        for (size_t i = 0; i < m_focusOrder.size(); i++)
+        {
+            if (m_focusOrder[i] == wid)
+            {
+                m_focusOrder.erase(m_focusOrder.begin() + i);
+                break;
+            }
+        }
+        m_focusOrder.insert(m_focusOrder.begin(), wid);
+    }
+
+    void forgetLocked(WID wid)
+    {
+        for (size_t i = 0; i < m_focusOrder.size(); i++)
+        {
+            if (m_focusOrder[i] == wid)
+            {
+                m_focusOrder.erase(m_focusOrder.begin() + i);
+                break;
+            }
+        }
+        if (m_focusedWid == wid)
+            m_focusedWid = kInvalidWid;
+    }
 
     // Shared close path: user X-button (via sweepClosed) and explicit
     // close() both end here. Callers collect WIDs first, then erase —
@@ -61,8 +98,7 @@ class WindowManager {
         it->second->stopCompositor();
         if (it->second->handle())
             m_handles.erase(it->second->handle());
-        if (m_focusedWid == wid)
-            m_focusedWid = kInvalidWid;
+        forgetLocked(wid);
         clearMount(wid);
         // ~MorphWindow binds its own context for renderer teardown and
         // detaches afterwards — no context work needed here.
@@ -138,6 +174,30 @@ public:
             w->show();
     }
 
+    // Hide a window without destroying it (close() destroys).
+    // No-op when the window doesn't exist.
+    void hide(WID wid)
+    {
+        auto w = get(wid);
+        if (w)
+            w->hide();
+    }
+
+    // Live title (empty when the window doesn't exist).
+    std::string title(WID wid) const
+    {
+        auto w = get(wid);
+        return w ? w->title() : "";
+    }
+
+    // Retitle a live window. No-op when it doesn't exist.
+    void setTitle(WID wid, const std::string& title)
+    {
+        auto w = get(wid);
+        if (w)
+            w->setTitle(title);
+    }
+
     // Destroy + erase. Fires on_close handlers. Safe no-op returning
     // false when the window is already gone — never crashes.
     bool close(WID wid)
@@ -189,7 +249,9 @@ public:
     void noteFocus(GLFWwindow* handle)
     {
         auto it = m_handles.find(handle);
-        m_focusedWid = it == m_handles.end() ? kInvalidWid : it->second;
+        if (it == m_handles.end())
+            return;
+        noteFocusedLocked(it->second);
     }
 
     // Most-recently-focused live window, or kInvalidWid. Backs
@@ -200,6 +262,51 @@ public:
         if (m_focusedWid != kInvalidWid && !exists(m_focusedWid))
             return kInvalidWid;
         return m_focusedWid;
+    }
+
+    // Mint a runtime WID for dynamic windows (`new Window`). Starts far
+    // above codegen and manual ids — the schemes never collide.
+    WID mintWid()
+    {
+        return m_nextMinted++;
+    }
+
+    // WID for an explicit id, or kInvalidWid (dynamic-id fallback for
+    // useWindow("id")).
+    WID widForAlias(const std::string& name) const
+    {
+        auto it = m_aliases.find(name);
+        if (it == m_aliases.end() || !exists(it->second))
+            return kInvalidWid;
+        return it->second;
+    }
+
+    // Most-recently-focused live window mounted on a route, or
+    // kInvalidWid. Backs useWindow("/route").
+    WID widForRoute(int rid) const
+    {
+        for (WID wid : m_focusOrder)
+        {
+            auto it = m_mounts.find(wid);
+            if (it != m_mounts.end() && it->second.rid == rid && exists(wid))
+                return wid;
+        }
+        return kInvalidWid;
+    }
+
+    // Open an external URL in the OS browser (never a Morph window).
+    static void openUrl(const std::string& url)
+    {
+#if defined(__linux__)
+        std::string cmd = "xdg-open \"" + url + "\" >/dev/null 2>&1 &";
+        (void)std::system(cmd.c_str());
+#elif defined(__APPLE__)
+        std::string cmd = "open \"" + url + "\" >/dev/null 2>&1 &";
+        (void)std::system(cmd.c_str());
+#elif defined(_WIN32)
+        std::string cmd = "start \"\" \"" + url + "\"";
+        (void)std::system(cmd.c_str());
+#endif
     }
 
     // Page navigation lands with the route manifest + factories

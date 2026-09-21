@@ -303,11 +303,12 @@ New diagnostics following the existing `mx-*` convention:
 | `morph check` diagnostics framework (`mx-*` codes) | ✅ Shipped — the lint rules plug into this |
 | `route.mx` scan + manifest generation | ✅ Shipped (`morph_parser::routes::scan_routes` — sorted RIDs, sanitized consts, `_`-private skip; proven by `route-test`) |
 | `navigation.cache` page-cache policy (`0` / N / `"all"`, LRU) | ❌ Not built |
-| `[window]` app-default fallback for routes without `windowConfig` | ❌ Not built (the `[window]` config section itself ✅ exists) |
-| `new Window(routeId, config)` | ❌ Not built |
-| `useWindow` hook | ❌ Not built |
+| `[window]` app-default fallback for routes without `windowConfig` | ✅ Shipped for dynamic windows (opts → file `windowConfig` → `[window]` defaults in `__morph_create_window`) |
+| `new Window(routeId, config)` | ✅ Shipped (morpher placeholders → RID helpers; proven click-driven in `route-test`) |
+| `useWindow` hook | ✅ Shipped (handle = WID int; `useWindow()`/`useWindow(id-or-route)`, methods + `closed`/`title`; module-scope use is a hard error) |
+| `win.navigate(routeId, props)` | ✅ Shipped (unmount + clear + remount via helpers; proven click-driven; cache plugs in later) |
 | `<a href>` navigation (internal / `_blank` / external) | ❌ Not built — `<a>`/`href` have no handling anywhere today |
-| RID/WID interning (`morph_routes.h`, `app::routes::`) | ✅ Shipped (RID side — emitted every build, included by `app.cpp`, asserted via `route:*` self-test checks; WID table lands with `useWindow`) |
+| RID/WID interning (`morph_routes.h`, `app::routes::`) | ✅ Shipped (RID consts + runtime WID minting, alias/route lookup, focus order; asserted via `route:*` self-test checks) |
 | C++ window API (`app::windows::*`) | ❌ Not built |
 | `morph-routes.d.ts` typed routes | ✅ Shipped (project-root file, `MorphRoute` union; `MorphWindowId` follows with `useWindow` ids) |
 | Route/window naming + reference lint rules (`mx-route-*`, `mx-window-*`) | ❌ Not built |

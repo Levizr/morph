@@ -15,11 +15,13 @@ pub struct CppEmitter<'a> {
     /// Route IR, positionally paired with `routes` by rid (built per
     /// route graph in the build command; empty when routes aren't built).
     routes_ir: &'a [(RouteEntry, IRWindow)],
+    /// App-wide window defaults for routes without `windowConfig`.
+    app_window: Option<(String, u32, u32)>,
 }
 
 impl<'a> CppEmitter<'a> {
     pub const fn new(windows: &'a [IRWindow]) -> Self {
-        Self { windows, routes: &[], routes_ir: &[] }
+        Self { windows, routes: &[], routes_ir: &[], app_window: None }
     }
 
     /// Attach the route manifest (RID table). Chained before `emit`.
@@ -31,6 +33,13 @@ impl<'a> CppEmitter<'a> {
     /// Attach built route IR for mount emission. Chained before `emit`.
     pub fn with_routes_ir(mut self, routes_ir: &'a [(RouteEntry, IRWindow)]) -> Self {
         self.routes_ir = routes_ir;
+        self
+    }
+
+    /// App-wide window defaults (`[window]` in morph.config.json) for
+    /// routes without their own `windowConfig`. Chained before `emit`.
+    pub fn with_app_window(mut self, title: String, width: u32, height: u32) -> Self {
+        self.app_window = Some((title, width, height));
         self
     }
 
@@ -247,6 +256,10 @@ impl<'a> CppEmitter<'a> {
                     });
                 code.push_str(&format!("    {target}.on({body});\n"));
             }
+            // `useWindow()` with no argument resolves to this window's WID
+            // (arg-free marker — plain substitution is exact and safe).
+            let code = code.replace("__morph_current_window()", &wid.to_string());
+            let code = resolve_window_placeholders(&code, self.routes)?;
             window_code_parts.push(lower_channels(code));
         }
         let window_code = window_code_parts.join("\n");
@@ -419,7 +432,10 @@ impl<'a> CppEmitter<'a> {
         }
         // Premain code (functions like doLogin, logout). Event emit
         // placeholders lower to static accessors like window code.
+        // Window placeholders resolve too — except bare useWindow(),
+        // which has no window at module scope (hard error).
         let premain_code = lower_channels(kept_entries.join("\n\n"));
+        let premain_code = resolve_window_placeholders(&premain_code, self.routes)?;
 
         // Native mode: user C++ imports via `import "./file.cpp"`
         // Native mode: user C++ imports via `import "./file.cpp"`
@@ -446,9 +462,27 @@ impl<'a> CppEmitter<'a> {
         // template vars needed)
         ctx.insert("window_code", &window_code);
         // Route mounts (Context + mount/unmount + per-route mid dispatch
-        // per route.mx). Channel placeholders lower like window code.
+        // per route.mx) + dynamic-window helpers. `useWindow()` inside a
+        // mount resolves to the mounting window (`__wid`); every other
+        // window placeholder resolves against the manifest. Channel
+        // placeholders lower like window code.
         let route_mounts = generate_route_mounts(self.routes_ir, &fs.features, &channel_lower);
-        ctx.insert("route_mounts", &lower_channels(route_mounts));
+        let route_mounts = route_mounts.replace("__morph_current_window()", "__wid");
+        let route_mounts = resolve_window_placeholders(&route_mounts, self.routes)?;
+        let mut route_mounts = lower_channels(route_mounts);
+        {
+            let (app_title, app_width, app_height) = self.app_window.as_ref().map_or_else(
+                || ("Morph App".to_string(), 800, 600),
+                |(t, w, h)| (t.clone(), *w, *h),
+            );
+            let helpers =
+                generate_window_helpers(self.routes_ir, &app_title, app_width, app_height);
+            if !helpers.is_empty() {
+                route_mounts.push_str("\n\n");
+                route_mounts.push_str(&helpers);
+            }
+        }
+        ctx.insert("route_mounts", &route_mounts);
         ctx.insert("keyframe_code", &keyframe_code);
         ctx.insert("list_factory_code", &list_factory_code);
         ctx.insert("headers", &headers);
@@ -465,6 +499,7 @@ impl<'a> CppEmitter<'a> {
         let mid_code = generate_mid_code(self.windows, &premain_code);
         ctx.insert("mid_code", &mid_code);
         let self_test_code = generate_self_test(self.windows, self.routes);
+        let self_test_code = resolve_window_placeholders(&self_test_code, self.routes)?;
         ctx.insert("self_test_code", &self_test_code);
 
         let rendered = tera::Tera::one_off(TEMPLATE, &ctx, false)
@@ -667,6 +702,204 @@ pub(crate) fn generate_mid_code(windows: &[IRWindow], premain_code: &str) -> Str
         out.push("}".to_string());
     }
     out.join("\n")
+}
+
+/// Split a placeholder call's argument list (string-aware, depth
+/// counted). `start` is the index just past the opening `(`. Returns
+/// (args, index-past-`)`) or None on unbalanced input.
+fn split_call_args(src: &str, start: usize) -> Option<(Vec<String>, usize)> {
+    let bytes = src.as_bytes();
+    let mut args = Vec::new();
+    let mut depth = 0;
+    let mut current = String::new();
+    let mut i = start;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'"' || b == b'\'' {
+            let mut j = i + 1;
+            while j < bytes.len() {
+                if bytes[j] == b'\\' {
+                    j += 2;
+                    continue;
+                }
+                if bytes[j] == b {
+                    j += 1;
+                    break;
+                }
+                j += 1;
+            }
+            current.push_str(&src[i..j.min(bytes.len())]);
+            i = j.min(bytes.len());
+            continue;
+        }
+        match b {
+            b'(' | b'{' | b'[' => {
+                depth += 1;
+                current.push(b as char);
+            }
+            b')' | b'}' | b']' => {
+                if depth == 0 {
+                    if b != b')' {
+                        return None;
+                    }
+                    args.push(current.trim().to_string());
+                    return Some((args, i + 1));
+                }
+                depth -= 1;
+                current.push(b as char);
+            }
+            b',' if depth == 0 => {
+                args.push(current.trim().to_string());
+                current = String::new();
+            }
+            _ => current.push(b as char),
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Unquote a C++ string literal (handles standard escapes).
+fn unquote_cpp(s: &str) -> Option<String> {
+    let t = s.trim();
+    if t.len() < 2 || !t.starts_with('"') || !t.ends_with('"') {
+        return None;
+    }
+    let inner = &t[1..t.len() - 1];
+    let mut out = String::with_capacity(inner.len());
+    let mut chars = inner.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('n') => out.push('\n'),
+                Some('t') => out.push('\t'),
+                Some('r') => out.push('\r'),
+                Some('\\') => out.push('\\'),
+                Some('"') => out.push('"'),
+                Some('\'') => out.push('\''),
+                Some('0') => out.push('\0'),
+                Some(other) => {
+                    out.push('\\');
+                    out.push(other);
+                }
+                None => out.push('\\'),
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    Some(out)
+}
+
+/// Resolve a route id to its manifest entry, with a typo suggestion.
+fn lookup_route<'r>(routes: &'r [RouteEntry], id: &str) -> anyhow::Result<&'r RouteEntry> {
+    if let Some(route) = routes.iter().find(|r| r.id == id) {
+        return Ok(route);
+    }
+    let mut best: Option<(&str, f64)> = None;
+    for route in routes {
+        let score = strsim::jaro_winkler(id, &route.id);
+        if score > best.map_or(0.0, |(_, s)| s) {
+            best = Some((route.id.as_str(), score));
+        }
+    }
+    let known: Vec<&str> = routes.iter().map(|r| r.id.as_str()).collect();
+    let known_list = if known.is_empty() {
+        "(none — no route.mx files)".to_string()
+    } else {
+        known.join(", ")
+    };
+    match best {
+        Some((suggestion, score)) if score > 0.7 => anyhow::bail!(
+            "mx-route-unknown: unknown route `{id}` — did you mean `{suggestion}`? Known routes: {known_list}"
+        ),
+        _ => anyhow::bail!("mx-route-unknown: unknown route `{id}`. Known routes: {known_list}"),
+    }
+}
+
+/// Resolve window placeholders in generated code to registry calls.
+/// Route-carrying placeholders (`new_window`, `win_navigate`,
+/// route-form `use_window`) intern the route string to its RID const;
+/// unknown or non-literal routes are hard errors (`mx-route-unknown`).
+/// `current_window` must already be substituted (per-window WID or
+/// `__wid`) — leftovers here mean module scope, which has no window.
+pub fn resolve_window_placeholders(src: &str, routes: &[RouteEntry]) -> anyhow::Result<String> {
+    let mut out = String::with_capacity(src.len());
+    let mut i = 0;
+    while i < src.len() {
+        let rest = &src[i..];
+        let found = [
+            "__morph_new_window(",
+            "__morph_win_navigate(",
+            "__morph_use_window(",
+            "__morph_win_closed(",
+            "__morph_win_title(",
+            "__morph_win_set_title(",
+            "__morph_current_window(",
+        ]
+        .iter()
+        .filter_map(|marker| rest.find(marker).map(|pos| (*marker, pos)))
+        .min_by_key(|(_, pos)| *pos);
+        let Some((marker, pos)) = found else {
+            out.push_str(rest);
+            break;
+        };
+        out.push_str(&rest[..pos]);
+        let arg_start = i + pos + marker.len();
+        let Some((args, end)) = split_call_args(src, arg_start) else {
+            anyhow::bail!("unbalanced placeholder call near `{marker}`");
+        };
+        let replacement = match marker {
+            "__morph_new_window(" => {
+                let route = args.first().map_or("", String::as_str);
+                let entry = lookup_route(routes, &unquote_cpp(route).unwrap_or_default())?;
+                let opts = args.get(1).map_or("JsObject{}", String::as_str);
+                format!("__morph_create_window(app::routes::{}, {opts})", entry.const_name)
+            }
+            "__morph_win_navigate(" => {
+                let wid = args.first().map_or("", String::as_str);
+                let route = args.get(1).map_or("", String::as_str);
+                let entry = lookup_route(routes, &unquote_cpp(route).unwrap_or_default())?;
+                let props = args.get(2).map_or("JsObject{}", String::as_str);
+                format!(
+                    "__morph_navigate_window({wid}, app::routes::{}, {props})",
+                    entry.const_name
+                )
+            }
+            "__morph_use_window(" => {
+                let arg = args.first().map_or("", String::as_str);
+                match unquote_cpp(arg) {
+                    Some(id) if id.starts_with('/') => {
+                        let entry = lookup_route(routes, &id)?;
+                        format!(
+                            "WindowManager::get().widForRoute(app::routes::{})",
+                            entry.const_name
+                        )
+                    }
+                    _ => format!("WindowManager::get().widForAlias({arg})"),
+                }
+            }
+            "__morph_win_closed(" => {
+                format!("WindowManager::get().closed({})", args.first().map_or("", String::as_str))
+            }
+            "__morph_win_title(" => {
+                format!("WindowManager::get().title({})", args.first().map_or("", String::as_str))
+            }
+            "__morph_win_set_title(" => {
+                let wid = args.first().map_or("", String::as_str);
+                let title = args.get(1).map_or("\"\"", String::as_str);
+                format!("WindowManager::get().setTitle({wid}, {title})")
+            }
+            _ => {
+                anyhow::bail!(
+                    "useWindow() with no argument needs a component or event context (module scope has no window); pass the handle in instead"
+                );
+            }
+        };
+        out.push_str(&replacement);
+        i = end;
+    }
+    Ok(out)
 }
 
 /// Route namespace ident: `/auth/login` → `auth_login`, `/` → `root`.
@@ -1086,11 +1319,97 @@ pub fn generate_route_mounts(
     out.join("\n\n")
 }
 
-/// Route manifest header (`morph_routes.h`): one `app::routes::` int
-/// const per `route.mx` (the RID — what the JSX strings lower to), plus
-/// the route count. Constexpr only: zero binary cost, and the C++
-/// compiler independently rejects typos (`app::routes::kSetings`
-/// doesn't exist) even if the linter is skipped.
+/// Dynamic window helpers (`new Window` / `navigate` lowering):
+/// mount dispatch switch, window creation (opts → route windowConfig →
+/// app defaults), and navigate (unmount + clear + remount). Emitted only
+/// when route IR exists; unknown RIDs fail closed (kInvalidWid/false).
+/// Page cache (`navigation.cache`) plugs into `__morph_navigate_window`
+/// when it lands — today navigate always remounts fresh.
+pub fn generate_window_helpers(
+    routes_ir: &[(RouteEntry, IRWindow)],
+    app_title: &str,
+    app_width: u32,
+    app_height: u32,
+) -> String {
+    if routes_ir.is_empty() {
+        return String::new();
+    }
+    let esc = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
+    let mut out = vec![
+        "// ── Dynamic windows (lowered `new Window` / `navigate`) ──".to_string(),
+        "bool __morph_mount_into(MorphWindow* win, WID wid, int rid, const JsObject& props) {"
+            .to_string(),
+        "    switch (rid) {".to_string(),
+    ];
+    for (route, _) in routes_ir {
+        let ns = route_ns_name(&route.id);
+        out.push(format!(
+            "    case {}: app::routes::{ns}::mount_{}(win, wid, props); return true;",
+            route.rid, route.const_name
+        ));
+    }
+    out.push("    default: return false;".to_string());
+    out.push("    }".to_string());
+    out.push("}".to_string());
+    out.push("WID __morph_create_window(int rid, const JsObject& opts) {".to_string());
+    out.push("    auto& wm = WindowManager::get();".to_string());
+    out.push("    std::string title;".to_string());
+    out.push("    int w = 0, h = 0;".to_string());
+    out.push("    switch (rid) {".to_string());
+    for (route, _) in routes_ir {
+        let title = route.title.as_deref().filter(|t| !t.is_empty()).unwrap_or(app_title);
+        let w = route.width.filter(|v| *v > 0).unwrap_or(app_width);
+        let h = route.height.filter(|v| *v > 0).unwrap_or(app_height);
+        out.push(format!(
+            "    case {}: title = \"{}\"; w = {}; h = {}; break;",
+            route.rid,
+            esc(title),
+            w,
+            h
+        ));
+    }
+    out.push("    default: return kInvalidWid;".to_string());
+    out.push("    }".to_string());
+    out.push("    if (opts.has(\"title\")) title = opts.get(\"title\").as_string();".to_string());
+    out.push(
+        "    if (opts.has(\"width\")) w = static_cast<int>(opts.get(\"width\").as_int());"
+            .to_string(),
+    );
+    out.push(
+        "    if (opts.has(\"height\")) h = static_cast<int>(opts.get(\"height\").as_int());"
+            .to_string(),
+    );
+    out.push("    if (w <= 0 || h <= 0) return kInvalidWid;".to_string());
+    out.push("    WID wid = wm.mintWid();".to_string());
+    out.push("    auto win = std::make_shared<MorphWindow>(title, w, h, false);".to_string());
+    out.push("    wm.registerWindow(wid, win);".to_string());
+    out.push(
+        "    if (opts.has(\"id\")) { auto alias = opts.get(\"id\").as_string(); if (!alias.empty()) wm.registerAlias(alias, wid); }"
+            .to_string(),
+    );
+    out.push(
+        "    JsObject data = opts.has(\"data\") ? opts.get(\"data\").as_object() : JsObject{};"
+            .to_string(),
+    );
+    out.push("    win->startCompositor(true);".to_string());
+    out.push("    if (!__morph_mount_into(win.get(), wid, rid, data)) {".to_string());
+    out.push("        wm.close(wid);".to_string());
+    out.push("        return kInvalidWid;".to_string());
+    out.push("    }".to_string());
+    out.push("    wm.open(wid);".to_string());
+    out.push("    return wid;".to_string());
+    out.push("}".to_string());
+    out.push("bool __morph_navigate_window(WID wid, int rid, const JsObject& props) {".to_string());
+    out.push("    auto& wm = WindowManager::get();".to_string());
+    out.push("    auto win = wm.get(wid);".to_string());
+    out.push("    if (!win) return false;".to_string());
+    out.push("    wm.clearMount(wid);".to_string());
+    out.push("    win->clearRoot();".to_string());
+    out.push("    return __morph_mount_into(win.get(), wid, rid, props);".to_string());
+    out.push("}".to_string());
+    out.join("\n")
+}
+
 /// Route manifest header (`morph_routes.h`): one `app::routes::` int
 /// const per `route.mx` (the RID — what the JSX strings lower to), plus
 /// the route count. Constexpr only: zero binary cost, and the C++

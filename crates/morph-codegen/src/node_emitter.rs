@@ -1,6 +1,33 @@
 use morph_ir::{IRNode, IRStyle};
 use std::fmt::Write as _;
 
+/// Handler bodies mentioning window constructs (`new Window(…)` /
+/// `useWindow(`) translate through morpher (placeholder lowering +
+/// handle tracking); everything else keeps the textual path.
+/// Nonzero indent avoids `static` locals — handlers run per event.
+fn translate_window_handler(body: &str) -> Option<String> {
+    if !(body.contains("new Window(") || body.contains("useWindow(")) {
+        return None;
+    }
+    // Unwrap the arrow and braced block to bare statements first:
+    // morpher translates `{ ... }` / `() => ...` into a never-invoked
+    // lambda value (`[]() -> auto {...};`) instead of splicing
+    // statements into the handler body. (Mirrors translate_handler's
+    // arrow-stripping in logic_emitter.)
+    let mut body = body.trim();
+    if let Some(idx) = body.find("=>") {
+        body = body[idx + 2..].trim();
+    }
+    let body =
+        body.strip_prefix('{').and_then(|b| b.strip_suffix('}')).map(str::trim).unwrap_or(body);
+    let mut options = morpher::TranslateOptions::default();
+    options.indent = 1;
+    morpher::translate_snippet(body, "snippet.ts", options)
+        .ok()
+        .map(|out| out.body.trim().to_string())
+        .filter(|b| !b.is_empty())
+}
+
 /// Keyword → C++ enum literal for style/node-type emission. Mirrors the
 /// `parse*` functions in `runtime/cpp/style/css_enums.h` exactly
 /// (case-sensitive, unknown → default).
@@ -181,10 +208,17 @@ pub(crate) fn translate_js<S: std::hash::BuildHasher>(
                 let word = &s[i..j];
                 // `__st_`-prefixed words are already-lowered signals.
                 if !word.starts_with("__st") {
-                    if let Some(to) = state_map.get(word) {
-                        res.push_str(to);
-                        i = j;
-                        continue;
+                    // Member access (`ctx->tab`) never substitutes: the
+                    // object already resolved. `->` cannot occur in valid
+                    // JS snippets, so the two-char check is unambiguous
+                    // (`a>total` still substitutes — only `->` skips).
+                    let is_member = i >= 2 && bytes[i - 1] == b'>' && bytes[i - 2] == b'-';
+                    if !is_member {
+                        if let Some(to) = state_map.get(word) {
+                            res.push_str(to);
+                            i = j;
+                            continue;
+                        }
                     }
                 }
                 res.push_str(word);
@@ -758,8 +792,25 @@ pub fn emit_node_with_state(
             // Already a complete lambda (handler-ref form built in the IR builder).
             ev.target.clone()
         } else {
-            let cpp = translate_js(&ev.target, state_map);
-            format!("[](JsObject e) {{ {cpp} }}")
+            // Window constructs lower through morpher (same placeholders
+            // as everywhere else); the textual path below would pass
+            // `new Window(` through raw. Falls back to textual on error.
+            let cpp = match translate_window_handler(&ev.target) {
+                Some(body) => body,
+                None => translate_js(&ev.target, state_map),
+            };
+            // Inside a list-item factory `__it` / `__index` alias the
+            // persistent per-row binding (`JsValue& __it = __b.item`), so a
+            // handler that references them must capture them — same rule as
+            // effect_captures() above, otherwise the lambda won't compile.
+            let mut caps: Vec<&str> = Vec::new();
+            if cpp.contains("__it") {
+                caps.push("&__it");
+            }
+            if cpp.contains("__index") {
+                caps.push("&__index");
+            }
+            format!("[{}](JsObject e) {{ {cpp} }}", caps.join(", "))
         };
         lines.push(format!("{}{}->{} = {};", indent, node.node_id, member, rhs));
     }

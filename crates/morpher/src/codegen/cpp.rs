@@ -371,6 +371,22 @@ impl<'a> CppTranslator<'a> {
         if name.starts_with("/*") {
             return Some(format!("{}/* destructuring not supported */", self.indent()));
         }
+        // Track Window handles for method/property lowering: direct
+        // `useWindow(...)` / `new Window(...)` initializers only.
+        if let Some(init) = d.init.as_ref() {
+            let is_window = match init {
+                Expression::CallExpression(call) => {
+                    matches!(&call.callee, Expression::Identifier(id) if id.name.as_str() == "useWindow")
+                }
+                Expression::NewExpression(n) => {
+                    matches!(&n.callee, Expression::Identifier(id) if id.name.as_str() == "Window")
+                }
+                _ => false,
+            };
+            if is_window {
+                self.ctx.window_vars.insert(name.clone());
+            }
+        }
 
         self.emit_typed_variable_declarator(d, &name, kind)
     }
@@ -3493,6 +3509,20 @@ impl<'a> CppTranslator<'a> {
     }
 
     fn emit_assignment(&mut self, a: &AssignmentExpression<'a>) -> String {
+        // `win.title = x` on a tracked Window handle lowers to a registry
+        // write; every other member assignment keeps default emission.
+        if a.operator.as_str() == "=" {
+            if let AssignmentTarget::StaticMemberExpression(mem) = &a.left {
+                if let Expression::Identifier(obj) = &mem.object {
+                    if mem.property.name.as_str() == "title"
+                        && self.ctx.window_vars.contains(obj.name.as_str())
+                    {
+                        let rhs = self.emit_expression(&a.right);
+                        return format!("__morph_win_set_title({}, {})", obj.name, rhs);
+                    }
+                }
+            }
+        }
         if let AssignmentTarget::AssignmentTargetIdentifier(left_id) = &a.left {
             let var_name = left_id.name.to_string();
             if a.operator.as_str() == "=" {
@@ -3669,6 +3699,17 @@ impl<'a> CppTranslator<'a> {
             String::new()
         };
         if let Expression::Identifier(id) = &call.callee {
+            // `useWindow()` — current window (codegen fills the WID per
+            // emission site); `useWindow(id-or-route)` — registry lookup
+            // (codegen resolves `/route` literals to RIDs, ids lower to a
+            // runtime alias lookup).
+            if id.name.as_str() == "useWindow" {
+                if call.arguments.is_empty() {
+                    return "__morph_current_window()".to_string();
+                }
+                let arg = self.emit_argument(&call.arguments[0]);
+                return format!("__morph_use_window({arg})");
+            }
             if id.name.as_str() == "fetch" {
                 self.ctx.needed.insert("\"../../runtime/cpp/net/net.h\"".to_string());
                 let args: Vec<String> =
@@ -3814,6 +3855,21 @@ impl<'a> CppTranslator<'a> {
                         return format!("std::println(stderr, \"{}\", {})", fmt, args.join(", "));
                     }
                     return format!("std::println(\"{}\", {})", fmt, args.join(", "));
+                }
+            }
+        }
+        // Window-handle methods (`win.navigate/close/show/hide/on`) —
+        // only for locals tracked as Window handles (from `useWindow()`
+        // or `new Window()`), so user objects with same-named methods
+        // keep default emission.
+        if let Expression::StaticMemberExpression(m) = &call.callee {
+            if let Expression::Identifier(obj) = &m.object {
+                if self.ctx.window_vars.contains(obj.name.as_str()) {
+                    if let Some(lowered) =
+                        self.emit_window_method(obj.name.as_str(), m.property.name.as_str(), call)
+                    {
+                        return lowered;
+                    }
                 }
             }
         }
@@ -4048,6 +4104,19 @@ impl<'a> CppTranslator<'a> {
             }
             return format!("/* super */{}", prop);
         }
+        // Window-handle properties (tracked locals only): `closed` and
+        // `title` lower to registry reads; anything else keeps default
+        // emission (fails C++ compilation loudly on the int handle).
+        if let Expression::Identifier(id) = &m.object {
+            if self.ctx.window_vars.contains(id.name.as_str()) {
+                let obj = id.name.as_str();
+                match prop.as_str() {
+                    "closed" => return format!("__morph_win_closed({obj})"),
+                    "title" => return format!("__morph_win_title({obj})"),
+                    _ => {}
+                }
+            }
+        }
         // Response.ok is a method, not a field: r.ok -> r.ok()
         if prop == "ok" {
             // Heuristic: if obj is Response (from fetch), call ok()
@@ -4150,9 +4219,64 @@ impl<'a> CppTranslator<'a> {
         }
     }
 
+    /// Lower a method call on a tracked Window handle (WID int) to a
+    /// placeholder (route-carrying ops, resolved at codegen) or a direct
+    /// `WindowManager` call. `None` falls through to default emission
+    /// (fails C++ compilation loudly on the int handle).
+    fn emit_window_method(
+        &mut self,
+        obj: &str,
+        method: &str,
+        call: &CallExpression<'a>,
+    ) -> Option<String> {
+        match method {
+            "navigate" => {
+                let route =
+                    call.arguments.first().map(|a| self.emit_argument(a)).unwrap_or_default();
+                let props = call
+                    .arguments
+                    .get(1)
+                    .map(|a| self.emit_argument(a))
+                    .unwrap_or_else(|| "JsObject{}".to_string());
+                Some(format!("__morph_win_navigate({obj}, {route}, {props})"))
+            }
+            "close" => Some(format!("WindowManager::get().close({obj})")),
+            "show" => Some(format!("WindowManager::get().open({obj})")),
+            "hide" => Some(format!("WindowManager::get().hide({obj})")),
+            "on" => {
+                let event =
+                    call.arguments.first().map(|a| self.emit_argument(a)).unwrap_or_default();
+                let handler = call
+                    .arguments
+                    .get(1)
+                    .map(|a| self.emit_argument(a))
+                    .unwrap_or_else(|| "[](const JsValue&){}".to_string());
+                if event.trim_matches('"').trim_matches('\'') == "close" {
+                    Some(format!("WindowManager::get().onClose({obj}, {handler})"))
+                } else {
+                    Some(format!(
+                        "static_assert(sizeof({obj}) == 0, \"Window.on only supports 'close'\")"
+                    ))
+                }
+            }
+            "ready" => Some(format!(
+                "static_assert(sizeof({obj}) == 0, \"Window.ready() is not built yet\")"
+            )),
+            _ => None,
+        }
+    }
+
     fn emit_new(&mut self, n: &NewExpression<'a>) -> String {
         let callee = self.emit_expression(&n.callee);
         let args: Vec<String> = n.arguments.iter().map(|a| self.emit_argument(a)).collect();
+        // `new Window(routeId, config?)` — Window handles lower to WID
+        // ints; the route string resolves at codegen (manifest). Requires
+        // a route argument (a zero-arg user class named Window keeps
+        // working); non-literal routes fail later with mx-route-unknown.
+        if callee == "Window" && !args.is_empty() {
+            let opts = args.get(1).cloned().unwrap_or_else(|| "JsObject{}".to_string());
+            return format!("__morph_new_window({}, {})", args[0], opts);
+        }
         if callee == "Error" {
             let msg = args.first().cloned().unwrap_or_else(|| "JsString(\"\")".to_string());
             self.ctx.need("JsObject");
@@ -4431,6 +4555,59 @@ impl<'a> CppTranslator<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn translate_stmts(source: &str) -> String {
+        use oxc_allocator::Allocator;
+        use oxc_parser::Parser;
+        let allocator = Allocator::default();
+        let source_type =
+            oxc_span::SourceType::from_path("file.ts").unwrap_or_default().with_typescript(true);
+        let parsed = Parser::new(&allocator, source, source_type).parse();
+        assert!(parsed.diagnostics.is_empty());
+        let mut t = CppTranslator::new(source, 0, crate::codegen::context::TypeMode::Infer, None);
+        let mut out = Vec::new();
+        for stmt in &parsed.program.body {
+            if let Some(code) = t.emit_statement(stmt) {
+                out.push(code);
+            }
+        }
+        out.join("\n")
+    }
+
+    #[test]
+    fn window_placeholders_lower() {
+        let out = translate_stmts(
+            "const w = new Window(\"/settings\", { width: 500 });\n\
+             const c = useWindow();\n\
+             const d = useWindow(\"login-a\");\n\
+             w.navigate(\"/auth/login\", { x: 1 });\n\
+             w.close();\n\
+             w.show();\n\
+             w.hide();\n\
+             w.on(\"close\", () => {});\n\
+             const shut = w.closed;\n\
+             const title = w.title;\n\
+             w.title = \"hi\";",
+        );
+        assert!(out.contains("__morph_new_window(\"/settings\""), "{out}");
+        assert!(out.contains("__morph_current_window()"), "{out}");
+        assert!(out.contains("__morph_use_window(\"login-a\")"), "{out}");
+        assert!(out.contains("__morph_win_navigate(w,"), "{out}");
+        assert!(out.contains("WindowManager::get().close(w)"), "{out}");
+        assert!(out.contains("WindowManager::get().open(w)"), "{out}");
+        assert!(out.contains("WindowManager::get().hide(w)"), "{out}");
+        assert!(out.contains("WindowManager::get().onClose(w,"), "{out}");
+        assert!(out.contains("__morph_win_closed(w)"), "{out}");
+        assert!(out.contains("__morph_win_title(w)"), "{out}");
+        assert!(out.contains("__morph_win_set_title(w,"), "{out}");
+    }
+
+    #[test]
+    fn non_window_objects_keep_default_emission() {
+        let out = translate_stmts("dialog.close();\nconst t = dialog.title;");
+        assert!(!out.contains("WindowManager"), "{out}");
+        assert!(!out.contains("__morph_"), "{out}");
+    }
 
     #[test]
     fn for_in_over_object_iterates_sorted_keys() {

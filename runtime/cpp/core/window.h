@@ -93,6 +93,7 @@ public:
     void setTitle(const std::string &title);
     void show();
     void hide();
+    const std::string &title() const { return m_title; }
     void setSize(int width, int height);
     void setConstraints(int minWidth, int minHeight, int maxWidth, int maxHeight);
     int width() const { return m_width; }
