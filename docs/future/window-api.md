@@ -192,3 +192,61 @@ Lowering detail: string literals never reach the runtime. The manifest pass owns
 1. `App` singleton (quit / ready / before-quit events)
 3. `Window.ready()`, `resize`/`focus` events, `.d.ts`, full `Window` object surface
 4. Test app: login window → button → dynamically creates a settings window (the Phase-2 validation app from the original design plan); same flow driven once from JSX and once from `native.cpp`
+
+## Window state controls (naming — Electron consensus)
+
+Maximize/minimize/fullscreen follow Electron's vocabulary (the closest
+spiritual relative — JS-driven desktop windows), mapped onto Morph's
+`win.show()`/`win.hide()` methods and `win.closed`/`win.title`
+properties:
+
+| Method | Property | Notes |
+|---|---|---|
+| `win.maximize()` | `win.isMaximized` | |
+| `win.unmaximize()` | — | Industry word ("unmaximize"); alternatives all worse |
+| `win.minimize()` | `win.isMinimized` | |
+| `win.restore()` | — | Undoes minimize *or* maximize (OS convention, one method) |
+| `win.setFullscreen(flag)` | `win.isFullscreen` | Bool setter covers on+off (Electron-style), no `unfullscreen` |
+
+(Qt's `showMaximized/showMinimized/showFullScreen/showNormal` and Tauri's
+`unminimize` were considered; Electron wins on guessability.) Lowering
+is identical to `show`/`hide` at every layer (morpher arm →
+`window_api.h` inline → `WindowManager` forward → `MorphWindow` +
+GLFW); fullscreen saves/restores geometry. Headless-assertable via
+state flags like the `wm:*` checks.
+
+## Capability gaps vs Electron/Qt/Tauri (work later)
+
+Prioritized: (1) programmatic geometry (`setSize/getSize`,
+`setPosition/getPosition`, `center()` — `MorphWindow::setSize` exists in
+C++ but has no handle method), state-change events, `alwaysOnTop`,
+opacity; (2) frameless + drag regions, `focus`/`blur`/`resize`/`move`
+events, skip-taskbar, min/max enforcement; (3) transparency/blur,
+taskbar integrations, display API, monitor-picking for fullscreen.
+
+## Cursor APIs (work later)
+
+Morph has CSS `cursor: default | pointer | text` with hover switching
+only. Missing, in framework order:
+
+- **Vocabulary**: `wait`, `crosshair`, `move`, `not-allowed`, `grab`,
+  `grabbing`, resize arrows, `zoom-in/out` (CSS keywords; map to GLFW's
+  6 + XCursor theme names). No API — just keywords.
+- **Window override** (Qt `setOverrideCursor` — CSS can't do this):
+  `win.setCursor("wait")` / `win.setCursor(null)` restores CSS behavior.
+- **Custom image + hotspot** (`glfwCreateCursor` over the existing
+  `stb_image` loader) and **hide** (`none` = 1×1 transparent cursor).
+- **Position**: `win.cursorPosition()` (needed by tooltips + drag code);
+  setters stay out in v1.
+
+## Pointer lock / FPS cursor (work later)
+
+GLFW already has the one-call version
+(`GLFW_CURSOR_DISABLED` = hidden + centered + relative deltas) that Qt
+users reimplement by hand and Electron lacks entirely — a genuine
+differentiator, not catch-up. Proposed: `win.setCursorLock(bool)` +
+`win.isCursorLocked` + `movementX/Y` on mouse events while locked (routed
+from the existing `cursorPosCb` pipeline) + `glfwRawMouseMotion` where
+supported + ESC releases by default. Headless-untestable (screenshot/GIF
+verification like all display behavior). Use cases: 3D/model viewers,
+infinite-pan canvas, dial widgets — needs no render-pipeline changes.

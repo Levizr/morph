@@ -1,105 +1,135 @@
-# `<morph-viewport>` — Native OpenGL Canvas
+# `<viewport>` + `<canvas>` — Custom Drawing
 
 **Status:** future · **Priority:** high
 
-> **Note:** This is a future plan, not a commitment. The syntax and API shown here are proposals — they can be completely different when actually implemented.
+> **Note:** This is a future plan, not a commitment. The syntax and API shown
+> here are proposals — they can be completely different when actually
+> implemented. Supersedes the scaffold notes below where they disagree
+> (the old table referenced the Python-era codebase and a driver
+> signature the node never implemented).
 
-An embedded OpenGL canvas element. Users drop `<morph-viewport>` anywhere in their JSX and get a native GL context inside the window — the same one the renderer uses — so they can draw whatever they want (charts, editors, games, custom widgets) with full access to OpenGL 3.3.
+## The split
 
-## Why it matters
+Two elements, one shared GL context (per window, as today — no
+per-viewport contexts; context switches are expensive and resource
+sharing would break window isolation):
 
-Morph renders everything through its own batched renderer. Today there is **no way to draw arbitrary custom content** — you're limited to the built-in widgets (rect, text, button, image, input, list). A viewport unlocks:
+- **`<viewport>`** — C++ escape hatch. A user driver class gets full
+  OpenGL 3.3 over a viewport rect (charts, editors, games, third-party
+  renderers). Renders into its own FBO texture on the window's context;
+  the compositor blits it (stable under damage tracking and Forge
+  tiles — inline drawing would break batching).
+- **`<canvas>`** — retained 2D commands from `.mx` (`fillRect`, `arc`,
+  `drawImage`, text). Records into the node; the renderer executes.
+  Repaint reuses dirty flags — no new loop. No raw-context escape hatch
+  (breaks the retained model and context isolation — rejected the way
+  suspend/resume was rejected for the page cache: tax the cold path,
+  never the hot one).
 
-- Custom data visualizations (graphs, plots, timelines) at native speed
-- Embedded editors / canvases (drawing tools, CAD-style previews)
-- Mini-games or particle systems inside an app
-- Third-party C++ renderers that own their own GL state
+## C++ syntax (all three directions)
 
-## How it will work
-
-The runtime scaffold already exists — the parser/builder wiring is what's missing.
-
-### Runtime: `ViewportNode` + `MorphViewportDriver`
-
-`runtime/cpp/viewport/viewport_node.h` declares a `ViewportNode : public MorphNode` that owns a `MorphViewportDriver*`. The driver is an interface (`viewport_driver.h`) with these callbacks:
-
-```cpp
-struct ViewportContext {
-    unsigned int fbo;      // viewport's framebuffer
-    int x, y, w, h;        // viewport rect (screen coords)
-    float deltaTime;       // seconds since last frame
-    float mouseX, mouseY;  // cursor position (viewport-local)
-    bool focused;          // viewport has keyboard focus
-};
-
-class MorphViewportDriver {
-public:
-    virtual void onInit(ViewportContext&) {}
-    virtual void onResize(ViewportContext&) {}
-    virtual void onDraw(ViewportContext&) = 0;          // required
-    virtual void onMouseMove(ViewportContext&) {}
-    virtual void onMouseDown(ViewportContext&) {}
-    virtual void onScroll(ViewportContext&) {}
-    virtual void onKeyDown(ViewportContext&) {}
-};
-```
-
-Only `onDraw` is mandatory; everything else has empty defaults. The context hands you the viewport's FBO, position/size, frame delta, and input state.
-
-### Planned usage
-
-A `morph-viewport` element is configured with a driver class in a user C++ header:
-
-```tsx
-// src/App.mx
-import { draw } from './my_viewport.cpp'   // exports MyViewportDriver
-
-export default function App() {
-  return (
-    <morph-viewport driver="./my_viewport.cpp" driver-class="MyViewportDriver"
-                    width="100%" height="400" />
-  )
-}
-```
+**Define** — a driver class in a co-located `.cpp` (compiled via the
+existing `cpp_sources` config), one include:
 
 ```cpp
-// my_viewport.cpp
+// src/plot_view.cpp
+#include "morph_api.h"
 #include "morph/viewport_driver.h"
 
-struct MyViewportDriver : MorphViewportDriver {
+struct PlotDriver : MorphViewportDriver {
+    std::vector<float> points;   // ordinary C++ state, lives with the node
+
+    void onInit(ViewportContext& ctx) override {
+        glGenBuffers(1, &vbo);
+    }
+
     void onDraw(ViewportContext& ctx) override {
-        // glViewport(ctx.x, ctx.y, ctx.w, ctx.h);
-        // draw anything — the FBO is already bound
+        // Rect + FBO already bound. GL state is saved/restored around
+        // this call — neither side can corrupt the other.
+        glViewport(0, 0, ctx.w, ctx.h);
+        glBindBuffer(GL_ARRAY_BUFFER, vbo);
+        glBufferData(GL_ARRAY_BUFFER, points.size() * sizeof(float),
+                     points.data(), GL_DYNAMIC_DRAW);
+        // ... draw calls ...
+    }
+
+    void onResize(int w, int h, ViewportContext& ctx) override {
+        rebuildProjection(w, h);
+    }
+
+    void onMouseDown(int btn, ViewportContext& ctx) override {
+        if (nearPoint(ctx.mouseX, ctx.mouseY)) dragging = true;
     }
 };
 ```
 
-The compiler emits `ViewportNode* vp = new ViewportNode(new MyViewportDriver());` and adds it as a child of the container node.
+Only `onDraw` is mandatory. `ViewportContext` carries `fbo`, `x/y/w/h`,
+`deltaTime`, viewport-local `mouseX/mouseY`, `focused`, plus a
+read-only `params` view (see below). Drivers delete their GL objects in
+their destructor (runs on unmount/window close — no leaks by
+construction).
 
-## Current state (scaffold audit)
+**Bind** — import the class, not string props:
+
+```tsx
+import { PlotDriver } from './plot_view.cpp'
+
+export default function App() {
+  return (
+    <body>
+      <viewport driver={PlotDriver} width={600} height={400} id="plot" />
+    </body>
+  )
+}
+```
+
+Typo-proof at build (unknown export = today's import error), no new
+machinery. Tag `viewport` (lowercase, route-style).
+
+**Control, C++ → viewport** — push state, request redraw (no immediate
+blocking draws — drawing happens on the compositor's frame):
+
+```cpp
+app::viewport::invalidate(wid, "plot");         // mark dirty → onDraw next frame
+app::viewport::setVisible(wid, "plot", false);  // skip draw, keep state
+```
+
+**Control, viewport → app** — results travel on the existing event
+channels (no new bus):
+
+```cpp
+morph::channel("app::events::pointPicked").emit(JsValue(pickedIndex));
+```
+
+```tsx
+morphEvent("pointPicked", (i) => setSelected(i))
+```
+
+**Control, JSX → driver** — plain props become per-frame params (UI-speed
+configuration; per-frame data lives in C++):
+
+```tsx
+<viewport driver={PlotDriver} width={600} height={400} color="#ff0000" showGrid={true} />
+```
+
+```cpp
+std::string color = ctx.params.get("color").as_string();  // read-only, never parsed
+```
+
+## Scaffold audit (2026-09-21)
 
 | Layer | State |
 |---|---|
-| `ViewportNode` class | ✅ Declared (`runtime/viewport/viewport_node.h` + `runtime/ui/` copy) |
-| `MorphViewportDriver` interface + `ViewportContext` | ✅ Declared (`viewport_driver.h`) |
-| `IRViewport` IR struct | ✅ Declared (`crates/morph-ir/src/node.rs`) |
-| Codegen viewport emitter | ✅ Present in `crates/morph-codegen/` — emits `new ViewportNode(new <driver_class>())` |
-| Feature gate `"viewport"` + header include | ✅ In `crates/morph-codegen/src/feature_set.rs` |
-| JSX parsing (`jsx_walker.py`) | ❌ Nothing — tags parse generically, no viewport special-casing |
-| IR building (`ir/builder.py`) | ❌ Only `morph-window` is special-cased |
-| `morph check` tag registry | ❌ `SUPPORTED_TAGS` has no viewport → would flag `mx-tag` |
-| Dev-mode IR serializer / deserializer | ❌ No viewport support |
-
-## Open questions
-
-- **Config surface** — `driver`/`driver-class` props on the element, or a `viewport` block in config?
-- **Retained surface** — should the viewport render into its own FBO texture that the compositor blits (stable), or draw inline into the frame (simpler)?
-- **Input routing** — hit-testing for `onMouseMove`/`onMouseDown`/`onScroll`/`onKeyDown` needs the viewport to intercept events over its rect.
-- **Interaction with Forge** — viewport content can't be tile-cached; damage tracking must treat it as always-dirty or as its own retained layer.
+| `MorphViewportDriver` + `ViewportContext` | ✅ Exists (`runtime/cpp/viewport/viewport_driver.h`) |
+| `ViewportNode` | ❌ Broken — calls `driver->onDraw(r)` with a `Renderer&`; the driver takes `ViewportContext&`. Must build the context (rect from layout, delta from pump, mouse/focus from hit-test) and wrap the call in state save/restore |
+| `runtime/cpp/ui/` copy | ❌ Its `#include "viewport_driver.h"` resolves inside `ui/` (no such header); dedupe to one location |
+| IR / codegen / linter / feature gate | ❌ Nothing (old rows described the Python codebase) |
+| Input routing | ❌ Viewport must intercept hit-test over its rect (hook: hover infra in `window.cpp`) |
 
 ## Build steps (when picked up)
 
-1. Add viewport to `SUPPORTED_TAGS` in `checker/registry.py` (props: `driver`, `driver-class`, `width`, `height`)
-2. Parse in `jsx_walker.py` → produce `IRViewport` in `ir/builder.py`
-3. Wire the IR through the serializer + dev deserializer (`runtime/dev/ir_deserializer.h`)
-4. Test with a driver that draws a rotating triangle (the canonical smoke test)
+1. Fix `ViewportNode` (context construction + save/restore + FBO blit), dedupe headers.
+2. Tag support in the Rust linter registry + IR node + codegen emitter (`new ViewportNode(new <Driver>())`).
+3. Input routing via hit-test interception.
+4. Smoke test: rotating-triangle driver fixture.
+5. `<canvas>` retained-2D track (shapes + text first, images second, hit-regions third).
