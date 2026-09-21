@@ -835,6 +835,7 @@ pub fn resolve_window_placeholders(src: &str, routes: &[RouteEntry]) -> anyhow::
             "__morph_win_closed(",
             "__morph_win_title(",
             "__morph_win_set_title(",
+            "__morph_open_browser(",
             "__morph_current_window(",
         ]
         .iter()
@@ -889,6 +890,10 @@ pub fn resolve_window_placeholders(src: &str, routes: &[RouteEntry]) -> anyhow::
                 let wid = args.first().map_or("", String::as_str);
                 let title = args.get(1).map_or("\"\"", String::as_str);
                 format!("WindowManager::get().setTitle({wid}, {title})")
+            }
+            "__morph_open_browser(" => {
+                let url = args.first().map_or("", String::as_str);
+                format!("WindowManager::get().openUrl({url})")
             }
             _ => {
                 anyhow::bail!(
