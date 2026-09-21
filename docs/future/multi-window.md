@@ -2,9 +2,11 @@
 
 **Status:** future · **Priority:** high
 
-Runtime control for showing, closing, and navigating between windows. The `WindowManager` singleton already tracks windows; `open()` and `navigate()` are stubs waiting to be wired.
+Runtime control for showing, closing, and navigating between windows. The `WindowManager` singleton owns every window (`shared_ptr`, WID-keyed); `open()`, `close()`, `hide()`, and helper-level `navigate()` are wired and proven.
 
 > **Decisions update (2026-09-20):** window ids are interned to integers (**WID**, MID-style — no runtime string lookup), routes intern to integers (**RID**, `app::routes::` consts), navigation uses `<a href>` (the `morph-open/close/navigate` actions never existed — the old claim below was stale and is struck through), and C++ gets its own window API. See [Decisions — old vs new](#decisions--old-vs-new).
+
+> **Shipped → main docs.** Window control from JSX is implemented and documented for users in [Windows & Routes](../guides/windows-and-routing.md) and [`Window` / `useWindow`](../api/windows.md). This page keeps the runtime design, open questions, and what remains. Implementation note: dynamic WIDs are runtime-minted (switch dispatch is future work).
 
 ## Why it matters
 
@@ -14,7 +16,7 @@ Runtime control for showing, closing, and navigating between windows. The `Windo
 
 ## Planned API — via `useWindow`
 
-Navigation and window control go through the `useWindow` hook, not static `App` calls. Inside any component:
+Navigation and window control go through the `useWindow` hook, not static `App` calls. Shipped subset (handles are WID ints; missing windows yield invalid handles tested via `.closed`): [`Window` / `useWindow`](../api/windows.md). The original proposal follows — `ready()` and object-typed handles are still future:
 
 ```ts
 const win = useWindow()                    // the window rendering this component
@@ -28,7 +30,7 @@ win.title = "New Title"
 win.on('close', () => { ... })
 ```
 
-(Id/route literals lower to WID/RID integers at build time — the strings above are what you write, never what runs.)
+(Id/route literals lower to RID consts at build time; dynamic WIDs mint at runtime — the strings above are what you write, never what runs. `ready()` is not built; content mounts synchronously today.)
 
 New windows are created **synchronously like Electron** — `new Window(routeId, config)` returns a valid handle immediately; only content is async:
 
@@ -43,8 +45,8 @@ await settings.ready()   // only when you need the first frame
 Windows are owned by the **registry, not by your handle**. That's what keeps handles safe when the user closes a window by the X button or the task manager:
 
 ```ts
-const loginWin = useWindow("login-window")   // null if it doesn't exist — sync
-if (!loginWin) return                         // handle the missing case
+const loginWin = useWindow("login-window")   // invalid handle if it doesn't exist — sync
+if (loginWin.closed) return                   // handle the missing case
 
 await loginWin.ready()                        // wait until content is mounted
 loginWin.close()
@@ -66,7 +68,7 @@ void close(WID id);                   // ✅ implemented (delete + erase; become
 bool navigate(WID win, RID route);    // swap the window's page — direct swap, no history
 ```
 
-Ids are integers, not strings. Every window-id literal in user code is interned at build time to a **WID** (the MID pattern: `useWindow("login-a")` → `useWindow_WID(3)`, switch dispatch, zero hash lookups on the hot path). The string→WID map is consulted **once at window registration**, never per call. Non-literal ids fall back to a runtime string lookup plus an `mx-window-dynamic` warning. Route ids intern the same way to an **RID** (`"/settings"` → `app::routes::kSettings`, see [file-routing.md](file-routing.md)) — RID says *what* to show, WID says *which instance*.
+Ids are integers, not strings. Route literals lower to **RID** consts at build time (the MID pattern); dynamic window ids mint at runtime (`mintWid`) with explicit `id:` values registered once as aliases. Non-literal lookups resolve through the registry. Route ids intern the same way to an **RID** (`"/settings"` → `app::routes::kSettings`, see [file-routing.md](file-routing.md)) — RID says *what* to show, WID says *which instance*. (Static WID switch dispatch remains future work.)
 
 The event emitter does **not** generate window calls today (see the struck-through claim above). Navigation from markup goes through `<a href>`:
 
@@ -76,11 +78,11 @@ The event emitter does **not** generate window calls today (see the struck-throu
 <a href="https://example.com">Help</a>                    {/* external → OS browser */}
 ```
 
-## How it will work
+## How it works (shipped)
 
-- **`open()`** — windows created from files are registered but can start hidden; `open` triggers show + layout + first paint. Requires `MorphWindow` to support "created but hidden" state (GLFW `glfwShowWindow`/`glfwHideWindow`)
-- **`navigate()`** — per-window page mounting. Each window owns one root layout tree; navigating swaps the root content (reusing the node-tree swap machinery that hot reload already uses) and delivers `props` to the new page component
-- **`close()`** — exists and works: deletes the window and erases it from the manager. **Safety rule:** the manager holds `shared_ptr<MorphWindow>`; JS handles resolve through the registry by id (weak references) — never raw pointers to deleted windows
+- **`open()`** ✅ — windows can be created hidden (`GLFW_VISIBLE` hint); `open` shows + schedules first paint.
+- **`navigate()`** ✅ at helper level — swaps the root content and delivers `props` to the new page; per-window mount contexts keep instances independent.
+- **`close()`** ✅ — deletes the window and erases it from the manager. **Safety rule:** the manager holds `shared_ptr<MorphWindow>`; JS handles resolve through the registry by id — never raw pointers to deleted windows. Renderer teardown binds the dying context; clipboard handle can't dangle.
 
 ## Current state
 
@@ -110,11 +112,8 @@ The event emitter does **not** generate window calls today (see the struck-throu
 | 5 | GL context sharing undecided | **Independent contexts** (status quo) | Isolation; sharing's only win is memory, at real lifetime risk |
 | 6 | Window control is JS-only | **C++ API too**: `app::windows::{open,navigate,close,on_close}` in `morph_api.h`, taking RID in / WID out | Tray icons, hotkeys, C++-driven flows; C++ always addresses a WID explicitly (no ambient "current window" across FFI) |
 
-## Build steps (when picked up)
+## Build steps (remaining)
 
-1. Registry rekey: `shared_ptr` ownership, WID-keyed registry, `*_WID` switch dispatch; GLFW close callback → `closed` + `close` events
-2. Add hidden state to `MorphWindow` + `open()` implementation (`glfwShowWindow`/`glfwHideWindow`)
-3. Manifest pass owns the string→WID/RID tables (`route.mx` scan, explicit `id:` literals)
-4. `new Window` + `useWindow` + `<a href>` in the translator → WID/RID calls; most-recently-focused wins by-route lookup; `data`→props
-5. C++ `app::windows::*` + `app::routes::` in `morph_api.h`, documented in `native-cpp.md`
-6. Test app: main window with a button that opens + navigates a second window; one route opened twice with different `data`, driven independently from JSX **and** `native.cpp`; deliberate typos proving linter + C++ compiler both catch them
+1. `<a href>` desugar in the translator → navigate / new-window / browser calls; most-recently-focused wins by-route lookup; `data`→props
+2. C++ `app::windows::*` + `app::routes::` in `morph_api.h`, documented in `native-cpp.md`
+3. Validation app: main window with a button that opens + navigates a second window; one route opened twice with different `data`, driven independently from JSX **and** `native.cpp`; deliberate typos proving linter + C++ compiler both catch them

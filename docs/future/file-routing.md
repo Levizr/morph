@@ -6,157 +6,17 @@
 
 > **Decisions update (2026-09-20):** route ids intern to integers (**RID**, `app::routes::` consts — no runtime string lookup), duplicate-route lookup returns the **most-recently-focused** window, `navigate` is a **direct swap** (no history), and markup navigation uses **`<a href>`** (the `morph-*` actions never existed). C++ controls windows via `app::windows::*`. Mounting design (per-instance state) lives in [Route Mounts & Per-Instance State](route-mounts.md). See [Decisions — old vs new](#decisions--old-vs-new). The reasoning behind these calls is answered in detail in [Q: Windows?](../faq/q-windows.md).
 
-A route file is **both a page and a window**:
+> **Shipped → main docs.** The route convention, route files, `new Window`, `useWindow`, `navigate`, RID interning, the memory model, and the `windowConfig` fallback are implemented and documented for users in [Windows & Routes](../guides/windows-and-routing.md) and [`Window` / `useWindow`](../api/windows.md). This page keeps the design history, open questions, and what remains below.
 
-- **Navigated to as a page** — rendered inside the current window (`win.navigate("/auth/login")`)
-- **Opened as a separate window** — `new Window("/auth/login", { width, height, data })`
+A route file is **both a page and a window** — navigated to in place (`win.navigate("/auth/login")`) or opened separately (`new Window("/auth/login", …)`). Full user docs: [Windows & Routes](../guides/windows-and-routing.md).
 
-## The convention — `route.mx`
+## Shipped design (history)
 
-Inspired by the Next.js App Router — where only files named `page.js` become routes ([routing docs](https://nextjs.org/docs/app/building-your-application/routing), [pages and layouts](https://nextjs.org/docs/app/building-your-application/routing/pages-and-layouts)) — Morph indexes only files named **`route.mx`**.
+The sections below shipped and moved to main docs — kept here as condensed design history. The manifest scans `route.mx` files (folder path = route id, `_`-private folders skipped), JSX strings lower to `app::routes::` RID consts, window ids lower to WID ints, and the fallback chain is call-site → file `windowConfig` → `[window]` app defaults. Nothing pre-initializes (binary size, not heap); navigation destroys state by default (page cache is future — see below).
 
-The **route id is the folder path** (relative to the source root `src/`), not the filename:
+## How it works (shipped)
 
-```
-src/
-├── auth/
-│   ├── login/
-│   │   ├── route.mx          →  /auth/login
-│   │   ├── login.css         ←  co-located styles
-│   │   └── login_helpers.cpp ←  co-located C++
-│   └── register/
-│       └── route.mx          →  /auth/register
-├── settings/
-│   └── route.mx              →  /settings
-└── components/               ←  NOT routes (no route.mx)
-    └── Button.mx
-```
-
-Every folder becomes a URL-like route; everything else in the folder is co-located with it. Regular `.mx` components stay components — a file is only indexed if it's literally named `route.mx`.
-
-## The route file
-
-A normal `.mx` component. The `windowConfig` export is **optional** — it provides defaults for when the file is opened as a window (overridable at construction time):
-
-```tsx
-// src/auth/login/route.mx
-import { morphState } from 'morph'
-import "./login.css"
-
-export const windowConfig: WindowConfig = { title: "Login", width: 400, height: 320 }
-
-export default function LoginPage(props: { userId?: number }) {
-  const [error, setError] = morphState("")
-  const win = useWindow()            // the window currently rendering this page
-
-  return (
-    <div>
-      <h1>Sign in</h1>
-      {props.userId && <p>Welcome back, user {props.userId}</p>}
-      <button onClick={() => win.navigate("/settings")}>Cancel</button>
-    </div>
-  )
-}
-```
-
-## Opening a route as a window
-
-Creation is **synchronous — like Electron**: `new Window(routeId, config)` returns a valid handle immediately; the window opens fast, and content (route mount + first frame) finishes async. Wait with `ready()` only if your code depends on content:
-
-```ts
-// any route can become a window — Electron-style
-const a = new Window("/auth/login", {
-  width: 400,          // overrides windowConfig.width
-  height: 320,
-  title: "Sign in",
-  id: "login-window",  // optional — used by useWindow("login-window")
-  data: { userId: 42 } // passed to the page as props
-})
-a.show()
-await a.ready()        // only when you need the first frame
-```
-
-- The second argument overrides `windowConfig` per-property; anything unspecified falls back to the file's `windowConfig`
-- `data` is delivered to the page as its `props` — identical to how navigation passes props
-- Without a `windowConfig` in the route file, `new Window(routeId, ...)` must supply `width`/`height`
-
-### `windowConfig` is optional — the fallback chain
-
-A route file needs **no** `windowConfig` export unless it wants non-default window chrome. Resolution order, most-specific first:
-
-1. `new Window(routeId, config)` / `<a … width height title>` overrides
-2. the route file's `windowConfig` export (if present)
-3. the **`[window]` section of `morph.config.json`** (already exists today: `width` / `height` / `title` with app-wide defaults)
-
-A bare `route.mx` with no export and no overrides opens at the app default size — zero boilerplate per route. The old "must supply `width`/`height`" rule below is replaced by step 3.
-
-## Memory model — thousands of routes cost binary size, not heap
-
-Nothing pre-initializes. Each `MorphWindow` owns exactly one root node tree, and that tree plus the window's state *is* the per-route memory cost. Everything else is tiered:
-
-| Layer | What's held | Cost with 1,000 routes |
-|---|---|---|
-| **Manifest** (at app open) | Per route: RID + factory pointer + `windowConfig` | ~100 bytes × routes — kilobytes, always resident |
-| **Code** (all routes, compiled in) | Machine code in the binary's text segment | Disk/binary size grows; **resident RAM doesn't** — the OS demand-pages code in on first execution |
-| **Mounted tree** (only what's open) | Nodes + signals + layout caches for the live page in each open window | One live page per window (plus cache below) — `navigate()` destroys the old root and mounts the new one |
-| **Window chrome** (per open window) | GLFW window + GL context + font atlas/textures | The real per-window cost |
-
-So opening the app initializes **one** route. `new Window(RID)` factory-builds that route's tree on demand. `close()` frees chrome + tree + context. A thousand unvisited routes cost binary size, not heap.
-
-The honest caveat: Morph is AOT — every route compiles into the one binary. No dynamic route downloading/splitting is planned; if it ever becomes necessary, the lever exists (dev mode already `dlopen`s `logic.so` per rebuild, proving on-demand native loading works) — but that's future work, not this design.
-
-### Page cache — user-configurable, default off
-
-Destroy-on-leave (the default) means navigation resets state: leave a page, come back, it remounts fresh. Apps that want web-like instant revisits opt into a keep-alive cache in `morph.config.json`:
-
-```json
-{
-  "navigation": { "cache": 0 }
-}
-```
-
-- `0` (**default**): no caching — navigate away destroys tree + state; returning remounts fresh. Minimal memory.
-- `N`: keep the last N visited pages detached in memory (LRU eviction); re-navigation within the cache is instant with state intact.
-- `"all"`: keep every visited page — the escape hatch for small apps that want everything instant.
-
-Rules:
-
-- Cached pages hold **tree + state only** — window chrome (GL context, atlas) is still freed on leave, so a cached page is cheap next to an open window.
-- **New props force a fresh mount**, even on a cached page — cached state was built with old props, and silently reusing it would lie.
-- `data` on `new Window` always mounts fresh (a new instance never shares another window's cache entry).
-
-## The `useWindow` hook
-
-Reactive access to a window handle from inside any component. By id/route it is **sync** and returns `null` when the window doesn't exist (it may have been closed by the user — see [Window lifecycle & availability](window-api.md#window-lifecycle--availability)):
-
-```ts
-const win = useWindow()                      // current window — sync, always valid
-const win = useWindow("login-window")        // by id — null if not running
-const win = useWindow("/auth/login")         // or by route id — most-recently-focused live window on that route
-if (!win) return
-```
-
-The returned handle exposes window operations (the exact API is free-form — this is the shape):
-
-```ts
-win.navigate("/settings", { theme: "dark" })   // swap this window's page (false if closed)
-win.close()                                    // close the window (safe no-op if already closed)
-win.show() / win.hide()                        // visibility
-win.title = "New Title"                        // live title updates
-win.closed                                     // true if the user closed it via X / task manager
-win.on('close', () => { ... })                 // fires for ANY close, including user-initiated
-```
-
-- `useWindow()` — no argument. Every component is compiled into a specific window's tree, so the compiler resolves the containing window statically (the same way React hooks get context without an argument). No ids to manage in the common case.
-- `useWindow("id")` — for reaching windows created elsewhere (e.g. a tray that controls the main window)
-- As a hook it can be reactive — a component calling `win.on('close')` could re-render when the window closes
-
-## How it will work
-
-1. **Compiler pass** — at build time, scan the project for files named `route.mx` and add each to the **manifest** (`folder path → component + windowConfig`). Nothing else is indexed — components never become routes accidentally
-2. **`new Window(routeId, config)`** — resolved through the manifest at codegen time: the route literal lowers to its RID const, the window is constructed from the route's `windowConfig`, constructor overrides applied, component mounted with `data` as props
-3. **`win.navigate(routeId, props)`** — mounts the target route's component into the window's existing root layout tree (reusing the node-tree swap machinery hot reload already uses), passing `props`
-4. **`useWindow()`** — compile-time: the component's containing window id is threaded through the IR and literal ids lower to WID/RID ints; runtime: WID switch dispatch (or a registry lookup for dynamic ids) returns the live handle
+Manifest scan → RID lowering at codegen → mount factories → registry windows. User-facing behavior: [Windows & Routes](../guides/windows-and-routing.md). What remains here: the invariants every future change must preserve.
 
 ### Runtime bridge requirements
 
@@ -168,21 +28,7 @@ win.on('close', () => { ... })                 // fires for ANY close, including
 
 ### RID interning — the namespace trick (same as state)
 
-JSX keeps human-readable strings; generated C++ uses namespace-qualified integer consts, exactly like `app::<ns>::setter` wrappers did for state:
-
-```tsx
-// what you write
-const s = new Window("/auth/login", { data: { userId: 42 } })
-```
-```cpp
-// generated morph_routes.h — what it becomes (folder path → sanitized const)
-namespace app::routes {
-    inline constexpr int kAuthLogin = 2;   // /auth/login
-    inline constexpr int kSettings = 1;    // /settings
-}
-// call site — switch dispatch, zero hash lookups
-WindowManager::get().create_RID(app::routes::kAuthLogin, ...);
-```
+JSX keeps human-readable strings; generated C++ uses namespace-qualified integer consts (`app::routes::kAuthLogin`), exactly like `app::<ns>::setter` wrappers did for state. Full lowering detail lives in the guide; the invariant that matters here:
 
 Two integers, two jobs: **RID** = *what* to show (compile-time constant, one per `route.mx`); **WID** = *which instance* (runtime handle, N per route). `create(RID) → WID`; `navigate(WID, RID)`. Conflating them would break "same route, two independent windows".
 
@@ -213,7 +59,7 @@ const v = useWindow("login-window")          // ✓
 
 ### Generated typed routes (editor-level safety)
 
-The manifest pass also generates `morph-routes.d.ts` — a union of every route and every statically-known window id, shipped into `node_modules/morph`:
+The manifest pass also generates `morph-routes.d.ts` — a union of every route and every statically-known window id, written to the project root (picked up by any `*.d.ts`-aware editor):
 
 ```ts
 // generated: morph-routes.d.ts
@@ -255,24 +101,25 @@ Window ids (`id` in `new Window(routeId, { id: "..." })`) are **not paths** — 
 
 New diagnostics following the existing `mx-*` convention:
 
-| Rule | What it checks | Severity |
-|---|---|---|
-| `mx-route-unknown` | route string doesn't exist in the manifest (`new Window`, `navigate`, `load`) | error |
-| `mx-route-suggestion` | close-match typo: *"unknown route `/auth/loign` — did you mean `/auth/login`?"* | error |
-| `mx-route-format` | inconsistent path form — `auth/login` vs `/auth/login` vs trailing `/` | warning |
-| `mx-route-case` | uppercase route segment (`/Auth/Login`) | error |
-| `mx-route-chars` | forbidden characters in a segment (spaces, dots, `\`, `?`, …) | error |
-| `mx-route-reserved` | segment uses a reserved name (`route`, `layout`, `loading`, …) | error |
-| `mx-route-private` | referencing a `_`-prefixed (private) folder as a route | error |
-| `mx-window-unknown` | id string matches no declared window id (`useWindow("x")`) | error |
-| `mx-window-id-chars` | id contains `/`, spaces, dots, or other forbidden chars | error |
-| `mx-window-id-edge` | id starts with a digit / `-` / `_` / `.`, or ends with `-` / `_` | error |
-| `mx-window-id-reserved` | id is a reserved word (`main`, `root`, `window`, …) | error |
-| `mx-window-id-long` | id exceeds the length cap | warning |
-| `mx-window-dynamic` | non-literal id (`useWindow(someVar)`) — can't be verified statically | warning |
-| `mx-window-duplicate` | two windows declaring the same explicit `id`, or a window id colliding with a route id | error |
-| `mx-route-no-export` | a `route.mx` file without a default export | error |
-| `mx-link-unknown` | `<a href="…">` referencing an unknown route (`href="/auth/loign"`) | error |
+| Rule | What it checks | Severity | State |
+|---|---|---|---|
+| `mx-route-unknown` | route string doesn't exist in the manifest (`new Window`, `navigate`, `load`) | error | ✅ Shipped (codegen, with suggestion) |
+| `mx-route-no-export` | a `route.mx` file without a default export | error | ✅ Shipped (build) |
+| `mx-undefined` / `mx-no-morph-import` | names resolve; Morph APIs imported | error | ✅ Shipped (build gate) |
+| `mx-route-suggestion` | close-match typo: *"unknown route `/auth/loign` — did you mean `/auth/login`?"* | error | ✅ Shipped (folded into unknown) |
+| `mx-route-format` | inconsistent path form — `auth/login` vs `/auth/login` vs trailing `/` | warning | ❌ Not built |
+| `mx-route-case` | uppercase route segment (`/Auth/Login`) | error | ❌ Not built |
+| `mx-route-chars` | forbidden characters in a segment (spaces, dots, `\`, `?`, …) | error | ❌ Not built |
+| `mx-route-reserved` | segment uses a reserved name (`route`, `layout`, `loading`, …) | error | ❌ Not built |
+| `mx-route-private` | referencing a `_`-prefixed (private) folder as a route | error | ❌ Not built |
+| `mx-window-unknown` | id string matches no declared window id (`useWindow("x")`) | error | ❌ Not built |
+| `mx-window-id-chars` | id contains `/`, spaces, dots, or other forbidden chars | error | ❌ Not built |
+| `mx-window-id-edge` | id starts with a digit / `-` / `_` / `.`, or ends with `-` / `_` | error | ❌ Not built |
+| `mx-window-id-reserved` | id is a reserved word (`main`, `root`, `window`, …) | error | ❌ Not built |
+| `mx-window-id-long` | id exceeds the length cap | warning | ❌ Not built |
+| `mx-window-dynamic` | non-literal id (`useWindow(someVar)`) — can't be verified statically | warning | ❌ Not built |
+| `mx-window-duplicate` | two windows declaring the same explicit `id`, or a window id colliding with a route id | error | ❌ Not built |
+| `mx-link-unknown` | `<a href="…">` referencing an unknown route (`href="/auth/loign"`) | error | ❌ Not built |
 
 **How it works:** the check pass collects every route id from the manifest scan + every explicit window id from `new Window(..., { id: "..." })` literals, then cross-references all route/window string literals across `.mx` files. Naming rules run on the declared ids themselves; close matches use edit distance for `mx-route-suggestion`. Rules are configurable in `morph.config` — teams can relax a severity or change the length cap:
 
@@ -290,7 +137,7 @@ New diagnostics following the existing `mx-*` convention:
 1. **Editor** — typed routes (`morph-routes.d.ts`) → TypeScript error + autocomplete
 2. **CI / build** — `morph check` rules above → `morph build` fails fast on errors
 3. **C++ compiler** — `app::routes::setings` doesn't exist → the generated TU fails even if the linter is skipped
-4. **Runtime** — the safety net stays: `useWindow(id)` returns `null`, `navigate` returns `false` — a miss degrades gracefully even if dynamic code sneaks one through
+4. **Runtime** — the safety net stays: `useWindow(id)` on a missing window yields an invalid handle (test `.closed`), `navigate` returns `false` — a miss degrades gracefully even if dynamic code sneaks one through
 
 ## Current state
 
@@ -319,7 +166,7 @@ New diagnostics following the existing `mx-*` convention:
 - **Props typing** — `props` comes from `data`/`navigate` args; types are inferred from the component signature or declared (`interface PageProps`)
 - **Hot reload in dev** — adding/removing a `route.mx` updates the manifest live; navigating to a route mid-edit re-mounts it
 - **Window ids** — ~~auto (route id) vs explicit (`id` in config); both must be resolvable by `useWindow`~~ **Decided 2026-09-20:** explicit `id` in config, interned to WID; by-route lookup (`useWindow("/route")`) returns the most-recently-focused live window on that route. Duplicate explicit ids stay a build error (`mx-window-duplicate`).
-- **`<a>` prop passing** — `navigate` takes a props object; what carries props on a link? (query-like `href="/x?y=1"` vs `data={…}` attr — undecided, implementation detail)
+- **`<a>` prop passing** — ~~query-like `href="/x?y=1"` vs `data={…}` attr — undecided~~ **Decided 2026-09-21:** `data={…}` attr. Query strings imply URL parsing Morph will never need.
 - **Nested folders** — `/auth/login` nests naturally; is there a limit to depth (no — same as Next.js)
 - **Dynamic segments** — not planned (native windows ≠ URL routes). Open to feedback if real apps need them: `suggestions.morph@levizr.com`
 

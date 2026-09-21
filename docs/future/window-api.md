@@ -6,6 +6,8 @@
 
 > **Decisions update (2026-09-20):** ids intern to integers (**WID** for instances, **RID** for routes — MID-style, no runtime string lookup), markup navigation is **`<a href>`**, and C++ gets a first-class window API (`app::windows::*`). See [Decisions — old vs new](#decisions--old-vs-new).
 
+> **Shipped → main docs.** `new Window`, `useWindow` (+methods/properties), and `navigate` are implemented and documented for users in [Windows & Routes](../guides/windows-and-routing.md) and [`Window` / `useWindow`](../api/windows.md). This page keeps the full target surface, open questions, and what remains. Two honest deltas from the original design: handles lowered as **WID ints** (not objects — `useWindow(id)` yields an invalid handle tested via `.closed`, not `null`), and static WID interning gave way to runtime minting + registry lookup (switch dispatch is future work).
+
 A programmatic API for creating and managing windows from JavaScript — `new Window(...)`, the `useWindow` hook, `App.quit()`, `App.on(...)` — layered on top of the existing declarative system. Today windows are declared via the `windowConfig` export or `<morph-window>`; this adds runtime control.
 
 ## Why it matters
@@ -16,6 +18,8 @@ A programmatic API for creating and managing windows from JavaScript — `new Wi
 - **Imperative escape hatch** — declarative conventions remain, but anything can be done in code
 
 ## Planned API surface
+
+The target surface (shipped subset: constructor, `navigate`, `close`, `show`/`hide`, `closed`, `title`, `on('close')`, `useWindow` — see [main docs](../api/windows.md); the rest below is future):
 
 ```ts
 class Window {
@@ -163,7 +167,8 @@ Lowering detail: string literals never reach the runtime. The manifest pass owns
 | CSS import (`import "./x.css"`; `CSS.load()` deprecated) | ✅ Shipped |
 | `windowConfig` export + `<morph-window>` | ✅ Shipped (declarative) |
 | `WindowManager` (register/close/allClosed) | ✅ Shipped |
-| `Window` / `App` classes, `useWindow` hook | ❌ Not built |
+| `new Window` / `useWindow` / `navigate` / `close` / `show` / `hide` / `closed` / `title` / `on('close')` | ✅ Shipped ([main docs](../api/windows.md)) |
+| `Window` / `App` classes (full surface: `ready`, `load`, `id`, `width`/`height` props, `resize`/`focus` events) | ❌ Not built |
 | C++ `app::windows::*` + `app::routes::` in `morph_api.h` | ❌ Not built |
 | `.d.ts` for imperative API | ❌ Not built |
 
@@ -182,11 +187,9 @@ Lowering detail: string literals never reach the runtime. The manifest pass owns
 | 3 | Window control JS-only | **C++ API too** (`app::windows::*`, RID in / WID out, `JsObject` data, `on_close`) | Tray/hotkey/C++-driven flows; explicit WID keeps FFI honest |
 | 4 | `morph-*` event actions for windows (claimed "already generated" — never was) | **`<a href>`** for markup (see [file-routing.md](file-routing.md)) | Browser-familiar; nothing to migrate |
 
-## Build steps (when picked up)
+## Build steps (remaining)
 
-1. `Window` class in C++ wrapping `MorphWindow` + registration with `WindowManager` (WID-keyed, `shared_ptr`)
-2. Manifest lookup for `new Window(routeId, config)` → RID lowering + `WindowConfig` parsing in the TS translator + `.d.ts`
-3. `useWindow()` / `useWindow(id)` compiler (WID/RID emission) + runtime registry
-4. C++ `app::windows::*` + `app::routes::` in `morph_api.h` + `native-cpp.md` docs
-5. `App` singleton (quit / ready / before-quit events)
-6. Test app: login window → button → dynamically creates a settings window (the Phase-2 validation app from the original design plan); same flow driven once from JSX and once from `native.cpp`
+1. C++ `app::windows::*` + `app::routes::` in `morph_api.h` + `native-cpp.md` docs
+2. `App` singleton (quit / ready / before-quit events)
+3. `Window.ready()`, `resize`/`focus` events, `.d.ts`, full `Window` object surface
+4. Test app: login window → button → dynamically creates a settings window (the Phase-2 validation app from the original design plan); same flow driven once from JSX and once from `native.cpp`

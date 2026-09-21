@@ -4,6 +4,8 @@
 
 > **Note:** This is a design record, not a commitment. It exists so `new Window(RID)`, `navigate()`, and internal `<a href>` get built on answered questions instead of silent guesses. Open questions for the owner are at the bottom.
 
+> **Shipped → main docs.** Mounts, per-instance state, props, and independence are implemented and documented for users in [Windows & Routes](../guides/windows-and-routing.md) and [`Window` / `useWindow`](../api/windows.md). This page keeps the internals (contexts, scopes, dispatch, factories) and what remains.
+
 ## Why this needs its own design
 
 Mounting a route is easy for *nodes* and hard for *state*. Today everything is global:
@@ -81,18 +83,9 @@ A function defined in `route.mx` is a namespaced module binding (`app::routes::a
 
 Consequence: route module-level functions, classes, and globals **must not reference route state or props** — they emit at namespace scope where no `ctx` exists (a baked `ctx->` there is a build error with a clear message, mirroring "entry components must not declare props"). Helpers take explicit parameters instead. Effects, handlers, and node code reference `ctx` freely — they all emit inside the mount function.
 
-### Props: `JsObject` in, plain C++ out (decided 2026-09-20)
+### Props: `JsObject` in, plain C++ out (decided 2026-09-20, ✅ shipped)
 
-```cpp
-std::shared_ptr<Context> mount(MorphWindow* win, WID wid, const JsObject& props);
-```
-
-`JsValue` appears **only in the mount prologue** — one extraction per declared prop — and never in context members, node code, or state:
-
-- Scalar props (`number`/`string`/`boolean`) extract to plain C++ members (`int userId;`) via total coercions (`as_int`/`as_string`/`as_bool` — never throw; unconvertible yields zero values; strings are never silently parsed as numbers).
-- Composite props (arrays/objects) keep `JsArray`/`JsObject` members — they honestly *are* JS values; no plain-C++ equivalent exists.
-- Missing props read as `undefined` → coerce to zero values (never crash); missing *required* props log loudly at mount.
-- The mount prologue is the single choke point, so future callers (JS lowering, C++ API) share one conversion rule.
+User-facing rules: [Windows & Routes](../guides/windows-and-routing.md#props). Internals: one extraction per declared prop in the mount prologue (the only `JsValue` touchpoint) via total `as_*` coercions — never throw, unconvertible yields zero values, strings never parsed as numbers. Composite props keep `JsArray`/`JsObject` members. Missing *required* props log loudly at mount. The prologue is the single choke point for all future callers.
 
 ### `useWindow()` lowers to a captured `__wid`
 
@@ -118,13 +111,13 @@ const WID __wid = wid;   // useWindow() → handle for THIS window
 
 v1 routes are driven via props (in) and events (out). Native `(rid, mount, name)` state access needs instance addressing the C++ API doesn't have yet — follow-up, not v1. `app::windows::*` (3a) covers window-level control; page-internals control waits.
 
-## Build order (when 3b is approved)
+## Build order (status)
 
-1. Runtime: `destroy_effect` + `create_effect_scoped`/`MountScope` + manager `m_mounts` + `MountHandle`.
-2. Codegen: route graph builds, `Context` + `mount`/`unmount` emission, route `state_map`, per-mount mid dispatch, `__wid` binding.
-3. `new Window(RID, config)` + `navigate()` + internal `<a href>` lowering (all three are one-line RID calls once mounts exist).
-4. Props extraction + literal-props lints.
-5. Validation app: one route opened twice with different `data` (independent counters — the proof), navigated, cached, unmounted; `mid` inside a route driving per-mount instances.
+1. Runtime ✅ — `destroy_effect` + `create_effect_scoped`/`MountScope` + manager `m_mounts` + `MountHandle`.
+2. Codegen ✅ — route graph builds, `Context` + `mount`/`unmount` emission, route `state_map`, per-mount mid dispatch, `__wid` binding.
+3. Lowering ✅ (`new Window` + `navigate`; internal `<a href>` still open) — one-line RID calls now mounts exist.
+4. Props extraction ✅ + literal-props lints ❌.
+5. Validation ✅ (same route twice proven; `mid`-in-route untested) — cache ❌, `native.cpp`-driven flow ❌.
 
 ## Decisions (owner, 2026-09-20)
 

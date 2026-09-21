@@ -727,6 +727,25 @@
         "changefreq": "monthly"
       },
       {
+        "title": "Window and useWindow API Reference",
+        "slug": "api/windows",
+        "file": "api/windows",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Window API: new Window with route config and data props, useWindow handle access, navigate/close/show/hide/closed/title/on-close, lifecycle safety, and scope rules.",
+        "keywords": [
+          "morph Window",
+          "morph useWindow",
+          "morph new Window",
+          "morph navigate",
+          "morph window handle"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.9,
+        "changefreq": "monthly"
+      },
+      {
         "title": "Which Morph API Do I Need",
         "slug": "api/faq/choosing",
         "file": "api/faq/choosing",
@@ -891,6 +910,25 @@
         "publishedAt": "2026-09-05",
         "priority": 0.8,
         "changefreq": "weekly"
+      },
+      {
+        "title": "Windows and Routing Guide",
+        "slug": "guides/windows-and-routing",
+        "file": "guides/windows-and-routing",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "How route.mx files become pages and windows, windowConfig fallback, props, same-route independence, lifecycle, memory model, page cache policy, and typo safety.",
+        "keywords": [
+          "morph routing guide",
+          "morph route.mx",
+          "morph windows guide",
+          "morph navigation",
+          "morph windowConfig"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.8,
+        "changefreq": "monthly"
       }
     ]
   },

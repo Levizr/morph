@@ -10,6 +10,7 @@ This section documents all core Morph APIs available from the `'morph'` package.
 | [`morphShared`](morphShared.md) | Global shared module-scoped state | Module scope (top level) |
 | [`morphEvent`](morphEvent.md) | Fire-and-forget event channels | Module scope (top level) |
 | [`morphEffect`](morphEffect.md) | Side effects with cleanup | Inside component function |
+| [`Window` / `useWindow`](windows.md) | Runtime windows: open, control, navigate | Component body / event handlers (handles are WID ids) |
 
 ## Importing
 
@@ -17,6 +18,7 @@ All APIs are imported from the `'morph'` package:
 
 ```tsx
 import { morphState, morphShared, morphEvent, morphEffect } from 'morph'
+import { Window, useWindow } from 'morph'
 ```
 
 ## Scope Rules (Enforced by Linter)
