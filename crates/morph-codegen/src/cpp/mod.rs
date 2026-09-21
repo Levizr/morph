@@ -193,7 +193,8 @@ impl<'a> CppEmitter<'a> {
             ));
             // WID-keyed registry (shared ownership) + one-time string alias
             // for dynamic id resolution. The main loop pumps the registry,
-            // so the {var} local below is setup-only.
+            // so the {var} local below is setup-only — it is reset() at
+            // the end of this window's block.
             code.push_str(&format!("wm.registerWindow({wid}, {var});\n"));
             code.push_str(&format!(
                 "wm.registerAlias(\"{}\", {wid});\n",
@@ -269,7 +270,14 @@ impl<'a> CppEmitter<'a> {
             // `useWindow()` with no argument resolves to this window's WID
             // (arg-free marker — plain substitution is exact and safe).
             let code = code.replace("__morph_current_window()", &wid.to_string());
-            let code = resolve_window_placeholders(&code, self.routes)?;
+            let mut code = resolve_window_placeholders(&code, self.routes)?;
+            // Release the setup-only local: the registry owns the window
+            // from here on. A lingering shared_ptr would keep a closed
+            // entry window on screen — destroyLocked erases the registry
+            // entry, but the X window dies only when the last owner
+            // releases (the app would then exit only once every window
+            // is gone, looking like "main died with the popup").
+            code.push_str(&format!("{var}.reset();\n"));
             window_code_parts.push(lower_channels(code));
         }
         let window_code = window_code_parts.join("\n");
@@ -2889,6 +2897,29 @@ mod tests {
         assert!(on.contains("wm.restorePage(wid, rid, props)"), "restore: {on}");
         let empty = generate_window_helpers(&[], "App", 800, 600, 2);
         assert!(empty.is_empty(), "no routes: {empty}");
+    }
+
+    #[test]
+    fn entry_window_local_is_released_after_setup() {
+        // The registry owns entry windows: a lingering setup-only
+        // shared_ptr would keep an X-closed entry window on screen
+        // (destroyLocked erases the registry entry, but the X window
+        // dies only when the last owner releases).
+        let windows = vec![IRWindow {
+            window_id: "main".to_string(),
+            title: "T".to_string(),
+            width: 800,
+            height: 600,
+            visible: true,
+            renderer: "flash".to_string(),
+            ..Default::default()
+        }];
+        let dir = std::env::temp_dir().join(format!("morph_win_reset_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        CppEmitter::new(&windows).emit(&dir).unwrap();
+        let app = std::fs::read_to_string(dir.join("app.cpp")).unwrap();
+        assert!(app.contains("win_main.reset();"), "release: {app}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
