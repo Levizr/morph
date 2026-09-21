@@ -299,13 +299,19 @@ public:
     {
 #if defined(__linux__)
         std::string cmd = "xdg-open \"" + url + "\" >/dev/null 2>&1 &";
-        (void)std::system(cmd.c_str());
+        if (std::system(cmd.c_str()))
+        {
+        }
 #elif defined(__APPLE__)
         std::string cmd = "open \"" + url + "\" >/dev/null 2>&1 &";
-        (void)std::system(cmd.c_str());
+        if (std::system(cmd.c_str()))
+        {
+        }
 #elif defined(_WIN32)
         std::string cmd = "start \"\" \"" + url + "\"";
-        (void)std::system(cmd.c_str());
+        if (std::system(cmd.c_str()))
+        {
+        }
 #endif
     }
 
