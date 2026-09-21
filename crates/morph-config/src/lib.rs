@@ -11,11 +11,61 @@ pub struct WindowConfig {
     pub height: u32,
     #[serde(default = "default_title")]
     pub title: String,
+    /// Owner window id/route, or `""` for none (independent top-level —
+    /// the browser/Electron default; ownership is always explicit).
+    /// Resolved to a WID at lowering; `"auto"` means most-recently-focused.
+    #[serde(default)]
+    pub parent: String,
+    /// Modal windows block every other window's close while open.
+    /// Requires a resolvable parent (hard error without one).
+    #[serde(default)]
+    pub modal: bool,
+    /// Presentation role (`""`/`"default"`/`"dialog"`/`"popup"`).
+    /// Hints only — never gates behavior. Parsed via `WindowRole`.
+    #[serde(default)]
+    pub role: String,
 }
 
 impl Default for WindowConfig {
     fn default() -> Self {
-        Self { width: 800, height: 600, title: "Morph App".to_string() }
+        Self {
+            width: 800,
+            height: 600,
+            title: "Morph App".to_string(),
+            parent: String::new(),
+            modal: false,
+            role: String::new(),
+        }
+    }
+}
+
+/// Window presentation role: interned int at codegen, window-manager
+/// hints only. New roles are additive (`3, 4, …`) — behavior comes from
+/// `parent` + `modal`, never from here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WindowRole {
+    #[default]
+    Default = 0,
+    Dialog = 1,
+    Popup = 2,
+}
+
+impl WindowRole {
+    /// Parse a role literal. Empty means default. Unknown roles are hard
+    /// errors — roles are a closed set, so anything else is a typo.
+    pub fn parse(s: &str) -> Result<Self> {
+        match s {
+            "" | "default" => Ok(Self::Default),
+            "dialog" => Ok(Self::Dialog),
+            "popup" => Ok(Self::Popup),
+            other => anyhow::bail!(
+                "unknown window role {other:?} (expected \"default\", \"dialog\", or \"popup\")"
+            ),
+        }
+    }
+
+    pub const fn as_int(self) -> i32 {
+        self as i32
     }
 }
 
@@ -389,6 +439,31 @@ mod tests {
         assert_eq!(all.navigation.cache.capacity().unwrap(), -1);
         let bad = MorphConfig::parse_str(r#"{"navigation":{"cache":"sometimes"}}"#).unwrap();
         assert!(bad.navigation.cache.capacity().is_err());
+    }
+
+    #[test]
+    fn parse_window_roles() {
+        assert_eq!(WindowRole::parse("").unwrap(), WindowRole::Default);
+        assert_eq!(WindowRole::parse("default").unwrap(), WindowRole::Default);
+        assert_eq!(WindowRole::parse("dialog").unwrap(), WindowRole::Dialog);
+        assert_eq!(WindowRole::parse("popup").unwrap(), WindowRole::Popup);
+        assert_eq!(WindowRole::Popup.as_int(), 2);
+        assert!(WindowRole::parse("sheet").is_err());
+    }
+
+    #[test]
+    fn parse_window_ownership_config() {
+        let cfg = MorphConfig::parse_str(
+            r#"{"window":{"width":640,"parent":"main","modal":true,"role":"popup"}}"#,
+        )
+        .unwrap();
+        assert_eq!(cfg.window.parent, "main");
+        assert!(cfg.window.modal);
+        assert_eq!(WindowRole::parse(&cfg.window.role).unwrap(), WindowRole::Popup);
+        let bare = MorphConfig::parse_str("{}").unwrap();
+        assert_eq!(bare.window.parent, "");
+        assert!(!bare.window.modal);
+        assert_eq!(WindowRole::parse(&bare.window.role).unwrap(), WindowRole::Default);
     }
 
     #[test]
