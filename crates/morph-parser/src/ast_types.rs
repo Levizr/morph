@@ -43,6 +43,12 @@ pub struct WindowConfig {
     pub min_height: Option<u32>,
     pub visible: bool,
     pub modal: bool,
+    /// Owner id/route, `""` = none, `"auto"` = most-recently-focused.
+    /// String literals only; anything else is ignored (consistent with
+    /// the other keys — dynamic values cannot lower to WIDs).
+    pub parent: String,
+    /// Presentation role literal (`""` = default). Validated at lowering.
+    pub role: String,
 }
 
 #[derive(Debug, Clone)]

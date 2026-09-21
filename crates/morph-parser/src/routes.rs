@@ -22,6 +22,12 @@ pub struct RouteEntry {
     pub title: Option<String>,
     pub width: Option<u32>,
     pub height: Option<u32>,
+    /// Owner id/route from `windowConfig.parent` (`""` = none).
+    pub parent: String,
+    /// `windowConfig.modal`.
+    pub modal: bool,
+    /// `windowConfig.role` literal (`""` = default; validated at lowering).
+    pub role: String,
     /// Whether the file has a default-export component (`mx-route-no-export`).
     pub has_default_export: bool,
 }
@@ -50,6 +56,9 @@ pub fn scan_routes(src_root: &Path) -> Vec<RouteEntry> {
             title: wc.as_ref().map(|w| w.title.clone()),
             width: wc.as_ref().map(|w| w.width),
             height: wc.as_ref().map(|w| w.height),
+            parent: wc.as_ref().map(|w| w.parent.clone()).unwrap_or_default(),
+            modal: wc.as_ref().is_some_and(|w| w.modal),
+            role: wc.as_ref().map(|w| w.role.clone()).unwrap_or_default(),
             has_default_export,
         });
     }

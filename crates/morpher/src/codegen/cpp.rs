@@ -2849,6 +2849,86 @@ impl<'a> CppTranslator<'a> {
         format!("JsObject{{{}}}", pairs.join(", "))
     }
 
+    /// `new Window` config object with ownership keys pre-lowered.
+    /// `parent`/`modal`/`role` become int-yielding C++ expressions so no
+    /// strings reach the runtime; every other key emits normally. Type
+    /// violations are C++ `static_assert`s (this file's hard-error idiom —
+    /// see `Window.ready`), so the build fails with the message inline.
+    fn emit_window_opts(&mut self, obj: &ObjectExpression<'a>) -> String {
+        if obj.properties.is_empty() {
+            return "JsObject{}".to_string();
+        }
+        let mut pairs = Vec::new();
+        for prop in &obj.properties {
+            let ObjectPropertyKind::ObjectProperty(p) = prop else {
+                continue;
+            };
+            let Some(key) = self.property_key_to_string(&p.key) else {
+                continue;
+            };
+            match key.as_str() {
+                "parent" => {
+                    let lowered = self.lower_parent_value(&p.value);
+                    pairs.push(format!("{{\"parent\", {lowered}}}"));
+                }
+                "modal" => {
+                    let lowered = self.lower_modal_value(&p.value);
+                    pairs.push(format!("{{\"modal\", {lowered}}}"));
+                }
+                "role" => {
+                    let lowered = self.lower_role_value(&p.value);
+                    pairs.push(format!("{{\"role\", {lowered}}}"));
+                }
+                _ => {
+                    let val = self.emit_expression(&p.value);
+                    pairs.push(format!("{{\"{key}\", {val}}}"));
+                }
+            }
+        }
+        format!("JsObject{{{}}}", pairs.join(", "))
+    }
+
+    /// Lower a `parent` value to an int-yielding C++ expression.
+    /// Handles (WID ints) and arbitrary int expressions pass through a
+    /// normalizing `JsValue(…).as_int()`; strings resolve by form.
+    fn lower_parent_value(&mut self, value: &Expression<'a>) -> String {
+        match value {
+            Expression::StringLiteral(s) => match s.value.as_str() {
+                "" => "kInvalidWid".to_string(),
+                "auto" => "WindowManager::get().focusedWid()".to_string(),
+                id if id.starts_with('/') => {
+                    format!("__morph_route_wid(\"{id}\")")
+                }
+                id => format!("WindowManager::get().widForAlias(\"{id}\")"),
+            },
+            Expression::NullLiteral(_) => "kInvalidWid".to_string(),
+            other => format!("JsValue({}).as_int()", self.emit_expression(other)),
+        }
+    }
+
+    /// Lower a `modal` value: bool literals pass through; anything
+    /// non-bool is a build error (silent truthiness would lie).
+    fn lower_modal_value(&mut self, value: &Expression<'a>) -> String {
+        match value {
+            Expression::BooleanLiteral(_) => self.emit_expression(value),
+            _ => "[] { static_assert(sizeof(\"Window modal\") == 0, \"mx-windowconfig-type: `modal` must be a boolean\"); return false; }()".to_string(),
+        }
+    }
+
+    /// Lower a `role` literal to its interned int (unknown roles fail the
+    /// build — roles are a closed set, so anything else is a typo).
+    fn lower_role_value(&mut self, value: &Expression<'a>) -> String {
+        match value {
+            Expression::StringLiteral(s) => {
+                match morph_config::WindowRole::parse(s.value.as_str()) {
+                    Ok(role) => role.as_int().to_string(),
+                    Err(_) => "[] { static_assert(sizeof(\"Window role\") == 0, \"mx-windowconfig-type: unknown window role (expected \\\"default\\\", \\\"dialog\\\", or \\\"popup\\\")\"); return 0; }()".to_string(),
+                }
+            }
+            _ => "[] { static_assert(sizeof(\"Window role\") == 0, \"mx-windowconfig-type: `role` must be a string literal\"); return 0; }()".to_string(),
+        }
+    }
+
     /// Dereference a `shared_ptr` variable holding a scalar value.
     ///
     /// Escape analysis wraps captured scalars in `shared_ptr`, but use sites
@@ -4274,7 +4354,10 @@ impl<'a> CppTranslator<'a> {
         // a route argument (a zero-arg user class named Window keeps
         // working); non-literal routes fail later with mx-route-unknown.
         if callee == "Window" && !args.is_empty() {
-            let opts = args.get(1).cloned().unwrap_or_else(|| "JsObject{}".to_string());
+            let opts = match n.arguments.get(1).and_then(|a| a.as_expression()) {
+                Some(Expression::ObjectExpression(obj)) => self.emit_window_opts(obj),
+                _ => args.get(1).cloned().unwrap_or_else(|| "JsObject{}".to_string()),
+            };
             return format!("__morph_new_window({}, {})", args[0], opts);
         }
         if callee == "Error" {
@@ -4600,6 +4683,41 @@ mod tests {
         assert!(out.contains("__morph_win_closed(w)"), "{out}");
         assert!(out.contains("__morph_win_title(w)"), "{out}");
         assert!(out.contains("__morph_win_set_title(w,"), "{out}");
+    }
+
+    #[test]
+    fn window_ownership_opts_lower_to_ints() {
+        let out = translate_stmts(
+            "const main = useWindow();\n\
+             const a = new Window(\"/settings\", { parent: main, modal: true, role: \"popup\", width: 500 });\n\
+             const b = new Window(\"/settings\", { parent: \"login-a\" });\n\
+             const c = new Window(\"/settings\", { parent: \"/auth/login\" });\n\
+             const d = new Window(\"/settings\", { parent: \"auto\" });\n\
+             const e = new Window(\"/settings\", { parent: null });\n\
+             const f = new Window(\"/settings\", { role: \"dialog\" });\n",
+        );
+        assert!(out.contains("{\"parent\", JsValue(main).as_int()}"), "{out}");
+        assert!(out.contains("{\"modal\", true}"), "{out}");
+        assert!(out.contains("{\"role\", 2}"), "{out}");
+        assert!(out.contains("{\"width\", 500}"), "{out}");
+        assert!(out.contains("widForAlias(\"login-a\")"), "{out}");
+        assert!(out.contains("__morph_route_wid(\"/auth/login\")"), "{out}");
+        assert!(out.contains("focusedWid()"), "{out}");
+        assert!(out.contains("{\"parent\", kInvalidWid}"), "{out}");
+        assert!(out.contains("{\"role\", 1}"), "{out}");
+    }
+
+    #[test]
+    fn window_ownership_type_violations_are_build_errors() {
+        for bad in [
+            "new Window(\"/s\", { modal: \"yes\" });",
+            "new Window(\"/s\", { role: \"sheet\" });",
+            "new Window(\"/s\", { role: 42 });",
+        ] {
+            let out = translate_stmts(&format!("const w = {bad}\n"));
+            assert!(out.contains("static_assert"), "{bad}: {out}");
+            assert!(out.contains("mx-windowconfig-type"), "{bad}: {out}");
+        }
     }
 
     #[test]

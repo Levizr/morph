@@ -858,6 +858,7 @@ pub fn resolve_window_placeholders(src: &str, routes: &[RouteEntry]) -> anyhow::
             "__morph_new_window(",
             "__morph_win_navigate(",
             "__morph_use_window(",
+            "__morph_route_wid(",
             "__morph_win_closed(",
             "__morph_win_title(",
             "__morph_win_set_title(",
@@ -904,6 +905,23 @@ pub fn resolve_window_placeholders(src: &str, routes: &[RouteEntry]) -> anyhow::
                         )
                     }
                     _ => format!("WindowManager::get().widForAlias({arg})"),
+                }
+            }
+            "__morph_route_wid(" => {
+                // `parent: "/route"` inside `new Window` opts (lowered by
+                // morpher): route string → RID const, resolved at build.
+                let arg = args.first().map_or("", String::as_str);
+                match unquote_cpp(arg) {
+                    Some(id) => {
+                        let entry = lookup_route(routes, &id)?;
+                        format!(
+                            "WindowManager::get().widForRoute(::app::routes::{})",
+                            entry.const_name
+                        )
+                    }
+                    None => {
+                        anyhow::bail!("mx-route-unknown: window parent route must be a string literal")
+                    }
                 }
             }
             "__morph_win_closed(" => {
@@ -2831,6 +2849,9 @@ mod tests {
                 title: Some("Login".to_string()),
                 width: Some(400),
                 height: Some(320),
+                parent: String::new(),
+                modal: false,
+                role: String::new(),
                 has_default_export: true,
             },
             RouteEntry {
@@ -2841,6 +2862,9 @@ mod tests {
                 title: None,
                 width: None,
                 height: None,
+                parent: String::new(),
+                modal: false,
+                role: String::new(),
                 has_default_export: true,
             },
         ];
@@ -2879,6 +2903,9 @@ mod tests {
                 title: None,
                 width: None,
                 height: None,
+                parent: String::new(),
+                modal: false,
+                role: String::new(),
                 has_default_export: true,
             },
             IRWindow::default(),

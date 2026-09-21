@@ -1541,6 +1541,7 @@ name = "morpher"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "morph-config",
  "morph-parser",
  "oxc_allocator",
  "oxc_ast",

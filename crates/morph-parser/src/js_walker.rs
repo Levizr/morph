@@ -732,6 +732,8 @@ impl<'src> MxWalker<'src> {
                 min_height: None,
                 visible: true,
                 modal: false,
+                parent: String::new(),
+                role: String::new(),
             };
             for prop in &obj.properties {
                 let ObjectPropertyKind::ObjectProperty(p) = prop else { continue };
@@ -783,6 +785,16 @@ impl<'src> MxWalker<'src> {
                     "modal" => {
                         if let Expression::BooleanLiteral(b) = &p.value {
                             config.modal = b.value;
+                        }
+                    }
+                    "parent" => {
+                        if let Some(v) = extract_string_lit(&p.value) {
+                            config.parent = v;
+                        }
+                    }
+                    "role" => {
+                        if let Some(v) = extract_string_lit(&p.value) {
+                            config.role = v;
                         }
                     }
                     _ => {}

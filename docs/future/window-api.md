@@ -250,3 +250,8 @@ from the existing `cursorPosCb` pipeline) + `glfwRawMouseMotion` where
 supported + ESC releases by default. Headless-untestable (screenshot/GIF
 verification like all display behavior). Use cases: 3D/model viewers,
 infinite-pan canvas, dial widgets — needs no render-pipeline changes.
+
+Yes, we know this is not a game engine. No, that will not stop us from
+stealing the game engines' best trick — the call costs one line, the
+feel win is enormous, and somebody out there is absolutely going to
+ship a tiny FPS in a popup window just to prove a point.

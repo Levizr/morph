@@ -5897,6 +5897,9 @@ export function Badge(props: { text: number }) {
             title: None,
             width: None,
             height: None,
+            parent: String::new(),
+            modal: false,
+            role: String::new(),
             has_default_export: true,
         }
     }
