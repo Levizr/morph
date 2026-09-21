@@ -460,6 +460,17 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 
         for (auto& line : lines) {
             float lineCross = line.crossSize;
+            // A single-line flex container with a definite cross size
+            // stretches its line to fill it (CSS flexbox §9.7): otherwise
+            // `align-items: stretch` has nothing to stretch
+            // intrinsically-empty items to (e.g. flex-grown cells with no
+            // content of their own collapse to zero on the cross axis).
+            if (!flexWrap) {
+                float definiteCross = -1.0f;
+                if (isCol && style.explicitWidth >= 0.0f) definiteCross = cw;
+                if (!isCol && style.explicitHeight >= 0.0f) definiteCross = ch;
+                if (definiteCross > lineCross) lineCross = definiteCross;
+            }
             float extraGap = line.fItems.size() > 1 ? style.gap * (line.fItems.size() - 1) : 0.0f;
             float free = mainAvail - line.totalMain;
 

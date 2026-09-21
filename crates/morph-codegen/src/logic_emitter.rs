@@ -315,7 +315,17 @@ fn translate_handler(target: &str, maps: &AmbientMaps) -> String {
         };
     }
     let cpp = translate_expr(&body, maps);
-    format!("[](JsObject e) {{ {}; }}", cpp.trim().trim_end_matches(';'))
+    // Same capture rule as the build emitter (see node_emitter.rs): a handler
+    // inside a list-item factory that references `__it` / `__index` must
+    // capture the persistent per-row binding or it won't compile.
+    let mut caps: Vec<&str> = Vec::new();
+    if cpp.contains("__it") {
+        caps.push("&__it");
+    }
+    if cpp.contains("__index") {
+        caps.push("&__index");
+    }
+    format!("[{}](JsObject e) {{ {}; }}", caps.join(", "), cpp.trim().trim_end_matches(';'))
 }
 
 /// Translate a branch condition (already C++-leaning from the builder is
@@ -632,6 +642,7 @@ fn emit_conditional_class_effects(lines: &mut Vec<String>, node: &IRNode, indent
             }
         }
         lines.push(format!("{indent}    }}"));
+        lines.push(format!("{indent}    n->markDirty(LayoutDirty);"));
         lines.push(format!("{indent}    n->markDirty(PaintDirty);"));
         lines.push(format!("{indent}}});"));
     }

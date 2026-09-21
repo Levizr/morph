@@ -1,0 +1,9 @@
+{
+  "name": "spike101",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 700, "title": "Spike101" },
+  "dependencies": {},
+  "cpp_sources": [],
+  "renderer": "flash",
+  "build": { "wayland": false, "system_freetype": false, "upx": false, "upx_version": "" }
+}

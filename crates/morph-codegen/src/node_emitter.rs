@@ -830,6 +830,56 @@ pub fn emit_node_with_state(
     lines.join("\n")
 }
 
+/// Flex role pass-through for a `__conditional__` mount-point wrapper.
+///
+/// The wrapper is a mount point, not a layout box: when the branch root plays
+/// a flex role (e.g. a `flex: 1` screen swapped by tabs), the wrapper's plain
+/// block box would sit between the flex parent and the flex child and silently
+/// break grow propagation (the child shrink-wraps to intrinsic content).
+/// Copying the flex role onto the wrapper makes the swap transparent.
+/// Only flex-role props are copied, so non-flex branches (login cards, inline
+/// spans, toasts) emit byte-identical output to before.
+fn conditional_flex_passthrough(node_id: &str, style: &IRStyle) -> Vec<String> {
+    let mut lines = Vec::new();
+    let ind = format!("{node_id}->style");
+    if style.display == "flex" {
+        lines.push(format!("{ind}.display = CSS::Display::Flex;"));
+        if style.flex_dir != "row" {
+            if let Some(lit) = keyword_literal("flexDirection", &style.flex_dir) {
+                lines.push(format!("{ind}.flexDirection = {lit};"));
+            }
+        }
+        if style.gap > 0.0 {
+            lines.push(format!("{ind}.gap = {};", fmt(style.gap)));
+        }
+        if style.justify_content != "flex-start" {
+            if let Some(lit) = keyword_literal("justifyContent", &style.justify_content) {
+                lines.push(format!("{ind}.justifyContent = {lit};"));
+            }
+        }
+        if style.align_items != "stretch" {
+            if let Some(lit) = keyword_literal("alignItems", &style.align_items) {
+                lines.push(format!("{ind}.alignItems = {lit};"));
+            }
+        }
+        if style.flex_wrap != "nowrap" {
+            if let Some(lit) = keyword_literal("flexWrap", &style.flex_wrap) {
+                lines.push(format!("{ind}.flexWrap = {lit};"));
+            }
+        }
+    }
+    if style.flex_grow != 0.0 {
+        lines.push(format!("{ind}.flexGrow = {};", fmt(style.flex_grow)));
+    }
+    if style.flex_shrink != 1.0 {
+        lines.push(format!("{ind}.flexShrink = {};", fmt(style.flex_shrink)));
+    }
+    if style.flex_basis != "auto" {
+        lines.push(format!("{ind}.flexBasis = \"{}\";", style.flex_basis));
+    }
+    lines
+}
+
 fn emit_conditional(
     node: &IRNode,
     parent_id: Option<&str>,
@@ -840,6 +890,16 @@ fn emit_conditional(
 ) -> String {
     let mut lines =
         vec![format!("RectNode* {} = new RectNode(0.0f, 0.0f, 0.0f, 0.0f);", node.node_id)];
+    if features.contains("flex") {
+        let branch_style = node
+            .then_nodes
+            .first()
+            .map(|n| &n.style)
+            .or_else(|| node.else_nodes.first().map(|n| &n.style));
+        if let Some(s) = branch_style {
+            lines.extend(conditional_flex_passthrough(&node.node_id, s));
+        }
+    }
     let then_slot = format!("__cond_then_{}", node.node_id);
     let else_slot = format!("__cond_else_{}", node.node_id);
     lines.push(format!("auto {then_slot} = std::make_shared<MorphNode*>(nullptr);"));
@@ -1665,6 +1725,67 @@ pub(crate) fn css_field_reset(node_var: &str, field_name: &str, indent: &str) ->
     lines
 }
 
+/// Expand the CSS `flex` shorthand into grow/shrink/basis assignments.
+/// Mirrors `parse_flex_shorthand` in the IR builder (single number means
+/// grow with `0%` basis; `none`/`auto`/`initial` are keywords).
+fn flex_shorthand_to_cpp(node_var: &str, css_val: &str, indent: &str) -> Vec<String> {
+    let prefix = format!("{node_var}->style");
+    let out = |g: f32, s: f32, basis: &str| {
+        vec![
+            format!("{indent}        {prefix}.flexGrow = {};", fmt(g)),
+            format!("{indent}        {prefix}.flexShrink = {};", fmt(s)),
+            format!("{indent}        {prefix}.flexBasis = \"{basis}\";"),
+        ]
+    };
+    match css_val.trim() {
+        "none" => out(0.0, 0.0, "auto"),
+        "auto" => out(1.0, 1.0, "auto"),
+        "initial" => out(0.0, 1.0, "auto"),
+        kw => {
+            let parts: Vec<&str> = kw.split_whitespace().collect();
+            let nums: Vec<f32> =
+                parts.iter().take(2).map(|p| p.parse::<f32>().unwrap_or(f32::NAN)).collect();
+            if nums.iter().any(|n| !n.is_finite()) {
+                return vec![];
+            }
+            match nums.len() {
+                1 => out(nums[0], 1.0, "0%"),
+                _ => {
+                    let basis = parts.get(2).copied().unwrap_or("0%");
+                    out(nums[0], nums[1], basis)
+                }
+            }
+        }
+    }
+}
+
+/// Expand `padding`/`margin` shorthand (1-4 lengths) into per-side assignments.
+/// Side order is top/right/bottom/left, matching the runtime's arrays.
+fn box_shorthand_to_cpp(
+    node_var: &str,
+    css_prop: &str,
+    css_val: &str,
+    indent: &str,
+) -> Vec<String> {
+    let vals: Vec<f32> = css_val
+        .split_whitespace()
+        .map(|p| p.trim_end_matches("px").trim().parse::<f32>())
+        .collect::<Result<Vec<f32>, _>>()
+        .unwrap_or_default();
+    let sides = match vals.len() {
+        1 => [vals[0], vals[0], vals[0], vals[0]],
+        2 => [vals[0], vals[1], vals[0], vals[1]],
+        3 => [vals[0], vals[1], vals[2], vals[1]],
+        4 => [vals[0], vals[1], vals[2], vals[3]],
+        _ => return vec![],
+    };
+    sides
+        .iter()
+        .enumerate()
+        .map(|(i, v)| format!("{indent}        {node_var}->style.{css_prop}[{i}] = {};", fmt(*v)))
+        .collect()
+}
+
 /// Resolve a literal CSS value to C++ `<node_var>->style.<field>` assignments.
 pub(crate) fn css_val_to_cpp(
     node_var: &str,
@@ -1672,6 +1793,23 @@ pub(crate) fn css_val_to_cpp(
     css_val: &str,
     indent: &str,
 ) -> Vec<String> {
+    // Shorthands never reach css_to_style_field: expand them here, mirroring
+    // the IR builder's static-style parsing. A dropped `flex` silently
+    // un-grows the node on class swap; a dropped `padding` un-insets it.
+    if css_prop == "flex" {
+        return flex_shorthand_to_cpp(node_var, css_val, indent);
+    }
+    if css_prop == "padding" || css_prop == "margin" {
+        return box_shorthand_to_cpp(node_var, css_prop, css_val, indent);
+    }
+    if css_prop == "overflow-x" || css_prop == "overflow-y" {
+        // The runtime tracks a single overflow mode; single-axis values
+        // apply to it exactly like `overflow`.
+        if let Some(lit) = keyword_literal("overflow", css_val.trim()) {
+            return vec![format!("{indent}        {node_var}->style.overflow = {lit};")];
+        }
+        return vec![];
+    }
     let Some((field_name, val_type)) = css_to_style_field(css_prop) else { return vec![] };
     let prefix = format!("{node_var}->style.{field_name}");
     let out: Vec<String> = match val_type {
@@ -1679,7 +1817,7 @@ pub(crate) fn css_val_to_cpp(
             let v = css_val.trim();
             let num = v.trim_end_matches("px").trim();
             match num.parse::<f32>() {
-                Ok(f) => vec![format!("{indent}        {prefix} = {}f;", fmt(f))],
+                Ok(f) => vec![format!("{indent}        {prefix} = {};", fmt(f))],
                 Err(_) => vec![],
             }
         }
@@ -1917,6 +2055,10 @@ fn emit_reactive_effects(
                 }
             }
             lines.push(format!("{indent}    }}"));
+            // Class swaps can change layout (display/flex/size): repainting
+            // alone leaves stale boxes, so relayout too. LayoutDirty on the
+            // node propagates SubtreeDirty to the parent, which re-runs layout.
+            lines.push(format!("{indent}    {id}->markDirty(LayoutDirty);"));
             lines.push(format!("{indent}    {id}->markDirty(PaintDirty);"));
             lines.push(close_effect.to_string());
         }

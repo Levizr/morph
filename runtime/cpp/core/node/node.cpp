@@ -48,12 +48,22 @@ void MorphNode::layoutIfNeeded(float px, float py, float parentW, float parentH,
         // layout() re-applies the child's own margins to px/py, so pass the
         // parent-assigned PRE-margin position and a margin-inclusive parent
         // width; otherwise re-layout double-applies the margins (frame 1).
+        //
+        // Only propagate force when this node did NOT just lay out its
+        // subtree itself: layout() lays out every child directly, clearing
+        // their flags. Forcing them to re-run would redundantly recompute —
+        // and a child's own layout() resets auto sizes (h = 0 with no
+        // explicit height), wiping parent-assigned flex grow/stretch sizes
+        // that the re-layout cannot reconstruct (own height ignores the
+        // passed parentH). Children that are genuinely dirty still run via
+        // their own flags.
+        bool propagateForce = (force || subtreeDirty) && !needsLayout;
         float cw = c->w > 0 ? (c->w + c->style.margin[3] + c->style.margin[1])
                             : (parentW - c->x + px);
         float ch = c->h > 0 ? c->h : (parentH - c->y + py);
         c->layoutIfNeeded(c->x - c->style.margin[3],
                           c->y - c->style.margin[0],
-                          cw, ch, r, stats, force || subtreeDirty);
+                          cw, ch, r, stats, propagateForce);
     }
     if (needsLayout) clearDirty(SubtreeDirty);
 }

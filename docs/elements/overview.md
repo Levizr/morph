@@ -36,7 +36,7 @@ Morph renders native elements using OpenGL. Not all HTML elements are supported 
 | `<del>`, `` | Strikethrough. |
 | `<q>` | Inline quotation (styled as inline text). |
 | `<label>` | Inline label text. |
-| `<a>` | Link (no navigation, styled as text). |
+| `<a>` | Link. `href="/route"` navigates the current window, `target="_blank"` opens a new window, external URLs open in the OS browser. |
 
 ## Interactive Elements
 
@@ -104,13 +104,19 @@ Declares a native window (alternative to the `windowConfig` export — use one, 
 
 See [Events](events.md) for the full list.
 
-### Morph-Specific
+### Navigation
 
-| Attribute | Notes |
+Navigation uses the standard `<a>` element — there are no `morph-*` action
+attributes:
+
+| Markup | Behavior |
 |---|---|
-| `morph-open` | Opens a URL or file on click. |
-| `morph-close` | Closes the window on click. |
-| `morph-navigate` | Navigates to a URL on click. |
+| `<a href="/settings">` | Navigate the current window to an internal route |
+| `<a href="/settings" target="_blank">` | Open an internal route as a new window |
+| `<a href="https://…">` | External URL — opens in the OS browser, never a Morph window |
+
+Internal `href`s are validated against the route manifest (`mx-route-unknown`
+on typos). See [Windows & Navigation](../faq/q-windows.md).
 
 ## Fragments
 

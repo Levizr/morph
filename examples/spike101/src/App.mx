@@ -1,0 +1,48 @@
+import { morphState } from 'morph'
+import './style.css'
+
+export const windowConfig = {
+  title: "Spike101",
+  width: 800,
+  height: 700,
+}
+
+export default function App() {
+  const [tab, setTab] = morphState("add")
+  const [label, setLabel] = morphState("")
+  const [amount, setAmount] = morphState("")
+  const [category, setCategory] = morphState("food")
+
+  function pickCategory(c: string) { setCategory(c) }
+
+  return (
+    <body>
+      <div className="app">
+        <div className="app-body">
+          <div className="gone">
+            <text>hidden one</text>
+          </div>
+          <div className="form-card">
+              <div className="card-head">
+                <text className="card-title">Add a transaction</text>
+                <text className="card-sub">controlled inputs</text>
+              </div>
+
+              <text className="field-label">Name</text>
+              <input className="field" value={amount} placeholder="e.g. Groceries"
+                     onChange={(e) => setAmount(e.value)} />
+
+              <text className="field-label">Amount</text>
+              <input className="field" value={label} placeholder="e.g. 24.50"
+                     onChange={(e) => setLabel(e.value)} />
+
+              <button className="btn-primary">Add transaction</button>
+          </div>
+          <div className="gone">
+            <text>hidden two</text>
+          </div>
+        </div>
+      </div>
+    </body>
+  )
+}

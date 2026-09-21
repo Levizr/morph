@@ -9,7 +9,7 @@ pub mod resolve;
 pub mod routes;
 
 pub use ast_types::*;
-pub use linter::{check as lint_check, lint};
+pub use linter::{check as lint_check, docs_url, lint};
 pub use resolve::{
     module_ns_path, module_ns_segments, resolve_graph, resolve_import_path, ModuleGraph,
     ResolvedModule,

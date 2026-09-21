@@ -236,6 +236,12 @@ pub(crate) fn log_lint_errors(
         if let Some(s) = &e.suggestion {
             println!("  {}  {} ", "hint:".dimmed(), s.dimmed());
         }
+        // Bare URL on its own segment so terminals render it as a clickable link.
+        // Only `mx-*` codes have reference pages; internal codes
+        // (`parse-error`, ...) point nowhere.
+        if e.code.starts_with("mx-") {
+            println!("  {}  {}", "Learn more:".dimmed(), morph_parser::docs_url(&e.code));
+        }
         let source_lines: Vec<String> = contents
             .get(&e.file_path)
             .map(|c| c.lines().map(ToString::to_string).collect())

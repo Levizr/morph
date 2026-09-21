@@ -122,6 +122,13 @@ pub(crate) fn run(
                     if let Some(hint) = &err.suggestion {
                         crate::logger::log_dim(&format!("  hint: {hint}"));
                     }
+                    if err.code.starts_with("mx-") {
+                        println!(
+                            "  {}  {}",
+                            "Learn more:".dimmed(),
+                            morph_parser::docs_url(&err.code)
+                        );
+                    }
                 }
             }
         }
@@ -239,6 +246,13 @@ pub(crate) fn run(
                     ));
                     if let Some(hint) = &err.suggestion {
                         crate::logger::log_dim(&format!("  hint: {hint}"));
+                    }
+                    if err.code.starts_with("mx-") {
+                        println!(
+                            "  {}  {}",
+                            "Learn more:".dimmed(),
+                            morph_parser::docs_url(&err.code)
+                        );
                     }
                 }
             }

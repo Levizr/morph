@@ -2253,6 +2253,13 @@ fn resolve_in_graph(
     None
 }
 
+// Deep link to the per-code error doc.
+// Every `mx-*` diagnostic printed by `morph check` / `morph build` points
+// here so users get the full explanation and fix, not just one line.
+pub fn docs_url(code: &str) -> String {
+    format!("https://morph.levizr.com/docs/errors/{code}")
+}
+
 // Helper for tag suggestion (exposed to crate)
 pub fn suggest_tag(input: &str) -> Option<String> {
     let mut best: Option<(String, f64)> = None;

@@ -1,5 +1,6 @@
 #include "../node.h"
 #include "../renderer.h"
+#include <cstdio>
 #include <cstring>
 #include <chrono>
 
@@ -158,6 +159,11 @@ int MorphNode::flattenImpl(RenderFrame& frame, int parentId, float scrollOffset,
     }
 
     int idx = (int)frame.nodes.size();
+    if (getenv("MORPH_GEOM_DEBUG")) {
+        fprintf(stderr, "[geom] type=%d x=%.1f y=%.1f w=%.1f h=%.1f offscreen=%d kids=%zu paintDirty=%d dlSize=%zu\n",
+                (int)type, x, y, w, h, (int)offscreen, children.size(),
+                (int)isDirty(PaintDirty), m_displayList.size());
+    }
     FlatRenderNode fn;
     fn.id = idx;
     fn.parentId = parentId;

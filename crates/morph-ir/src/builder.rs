@@ -4089,22 +4089,36 @@ fn analyze_dynamic_class(
         _ => return effects,
     };
     // Collect top-level ternary expressions: the template's ${...} parts
-    // plus a bare ternary expression.
-    let mut ternaries: Vec<&ConditionalExpression> = Vec::new();
+    // plus a bare ternary expression. For template parts, carry the
+    // surrounding static text: resolving the arm alone ("on" / "") would
+    // match no rule, while the full branch string ("chip on" / "chip ")
+    // resolves to the real declarations.
+    let mut ternaries: Vec<(&ConditionalExpression, String, String)> = Vec::new();
     match expr {
         Expression::TemplateLiteral(tpl) => {
-            for part in &tpl.expressions {
+            for (i, part) in tpl.expressions.iter().enumerate() {
                 if let Expression::ConditionalExpression(cond) = part {
-                    ternaries.push(cond);
+                    let quasi_text = |q: &TemplateElement| {
+                        q.value
+                            .cooked
+                            .as_ref()
+                            .map(|c| c.as_str().to_string())
+                            .unwrap_or_else(|| q.value.raw.as_str().to_string())
+                    };
+                    let prefix: String = tpl.quasis.iter().take(i + 1).map(quasi_text).collect();
+                    let suffix: String = tpl.quasis.iter().skip(i + 1).map(quasi_text).collect();
+                    ternaries.push((cond, prefix, suffix));
                 }
             }
         }
-        Expression::ConditionalExpression(cond) => ternaries.push(cond),
+        Expression::ConditionalExpression(cond) => {
+            ternaries.push((cond, String::new(), String::new()))
+        }
         _ => {}
     }
-    for ternary in ternaries {
-        let on_str = string_branch(&ternary.consequent);
-        let off_str = string_branch(&ternary.alternate);
+    for (ternary, prefix, suffix) in ternaries {
+        let on_str = format!("{prefix}{}{suffix}", string_branch(&ternary.consequent));
+        let off_str = format!("{prefix}{}{suffix}", string_branch(&ternary.alternate));
         let on_styles = resolve_branch_classes(&on_str, tag, css_rules, tailwind);
         let off_styles = resolve_branch_classes(&off_str, tag, css_rules, tailwind);
         if on_styles.is_empty() && off_styles.is_empty() {

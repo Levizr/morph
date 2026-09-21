@@ -189,6 +189,33 @@ impl FeatureSet {
                 if !node.reactive_style.is_empty() {
                     self.scan_reactive(&node.reactive_style);
                 }
+                // Conditional class swaps apply whole stylesheets at runtime,
+                // so their props must enable features exactly like reactive
+                // styles do — otherwise e.g. a swapped-in `display: none`
+                // compiles against a runtime with the behavior compiled out.
+                for eff in &node.class_conditional_effects {
+                    for (prop, val) in eff.on_styles.iter().chain(eff.off_styles.iter()) {
+                        for f in Self::reactive_feature(prop) {
+                            self.features.insert(f.into());
+                        }
+                        if prop == "display" && val.trim() == "none" {
+                            self.features.insert("display_none".into());
+                        }
+                        match prop.as_str() {
+                            "flex" | "flex-grow" | "flex-shrink" | "flex-basis" => {
+                                self.features.insert("flex".into());
+                            }
+                            "border" | "border-top" | "border-right" | "border-bottom"
+                            | "border-left" => {
+                                self.features.insert("border".into());
+                            }
+                            "overflow-x" | "overflow-y" => {
+                                self.features.insert("scroll".into());
+                            }
+                            _ => {}
+                        }
+                    }
+                }
             }
         }
         if ["scroll", "event", "cursor", "animation", "hover", "active"]
