@@ -109,6 +109,47 @@ pub struct LintConfig {
     pub severities: std::collections::HashMap<String, String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct NavigationConfig {
+    /// Page-cache policy: `0` (default, destroy on leave), `N` (keep N
+    /// last pages, LRU), or `"all"` (unbounded). Cached pages hold tree +
+    /// state only — window chrome is always freed.
+    #[serde(default)]
+    pub cache: PageCache,
+}
+
+/// `navigation.cache` value: a count or the `"all"` keyword.
+///
+/// Numbers and strings share one key, so the enum is untagged; unknown
+/// strings fail at `capacity()` with the offending value (not silently
+/// defaulted).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum PageCache {
+    Count(u32),
+    Keyword(String),
+}
+
+impl Default for PageCache {
+    fn default() -> Self {
+        Self::Count(0)
+    }
+}
+
+impl PageCache {
+    /// Generated-code capacity: `0` = caching off, `N` = LRU cap,
+    /// `-1` = unbounded (`"all"`).
+    pub fn capacity(&self) -> Result<i64> {
+        match self {
+            Self::Count(n) => Ok(i64::from(*n)),
+            Self::Keyword(s) if s == "all" => Ok(-1),
+            Self::Keyword(s) => anyhow::bail!(
+                "navigation.cache must be 0, a positive integer, or \"all\" (found {s:?})"
+            ),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MorphConfig {
     #[serde(default = "default_name")]
@@ -137,6 +178,8 @@ pub struct MorphConfig {
     pub lint: LintConfig,
     #[serde(default)]
     pub runtime: RuntimeConfig,
+    #[serde(default)]
+    pub navigation: NavigationConfig,
 }
 
 fn default_name() -> String {
@@ -235,6 +278,7 @@ impl Default for MorphConfig {
             build: BuildConfig::default(),
             lint: LintConfig::default(),
             runtime: RuntimeConfig::default(),
+            navigation: NavigationConfig::default(),
         }
     }
 }
@@ -334,6 +378,17 @@ mod tests {
         assert_eq!(cfg.entry, "src/App.mx");
         assert_eq!(cfg.runtime.runtime_type, "cpp");
         assert_eq!(cfg.type_mode, "infer");
+        assert_eq!(cfg.navigation.cache.capacity().unwrap(), 0);
+    }
+
+    #[test]
+    fn parse_navigation_cache_forms() {
+        let n = MorphConfig::parse_str(r#"{"navigation":{"cache":3}}"#).unwrap();
+        assert_eq!(n.navigation.cache.capacity().unwrap(), 3);
+        let all = MorphConfig::parse_str(r#"{"navigation":{"cache":"all"}}"#).unwrap();
+        assert_eq!(all.navigation.cache.capacity().unwrap(), -1);
+        let bad = MorphConfig::parse_str(r#"{"navigation":{"cache":"sometimes"}}"#).unwrap();
+        assert!(bad.navigation.cache.capacity().is_err());
     }
 
     #[test]

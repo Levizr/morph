@@ -17,11 +17,14 @@ pub struct CppEmitter<'a> {
     routes_ir: &'a [(RouteEntry, IRWindow)],
     /// App-wide window defaults for routes without `windowConfig`.
     app_window: Option<(String, u32, u32)>,
+    /// Page-cache capacity from `navigation.cache` (`0` = destroy on
+    /// leave, N = LRU cap, -1 = `"all"`). Emitted as `kMorphPageCache`.
+    page_cache: i64,
 }
 
 impl<'a> CppEmitter<'a> {
     pub const fn new(windows: &'a [IRWindow]) -> Self {
-        Self { windows, routes: &[], routes_ir: &[], app_window: None }
+        Self { windows, routes: &[], routes_ir: &[], app_window: None, page_cache: 0 }
     }
 
     /// Attach the route manifest (RID table). Chained before `emit`.
@@ -40,6 +43,13 @@ impl<'a> CppEmitter<'a> {
     /// routes without their own `windowConfig`. Chained before `emit`.
     pub fn with_app_window(mut self, title: String, width: u32, height: u32) -> Self {
         self.app_window = Some((title, width, height));
+        self
+    }
+
+    /// Page-cache capacity (`navigation.cache` resolved to 0 / N / -1).
+    /// Chained before `emit`.
+    pub fn with_page_cache(mut self, cap: i64) -> Self {
+        self.page_cache = cap;
         self
     }
 
@@ -475,11 +485,19 @@ impl<'a> CppEmitter<'a> {
                 || ("Morph App".to_string(), 800, 600),
                 |(t, w, h)| (t.clone(), *w, *h),
             );
-            let helpers =
-                generate_window_helpers(self.routes_ir, &app_title, app_width, app_height);
+            let helpers = generate_window_helpers(
+                self.routes_ir,
+                &app_title,
+                app_width,
+                app_height,
+                self.page_cache,
+            );
             if !helpers.is_empty() {
-                route_mounts.push_str("\n\n");
-                route_mounts.push_str(&helpers);
+                // Helpers precede the mounts: navigate/create are called
+                // from mount bodies, so they must be declared first. The
+                // reverse order is safe too — mount_into calls mount_* via
+                // the morph_routes.h declarations.
+                route_mounts.insert_str(0, &(helpers + "\n\n"));
             }
         }
         ctx.insert("route_mounts", &route_mounts);
@@ -855,7 +873,7 @@ pub fn resolve_window_placeholders(src: &str, routes: &[RouteEntry]) -> anyhow::
                 let route = args.first().map_or("", String::as_str);
                 let entry = lookup_route(routes, &unquote_cpp(route).unwrap_or_default())?;
                 let opts = args.get(1).map_or("JsObject{}", String::as_str);
-                format!("__morph_create_window(app::routes::{}, {opts})", entry.const_name)
+                format!("__morph_create_window(::app::routes::{}, {opts})", entry.const_name)
             }
             "__morph_win_navigate(" => {
                 let wid = args.first().map_or("", String::as_str);
@@ -863,7 +881,7 @@ pub fn resolve_window_placeholders(src: &str, routes: &[RouteEntry]) -> anyhow::
                 let entry = lookup_route(routes, &unquote_cpp(route).unwrap_or_default())?;
                 let props = args.get(2).map_or("JsObject{}", String::as_str);
                 format!(
-                    "__morph_navigate_window({wid}, app::routes::{}, {props})",
+                    "__morph_navigate_window({wid}, ::app::routes::{}, {props})",
                     entry.const_name
                 )
             }
@@ -873,7 +891,7 @@ pub fn resolve_window_placeholders(src: &str, routes: &[RouteEntry]) -> anyhow::
                     Some(id) if id.starts_with('/') => {
                         let entry = lookup_route(routes, &id)?;
                         format!(
-                            "WindowManager::get().widForRoute(app::routes::{})",
+                            "WindowManager::get().widForRoute(::app::routes::{})",
                             entry.const_name
                         )
                     }
@@ -1232,7 +1250,7 @@ pub fn generate_route_mounts(
         code.push("        ctx->subs.clear();".to_string());
         code.push("    };".to_string());
         code.push(format!(
-            "    WindowManager::get().setMount(wid, MountHandle{{{rid}, ctx, __teardown_{}}});",
+            "    WindowManager::get().setMount(wid, MountHandle{{{rid}, ctx, __teardown_{}, props}});",
             route.const_name,
             rid = route.rid
         ));
@@ -1326,15 +1344,18 @@ pub fn generate_route_mounts(
 
 /// Dynamic window helpers (`new Window` / `navigate` lowering):
 /// mount dispatch switch, window creation (opts → route windowConfig →
-/// app defaults), and navigate (unmount + clear + remount). Emitted only
+/// app defaults), and navigate (cache-aware: detach into the page cache
+/// + restore on hit, else unmount + clear + remount). Emitted only
 /// when route IR exists; unknown RIDs fail closed (kInvalidWid/false).
-/// Page cache (`navigation.cache`) plugs into `__morph_navigate_window`
-/// when it lands — today navigate always remounts fresh.
+/// `page_cache` is the resolved `navigation.cache` (0 / N / -1) baked in
+/// as `kMorphPageCache` — the navigate branch on it is predictable, so
+/// the default-0 path costs nothing extra on the hot path.
 pub fn generate_window_helpers(
     routes_ir: &[(RouteEntry, IRWindow)],
     app_title: &str,
     app_width: u32,
     app_height: u32,
+    page_cache: i64,
 ) -> String {
     if routes_ir.is_empty() {
         return String::new();
@@ -1342,6 +1363,7 @@ pub fn generate_window_helpers(
     let esc = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
     let mut out = vec![
         "// ── Dynamic windows (lowered `new Window` / `navigate`) ──".to_string(),
+        format!("constexpr int kMorphPageCache = {page_cache};"),
         "bool __morph_mount_into(MorphWindow* win, WID wid, int rid, const JsObject& props) {"
             .to_string(),
         "    switch (rid) {".to_string(),
@@ -1408,8 +1430,13 @@ pub fn generate_window_helpers(
     out.push("    auto& wm = WindowManager::get();".to_string());
     out.push("    auto win = wm.get(wid);".to_string());
     out.push("    if (!win) return false;".to_string());
-    out.push("    wm.clearMount(wid);".to_string());
-    out.push("    win->clearRoot();".to_string());
+    out.push("    if (kMorphPageCache != 0) {".to_string());
+    out.push("        wm.cacheCurrentPage(wid, kMorphPageCache);".to_string());
+    out.push("        if (wm.restorePage(wid, rid, props)) return true;".to_string());
+    out.push("    } else {".to_string());
+    out.push("        wm.clearMount(wid);".to_string());
+    out.push("        win->clearRoot();".to_string());
+    out.push("    }".to_string());
     out.push("    return __morph_mount_into(win.get(), wid, rid, props);".to_string());
     out.push("}".to_string());
     // Native `app::windows::open/navigate` (declared in window_api.h,
@@ -1708,6 +1735,129 @@ fn generate_self_test(windows: &[IRWindow], routes: &[RouteEntry]) -> String {
         lines.push("    check(__wm.get(901) == __wa2, \"wm:re-register-replaces\");".to_string());
         lines.push("    check(__wm.close(901) && __wm.close(902), \"wm:close-rest\");".to_string());
         lines.push("    check(__wm.allClosed(), \"wm:empty-all-closed\");".to_string());
+    }
+    // Page cache: detach + restore through the WindowManager primitives
+    // (no route mounts — headless windows carry synthetic handles).
+    // Same rid + deep-equal props restores; new props miss; cap 0
+    // destroys; overflow evicts LRU with teardown.
+    {
+        lines.push(
+            "    auto __wc = std::make_shared<MorphWindow>(\"wm-c\", 100, 100, false);".to_string(),
+        );
+        lines.push("    __wm.registerWindow(903, __wc);".to_string());
+        lines.push("    JsObject __cp; __cp.set(\"userId\", JsValue(7));".to_string());
+        lines.push("    __wm.setMount(903, MountHandle{7, nullptr, []{}, __cp});".to_string());
+        lines.push("    __wm.cacheCurrentPage(903, 2);".to_string());
+        lines.push("    check(__wm.pageCacheSize() == 1, \"cache:detach-holds\");".to_string());
+        lines.push(
+            "    check(__wm.mountedRid(903) == -1, \"cache:detach-clears-slot\");".to_string(),
+        );
+        lines.push("    check(__wm.restorePage(903, 7, __cp), \"cache:restore-hit\");".to_string());
+        lines.push(
+            "    check(__wm.pageCacheSize() == 0 && __wm.mountedRid(903) == 7, \"cache:restore-reattaches\");"
+                .to_string(),
+        );
+        lines.push("    JsObject __cp2; __cp2.set(\"userId\", JsValue(8));".to_string());
+        lines.push("    __wm.cacheCurrentPage(903, 2);".to_string());
+        lines.push(
+            "    check(!__wm.restorePage(903, 7, __cp2), \"cache:new-props-miss\");".to_string(),
+        );
+        lines.push(
+            "    check(!__wm.restorePage(903, 8, __cp), \"cache:other-rid-miss\");".to_string(),
+        );
+        lines.push(
+            "    check(__wm.restorePage(903, 7, __cp), \"cache:props-still-hit\");".to_string(),
+        );
+        // Structural (not identical) props must hit: mount-time `data`
+        // and navigate-time args are built by separate lowerings.
+        lines.push("    __wm.cacheCurrentPage(903, 2);".to_string());
+        lines.push("    JsObject __cpB; __cpB.set(\"userId\", JsValue(7));".to_string());
+        lines.push(
+            "    check(__wm.restorePage(903, 7, __cpB), \"cache:structural-props-hit\");"
+                .to_string(),
+        );
+        lines.push(
+            "    JsObject __n1; __n1.set(\"theme\", JsValue(\"dark\")); JsObject __w1; __w1.set(\"ui\", JsValue(__n1));"
+                .to_string(),
+        );
+        lines.push("    __wm.setMount(903, MountHandle{12, nullptr, []{}, __w1});".to_string());
+        lines.push("    __wm.cacheCurrentPage(903, 2);".to_string());
+        lines.push(
+            "    JsObject __n2; __n2.set(\"theme\", JsValue(\"dark\")); JsObject __w2; __w2.set(\"ui\", JsValue(__n2));"
+                .to_string(),
+        );
+        lines.push(
+            "    check(__wm.restorePage(903, 12, __w2), \"cache:nested-props-hit\");".to_string(),
+        );
+        lines.push("    __n2.set(\"theme\", JsValue(\"light\"));".to_string());
+        lines.push("    __wm.cacheCurrentPage(903, 2);".to_string());
+        lines.push(
+            "    check(!__wm.restorePage(903, 12, __w2), \"cache:nested-props-miss\");".to_string(),
+        );
+        lines.push("    static bool __ev_hit = false; __ev_hit = false;".to_string());
+        lines.push(
+            "    __wm.setMount(903, MountHandle{9, nullptr, []{ __ev_hit = true; }, JsObject{}});"
+                .to_string(),
+        );
+        lines.push("    __wm.cacheCurrentPage(903, 1);".to_string());
+        lines.push(
+            "    __wm.setMount(903, MountHandle{10, nullptr, []{}, JsObject{}});".to_string(),
+        );
+        lines.push("    __wm.cacheCurrentPage(903, 1);".to_string());
+        lines.push(
+            "    check(__wm.pageCacheSize() == 1 && __ev_hit, \"cache:lru-evicts-with-teardown\");"
+                .to_string(),
+        );
+        lines.push(
+            "    check(!__wm.restorePage(903, 9, JsObject{}), \"cache:evicted-misses\");"
+                .to_string(),
+        );
+        lines.push(
+            "    __wm.setMount(903, MountHandle{11, nullptr, []{}, JsObject{}});".to_string(),
+        );
+        lines.push("    __wm.cacheCurrentPage(903, 0);".to_string());
+        lines.push(
+            "    check(__wm.pageCacheSize() == 1 && __wm.mountedRid(903) == -1, \"cache:cap-zero-destroys\");"
+                .to_string(),
+        );
+        lines.push("    __wm.clearPageCache();".to_string());
+        lines.push("    check(__wm.pageCacheSize() == 0, \"cache:clear-empties\");".to_string());
+        // Pages are per-window: one window's detached state is invisible
+        // to another, and closing a window flushes its pages.
+        lines.push(
+            "    auto __wd = std::make_shared<MorphWindow>(\"wm-d\", 100, 100, false);".to_string(),
+        );
+        lines.push("    __wm.registerWindow(904, __wd);".to_string());
+        lines.push("    __wm.setMount(904, MountHandle{7, nullptr, []{}, __cp});".to_string());
+        lines.push("    __wm.cacheCurrentPage(904, 2);".to_string());
+        lines.push(
+            "    check(__wm.pageCacheSize() == 1, \"cache:second-window-holds\");".to_string(),
+        );
+        lines.push(
+            "    check(!__wm.restorePage(903, 7, __cp), \"cache:no-cross-window-restore\");"
+                .to_string(),
+        );
+        lines.push(
+            "    check(__wm.restorePage(904, 7, __cp), \"cache:own-window-restores\");".to_string(),
+        );
+        lines.push("    static bool __close_hit = false; __close_hit = false;".to_string());
+        lines.push(
+            "    __wm.setMount(904, MountHandle{13, nullptr, []{ __close_hit = true; }, JsObject{}});"
+                .to_string(),
+        );
+        lines.push("    __wm.cacheCurrentPage(904, 2);".to_string());
+        lines.push(
+            "    check(__wm.close(904) && __close_hit, \"cache:close-flushes-with-teardown\");"
+                .to_string(),
+        );
+        lines.push(
+            "    check(__wm.pageCacheSize() == 0, \"cache:close-flush-empties\");".to_string(),
+        );
+        lines.push(
+            "    check(!__wm.restorePage(904, 7, __cp), \"cache:closed-window-misses\");"
+                .to_string(),
+        );
+        lines.push("    check(__wm.close(903), \"cache:close-rest\");".to_string());
     }
     lines.push(
         "    printf(\"[morph-self-test] %d checks, %d failures\\n\", checks, failures);"
@@ -2708,6 +2858,37 @@ mod tests {
             "mount decl: {mounted}"
         );
         assert!(mounted.contains("void unmount_kSettings(WID wid);"), "unmount decl: {mounted}");
+    }
+
+    #[test]
+    fn window_helpers_bake_page_cache_and_mount_props() {
+        let routes_ir = vec![(
+            RouteEntry {
+                id: "/a".to_string(),
+                rid: 0,
+                file: std::path::PathBuf::from("/src/a/route.mx"),
+                const_name: "kA".to_string(),
+                title: None,
+                width: None,
+                height: None,
+                has_default_export: true,
+            },
+            IRWindow::default(),
+        )];
+        let off = generate_window_helpers(&routes_ir, "App", 800, 600, 0);
+        assert!(off.contains("constexpr int kMorphPageCache = 0;"), "cap: {off}");
+        assert!(off.contains("wm.clearMount(wid);"), "destroy path: {off}");
+        let mounts = generate_route_mounts(&routes_ir, &std::collections::HashSet::new(), &[]);
+        assert!(
+            mounts.contains("MountHandle{0, ctx, __teardown_kA, props}"),
+            "props held: {mounts}"
+        );
+        let on = generate_window_helpers(&routes_ir, "App", 800, 600, 2);
+        assert!(on.contains("constexpr int kMorphPageCache = 2;"), "cap: {on}");
+        assert!(on.contains("wm.cacheCurrentPage(wid, kMorphPageCache);"), "detach: {on}");
+        assert!(on.contains("wm.restorePage(wid, rid, props)"), "restore: {on}");
+        let empty = generate_window_helpers(&[], "App", 800, 600, 2);
+        assert!(empty.is_empty(), "no routes: {empty}");
     }
 
     #[test]

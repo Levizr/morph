@@ -110,4 +110,4 @@ Windows are owned by the **registry, not by your handle**. The user can always d
 
 ## What's next
 
-`Window.ready()`, `resize`/`focus` events, `App.quit()`, and page caching (`navigation.cache`) are planned — see [Q: Windows?](../faq/q-windows.md).
+`Window.ready()`, `resize`/`focus` events, and `App.quit()` are planned — see [Q: Windows?](../faq/q-windows.md). Page keep-alive is available today via [`navigation.cache`](../guides/windows-and-routing.md#page-cache).

@@ -7,6 +7,9 @@
     "title": "Route Test"
   },
   "dependencies": {},
+  "navigation": {
+    "cache": 2
+  },
   "cpp_sources": [],
   "build": {
     "wayland": false,

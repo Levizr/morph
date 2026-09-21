@@ -9,6 +9,7 @@ export default function SettingsPage(props: { userId: number }) {
     <body>
       <div className="title" id="stitle">settings — user {props.userId}, tab {tab}</div>
       <button id="btn-adv" onClick={() => setTab("advanced")}>advanced</button>
+      <a id="link-login2" href="/auth/login">login</a>
     </body>
   )
 }

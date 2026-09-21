@@ -267,7 +267,14 @@ pub(crate) fn run(
     let emitter = morph_codegen::CppEmitter::new(&windows)
         .with_routes(&routes)
         .with_routes_ir(&routes_ir)
-        .with_app_window(config.window.title.clone(), config.window.width, config.window.height);
+        .with_app_window(config.window.title.clone(), config.window.width, config.window.height)
+        .with_page_cache(
+            config
+                .navigation
+                .cache
+                .capacity()
+                .map_err(|e| anyhow::anyhow!("morph.config.json: {e}"))?,
+        );
     emitter.emit(&output_dir)?;
     write_routes_dts(&cwd, &routes);
     pb.finish_and_clear();

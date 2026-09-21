@@ -149,7 +149,7 @@ New diagnostics following the existing `mx-*` convention:
 | Node-tree swap (hot reload) — the navigate primitive | ✅ Shipped |
 | `morph check` diagnostics framework (`mx-*` codes) | ✅ Shipped — the lint rules plug into this |
 | `route.mx` scan + manifest generation | ✅ Shipped (`morph_parser::routes::scan_routes` — sorted RIDs, sanitized consts, `_`-private skip; proven by `route-test`) |
-| `navigation.cache` page-cache policy (`0` / N / `"all"`, LRU) | ❌ Not built |
+| `navigation.cache` page-cache policy (`0` / N / `"all"`, LRU) | ✅ Shipped (per-window detach + restore in `__morph_navigate_window`; structural props match, new props remount, close flushes; proven in `route-test` + `cache:*` self-test checks) |
 | `[window]` app-default fallback for routes without `windowConfig` | ✅ Shipped for dynamic windows (opts → file `windowConfig` → `[window]` defaults in `__morph_create_window`) |
 | `new Window(routeId, config)` | ✅ Shipped (morpher placeholders → RID helpers; proven click-driven in `route-test`) |
 | `useWindow` hook | ✅ Shipped (handle = WID int; `useWindow()`/`useWindow(id-or-route)`, methods + `closed`/`title`; module-scope use is a hard error) |

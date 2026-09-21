@@ -83,6 +83,16 @@ public:
         m_root = nullptr;
         m_pendingRender = true;
     }
+    // Detach the root tree WITHOUT deleting (page cache) — ownership
+    // moves to the caller (held in a unique_ptr, reattached or destroyed
+    // on eviction). The emptied window schedules a frame so it repaints.
+    MorphNode* takeRoot()
+    {
+        MorphNode* detached = m_root;
+        m_root = nullptr;
+        m_pendingRender = true;
+        return detached;
+    }
     void update(float dt)
     {
         if (m_root)

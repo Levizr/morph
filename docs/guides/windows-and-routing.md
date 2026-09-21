@@ -101,9 +101,9 @@ Nothing pre-initializes. Opening the app mounts exactly one route:
 | **Mounted trees** (only what's open) | One live page per window — `navigate()` destroys the old root and mounts the new one |
 | **Window chrome** (GLFW window + GL context + textures) | The real per-window cost |
 
-### Page cache (planned)
+### Page cache
 
-Destroy-on-leave is the default: navigating away frees the page, and coming back remounts fresh. `navigation.cache` (in `morph.config.json`) opts into keep-alive — `0` (default), `N` last pages (LRU), or `"all"`. Cached pages hold tree + state only (no GL chrome), so they're cheap next to open windows.
+Destroy-on-leave is the default: navigating away frees the page, and coming back remounts fresh. `navigation.cache` (in `morph.config.json`) opts into keep-alive — `0` (default), `N` last pages per window (LRU), or `"all"`. Cached pages hold tree + state only (no GL chrome), so they're cheap next to open windows. A window only ever restores its own pages (no cross-window state leaks), new props always remount fresh, and closing a window drops its cached pages.
 
 ## Typo safety
 

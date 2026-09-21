@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <GLFW/glfw3.h>
 
+#include "../types/js_value.h"
 #include "window.h"
 
 // Window instance id. Every window-id literal in user code is interned at
@@ -25,7 +26,58 @@ struct MountHandle {
     int rid = -1;
     std::shared_ptr<void> ctx;
     std::function<void()> teardown;
+    // Props the page was mounted with. The page cache restores a handle
+    // only for deep-equal props — new props always remount fresh.
+    JsObject props;
 };
+
+// Detached page: tree + context held while its window shows another
+// route (`navigation.cache`). Effects stay subscribed — their signals
+// live in the held ctx, so nothing dangles and no suspend/resume
+// machinery is needed. Memory cost is tree + signals only; window
+// chrome (GLFW + GL context) is always freed on navigate.
+struct CachedPage {
+    int rid = -1;
+    MountHandle mount;
+    std::unique_ptr<MorphNode> tree; // owned; destroyed on eviction
+};
+
+// Structural value equality for page-cache props. JsValue::operator==
+// treats objects/arrays by identity (shared_ptr comparison — correct JS
+// `==` semantics), but the cache must match structurally identical props
+// built by separate lowerings (mount-time `data` vs navigate-time args).
+// Numbers compare numerically (JsNumber== is int/double-loose).
+static bool jsDeepEqual(const JsValue& a, const JsValue& b)
+{
+    if (a.is_object() && b.is_object())
+    {
+        auto pa = a.as_object().properties;
+        auto pb = b.as_object().properties;
+        if (pa->size() != pb->size())
+            return false;
+        for (const auto& [key, val] : *pa)
+        {
+            auto it = pb->find(key);
+            if (it == pb->end() || !jsDeepEqual(val, it->second))
+                return false;
+        }
+        return true;
+    }
+    if (a.is_array() && b.is_array())
+    {
+        auto ea = a.as_array().elements;
+        auto eb = b.as_array().elements;
+        if (ea->size() != eb->size())
+            return false;
+        for (size_t i = 0; i < ea->size(); i++)
+        {
+            if (!jsDeepEqual((*ea)[i], (*eb)[i]))
+                return false;
+        }
+        return true;
+    }
+    return a == b;
+}
 
 class WindowManager {
     // Registry owns every window (shared_ptr). Handles resolve their WID
@@ -42,6 +94,12 @@ class WindowManager {
     std::unordered_map<WID, std::vector<std::function<void()>>> m_closeHandlers;
     // Mounted route per window (empty for declarative entry windows).
     std::unordered_map<WID, MountHandle> m_mounts;
+    // Detached pages per window (front = most recently used). A window
+    // only ever restores its own pages — sharing cached state across
+    // windows would leak one window's state into another. Touched only
+    // on navigate/close/evict — never per frame. Empty unless the project
+    // opts into `navigation.cache` (default 0 destroys on leave).
+    std::unordered_map<WID, std::vector<CachedPage>> m_pageCache;
     WID m_focusedWid = kInvalidWid;
     // Focus recency (front = most recent). Backs by-route lookup
     // (`useWindow("/r")` picks the first live window on that route).
@@ -100,6 +158,7 @@ class WindowManager {
             m_handles.erase(it->second->handle());
         forgetLocked(wid);
         clearMount(wid);
+        flushPageCache(wid);
         // ~MorphWindow binds its own context for renderer teardown and
         // detaches afterwards — no context work needed here.
         m_windows.erase(it);
@@ -110,6 +169,7 @@ public:
     {
         for (auto& [wid, _] : m_windows)
             clearMount(wid);
+        clearPageCache();
         m_windows.clear();
         m_aliases.clear();
         m_handles.clear();
@@ -128,6 +188,9 @@ public:
 
     void registerWindow(WID wid, std::shared_ptr<MorphWindow> w)
     {
+        // Re-registration is a new incarnation: drop any pages the
+        // previous occupant detached (they can never be restored).
+        flushPageCache(wid);
         m_windows[wid] = std::move(w);
         if (m_windows[wid] && m_windows[wid]->handle())
             m_handles[m_windows[wid]->handle()] = wid;
@@ -243,6 +306,110 @@ public:
     {
         auto it = m_mounts.find(wid);
         return it == m_mounts.end() ? -1 : it->second.rid;
+    }
+
+    // Detach wid's live mount + tree into its own page cache (no
+    // teardown — effects stay subscribed). `cap` is the generated
+    // `kMorphPageCache`: 0 destroys in place (today's path), N keeps N
+    // last pages per window (LRU), negative is unbounded (`"all"`). LRU
+    // overflow runs teardown + destroys the tree. Safe on empty mounts
+    // and missing windows.
+    void cacheCurrentPage(WID wid, int cap)
+    {
+        auto win = get(wid);
+        auto it = m_mounts.find(wid);
+        if (it == m_mounts.end())
+        {
+            if (win)
+                win->clearRoot();
+            return;
+        }
+        if (cap == 0)
+        {
+            clearMount(wid);
+            if (win)
+                win->clearRoot();
+            return;
+        }
+        CachedPage pg;
+        pg.rid = it->second.rid;
+        pg.mount = std::move(it->second);
+        m_mounts.erase(it);
+        pg.tree.reset(win ? win->takeRoot() : nullptr);
+        std::vector<CachedPage>& pages = m_pageCache[wid];
+        pages.insert(pages.begin(), std::move(pg));
+        while (cap > 0 && (int)pages.size() > cap)
+        {
+            CachedPage& victim = pages.back();
+            if (victim.mount.teardown)
+                victim.mount.teardown();
+            pages.pop_back();
+        }
+    }
+
+    // Restore one of wid's own cached pages (same rid + deep-equal
+    // props): reattaches the tree and re-registers the mount. New props
+    // miss and remount fresh. Returns false on miss or a missing window.
+    bool restorePage(WID wid, int rid, const JsObject& props)
+    {
+        auto win = get(wid);
+        if (!win)
+            return false;
+        auto cit = m_pageCache.find(wid);
+        if (cit == m_pageCache.end())
+            return false;
+        std::vector<CachedPage>& pages = cit->second;
+        for (auto it = pages.begin(); it != pages.end(); ++it)
+        {
+            if (it->rid != rid || !jsDeepEqual(JsValue(it->mount.props), JsValue(props)))
+                continue;
+            CachedPage pg = std::move(*it);
+            pages.erase(it);
+            if (pg.tree)
+                win->addChild(pg.tree.release());
+            m_mounts[wid] = std::move(pg.mount);
+            return true;
+        }
+        return false;
+    }
+
+    size_t pageCacheSize() const
+    {
+        size_t n = 0;
+        for (const auto& [wid, pages] : m_pageCache)
+            n += pages.size();
+        return n;
+    }
+
+    // Drop one window's cached pages (teardown + destroy trees). Runs on
+    // window close — a dead window can never be back-navigated to, so its
+    // pages are garbage, not cache.
+    void flushPageCache(WID wid)
+    {
+        auto cit = m_pageCache.find(wid);
+        if (cit == m_pageCache.end())
+            return;
+        for (CachedPage& pg : cit->second)
+        {
+            if (pg.mount.teardown)
+                pg.mount.teardown();
+        }
+        m_pageCache.erase(cit);
+    }
+
+    // Drop every cached page (teardown + destroy trees). Shutdown and
+    // test determinism; normal navigation evicts incrementally.
+    void clearPageCache()
+    {
+        for (auto& [wid, pages] : m_pageCache)
+        {
+            for (CachedPage& pg : pages)
+            {
+                if (pg.mount.teardown)
+                    pg.mount.teardown();
+            }
+        }
+        m_pageCache.clear();
     }
 
     // Called from MorphWindow::windowFocusCb via the GLFW focus callback.

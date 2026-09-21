@@ -2,6 +2,7 @@ export default function LoginPage() {
   return (
     <body>
       <div className="title">login</div>
+      <a id="link-back" href="/settings" data={{ userId: 7 }}>back to settings</a>
     </body>
   )
 }
