@@ -85,6 +85,21 @@ win.navigate("/settings", { theme: "dark" })
 win.on('close', () => { console.log("gone") })
 ```
 
+## Links (`<a href>`)
+
+Markup navigation — no handlers needed. The `href` must be a string literal (dynamic hrefs fail the build; routes are manifest-checked, so typos fail too):
+
+```tsx
+<a href="/settings">Settings</a>                                        {/* navigate this window */}
+<a href="/settings" target="_blank" width={500} data={{ theme: "dark" }}>Pop out</a>  {/* new window + overrides */}
+<a href="https://example.com/help">Help</a>                             {/* external → OS browser */}
+```
+
+- Internal `href` navigates the current window (same as `win.navigate(routeId)`).
+- `target="_blank"` opens the route as a new window; `width` / `height` / `title` override the route's `windowConfig`, and `data={{…}}` arrives as page `props` (an object expression only — never query strings).
+- Any URI scheme (`https:`, `mailto:`, …) opens the OS browser, never a Morph window.
+- `<a>` without `href` renders as-is with no click behavior.
+
 ## Window lifecycle
 
 Windows are owned by the **registry, not by your handle**. The user can always defeat your bookkeeping — X button, task manager, OS shutdown — so the design assumes **every window can die at any moment, and every operation must survive that**:
@@ -95,4 +110,4 @@ Windows are owned by the **registry, not by your handle**. The user can always d
 
 ## What's next
 
-`Window.ready()`, `resize`/`focus` events, `App.quit()`, page caching (`navigation.cache`), and `<a href>` navigation are planned — see [Q: Windows?](../faq/q-windows.md).
+`Window.ready()`, `resize`/`focus` events, `App.quit()`, and page caching (`navigation.cache`) are planned — see [Q: Windows?](../faq/q-windows.md).

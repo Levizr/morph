@@ -154,9 +154,9 @@ New diagnostics following the existing `mx-*` convention:
 | `new Window(routeId, config)` | ✅ Shipped (morpher placeholders → RID helpers; proven click-driven in `route-test`) |
 | `useWindow` hook | ✅ Shipped (handle = WID int; `useWindow()`/`useWindow(id-or-route)`, methods + `closed`/`title`; module-scope use is a hard error) |
 | `win.navigate(routeId, props)` | ✅ Shipped (unmount + clear + remount via helpers; proven click-driven; cache plugs in later) |
-| `<a href>` navigation (internal / `_blank` / external) | ❌ Not built — `<a>`/`href` have no handling anywhere today |
+| `<a href>` navigation (internal / `_blank` / external) | ✅ Shipped (IR desugar to navigate / `new Window` placeholders; external → `WindowManager::openUrl`; dynamic href is a hard error; proven in `route-test`) |
 | RID/WID interning (`morph_routes.h`, `app::routes::`) | ✅ Shipped (RID consts + runtime WID minting, alias/route lookup, focus order; asserted via `route:*` self-test checks) |
-| C++ window API (`app::windows::*`) | ❌ Not built |
+| C++ window API (`app::windows::*`) | ✅ Shipped (`open` / `navigate` / `close` / `show` / `hide` / `title` / `closed` / `on_close`) |
 | `morph-routes.d.ts` typed routes | ✅ Shipped (project-root file, `MorphRoute` union; `MorphWindowId` follows with `useWindow` ids) |
 | Route/window naming + reference lint rules (`mx-route-*`, `mx-window-*`) | ❌ Not built |
 

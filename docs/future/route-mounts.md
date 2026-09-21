@@ -115,7 +115,7 @@ v1 routes are driven via props (in) and events (out). Native `(rid, mount, name)
 
 1. Runtime ✅ — `destroy_effect` + `create_effect_scoped`/`MountScope` + manager `m_mounts` + `MountHandle`.
 2. Codegen ✅ — route graph builds, `Context` + `mount`/`unmount` emission, route `state_map`, per-mount mid dispatch, `__wid` binding.
-3. Lowering ✅ (`new Window` + `navigate`; internal `<a href>` still open) — one-line RID calls now mounts exist.
+3. Lowering ✅ (`new Window` + `navigate` + internal `<a href>` desugar) — one-line RID calls now mounts exist.
 4. Props extraction ✅ + literal-props lints ❌.
 5. Validation ✅ (same route twice proven; `mid`-in-route untested) — cache ❌, `native.cpp`-driven flow ❌.
 

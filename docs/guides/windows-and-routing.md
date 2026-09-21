@@ -25,6 +25,7 @@ The route id is the **folder path** (relative to `src/`), not the filename. Ever
 
 - **Navigated to as a page** — rendered inside an existing window: `win.navigate("/auth/login")`
 - **Opened as a window** — `new Window("/auth/login", { width, height, data })`
+- **Linked to in markup** — `<a href="/auth/login">` navigates, `target="_blank"` pops out a window, external URLs open the OS browser (see [`<a href>`](../api/windows.md#links-a-href))
 
 Folders starting with `_` are private (Next.js rule): `src/blog/_components/` is never a route, even if it contains a `route.mx`.
 
