@@ -515,7 +515,7 @@ impl IRBuilder {
         let root_comp =
             route_mod.source.components.iter().find(|c| c.is_default).ok_or_else(|| {
                 anyhow::anyhow!(
-                    "mx-route-no-export: route {} has no default-export component",
+                    "mx-route-no-export: route {} has no default-export component\nLearn more: https://morph.levizr.com/docs/errors/mx-route-no-export",
                     route_mod.path.display()
                 )
             })?;
@@ -2404,7 +2404,97 @@ impl IRBuilder {
                     .into_iter()
                     .filter(|anim| keyframes.contains_key(&anim.name))
                     .collect();
+                // `<a href>` desugar (navigation links): when `href` is
+                // present the link keys are consumed here — never rendered
+                // as node attrs — and synthesized into a click event.
+                // Internal paths lower to navigate/new-window placeholders
+                // (manifest-checked at codegen); external schemes open the
+                // OS browser. Props ride `data={…}` (never query strings).
+                let link_href = if tag == "a" {
+                    match props.iter().find(|(k, _)| k.as_str() == "href") {
+                        Some((_, morph_parser::JsxPropValue::String(href))) => Some(href.clone()),
+                        Some(_) => anyhow::bail!(
+                            "link `href` must be a string literal ({line}:{col}); dynamic hrefs cannot be manifest-checked"
+                        ),
+                        None => None,
+                    }
+                } else {
+                    None
+                };
+                if let Some(href) = link_href {
+                    let target_blank = matches!(
+                        props.iter().find(|(k, _)| k.as_str() == "target"),
+                        Some((_, morph_parser::JsxPropValue::String(t))) if t == "_blank"
+                    );
+                    let data_src = match props.iter().find(|(k, _)| k.as_str() == "data") {
+                        Some((_, morph_parser::JsxPropValue::Expr(e))) => Some(e.clone()),
+                        Some(_) => anyhow::bail!(
+                            "link `data` must be an object expression ({line}:{col}); props ride `data={{…}}`"
+                        ),
+                        None => None,
+                    };
+                    let body = if is_external_href(&href) {
+                        format!(
+                            "() => {{ __morph_open_browser(\"{}\") }}",
+                            href.replace('"', "\\\"")
+                        )
+                    } else if target_blank {
+                        let mut cfg = Vec::new();
+                        for key in ["width", "height", "title"] {
+                            if let Some((_, value)) = props.iter().find(|(k, _)| k.as_str() == key)
+                            {
+                                match value {
+                                    // Numeric literals arrive as strings —
+                                    // emit them raw so strict runtime
+                                    // coercion (`as_int`, no parsing) works.
+                                    morph_parser::JsxPropValue::String(s)
+                                        if s.parse::<f64>().is_ok() =>
+                                    {
+                                        cfg.push(format!("{key}: {s}"));
+                                    }
+                                    morph_parser::JsxPropValue::String(s) => {
+                                        cfg.push(format!("{key}: \"{}\"", s.replace('"', "\\\"")));
+                                    }
+                                    morph_parser::JsxPropValue::Expr(e) => {
+                                        cfg.push(format!("{key}: {e}"));
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        if let Some(data) = data_src {
+                            cfg.push(format!("data: {}", strip_braces(&data)));
+                        }
+                        format!(
+                            "() => {{ const __w = new Window(\"{href}\", {{{}}}) }}",
+                            cfg.join(", ")
+                        )
+                    } else {
+                        format!(
+                            "() => {{ const __w = useWindow(); __w.navigate(\"{href}\"{}) }}",
+                            data_src.map_or_else(String::new, |data| format!(
+                                ", {}",
+                                strip_braces(&data)
+                            ))
+                        )
+                    };
+                    node.events.push(IREvent {
+                        trigger: "click".into(),
+                        action: "call".into(),
+                        target: capture_raw(&body, frame),
+                    });
+                }
                 for (k, v) in props {
+                    if tag == "a"
+                        && (k == "href"
+                            || k == "target"
+                            || k == "data"
+                            || k == "width"
+                            || k == "height"
+                            || k == "title")
+                    {
+                        continue;
+                    }
                     if let morph_parser::JsxPropValue::Fn(f) = v {
                         if let Some(trigger) = event_trigger(k) {
                             node.events.push(IREvent {
@@ -4195,6 +4285,29 @@ fn match_selector_compound(tag: &str, classes: &[String], id: Option<&str>, sel:
     true
 }
 
+/// Strip one `{…}` container layer (attribute expression spans cover
+/// their braces; call sites need the bare object expression as-is).
+fn strip_braces(expr: &str) -> String {
+    let trimmed = expr.trim();
+    trimmed
+        .strip_prefix('{')
+        .and_then(|b| b.strip_suffix('}'))
+        .map_or_else(|| trimmed.to_string(), |inner| inner.trim().to_string())
+}
+
+/// True for external link targets: any URI scheme (`https:`, `http:`,
+/// `mailto:`, …). Everything else is an internal route id.
+fn is_external_href(href: &str) -> bool {
+    if href.contains("://") {
+        return true;
+    }
+    href.find(':').is_some_and(|i| {
+        href[..i].chars().enumerate().all(|(n, c)| {
+            c.is_ascii_alphabetic() || (n > 0 && (c.is_ascii_digit() || "+.-".contains(c)))
+        })
+    })
+}
+
 /// Map a JSX event prop to its trigger name. Anything unlisted is not
 /// an event the runtime wires, so it falls through to attribute handling.
 fn event_trigger(prop: &str) -> Option<&'static str> {
@@ -5851,6 +5964,50 @@ export default function SettingsPage(props: { userId: number }) {
             .build_route(&graph, &route_entry("/settings"), &[], &HashMap::new())
             .unwrap_err();
         assert!(err.to_string().contains("mx-route-no-export"), "{err}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    const LINK_APP: &str = r#"
+export default function App() {
+  return (
+    <body>
+      <a href="/settings">plain</a>
+      <a href="/settings" target="_blank" width={500}>popup</a>
+      <a href="/settings" target="_blank" data={{ theme: "dark" }}>with data</a>
+      <a href="https://example.com/help">help</a>
+      <a>no href</a>
+    </body>
+  )
+}
+"#;
+
+    #[test]
+    fn link_href_desugars_to_placeholders() {
+        let root = scratch("link_desugar");
+        write_file(&root, "App.mx", LINK_APP);
+        let win = &build_root(&root)[0];
+        let mut targets = Vec::new();
+        for node in &win.nodes {
+            event_targets(node, &mut targets);
+        }
+        assert_eq!(targets.len(), 4, "{targets:?}");
+        assert!(targets[0].contains("__w.navigate(\"/settings\")"), "{targets:?}");
+        assert!(targets[1].contains("new Window(\"/settings\", {width: 500})"), "{targets:?}");
+        assert!(targets[2].contains("data: { theme: \"dark\" }"), "{targets:?}");
+        assert!(
+            targets[3].contains("__morph_open_browser(\"https://example.com/help\")"),
+            "{targets:?}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn link_dynamic_href_is_hard_error() {
+        let root = scratch("link_dyn");
+        write_file(&root, "App.mx", "export default function App() { const u = \"/x\"; return (<body><a href={u}>x</a></body>) }\n");
+        let graph = morph_parser::resolve_graph(&root.join("App.mx"), &root).unwrap();
+        let err = IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap_err();
+        assert!(err.to_string().contains("must be a string literal"), "{err}");
         let _ = std::fs::remove_dir_all(&root);
     }
 

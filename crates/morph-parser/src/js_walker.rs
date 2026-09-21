@@ -442,8 +442,22 @@ impl<'src> MxWalker<'src> {
         for item in &opening.attributes {
             if let Some(attr) = item.as_attribute() {
                 let name = attr.name.get_identifier().name.to_string();
-                let value =
-                    attr.value.as_ref().map_or(JsxPropValue::Bool, |v| self.jsx_prop_value(v));
+                // Only the `style` attribute parses objects into style
+                // maps (with CSS value semantics like `42` → `"42px"`).
+                // Any other object literal (`data={{…}}`, custom props) is
+                // a runtime expression — mapping it through style values
+                // would corrupt it irreversibly.
+                let value = match &attr.value {
+                    Some(JSXAttributeValue::ExpressionContainer(ec)) if name != "style" => {
+                        match ec.expression.as_expression() {
+                            Some(Expression::ObjectExpression(_)) => {
+                                JsxPropValue::Expr(self.span_text(ec.span).to_string())
+                            }
+                            _ => self.jsx_prop_value(attr.value.as_ref().unwrap()),
+                        }
+                    }
+                    _ => attr.value.as_ref().map_or(JsxPropValue::Bool, |v| self.jsx_prop_value(v)),
+                };
                 props.insert(name, value);
             }
         }
