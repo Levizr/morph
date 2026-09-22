@@ -204,7 +204,14 @@ impl StaticDeps {
         self.platform.hash(&mut h);
         if dep == "glfw" {
             self.wayland.hash(&mut h);
+            // Gamepad DB trim (see trim_glfw_gamepad): part of the build
+            // identity so old untrimmed archives never get reused.
+            "nogamepad-v1".hash(&mut h);
         }
+        // Dependency compile flags are build identity too (unwind tables
+        // etc. change object bytes without changing versions).
+        self.cflags_extra().hash(&mut h);
+        Self::hb_extra_flags().hash(&mut h);
         if dep == "freetype" {
             let mut keep = FT_MODULE_KEEP.to_vec();
             keep.sort_unstable();
@@ -217,7 +224,17 @@ impl StaticDeps {
     }
 
     fn cflags_extra(&self) -> String {
-        let mut flags = vec!["-Os", "-ffunction-sections", "-fdata-sections"];
+        // Lean static archives: size-first flags mirror the app link
+        // (-Oz rule lives in the app crate; deps use -Os which LTO
+        // reshapes anyway). Unwind tables are pure dead weight in
+        // dependency C code — no consumer ever unwinds through them.
+        let mut flags = vec![
+            "-Os",
+            "-ffunction-sections",
+            "-fdata-sections",
+            "-fno-asynchronous-unwind-tables",
+            "-fno-unwind-tables",
+        ];
         if self.lto_ok {
             flags.push("-flto");
         }
@@ -347,6 +364,7 @@ impl StaticDeps {
         let src = self.extract("glfw", &tarball)?;
         let build = self.cache.join("build").join("glfw-build");
         reset_dir(&build)?;
+        Self::trim_glfw_gamepad(&src)?;
         let mut args = vec![
             "cmake".to_string(),
             "-S".to_string(),
@@ -378,6 +396,43 @@ impl StaticDeps {
             "Installing glfw",
             &[],
         )
+    }
+
+    /// Drop GLFW's built-in gamepad mapping database (257KB source).
+    /// Morph exposes no gamepad API, so the DB is 100% dead weight that
+    /// `glfwInit` would otherwise link unconditionally. The stub keeps
+    /// every gamepad function callable (they just find no mappings).
+    /// The source tree is a per-build scratch copy, like ftmodule.
+    fn trim_glfw_gamepad(src: &Path) -> Result<()> {
+        let input_c = src.join("glfw-3.4").join("src").join("input.c");
+        // Tarball extracts to glfw-3.4/ — fall back to a flat src/ layout.
+        let input_c = if input_c.exists() { input_c } else { src.join("src").join("input.c") };
+        let text = std::fs::read_to_string(&input_c)
+            .with_context(|| format!("reading {}", input_c.display()))?;
+        let marker = "void _glfwInitGamepadMappings(void)";
+        let start = text.find(marker).with_context(|| "gamepad init not found")?;
+        let brace = text[start..].find('{').with_context(|| "gamepad body not found")? + start;
+        let mut depth = 0;
+        let mut end = None;
+        for (i, ch) in text[brace..].char_indices() {
+            match ch {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = Some(brace + i + 1);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let end = end.with_context(|| "gamepad body end not found")?;
+        let mut out = text[..brace].to_string();
+        out.push_str("{\n    (void)0; /* trimmed by morph --static: no gamepad API surface */\n}");
+        out.push_str(&text[end..]);
+        std::fs::write(&input_c, out)?;
+        Ok(())
     }
 
     fn write_trimmed_ftmodule(&self, src: &Path) -> Result<()> {
@@ -527,6 +582,18 @@ impl StaticDeps {
             .collect()
     }
 
+    /// Extra C/C++ flags for the HarfBuzz meson build (single source so
+    /// the cache hash below stays in sync with what actually compiles).
+    const fn hb_extra_flags() -> [&'static str; 5] {
+        [
+            "-DHB_MINI",
+            "-ffunction-sections",
+            "-fdata-sections",
+            "-fno-asynchronous-unwind-tables",
+            "-fno-unwind-tables",
+        ]
+    }
+
     fn build_harfbuzz(&self, prefix: &Path) -> Result<()> {
         let meson = self.meson()?;
         let tarball = self.source_tarball("harfbuzz")?;
@@ -534,7 +601,7 @@ impl StaticDeps {
         let build = self.cache.join("build").join("harfbuzz-build");
         reset_dir(&build)?;
         let mut opts = self.meson_opts(&src);
-        let extra = ["-DHB_MINI", "-ffunction-sections", "-fdata-sections"];
+        let extra = Self::hb_extra_flags();
         let ft_args = self.freetype_include_args();
         let c_args: Vec<String> = extra.iter().map(ToString::to_string).chain(ft_args).collect();
         let cpp_args = c_args.clone();
@@ -717,7 +784,7 @@ fn reset_dir(d: &Path) -> Result<()> {
 }
 
 fn load_manifest(cache: &Path) -> HashMap<String, (String, String)> {
-    let text = std::fs::read_to_string(cache.join("manifest.json")).unwrap_or_default();
+    let text = std::fs::read_to_string(cache.join("manifest.jsont.json")).unwrap_or_default();
     let parsed: HashMap<String, HashMap<String, String>> =
         serde_json::from_str(&text).unwrap_or_default();
     parsed

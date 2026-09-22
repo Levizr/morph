@@ -223,6 +223,9 @@ impl Compiler {
         cmd.push("-std=c++23".into());
         if opts.static_mode {
             let (opt, size_flags) = static_size_flags(&self.gpp);
+            // Same per-app rule as dynamic links: static content ships
+            // -Oz, perf content keeps -O2. The -s/-flto extras always apply.
+            let opt = if opt.is_empty() { opt } else { Self::opt_flag(defines).to_string() };
             if !opt.is_empty() {
                 cmd.push(opt);
             }
@@ -520,6 +523,10 @@ impl Compiler {
         // Strip symbols: a release binary ships no symtab (tens of KB on
         // small apps). Debug info was never emitted (no -g), so this only
         // drops the symbol table + unneeded symbols, never debug data.
+        // MORPH_NO_STRIP=1 keeps symbols (size attribution via nm).
+        if std::env::var("MORPH_NO_STRIP").is_ok() {
+            return Ok(());
+        }
         let strip_status = std::process::Command::new("strip")
             .args(if is_macos() { vec!["-u", "-r"] } else { vec!["--strip-unneeded"] })
             .arg(binary_path)
