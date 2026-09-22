@@ -51,6 +51,21 @@ morph run      # optimized native binary
 and native code is still ~330KB. Measured, not estimated —
 see [App disk size: benchmarks](guides/app-size.md).
 
+Your hello-world — renderer, layout, fonts — in **162KB**, zero
+dependencies. A kitchen-sink app with routing, windows, reactive state
+and native code still ships around **330KB**. For perspective:
+
+| What | Size | Can it render your UI? |
+|---|---|---|
+| Morph hello-world | **162KB** | ✅ yes, all of it |
+| Tauri hello-world | ~1.5MB | ✅ (needs your OS webview) |
+| Flutter hello-world | ~13.5MB | ✅ |
+| One 1080p stock photo | ~300KB | ❌ it's a picture of a dog |
+| Electron hello-world | ~95MB | ✅ (**586× bigger.** It ships a whole browser. For "hello".) |
+
+Dial-up could download your Morph app before the modem finished its
+scream. An Electron "hello world" needs a loading bar.
+
 ## Key Features
 
 - **`.mx` files** — JSX-like syntax with TypeScript/JavaScript and CSS in a single file

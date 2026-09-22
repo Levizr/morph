@@ -8,13 +8,14 @@
         "file": "index",
         "status": "production",
         "author": "PIYUSH",
-        "description": "What is Morph and how is it different from Electron? Build native desktop apps by compiling .mx files (JSX + TypeScript + CSS) directly into OpenGL binaries — no browser, no WebView, no runtime.",
-        "keywords": [
-          "what is morph",
-          "morph vs electron",
-          "compile mx to native binary",
-          "morph native ui framework"
-        ],
+     "description": "What is Morph and how is it different from Electron? Build native desktop apps by compiling .mx files (JSX + TypeScript + CSS) directly into OpenGL binaries — no browser, no WebView, no runtime. Hello-world ships as a 162KB self-contained binary.",
+     "keywords": [
+      "what is morph",
+      "morph vs electron",
+      "compile mx to native binary",
+      "morph native ui framework",
+      "morph 162KB binary"
+     ],
         "lastUpdated": "2026-09-05",
         "publishedAt": "2026-08-18",
         "priority": 0.9,
@@ -246,15 +247,18 @@
         "file": "concepts/build-mode",
         "status": "production",
         "author": "PIYUSH",
-        "description": "How to build a standalone Morph app: use morph build for an optimized release binary and morph run to build-plus-run, ready to distribute with no runtime.",
+        "description": "How to build a standalone Morph app: use morph build for an optimized release binary and morph run to build-plus-run, ready to distribute with no runtime. Static linking, UPX --lzma compression by default, and custom upx_flags for full control — hello-world ships at 162KB self-contained.",
         "keywords": [
           "morph build mode",
           "morph release binary",
           "morph run command",
           "build morph native app",
-          "morph distribution build"
+          "morph distribution build",
+          "morph upx_flags",
+          "morph upx lzma",
+          "morph static binary 162KB"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-23",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -923,14 +927,16 @@
         "file": "guides/app-size",
         "status": "production",
         "author": "PIYUSH",
-        "description": "Measured Morph binary sizes: hello-world to full apps, static vs dynamic vs UPX, framework comparison table, and how size grows with features.",
+        "description": "Measured Morph binary sizes: 162KB self-contained hello-world, ~330KB full apps, static vs dynamic vs UPX, framework comparison table (Morph vs Tauri, Qt, Flutter, Electron), and how size grows with features.",
         "keywords": [
           "morph binary size",
           "morph app size",
           "morph benchmarks",
           "morph UPX",
           "morph vs electron size",
-          "morph static size"
+          "morph static size",
+          "morph 162KB",
+          "morph upx_flags"
         ],
         "lastUpdated": "2026-09-23",
         "publishedAt": "2026-09-23",
