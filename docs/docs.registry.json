@@ -2032,6 +2032,26 @@
         "changefreq": "monthly"
       },
       {
+        "title": "Morph Lean Binaries: 150KB Budget (Active)",
+        "slug": "future/lean-binary",
+        "file": "future/lean-binary",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "Lean binary program for Morph: 150KB no-UPX budget for hello-world, per-app -Os/-O2 selection, derived MORPH_FEATURE_* flags for every subsystem, and the measurement log.",
+        "keywords": [
+          "morph lean binary",
+          "morph binary size",
+          "morph 150KB",
+          "morph dead code elimination",
+          "morph feature flags",
+          "morph per-app optimization"
+        ],
+        "lastUpdated": "2026-09-22",
+        "publishedAt": "2026-09-22",
+        "priority": 0.9,
+        "changefreq": "weekly"
+      },
+      {
         "title": "Morph File-Based Windows and Pages (Planned)",
         "slug": "future/file-routing",
         "file": "future/file-routing",
