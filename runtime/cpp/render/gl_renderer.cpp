@@ -224,10 +224,12 @@ GLRenderer::FontAtlas &GLRenderer::getOrCreateAtlas(int fontSize, CSS::FontWeigh
     }
     FT_Set_Pixel_Sizes(face, 0, fontSize);
 
+#ifdef MORPH_FEATURE_HARFBUZZ
     // Create HarfBuzz font
     hb_font_t *hbFont = hb_ft_font_create(face, nullptr);
     hb_ft_font_changed(hbFont);
     atlas.hbFont = hbFont;
+#endif
     atlas.ftFace = face;
 
     // Create R8 texture (initially all zeros, grows on demand)
@@ -489,7 +491,11 @@ void GLRenderer::shapeText(const std::string &text, FontAtlas &atlas,
                            std::vector<ShapedGlyph> &out)
 {
     out.clear();
-    if (text.empty() || !atlas.hbFont)
+    if (text.empty())
+        return;
+
+#ifdef MORPH_FEATURE_HARFBUZZ
+    if (!atlas.hbFont)
         return;
 
     hb_buffer_t *buf = hb_buffer_create();
@@ -520,6 +526,44 @@ void GLRenderer::shapeText(const std::string &text, FontAtlas &atlas,
     }
 
     hb_buffer_destroy(buf);
+#else
+    // FreeType-only shaping (no HarfBuzz in this build): 1:1 codepoint
+    // mapping with native kerning. No ligatures, complex-script joining,
+    // or mark positioning — those need MORPH_FEATURE_HARFBUZZ, enabled
+    // automatically for emoji, complex scripts, dynamic text, or inputs.
+    if (!atlas.ftFace)
+        return;
+    FT_Face face = atlas.ftFace;
+    bool kern = FT_HAS_KERNING(face) != 0;
+    FT_UInt prev = 0;
+    size_t pos = 0;
+    while (pos < text.size())
+    {
+        unsigned int cp = utf8ToCodepoint(text, pos);
+        FT_UInt glyph = (cp == 0) ? 0 : FT_Get_Char_Index(face, cp);
+        float ax = 0, ay = 0;
+        if (FT_Load_Glyph(face, glyph, FT_LOAD_DEFAULT) == 0)
+        {
+            ax = (float)(face->glyph->advance.x >> 6);
+            ay = (float)(face->glyph->advance.y >> 6);
+            if (kern && prev != 0 && glyph != 0)
+            {
+                FT_Vector delta;
+                if (FT_Get_Kerning(face, prev, glyph, FT_KERNING_DEFAULT, &delta) == 0)
+                    ax += (float)(delta.x >> 6);
+            }
+        }
+        ShapedGlyph sg;
+        sg.glyphIndex = glyph;
+        sg.ax = ax;
+        sg.ay = ay;
+        sg.dx = 0;
+        sg.dy = 0;
+        sg.codepoint = cp;
+        out.push_back(sg);
+        prev = glyph;
+    }
+#endif
 }
 
 float GLRenderer::measureTextWidth(const std::string &text, float fontSize,
@@ -700,8 +744,10 @@ void GLRenderer::shutdown()
             glDeleteTextures(1, &a.textureR8);
         if (a.textureRGBA)
             glDeleteTextures(1, &a.textureRGBA);
+#ifdef MORPH_FEATURE_HARFBUZZ
         if (a.hbFont)
             hb_font_destroy(a.hbFont);
+#endif
         if (a.ftFace)
             FT_Done_Face(a.ftFace);
     }

@@ -18,8 +18,10 @@
 #ifdef MORPH_FEATURE_TEXT
 #include <ft2build.h>
 #include FT_FREETYPE_H
+#ifdef MORPH_FEATURE_HARFBUZZ
 #include <hb.h>
 #include <hb-ft.h>
+#endif
 #include <cstdio>
 #include <string>
 
@@ -152,8 +154,11 @@ public:
         // Actual strike height for color emoji bitmap fonts (0 if outline font)
         int actualStrikeHeight = 0;
 
-        // HarfBuzz + FreeType handles
+        // Font handles: FreeType always; HarfBuzz only when the app
+        // shapes complex content (emoji/complex scripts/dynamic text).
+#ifdef MORPH_FEATURE_HARFBUZZ
         hb_font_t *hbFont = nullptr;
+#endif
         FT_Face ftFace = nullptr;
     };
 #endif

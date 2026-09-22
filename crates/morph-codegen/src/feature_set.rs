@@ -218,6 +218,8 @@ impl FeatureSet {
                     self.features.insert("cursor".into());
                     self.features.insert("radius".into());
                     self.features.insert("event".into());
+                    // Fields accept arbitrary typing (emoji included).
+                    self.features.insert("harfbuzz".into());
                 }
                 if node.node_type == "img" {
                     self.features.insert("image".into());
@@ -257,6 +259,13 @@ impl FeatureSet {
                     || node.item_template.is_some()
                 {
                     self.features.insert("reactivity".into());
+                }
+                if !node.reactive_text.is_empty() {
+                    // Runtime content can be anything (emoji included).
+                    self.features.insert("harfbuzz".into());
+                }
+                if Self::needs_harfbuzz(&node.text_content) {
+                    self.features.insert("harfbuzz".into());
                 }
                 if !node.reactive_style.is_empty() {
                     self.scan_reactive(&node.reactive_style);
@@ -328,6 +337,37 @@ impl FeatureSet {
         if on {
             self.features.insert("pagecache".into());
         }
+    }
+
+    /// True when text needs HarfBuzz shaping: emoji/symbol codepoints,
+    /// complex scripts (Arabic, Hebrew, Indic, Thai/Lao/Tibetan/Myanmar,
+    /// Khmer, Hangul Jamo), or joiners that only occur in emoji sequences.
+    /// Everything else (Latin, Cyrillic, Greek, CJK ideographs, kana,
+    /// precomposed Hangul) shapes 1:1 in FreeType — typographically correct.
+    fn needs_harfbuzz(text: &str) -> bool {
+        for c in text.chars() {
+            let cp = c as u32;
+            let emoji = (0x1F000..=0x1FAFF).contains(&cp)
+                || (0x2600..=0x26FF).contains(&cp)
+                || (0x2700..=0x27BF).contains(&cp)
+                || (0x2B00..=0x2BFF).contains(&cp)
+                || cp == 0x20E3
+                || cp == 0xFE0F
+                || cp == 0x200D
+                || (0x1F1E6..=0x1F1FF).contains(&cp);
+            let complex = (0x0590..=0x05FF).contains(&cp)
+                || (0x0600..=0x077F).contains(&cp)
+                || (0x0900..=0x0DFF).contains(&cp)
+                || (0x0E00..=0x0EFF).contains(&cp)
+                || (0x0F00..=0x0FFF).contains(&cp)
+                || (0x1000..=0x109F).contains(&cp)
+                || (0x1780..=0x17FF).contains(&cp)
+                || (0x1100..=0x11FF).contains(&cp);
+            if emoji || complex {
+                return true;
+            }
+        }
+        false
     }
 
     pub fn required_headers(&self) -> Vec<String> {
@@ -467,6 +507,11 @@ impl FeatureSet {
         if self.features.contains("pagecache") {
             d.push("MORPH_FEATURE_PAGECACHE".into());
         }
+        // HarfBuzz text shaping: emoji, complex scripts, dynamic text,
+        // and input fields. Everything else shapes 1:1 in FreeType.
+        if self.features.contains("harfbuzz") {
+            d.push("MORPH_FEATURE_HARFBUZZ".into());
+        }
         d
     }
 
@@ -538,5 +583,94 @@ mod tests {
         fs.scan(std::slice::from_ref(&win));
         assert!(fs.features.contains("border"));
         assert!(fs.required_defines().contains(&"MORPH_FEATURE_BORDER".to_string()));
+    }
+
+    fn text_window(text: &str, node_type: &str) -> IRWindow {
+        let mut node = IRNode {
+            node_id: "node_0001".to_string(),
+            node_type: node_type.to_string(),
+            text_content: text.to_string(),
+            ..Default::default()
+        };
+        if node_type == "input" {
+            node.text_content = String::new();
+        }
+        IRWindow {
+            window_id: "main".to_string(),
+            title: "Test".to_string(),
+            width: 800,
+            height: 600,
+            visible: true,
+            min_width: None,
+            max_width: None,
+            min_height: None,
+            max_height: None,
+            modal: false,
+            renderer: "flash".to_string(),
+            nodes: vec![node],
+            startup_logs: Vec::new(),
+            premain_functions: Vec::new(),
+            extra_headers: Vec::new(),
+            state_vars: Vec::new(),
+            reactive_consts: Vec::new(),
+            route_props: Vec::new(),
+            shared_vars: Vec::new(),
+            effect_decls: Vec::new(),
+            cpp_imports: Vec::new(),
+            event_decls: Vec::new(),
+            mid_assignments: Vec::new(),
+            module_bindings: Vec::new(),
+            channel_subs: Vec::new(),
+            keyframes: std::collections::HashMap::new(),
+        }
+    }
+
+    fn defines_for(text: &str, node_type: &str) -> Vec<String> {
+        let win = text_window(text, node_type);
+        let mut fs = FeatureSet::new();
+        fs.scan(std::slice::from_ref(&win));
+        fs.required_defines()
+    }
+
+    #[test]
+    fn harfbuzz_triggers_on_emoji_and_complex_scripts() {
+        for text in ["hello 🎉", "مرحبا", "नमस्ते", "שלום", "สวัสดี", "👨‍👩‍👧"]
+        {
+            let d = defines_for(text, "__text__");
+            assert!(
+                d.contains(&"MORPH_FEATURE_HARFBUZZ".to_string()),
+                "{text:?} should shape via HarfBuzz"
+            );
+        }
+    }
+
+    #[test]
+    fn harfbuzz_stays_off_for_plain_and_cjk_text() {
+        for text in [
+            "hello world",
+            "123",
+            "Bonjour le monde",
+            "日本語テスト",
+            "한글",
+            "Ελληνικά",
+            "Кириллица",
+        ] {
+            let d = defines_for(text, "__text__");
+            assert!(
+                !d.contains(&"MORPH_FEATURE_HARFBUZZ".to_string()),
+                "{text:?} should shape in FreeType"
+            );
+        }
+    }
+
+    #[test]
+    fn harfbuzz_forced_by_reactive_text_and_inputs() {
+        let d = defines_for("", "input");
+        assert!(d.contains(&"MORPH_FEATURE_HARFBUZZ".to_string()), "inputs take anything");
+        let mut win = text_window("plain", "__text__");
+        win.nodes[0].reactive_text = "{name}".to_string();
+        let mut fs = FeatureSet::new();
+        fs.scan(std::slice::from_ref(&win));
+        assert!(fs.required_defines().contains(&"MORPH_FEATURE_HARFBUZZ".to_string()));
     }
 }

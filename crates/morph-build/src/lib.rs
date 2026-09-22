@@ -288,6 +288,14 @@ impl Compiler {
         } else {
             "-Wl,--gc-sections".to_string()
         });
+        // Size debugging: MORPH_LINK_MAP=<path> emits a GNU ld link map
+        // for per-object attribution (see docs/future/lean-binary.md).
+        // Never on by default — the map itself costs link time.
+        if let Ok(map_path) = std::env::var("MORPH_LINK_MAP") {
+            if !map_path.is_empty() && !is_macos() {
+                cmd.push(format!("-Wl,-Map,{map_path}"));
+            }
+        }
 
         // Platform libs: static archives are bundled into the binary so the
         // app runs on a stock machine; only the universal base (GL,
@@ -295,7 +303,7 @@ impl Compiler {
         let mut archives: std::collections::HashMap<String, static_deps::DepInfo> =
             std::collections::HashMap::new();
         if opts.static_mode {
-            archives = resolve_static_archives(&self.gpp, opts, self.silent)?;
+            archives = resolve_static_archives(&self.gpp, opts, self.silent, defines)?;
             let ft = archives.get("freetype");
             let hb = archives.get("harfbuzz");
             let glfw =
@@ -457,17 +465,22 @@ impl Compiler {
             }
         } else {
             let have_cflags = append_pkg_config(&mut cmd, "harfbuzz", "--cflags");
-            if !opts.static_mode {
-                if !append_pkg_config(&mut cmd, "harfbuzz", "--libs") {
-                    cmd.push("-lharfbuzz".into());
-                }
-                if !have_cflags {
+            // HarfBuzz links only when the app shapes complex content
+            // (MORPH_FEATURE_HARFBUZZ) — otherwise neither the lib nor
+            // its headers ride along, so the dep need not be installed.
+            if defines.iter().any(|d| d == "MORPH_FEATURE_HARFBUZZ") {
+                if !opts.static_mode {
+                    if !append_pkg_config(&mut cmd, "harfbuzz", "--libs") {
+                        cmd.push("-lharfbuzz".into());
+                    }
+                    if !have_cflags {
+                        cmd.extend(system_include_dirs().iter().map(|d| format!("-I{d}/harfbuzz")));
+                    }
+                } else if !have_cflags {
+                    // Static system archive: the archive is already on the link
+                    // line, only the headers still need a fallback path.
                     cmd.extend(system_include_dirs().iter().map(|d| format!("-I{d}/harfbuzz")));
                 }
-            } else if !have_cflags {
-                // Static system archive: the archive is already on the link
-                // line, only the headers still need a fallback path.
-                cmd.extend(system_include_dirs().iter().map(|d| format!("-I{d}/harfbuzz")));
             }
         }
 
@@ -594,6 +607,7 @@ fn resolve_static_archives(
     gpp: &str,
     opts: &BuildOptions,
     silent: bool,
+    defines: &[String],
 ) -> Result<std::collections::HashMap<String, static_deps::DepInfo>> {
     let mut deps = static_deps::StaticDeps::new(gpp, opts.wayland);
     if silent {
@@ -604,7 +618,14 @@ fn resolve_static_archives(
     // Default: build the trimmed freetype ourselves (smallest result).
     // system_freetype prefers the system archive instead.
     resolve_one(&mut info, &mut deps, "freetype", !opts.system_freetype)?;
-    resolve_one(&mut info, &mut deps, "harfbuzz", false)?;
+    // HarfBuzz only when the app shapes complex content (emoji, complex
+    // scripts, dynamic text, inputs) — otherwise the whole meson build
+    // (35MB source) is skipped. Text shaping falls back to FreeType.
+    if defines.iter().any(|d| d == "MORPH_FEATURE_HARFBUZZ") {
+        resolve_one(&mut info, &mut deps, "harfbuzz", false)?;
+    } else if !silent {
+        eprintln!("  skipping harfbuzz static build (no shaping content detected)");
+    }
     Ok(info)
 }
 
