@@ -45,23 +45,43 @@ Requires the `.a` dev archives. Morph can auto-build FreeType from source if the
 
 ## UPX Compression
 
-By default, Morph compresses the binary with UPX (an executable compressor). This typically reduces binary size by 50-70%.
+By default, Morph compresses the binary with UPX using its tightest
+generally-sane setting, `--lzma` — typically 55–65% off the raw binary.
+That's how hello-world lands at **162KB self-contained**: the linker
+already threw away everything you don't use, then LZMA squeezes what's
+left. Decompression happens in milliseconds at startup; you pay nothing
+at runtime.
 
-```bash
-morph build --no-upx    # skip compression
-morph build --upx       # force compression (default)
-```
-
-Configure in `morph.config.json`:
+Full control lives in `morph.config.json`:
 
 ```json
 {
   "build": {
     "upx": true,
-    "upx_version": ""
+    "upx_version": "",
+    "upx_flags": []
   }
 }
 ```
+
+- `upx`: set `false` to skip compression entirely.
+- `upx_version`: pin a UPX release (empty = system UPX, else auto-downloaded).
+- `upx_flags`: **your flags, passed through verbatim.** Empty (the
+  default) means Morph's `--lzma`. Want it your way?
+
+```json
+{ "build": { "upx_flags": ["--ultra-brute", "--lzma"] } }
+```
+
+Maximum squeeze, if you've got a minute to spare. Prefer fast builds
+over final bytes?
+
+```json
+{ "build": { "upx_flags": ["--best"] } }
+```
+
+Morph never argues — whatever you list is exactly what runs. No hidden
+flags appended, no "helpful" overrides. Your binary, your rules.
 
 ## Output
 

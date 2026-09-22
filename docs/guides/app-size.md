@@ -16,7 +16,12 @@ from `ls -la` (`--static --no-upx` for raw, then UPX `--lzma`).
 A full graphical app written in JSX with reactive state ships as a
 single zero-dependency file smaller than most web images. A 1080p photo
 is typically 200–500KB — Morph's entire software pipeline fits inside
-that.
+that. Your app is literally smaller than a screenshot *of* your app.
+Take that screenshot, by the way: the PNG will probably be bigger than
+the binary that rendered it. If your designer sends you a 300KB hero
+image, congratulations — the art asset now outweighs the entire program.
+Electron needs 95MB to say "hello". Morph says it in 162KB and still
+has room for lunch.
 
 ## Real-world baseline comparison
 
@@ -58,8 +63,9 @@ Details live in the [lean-binary design record](../future/lean-binary.md)
 ## Dynamic builds (for completeness)
 
 Prefer system libraries over self-containment? Dynamic hello-world is
-**113KB raw / 49KB UPX**, plus system GLFW/FreeType/HarfBuzz/X11
+**113KB raw / 43KB UPX**, plus system GLFW/FreeType/HarfBuzz/X11
 (~4MB on disk distribution-wide, shared by every app on the machine).
+43KB. Your app now weighs less than this sentence's font file.
 Same promise, different tradeoff — see [deployment](deployment.md).
 
 ## Reproduce it

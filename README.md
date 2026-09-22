@@ -31,7 +31,7 @@ No browser. No Electron. No WebView. Just a lightweight native binary.
 
 ## What is Morph?
 
-Morph is a UI framework that compiles `.mx` files (JSX-like syntax with TypeScript and CSS) directly into native OpenGL binaries. You write familiar web-style code — Morph produces a tiny, standalone native binary with zero browser overhead.
+Morph is a UI framework that compiles `.mx` files (JSX-like syntax with TypeScript and CSS) directly into native OpenGL binaries. You write familiar web-style code — Morph produces a tiny, standalone native binary with zero browser overhead. A whole hello-world app ships as a single self-contained **162KB** file: smaller than the stock photo on most landing pages.
 
 ```tsx
 // src/App.mx
@@ -73,7 +73,23 @@ export default function App() {
 |---|---|---|---|
 | Write UI in | HTML/CSS/JS | C++ / QML | TS/JSX/CSS |
 | Runtime | Chromium (~150MB) | Qt libs | **Zero** |
-| Binary size | ~80MB+ | ~20MB+ | **<1MB** |
+| Binary size | ~80MB+ | ~20MB+ | **162KB** |
+
+Your entire app — renderer, layout, reactive state, fonts — in 162KB,
+self-contained, zero dependencies. For perspective, that's roughly:
+
+| What | Size | Can it render your UI? |
+|---|---|---|
+| Morph hello-world (this framework) | **162KB** | ✅ yes, all of it |
+| Tauri hello-world | ~1.5MB | ✅ (needs your OS webview) |
+| Flutter hello-world | ~13.5MB | ✅ |
+| One 1080p stock photo | ~300KB | ❌ it's a picture of a dog |
+| Electron hello-world | ~95MB | ✅ (**586× bigger.** It ships a whole browser. For "hello".) |
+
+Dial-up could download your Morph app before the modem finished its
+scream. An Electron "hello world" needs a loading bar. We measured it —
+see [App disk size: benchmarks](docs/guides/app-size.md). Every number
+there is `ls -la`, not marketing math.
 | Native OpenGL access | ✗ | ✓ | ✓ |
 | Hot reload | ✓ | ✗ | ✓ |
 | Custom C++ nodes | ✗ | ✓ | ✓ |

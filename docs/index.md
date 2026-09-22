@@ -43,7 +43,7 @@ morph run      # optimized native binary
 |---|---|---|---|
 | Write UI in | HTML/CSS/JS | C++ / QML | TS/JSX/CSS |
 | Runtime | Chromium (~150MB) | Qt libs | **Zero** |
-| Binary size | ~80MB+ | ~20MB+ | **<1MB** |
+| Binary size | ~80MB+ | ~20MB+ | **162KB** |
 | Native OpenGL | ✗ | ✓ | ✓ |
 | Hot reload | ✓ | ✗ | ✓ |
 

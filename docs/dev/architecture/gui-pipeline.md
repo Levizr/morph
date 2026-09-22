@@ -30,7 +30,7 @@ How `morph build` / `morph run` / `morph dev` turn `.mx` source into a native wi
 │ Compile      │   --static / UPX post-processing
    │
    ▼
-.morph/output/<app>   native binary (<1MB, zero runtime deps)
+.morph/output/<app>   native binary (162KB hello, zero runtime deps)
 ```
 
 All stages run in-process in the `morph` binary. The crates, with their front doors:
