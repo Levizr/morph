@@ -43,9 +43,13 @@ morph run      # optimized native binary
 |---|---|---|---|
 | Write UI in | HTML/CSS/JS | C++ / QML | TS/JSX/CSS |
 | Runtime | Chromium (~150MB) | Qt libs | **Zero** |
-| Binary size | ~80MB+ | ~20MB+ | **162KB** |
+| Binary size | ~80MB+ | ~20MB+ | **162KB\*** |
 | Native OpenGL | ✗ | ✓ | ✓ |
 | Hot reload | ✓ | ✗ | ✓ |
+
+\* Self-contained hello-world; a full app with routing, windows, state
+and native code is still ~330KB. Measured, not estimated —
+see [App disk size: benchmarks](guides/app-size.md).
 
 ## Key Features
 

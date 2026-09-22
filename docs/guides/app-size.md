@@ -13,15 +13,16 @@ from `ls -la` (`--static --no-upx` for raw, then UPX `--lzma`).
 | windows (multi-window, ownership, modals) | 891KB | 344KB |
 | routes (file routing, mounts, page cache, links, native C++) | 846KB | 327KB |
 
-A full graphical app written in JSX with reactive state ships as a
-single zero-dependency file smaller than most web images. A 1080p photo
-is typically 200–500KB — Morph's entire software pipeline fits inside
-that. Your app is literally smaller than a screenshot *of* your app.
-Take that screenshot, by the way: the PNG will probably be bigger than
-the binary that rendered it. If your designer sends you a 300KB hero
-image, congratulations — the art asset now outweighs the entire program.
-Electron needs 95MB to say "hello". Morph says it in 162KB and still
-has room for lunch.
+A hello-world graphical app written in JSX ships as a single
+zero-dependency **162KB** file — smaller than most web images. A 1080p
+photo is typically 200–500KB. Your hello-world is literally smaller
+than a screenshot *of* your hello-world: the PNG will probably outweigh
+the binary that rendered it. And real apps stay tiny too — routing,
+windows, state, lists and native code land around **327–344KB**,
+still lighter than one stock photo. If your designer sends you a 300KB
+hero image, congratulations — the art asset now outweighs the entire
+program. Electron needs 95MB to say "hello". Morph says it in 162KB
+and still has room for lunch.
 
 ## Real-world baseline comparison
 
@@ -29,7 +30,7 @@ Same class of measurement — fully self-contained GUI binaries:
 
 | Framework / Ecosystem | Linkage mode | UPX size | × vs Morph |
 |---|---|---|---|
-| **Levizr Morph** | Statically compiled C++ | **162KB** | **1× (baseline)** |
+| **Levizr Morph (hello-world)** | Statically compiled C++ | **162KB** | **1× (baseline)** |
 | Tauri (v2.x / Rust) | Dynamic OS webview | ~1.5MB | ~9.5× |
 | Go / Fyne | Fully self-contained | ~3.8MB | ~23× |
 | C++ / Qt6 | Fully self-contained | ~4.2MB | ~26× |

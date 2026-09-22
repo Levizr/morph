@@ -75,8 +75,10 @@ export default function App() {
 | Runtime | Chromium (~150MB) | Qt libs | **Zero** |
 | Binary size | ~80MB+ | ~20MB+ | **162KB** |
 
-Your entire app — renderer, layout, reactive state, fonts — in 162KB,
-self-contained, zero dependencies. For perspective, that's roughly:
+Your hello-world — renderer, layout, fonts — in **162KB**,
+self-contained, zero dependencies. And it barely grows: a kitchen-sink
+app with routing, windows, reactive state and native code still ships
+around **330KB**. For perspective:
 
 | What | Size | Can it render your UI? |
 |---|---|---|
