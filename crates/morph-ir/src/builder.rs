@@ -2462,6 +2462,36 @@ impl IRBuilder {
                                 }
                             }
                         }
+                        // Ownership rides along: parent id/route/auto as a
+                        // string literal, modal as a bare flag, role as a
+                        // string literal. Dynamic values fail the build —
+                        // WIDs cannot be computed from markup.
+                        if let Some((_, value)) = props.iter().find(|(k, _)| k.as_str() == "parent")
+                        {
+                            match value {
+                                morph_parser::JsxPropValue::String(s) => {
+                                    cfg.push(format!("parent: \"{}\"", s.replace('"', "\\\"")));
+                                }
+                                _ => anyhow::bail!(
+                                    "link `parent` must be a string literal ({line}:{col}); pass a window id, route, or \"auto\""
+                                ),
+                            }
+                        }
+                        if props.iter().any(|(k, v)| {
+                            k.as_str() == "modal" && matches!(v, morph_parser::JsxPropValue::Bool)
+                        }) {
+                            cfg.push("modal: true".to_string());
+                        }
+                        if let Some((_, value)) = props.iter().find(|(k, _)| k.as_str() == "role") {
+                            match value {
+                                morph_parser::JsxPropValue::String(s) => {
+                                    cfg.push(format!("role: \"{}\"", s.replace('"', "\\\"")));
+                                }
+                                _ => anyhow::bail!(
+                                    "link `role` must be a string literal ({line}:{col}); expected \"default\", \"dialog\", or \"popup\""
+                                ),
+                            }
+                        }
                         if let Some(data) = data_src {
                             cfg.push(format!("data: {}", strip_braces(&data)));
                         }
@@ -2491,7 +2521,10 @@ impl IRBuilder {
                             || k == "data"
                             || k == "width"
                             || k == "height"
-                            || k == "title")
+                            || k == "title"
+                            || k == "parent"
+                            || k == "modal"
+                            || k == "role")
                     {
                         continue;
                     }
@@ -5991,6 +6024,7 @@ export default function App() {
       <a href="/settings">plain</a>
       <a href="/settings" target="_blank" width={500}>popup</a>
       <a href="/settings" target="_blank" data={{ theme: "dark" }}>with data</a>
+      <a href="/settings" target="_blank" parent="auto" modal role="popup">owned</a>
       <a href="https://example.com/help">help</a>
       <a>no href</a>
     </body>
@@ -6007,12 +6041,15 @@ export default function App() {
         for node in &win.nodes {
             event_targets(node, &mut targets);
         }
-        assert_eq!(targets.len(), 4, "{targets:?}");
+        assert_eq!(targets.len(), 5, "{targets:?}");
         assert!(targets[0].contains("__w.navigate(\"/settings\")"), "{targets:?}");
         assert!(targets[1].contains("new Window(\"/settings\", {width: 500})"), "{targets:?}");
         assert!(targets[2].contains("data: { theme: \"dark\" }"), "{targets:?}");
+        assert!(targets[3].contains("parent: \"auto\""), "{targets:?}");
+        assert!(targets[3].contains("modal: true"), "{targets:?}");
+        assert!(targets[3].contains("role: \"popup\""), "{targets:?}");
         assert!(
-            targets[3].contains("__morph_open_browser(\"https://example.com/help\")"),
+            targets[4].contains("__morph_open_browser(\"https://example.com/help\")"),
             "{targets:?}"
         );
         let _ = std::fs::remove_dir_all(&root);

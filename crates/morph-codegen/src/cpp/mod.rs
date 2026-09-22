@@ -20,11 +20,22 @@ pub struct CppEmitter<'a> {
     /// Page-cache capacity from `navigation.cache` (`0` = destroy on
     /// leave, N = LRU cap, -1 = `"all"`). Emitted as `kMorphPageCache`.
     page_cache: i64,
+    /// App-wide ownership defaults (`parent`/`modal`/`role` from
+    /// `[window]` in morph.config.json) for routes without their own.
+    /// Parent is the raw string (`""` none, `"auto"` focused, id, route).
+    app_ownership: (String, bool, i64),
 }
 
 impl<'a> CppEmitter<'a> {
-    pub const fn new(windows: &'a [IRWindow]) -> Self {
-        Self { windows, routes: &[], routes_ir: &[], app_window: None, page_cache: 0 }
+    pub fn new(windows: &'a [IRWindow]) -> Self {
+        Self {
+            windows,
+            routes: &[],
+            routes_ir: &[],
+            app_window: None,
+            page_cache: 0,
+            app_ownership: (String::new(), false, 0),
+        }
     }
 
     /// Attach the route manifest (RID table). Chained before `emit`.
@@ -50,6 +61,13 @@ impl<'a> CppEmitter<'a> {
     /// Chained before `emit`.
     pub fn with_page_cache(mut self, cap: i64) -> Self {
         self.page_cache = cap;
+        self
+    }
+
+    /// App-wide ownership defaults (`parent` raw string, `modal`, `role`
+    /// int from `[window]`). Chained before `emit`.
+    pub fn with_window_ownership(mut self, parent: String, modal: bool, role: i64) -> Self {
+        self.app_ownership = (parent, modal, role);
         self
     }
 
@@ -499,7 +517,8 @@ impl<'a> CppEmitter<'a> {
                 app_width,
                 app_height,
                 self.page_cache,
-            );
+                self.app_ownership.clone(),
+            )?;
             if !helpers.is_empty() {
                 // Helpers precede the mounts: navigate/create are called
                 // from mount bodies, so they must be declared first. The
@@ -920,7 +939,9 @@ pub fn resolve_window_placeholders(src: &str, routes: &[RouteEntry]) -> anyhow::
                         )
                     }
                     None => {
-                        anyhow::bail!("mx-route-unknown: window parent route must be a string literal")
+                        anyhow::bail!(
+                            "mx-route-unknown: window parent route must be a string literal"
+                        )
                     }
                 }
             }
@@ -1368,6 +1389,29 @@ pub fn generate_route_mounts(
     out.join("\n\n")
 }
 
+/// Lower a `parent` string (route `windowConfig`, `[window]` default) to
+/// a WID-yielding C++ expression: route → manifest const, `"auto"` →
+/// focused window, `""` → invalid, anything else → alias lookup.
+/// Unknown routes fail the build (same `mx-route-unknown` as every
+/// other route reference).
+fn parent_wid_expr(parent: &str, routes: &[RouteEntry]) -> anyhow::Result<String> {
+    if parent.is_empty() {
+        return Ok("kInvalidWid".to_string());
+    }
+    if parent == "auto" {
+        return Ok("WindowManager::get().focusedWid()".to_string());
+    }
+    if parent.starts_with('/') {
+        let entry = lookup_route(routes, parent)?;
+        return Ok(format!(
+            "WindowManager::get().widForRoute(::app::routes::{})",
+            entry.const_name
+        ));
+    }
+    let escaped = parent.replace('\\', "\\\\").replace('"', "\\\"");
+    Ok(format!("WindowManager::get().widForAlias(\"{escaped}\")"))
+}
+
 /// Dynamic window helpers (`new Window` / `navigate` lowering):
 /// mount dispatch switch, window creation (opts → route windowConfig →
 /// app defaults), and navigate (cache-aware: detach into the page cache
@@ -1376,15 +1420,18 @@ pub fn generate_route_mounts(
 /// `page_cache` is the resolved `navigation.cache` (0 / N / -1) baked in
 /// as `kMorphPageCache` — the navigate branch on it is predictable, so
 /// the default-0 path costs nothing extra on the hot path.
+/// `app_ownership` is the `[window]` parent/modal/role fallback seeding
+/// every route (route `windowConfig` overrides, call-site opts win).
 pub fn generate_window_helpers(
     routes_ir: &[(RouteEntry, IRWindow)],
     app_title: &str,
     app_width: u32,
     app_height: u32,
     page_cache: i64,
-) -> String {
+    app_ownership: (String, bool, i64),
+) -> anyhow::Result<String> {
     if routes_ir.is_empty() {
-        return String::new();
+        return Ok(String::new());
     }
     let esc = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
     let mut out = vec![
@@ -1408,17 +1455,31 @@ pub fn generate_window_helpers(
     out.push("    auto& wm = WindowManager::get();".to_string());
     out.push("    std::string title;".to_string());
     out.push("    int w = 0, h = 0;".to_string());
+    // Ownership fallback seeds: app defaults first, route switch
+    // overwrites, call-site opts win (same chain as geometry).
+    let route_entries: Vec<RouteEntry> = routes_ir.iter().map(|(r, _)| r.clone()).collect();
+    let app_parent = parent_wid_expr(&app_ownership.0, &route_entries)?;
+    out.push(format!("    WID parent = {};", app_parent));
+    out.push(format!("    bool modal = {};", if app_ownership.1 { "true" } else { "false" }));
+    out.push(format!("    int role = {};", app_ownership.2));
     out.push("    switch (rid) {".to_string());
     for (route, _) in routes_ir {
         let title = route.title.as_deref().filter(|t| !t.is_empty()).unwrap_or(app_title);
         let w = route.width.filter(|v| *v > 0).unwrap_or(app_width);
         let h = route.height.filter(|v| *v > 0).unwrap_or(app_height);
+        let rparent = parent_wid_expr(&route.parent, &route_entries)?;
+        let rrole = morph_config::WindowRole::parse(&route.role)
+            .map(|r| r.as_int())
+            .map_err(|e| anyhow::anyhow!("route {}: {e}", route.id))?;
         out.push(format!(
-            "    case {}: title = \"{}\"; w = {}; h = {}; break;",
+            "    case {}: title = \"{}\"; w = {}; h = {}; parent = {}; modal = {}; role = {}; break;",
             route.rid,
             esc(title),
             w,
-            h
+            h,
+            rparent,
+            if route.modal { "true" } else { "false" },
+            rrole,
         ));
     }
     out.push("    default: return kInvalidWid;".to_string());
@@ -1433,9 +1494,29 @@ pub fn generate_window_helpers(
             .to_string(),
     );
     out.push("    if (w <= 0 || h <= 0) return kInvalidWid;".to_string());
+    out.push(
+        "    if (opts.has(\"parent\")) parent = static_cast<WID>(opts.get(\"parent\").as_int());"
+            .to_string(),
+    );
+    out.push("    if (opts.has(\"modal\")) modal = opts.get(\"modal\").as_bool();".to_string());
+    out.push(
+        "    if (opts.has(\"role\")) role = static_cast<int>(opts.get(\"role\").as_int());"
+            .to_string(),
+    );
+    out.push("    if (modal && parent == kInvalidWid) {".to_string());
+    out.push(
+        "        fprintf(stderr, \"[morph] modal window needs a valid parent\\n\");".to_string(),
+    );
+    out.push("        return kInvalidWid;".to_string());
+    out.push("    }".to_string());
     out.push("    WID wid = wm.mintWid();".to_string());
     out.push("    auto win = std::make_shared<MorphWindow>(title, w, h, false);".to_string());
     out.push("    wm.registerWindow(wid, win);".to_string());
+    out.push("    wm.setWindowParent(wid, parent);".to_string());
+    out.push("    wm.setWindowModal(wid, modal);".to_string());
+    out.push("    wm.setWindowRole(wid, role);".to_string());
+    out.push("    if (parent != kInvalidWid) win->setFloating(true);".to_string());
+    out.push("    if (modal) wm.centerOnParent(wid);".to_string());
     out.push(
         "    if (opts.has(\"id\")) { auto alias = opts.get(\"id\").as_string(); if (!alias.empty()) wm.registerAlias(alias, wid); }"
             .to_string(),
@@ -1478,6 +1559,11 @@ pub fn generate_window_helpers(
     out.push("    if (!cfg.title.empty()) opts.set(\"title\", JsValue(cfg.title));".to_string());
     out.push("    if (!cfg.id.empty()) opts.set(\"id\", JsValue(cfg.id));".to_string());
     out.push("    opts.set(\"data\", JsValue(cfg.data));".to_string());
+    out.push(
+        "    if (cfg.parent != kInvalidWid) opts.set(\"parent\", JsValue(cfg.parent));".to_string(),
+    );
+    out.push("    if (cfg.modal) opts.set(\"modal\", JsValue(true));".to_string());
+    out.push("    if (cfg.role != 0) opts.set(\"role\", JsValue(cfg.role));".to_string());
     out.push("    return __morph_create_window(rid, opts);".to_string());
     out.push("}".to_string());
     out.push("bool navigate(WID wid, int rid) {".to_string());
@@ -1487,7 +1573,7 @@ pub fn generate_window_helpers(
     out.push("    return __morph_navigate_window(wid, rid, props);".to_string());
     out.push("}".to_string());
     out.push("} // namespace app::windows".to_string());
-    out.join("\n")
+    Ok(out.join("\n"))
 }
 
 /// Route manifest header (`morph_routes.h`): one `app::routes::` int
@@ -1884,6 +1970,66 @@ fn generate_self_test(windows: &[IRWindow], routes: &[RouteEntry]) -> String {
                 .to_string(),
         );
         lines.push("    check(__wm.close(903), \"cache:close-rest\");".to_string());
+    }
+    // Ownership: cascade kills owned children but spares independents;
+    // a live modal refuses other windows' closes but always closes
+    // itself; parent/role/modal rows read back; follow math is visual
+    // (headless positions never change, so noteFollowMoved is a no-op
+    // here — exercised via screenshots).
+    {
+        lines.push(
+            "    auto __we = std::make_shared<MorphWindow>(\"wm-e\", 100, 100, false);".to_string(),
+        );
+        lines.push(
+            "    auto __wc2 = std::make_shared<MorphWindow>(\"wm-c2\", 60, 40, false);".to_string(),
+        );
+        lines.push(
+            "    auto __wi = std::make_shared<MorphWindow>(\"wm-i\", 100, 100, false);".to_string(),
+        );
+        lines.push("    __wm.registerWindow(905, __we);".to_string());
+        lines.push("    __wm.registerWindow(906, __wc2);".to_string());
+        lines.push("    __wm.registerWindow(907, __wi);".to_string());
+        lines.push("    __wm.setWindowParent(906, 905);".to_string());
+        lines.push("    __wm.setWindowModal(906, true);".to_string());
+        lines.push("    __wm.setWindowRole(906, 2);".to_string());
+        lines.push(
+            "    check(__wm.windowParent(906) == 905, \"own:parent-reads-back\");".to_string(),
+        );
+        lines.push(
+            "    check(__wm.windowModal(906) && !__wm.windowModal(905), \"own:modal-reads-back\");"
+                .to_string(),
+        );
+        lines.push("    check(__wm.windowRole(906) == 2, \"own:role-reads-back\");".to_string());
+        lines.push("    check(!__wm.close(905), \"own:modal-blocks-owner-close\");".to_string());
+        lines.push(
+            "    check(!__wm.close(907), \"own:modal-blocks-independent-close\");".to_string(),
+        );
+        lines.push("    check(__wm.close(906), \"own:modal-itself-closes\");".to_string());
+        lines.push("    check(__wm.close(905), \"own:unblocked-owner-closes\");".to_string());
+        lines.push(
+            "    check(__wm.closed(905) && __wm.exists(907), \"own:cascade-spares-independent\");"
+                .to_string(),
+        );
+        lines.push("    __wm.setWindowParent(907, 905);".to_string());
+        lines.push("    __wm.registerWindow(905, __we);".to_string());
+        lines
+            .push("    check(__wm.windowParent(907) == 905, \"own:reparent-sticks\");".to_string());
+        lines.push("    check(__wm.close(905), \"own:owner-close-cascades\");".to_string());
+        lines.push("    check(__wm.closed(907), \"own:cascade-kills-owned-child\");".to_string());
+        lines.push("    __wm.registerWindow(905, __we);".to_string());
+        lines.push("    __wm.registerWindow(906, __wc2);".to_string());
+        lines.push("    __wm.setWindowParent(906, 905);".to_string());
+        lines.push("    __wm.centerOnParent(906);".to_string());
+        lines.push(
+            "    check(__wm.windowParent(906) == 905, \"own:center-keeps-parent\");".to_string(),
+        );
+        lines.push("    __wm.noteFollowMoved(905);".to_string());
+        lines.push("    __wm.noteFollowMoved(906);".to_string());
+        lines.push(
+            "    check(__wm.exists(905) && __wm.exists(906), \"own:follow-noop-headless\");"
+                .to_string(),
+        );
+        lines.push("    check(__wm.close(905), \"own:owner-close-cascades\");".to_string());
     }
     lines.push(
         "    printf(\"[morph-self-test] %d checks, %d failures\\n\", checks, failures);"
@@ -2910,19 +3056,31 @@ mod tests {
             },
             IRWindow::default(),
         )];
-        let off = generate_window_helpers(&routes_ir, "App", 800, 600, 0);
+        let off =
+            generate_window_helpers(&routes_ir, "App", 800, 600, 0, (String::new(), false, 0))
+                .unwrap();
         assert!(off.contains("constexpr int kMorphPageCache = 0;"), "cap: {off}");
         assert!(off.contains("wm.clearMount(wid);"), "destroy path: {off}");
+        assert!(off.contains("wm.setWindowParent(wid, parent);"), "ownership: {off}");
         let mounts = generate_route_mounts(&routes_ir, &std::collections::HashSet::new(), &[]);
         assert!(
             mounts.contains("MountHandle{0, ctx, __teardown_kA, props}"),
             "props held: {mounts}"
         );
-        let on = generate_window_helpers(&routes_ir, "App", 800, 600, 2);
+        let on = generate_window_helpers(&routes_ir, "App", 800, 600, 2, (String::new(), false, 0))
+            .unwrap();
         assert!(on.contains("constexpr int kMorphPageCache = 2;"), "cap: {on}");
         assert!(on.contains("wm.cacheCurrentPage(wid, kMorphPageCache);"), "detach: {on}");
         assert!(on.contains("wm.restorePage(wid, rid, props)"), "restore: {on}");
-        let empty = generate_window_helpers(&[], "App", 800, 600, 2);
+        let owned =
+            generate_window_helpers(&routes_ir, "App", 800, 600, 0, ("main".to_string(), true, 2))
+                .unwrap();
+        assert!(owned.contains("widForAlias(\"main\")"), "app parent: {owned}");
+        assert!(owned.contains("bool modal = true;"), "app modal: {owned}");
+        assert!(owned.contains("int role = 2;"), "app role: {owned}");
+        assert!(owned.contains("if (modal) wm.centerOnParent(wid);"), "center: {owned}");
+        let empty =
+            generate_window_helpers(&[], "App", 800, 600, 2, (String::new(), false, 0)).unwrap();
         assert!(empty.is_empty(), "no routes: {empty}");
     }
 

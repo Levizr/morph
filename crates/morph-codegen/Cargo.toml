@@ -13,6 +13,7 @@ serde_json = { workspace = true }
 tera = { workspace = true }
 morph-ir = { path = "../morph-ir", version = "0.1.0" }
 morph-parser = { path = "../morph-parser", version = "0.1.0" }
+morph-config = { path = "../morph-config", version = "0.1.0" }
 morpher = { path = "../morpher", version = "0.1.0" }
 strsim = { workspace = true }
 

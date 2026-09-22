@@ -1455,6 +1455,7 @@ name = "morph-codegen"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "morph-config",
  "morph-ir",
  "morph-parser",
  "morpher",

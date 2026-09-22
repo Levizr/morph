@@ -288,6 +288,13 @@ pub(crate) fn run(
                 .cache
                 .capacity()
                 .map_err(|e| anyhow::anyhow!("morph.config.json: {e}"))?,
+        )
+        .with_window_ownership(
+            config.window.parent.clone(),
+            config.window.modal,
+            morph_config::WindowRole::parse(&config.window.role)
+                .map_err(|e| anyhow::anyhow!("morph.config.json [window]: {e}"))?
+                .as_int() as i64,
         );
     emitter.emit(&output_dir)?;
     write_routes_dts(&cwd, &routes);
