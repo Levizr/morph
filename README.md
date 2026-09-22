@@ -73,7 +73,10 @@ export default function App() {
 |---|---|---|---|
 | Write UI in | HTML/CSS/JS | C++ / QML | TS/JSX/CSS |
 | Runtime | Chromium (~150MB) | Qt libs | **Zero** |
-| Binary size | ~80MB+ | ~20MB+ | **162KB** |
+| Binary size | ~80MB+ | ~20MB+ | **162KB\*** |
+
+\* Self-contained hello-world (a full app with routing, windows, state
+and native code is still ~330KB).
 
 Your hello-world — renderer, layout, fonts — in **162KB**,
 self-contained, zero dependencies. And it barely grows: a kitchen-sink
