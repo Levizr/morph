@@ -477,7 +477,7 @@ pub(crate) fn run(
     if upx_enabled {
         if let Some(upx_bin) = morph_build::upx::ensure_upx(upx_version.as_deref(), true) {
             crate::logger::log_step("Compressing binary with UPX ...");
-            if morph_build::upx::compress(&binary_path, &upx_bin) {
+            if morph_build::upx::compress(&binary_path, &upx_bin, &config.build.upx_flags) {
                 crate::logger::log_success(&format!("UPX compressed → {}", binary_path.display()));
             }
         } else {

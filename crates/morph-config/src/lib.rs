@@ -89,6 +89,10 @@ pub struct BuildConfig {
     pub upx: bool,
     #[serde(default)]
     pub upx_version: String,
+    /// Extra UPX flags (e.g. `["--ultra-brute"]`). Empty = built-in
+    /// default (`--lzma`). Full control — passed through verbatim.
+    #[serde(default)]
+    pub upx_flags: Vec<String>,
     #[serde(default)]
     pub cxx: String,
     #[serde(default)]
@@ -104,6 +108,7 @@ impl Default for BuildConfig {
             system_freetype: false,
             upx: true,
             upx_version: String::new(),
+            upx_flags: Vec::new(),
             cxx: String::new(),
             dev_cxx: String::new(),
             cmake: String::new(),

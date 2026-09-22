@@ -150,15 +150,21 @@ pub fn ensure_upx(version: Option<&str>, silent: bool) -> Option<PathBuf> {
 }
 
 /// Compress `binary_path` in place with UPX. Returns true on success.
-/// Mirrors Python `compress()`: `--best` into a temp file, then swap, so a
+/// Mirrors Python `compress()`: into a temp file, then swap, so a
 /// failed run never leaves a truncated binary behind.
-pub fn compress(binary_path: &Path, upx_bin: &Path) -> bool {
+///
+/// `flags`: user flags from `build.upx_flags`, passed through verbatim.
+/// Empty = built-in default (`--lzma`, tighter than `--best`).
+pub fn compress(binary_path: &Path, upx_bin: &Path, flags: &[String]) -> bool {
     let tmp = binary_path.with_extension("upx");
-    let out = std::process::Command::new(upx_bin)
-        .args(["--best", "-o"])
-        .arg(&tmp)
-        .arg(binary_path)
-        .output();
+    let mut cmd = std::process::Command::new(upx_bin);
+    if flags.is_empty() {
+        cmd.args(["--lzma", "-o"]);
+    } else {
+        cmd.args(flags.iter().map(String::as_str));
+        cmd.arg("-o");
+    }
+    let out = cmd.arg(&tmp).arg(binary_path).output();
     match out {
         Ok(o) if o.status.success() => std::fs::rename(&tmp, binary_path).is_ok(),
         Ok(o) => {
@@ -188,7 +194,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let bin = dir.join("app.bin");
         std::fs::write(&bin, b"definitely not an elf binary").unwrap();
-        assert!(!compress(&bin, &dir.join("no-such-upx")));
+        assert!(!compress(&bin, &dir.join("no-such-upx"), &[]));
         assert_eq!(std::fs::read(&bin).unwrap(), b"definitely not an elf binary");
         assert!(!dir.join("app.upx").exists());
         let _ = std::fs::remove_dir_all(&dir);
