@@ -1,0 +1,17 @@
+{
+  "name": "hello-size",
+  "entry": "src/App.mx",
+  "window": {
+    "width": 800,
+    "height": 600,
+    "title": "Hello"
+  },
+  "dependencies": {},
+  "cpp_sources": [],
+  "build": {
+    "wayland": false,
+    "system_freetype": false,
+    "upx": false,
+    "upx_version": ""
+  }
+}
