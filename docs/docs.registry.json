@@ -2017,7 +2017,7 @@
         "file": "future/window-ownership",
         "status": "future",
         "author": "PIYUSH",
-        "description": "Window ownership design for Morph: parent/child relationships, modal close-blocking, presentation roles, owner cascade, and modal follow.",
+        "description": "Window ownership shipped record for Morph: parent/child relationships, modal close-blocking, presentation roles, owner cascade, modal follow, plus invariants and remainders.",
         "keywords": [
           "morph window ownership",
           "morph window parent",

@@ -50,6 +50,8 @@ const main = useWindow()
 const popup = new Window("/settings", { parent: main, modal: true, role: "popup" })
 ```
 
+`modal: true` with no resolvable parent fails the window open (a modal with nobody to block is meaningless); unknown `role` literals fail the build (closed set — anything else is a typo).
+
 ## `useWindow()`
 
 Access a window handle from inside any component:
@@ -108,7 +110,7 @@ Markup navigation — no handlers needed. The `href` must be a string literal (d
 ```
 
 - Internal `href` navigates the current window (same as `win.navigate(routeId)`).
-- `target="_blank"` opens the route as a new window; `width` / `height` / `title` override the route's `windowConfig`, and `data={{…}}` arrives as page `props` (an object expression only — never query strings).
+- `target="_blank"` opens the route as a new window; `width` / `height` / `title` override the route's `windowConfig`, and `data={{…}}` arrives as page `props` (an object expression only — never query strings). Ownership rides along too: `parent="…"` (id, route, or `"auto"`), bare `modal`, `role="…"` — string literals only.
 - Any URI scheme (`https:`, `mailto:`, …) opens the OS browser, never a Morph window.
 - `<a>` without `href` renders as-is with no click behavior.
 

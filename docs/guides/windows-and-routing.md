@@ -59,9 +59,9 @@ Most routes need no window chrome of their own. Resolution order, most-specific 
 
 1. Call-site overrides — `new Window("/x", { width: 500 })`
 2. The route file's `windowConfig` export
-3. The **`[window]` section of `morph.config.json`** (app-wide `width` / `height` / `title`)
+3. The **`[window]` section of `morph.config.json`** (app-wide `width` / `height` / `title` / `parent` / `modal` / `role`)
 
-A bare `route.mx` opens at the app default size — zero boilerplate per route.
+A bare `route.mx` opens at the app default size — zero boilerplate per route. Ownership keys (`parent`, `modal`, `role`) resolve through the same chain: a route file can declare every one of its windows modal, and a single call-site `parent` still wins.
 
 ### Props
 

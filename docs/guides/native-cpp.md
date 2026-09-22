@@ -183,6 +183,9 @@ WID login = app::windows::open(app::routes::kAuthLogin, {
     .title = "Sign in",
     .id = "login-a",              // addressable: useWindow("login-a")
     .data = JsObject{{"userId", 42}},
+    .parent = mainWid,            // owner WID (kInvalidWid = independent)
+    .modal = true,                // blocks other closes; needs valid parent
+    .role = 2,                    // 0 default, 1 dialog, 2 popup (hints only)
 });
 
 app::windows::navigate(wid, app::routes::kAuthLogin);  // false if closed
