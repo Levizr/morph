@@ -8,7 +8,7 @@
         "file": "index",
         "status": "production",
         "author": "PIYUSH",
-        "description": "What is Morph and how is it different from Electron? Build native desktop apps by compiling .mx files (JSX + TypeScript + CSS) directly into OpenGL binaries \u2014 no browser, no WebView, no runtime.",
+        "description": "What is Morph and how is it different from Electron? Build native desktop apps by compiling .mx files (JSX + TypeScript + CSS) directly into OpenGL binaries — no browser, no WebView, no runtime.",
         "keywords": [
           "what is morph",
           "morph vs electron",
@@ -26,7 +26,7 @@
         "file": "getting-started/installation",
         "status": "production",
         "author": "PIYUSH",
-        "description": "How to install Morph on Linux with zero runtime: no Python or Node.js \u2014 the one-line curl installer or cargo install morphc, a C++23 toolchain, and every step to set up OpenGL, GLFW, and your first native build.",
+        "description": "How to install Morph on Linux with zero runtime: no Python or Node.js — the one-line curl installer or cargo install morphc, a C++23 toolchain, and every step to set up OpenGL, GLFW, and your first native build.",
         "keywords": [
           "install morph linux",
           "install morph",
@@ -208,7 +208,7 @@
         "file": "concepts/how-it-works",
         "status": "production",
         "author": "PIYUSH",
-        "description": "How Morph works under the hood: the source to binary pipeline \u2014 Oxc parsing, IR building, layout, and C++ codegen that links into a single native binary.",
+        "description": "How Morph works under the hood: the source to binary pipeline — Oxc parsing, IR building, layout, and C++ codegen that links into a single native binary.",
         "keywords": [
           "how morph compiles mx",
           "morph compiler pipeline",
@@ -289,7 +289,7 @@
         "file": "elements/overview",
         "status": "production",
         "author": "PIYUSH",
-        "description": "Which HTML-like elements Morph supports \u2014 div, span, button, input, headings, and more \u2014 and how they compile to native OpenGL nodes instead of a browser DOM.",
+        "description": "Which HTML-like elements Morph supports — div, span, button, input, headings, and more — and how they compile to native OpenGL nodes instead of a browser DOM.",
         "keywords": [
           "morph html elements",
           "morph div span button",
@@ -390,7 +390,7 @@
         "file": "css/properties",
         "status": "production",
         "author": "PIYUSH",
-        "description": "Which CSS properties Morph supports \u2014 layout, sizing, colors, and typography \u2014 applied at compile time to native OpenGL rendering, with all supported units explained.",
+        "description": "Which CSS properties Morph supports — layout, sizing, colors, and typography — applied at compile time to native OpenGL rendering, with all supported units explained.",
         "keywords": [
           "morph css properties",
           "morph supported css units",
@@ -466,7 +466,7 @@
         "file": "css/flexbox",
         "status": "production",
         "author": "PIYUSH",
-        "description": "How to lay out Morph UI with CSS Flexbox \u2014 the same display:flex model you know from the web, compiled to native with a two-pass layout engine.",
+        "description": "How to lay out Morph UI with CSS Flexbox — the same display:flex model you know from the web, compiled to native with a two-pass layout engine.",
         "keywords": [
           "morph flexbox layout",
           "morph display flex",
@@ -485,7 +485,7 @@
         "file": "css/tailwind",
         "status": "production",
         "author": "PIYUSH",
-        "description": "How to style Morph with Tailwind: use 500+ utility classes directly in className with a built-in resolver \u2014 no Node.js or Tailwind install required.",
+        "description": "How to style Morph with Tailwind: use 500+ utility classes directly in className with a built-in resolver — no Node.js or Tailwind install required.",
         "keywords": [
           "morph tailwind",
           "morph utility classes",
@@ -904,7 +904,7 @@
         "file": "guides/intent-based-codegen",
         "status": "production",
         "author": "PIYUSH",
-        "description": "How Morph compiles TypeScript to native C++ by default: escape analysis, proven-range integers, trusted annotations, and smart pointers only where semantically required \u2014 no garbage collector needed.",
+        "description": "How Morph compiles TypeScript to native C++ by default: escape analysis, proven-range integers, trusted annotations, and smart pointers only where semantically required — no garbage collector needed.",
         "keywords": [
           "morph intent-based codegen",
           "morph escape analysis",
@@ -1052,7 +1052,7 @@
         "file": "rendering/index",
         "status": "production",
         "author": "PIYUSH",
-        "description": "Which Morph renderer to pick \u2014 flash (lightweight direct) or forge (hybrid retained compositor) \u2014 how selection works and how each paints pixels to screen.",
+        "description": "Which Morph renderer to pick — flash (lightweight direct) or forge (hybrid retained compositor) — how selection works and how each paints pixels to screen.",
         "keywords": [
           "morph renderer flash forge",
           "morph dual renderer",
@@ -1071,7 +1071,7 @@
         "file": "rendering/flash",
         "status": "production",
         "author": "PIYUSH",
-        "description": "How the flash renderer in Morph works: a lightweight direct renderer that clears and redraws the full window each frame \u2014 the production default.",
+        "description": "How the flash renderer in Morph works: a lightweight direct renderer that clears and redraws the full window each frame — the production default.",
         "keywords": [
           "morph flash renderer",
           "morph direct rendering",
@@ -1152,7 +1152,7 @@
         "changefreq": "weekly"
       },
       {
-        "title": "mx-export \u2014 Missing or Duplicate Default Export",
+        "title": "mx-export — Missing or Duplicate Default Export",
         "slug": "errors/mx-export",
         "file": "errors/mx-export",
         "status": "production",
@@ -1169,7 +1169,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-component-unknown \u2014 Unknown Component",
+        "title": "mx-component-unknown — Unknown Component",
         "slug": "errors/mx-component-unknown",
         "file": "errors/mx-component-unknown",
         "status": "production",
@@ -1186,7 +1186,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-component-prop \u2014 Unknown Prop on a Component",
+        "title": "mx-component-prop — Unknown Prop on a Component",
         "slug": "errors/mx-component-prop",
         "file": "errors/mx-component-prop",
         "status": "production",
@@ -1203,7 +1203,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-component-required \u2014 Missing Required Prop",
+        "title": "mx-component-required — Missing Required Prop",
         "slug": "errors/mx-component-required",
         "file": "errors/mx-component-required",
         "status": "production",
@@ -1220,7 +1220,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-window-missing \u2014 No Window Created",
+        "title": "mx-window-missing — No Window Created",
         "slug": "errors/mx-window-missing",
         "file": "errors/mx-window-missing",
         "status": "production",
@@ -1237,7 +1237,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-windowconfig-key \u2014 Invalid windowConfig Key",
+        "title": "mx-windowconfig-key — Invalid windowConfig Key",
         "slug": "errors/mx-windowconfig-key",
         "file": "errors/mx-windowconfig-key",
         "status": "production",
@@ -1254,7 +1254,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-windowconfig-type \u2014 Invalid windowConfig Value Type",
+        "title": "mx-windowconfig-type — Invalid windowConfig Value Type",
         "slug": "errors/mx-windowconfig-type",
         "file": "errors/mx-windowconfig-type",
         "status": "production",
@@ -1271,7 +1271,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-tag \u2014 Unknown Element Tag",
+        "title": "mx-tag — Unknown Element Tag",
         "slug": "errors/mx-tag",
         "file": "errors/mx-tag",
         "status": "production",
@@ -1288,7 +1288,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-tag-stub \u2014 Unimplemented Element",
+        "title": "mx-tag-stub — Unimplemented Element",
         "slug": "errors/mx-tag-stub",
         "file": "errors/mx-tag-stub",
         "status": "production",
@@ -1305,7 +1305,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-prop \u2014 Invalid or Misspelled Prop",
+        "title": "mx-prop — Invalid or Misspelled Prop",
         "slug": "errors/mx-prop",
         "file": "errors/mx-prop",
         "status": "production",
@@ -1322,7 +1322,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-img-src \u2014 img Without src",
+        "title": "mx-img-src — img Without src",
         "slug": "errors/mx-img-src",
         "file": "errors/mx-img-src",
         "status": "production",
@@ -1339,7 +1339,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-event-value \u2014 Event Handler Is Not a Function",
+        "title": "mx-event-value — Event Handler Is Not a Function",
         "slug": "errors/mx-event-value",
         "file": "errors/mx-event-value",
         "status": "production",
@@ -1356,7 +1356,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-key-misuse \u2014 key Used Outside a List",
+        "title": "mx-key-misuse — key Used Outside a List",
         "slug": "errors/mx-key-misuse",
         "file": "errors/mx-key-misuse",
         "status": "production",
@@ -1373,7 +1373,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-dup-class \u2014 class and className Used Together",
+        "title": "mx-dup-class — class and className Used Together",
         "slug": "errors/mx-dup-class",
         "file": "errors/mx-dup-class",
         "status": "production",
@@ -1390,7 +1390,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-style-prop \u2014 Unsupported Inline Style Property",
+        "title": "mx-style-prop — Unsupported Inline Style Property",
         "slug": "errors/mx-style-prop",
         "file": "errors/mx-style-prop",
         "status": "production",
@@ -1407,7 +1407,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-style-value \u2014 Invalid Inline Style Value",
+        "title": "mx-style-value — Invalid Inline Style Value",
         "slug": "errors/mx-style-value",
         "file": "errors/mx-style-value",
         "status": "production",
@@ -1424,7 +1424,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-tailwind-class \u2014 Unresolvable Tailwind Class",
+        "title": "mx-tailwind-class — Unresolvable Tailwind Class",
         "slug": "errors/mx-tailwind-class",
         "file": "errors/mx-tailwind-class",
         "status": "production",
@@ -1441,7 +1441,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-css-prop \u2014 Unsupported CSS File Property",
+        "title": "mx-css-prop — Unsupported CSS File Property",
         "slug": "errors/mx-css-prop",
         "file": "errors/mx-css-prop",
         "status": "production",
@@ -1458,7 +1458,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-css-file-missing \u2014 Imported CSS File Not Found",
+        "title": "mx-css-file-missing — Imported CSS File Not Found",
         "slug": "errors/mx-css-file-missing",
         "file": "errors/mx-css-file-missing",
         "status": "production",
@@ -1475,7 +1475,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-css-load-deprecated \u2014 CSS.load() Is Deprecated",
+        "title": "mx-css-load-deprecated — CSS.load() Is Deprecated",
         "slug": "errors/mx-css-load-deprecated",
         "file": "errors/mx-css-load-deprecated",
         "status": "production",
@@ -1492,7 +1492,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-import-morph \u2014 Invalid Import from morph",
+        "title": "mx-import-morph — Invalid Import from morph",
         "slug": "errors/mx-import-morph",
         "file": "errors/mx-import-morph",
         "status": "production",
@@ -1509,7 +1509,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-no-morph-import \u2014 Morph API Used Without Import",
+        "title": "mx-no-morph-import — Morph API Used Without Import",
         "slug": "errors/mx-no-morph-import",
         "file": "errors/mx-no-morph-import",
         "status": "production",
@@ -1526,7 +1526,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-undefined \u2014 Undefined Name",
+        "title": "mx-undefined — Undefined Name",
         "slug": "errors/mx-undefined",
         "file": "errors/mx-undefined",
         "status": "production",
@@ -1543,7 +1543,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-import-type \u2014 Unsupported Import Type",
+        "title": "mx-import-type — Unsupported Import Type",
         "slug": "errors/mx-import-type",
         "file": "errors/mx-import-type",
         "status": "production",
@@ -1560,7 +1560,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-naming \u2014 Invalid Module File or Directory Name",
+        "title": "mx-naming — Invalid Module File or Directory Name",
         "slug": "errors/mx-naming",
         "file": "errors/mx-naming",
         "status": "production",
@@ -1577,7 +1577,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-state-scope \u2014 morphState Outside a Component",
+        "title": "mx-state-scope — morphState Outside a Component",
         "slug": "errors/mx-state-scope",
         "file": "errors/mx-state-scope",
         "status": "production",
@@ -1594,7 +1594,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-shared-scope \u2014 morphShared Not at Exported Module Scope",
+        "title": "mx-shared-scope — morphShared Not at Exported Module Scope",
         "slug": "errors/mx-shared-scope",
         "file": "errors/mx-shared-scope",
         "status": "production",
@@ -1611,7 +1611,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-event-scope \u2014 morphEvent Not at Exported Module Scope",
+        "title": "mx-event-scope — morphEvent Not at Exported Module Scope",
         "slug": "errors/mx-event-scope",
         "file": "errors/mx-event-scope",
         "status": "production",
@@ -1628,7 +1628,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-api-removed \u2014 Removed String-Key API",
+        "title": "mx-api-removed — Removed String-Key API",
         "slug": "errors/mx-api-removed",
         "file": "errors/mx-api-removed",
         "status": "production",
@@ -1645,7 +1645,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-state-pattern \u2014 morphState Destructuring Pattern",
+        "title": "mx-state-pattern — morphState Destructuring Pattern",
         "slug": "errors/mx-state-pattern",
         "file": "errors/mx-state-pattern",
         "status": "production",
@@ -1662,7 +1662,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-effect-cb \u2014 morphEffect First Argument Must Be a Function",
+        "title": "mx-effect-cb — morphEffect First Argument Must Be a Function",
         "slug": "errors/mx-effect-cb",
         "file": "errors/mx-effect-cb",
         "status": "production",
@@ -1679,7 +1679,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-effect-deps \u2014 Effect Dependencies Should Be State",
+        "title": "mx-effect-deps — Effect Dependencies Should Be State",
         "slug": "errors/mx-effect-deps",
         "file": "errors/mx-effect-deps",
         "status": "production",
@@ -1696,7 +1696,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-transpile \u2014 JavaScript That Cannot Compile to C++",
+        "title": "mx-transpile — JavaScript That Cannot Compile to C++",
         "slug": "errors/mx-transpile",
         "file": "errors/mx-transpile",
         "status": "production",
@@ -1713,7 +1713,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-js-global \u2014 Browser Global With No Native Counterpart",
+        "title": "mx-js-global — Browser Global With No Native Counterpart",
         "slug": "errors/mx-js-global",
         "file": "errors/mx-js-global",
         "status": "production",
@@ -1730,7 +1730,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-js-member \u2014 Unsupported Builtin Member Access",
+        "title": "mx-js-member — Unsupported Builtin Member Access",
         "slug": "errors/mx-js-member",
         "file": "errors/mx-js-member",
         "status": "production",
@@ -1747,7 +1747,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-js-method \u2014 Unimplemented Method",
+        "title": "mx-js-method — Unimplemented Method",
         "slug": "errors/mx-js-method",
         "file": "errors/mx-js-method",
         "status": "production",
@@ -1764,7 +1764,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-js-op \u2014 Unemittable Operator",
+        "title": "mx-js-op — Unemittable Operator",
         "slug": "errors/mx-js-op",
         "file": "errors/mx-js-op",
         "status": "production",
@@ -1781,7 +1781,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-js-syntax \u2014 Unhandleable Syntax Construct",
+        "title": "mx-js-syntax — Unhandleable Syntax Construct",
         "slug": "errors/mx-js-syntax",
         "file": "errors/mx-js-syntax",
         "status": "production",
@@ -1798,7 +1798,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-list-key \u2014 List Item Without key",
+        "title": "mx-list-key — List Item Without key",
         "slug": "errors/mx-list-key",
         "file": "errors/mx-list-key",
         "status": "production",
@@ -1815,7 +1815,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-route-unknown \u2014 Unknown Route ID",
+        "title": "mx-route-unknown — Unknown Route ID",
         "slug": "errors/mx-route-unknown",
         "file": "errors/mx-route-unknown",
         "status": "production",
@@ -1832,7 +1832,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-route-no-export \u2014 Route File Without Default Export",
+        "title": "mx-route-no-export — Route File Without Default Export",
         "slug": "errors/mx-route-no-export",
         "file": "errors/mx-route-no-export",
         "status": "production",
@@ -1859,7 +1859,7 @@
         "file": "examples/calculator",
         "status": "production",
         "author": "PIYUSH",
-        "description": "A calculator app built with Morph: buttons, state, and layout all in a single native binary \u2014 a complete example to learn from.",
+        "description": "A calculator app built with Morph: buttons, state, and layout all in a single native binary — a complete example to learn from.",
         "keywords": [
           "morph calculator example",
           "morph example app",
@@ -1895,7 +1895,7 @@
         "file": "examples/ipchecker",
         "status": "production",
         "author": "PIYUSH",
-        "description": "An IP checker app built with Morph that fetches and displays data in a native window \u2014 a working example of async and networking in action.",
+        "description": "An IP checker app built with Morph that fetches and displays data in a native window — a working example of async and networking in action.",
         "keywords": [
           "morph fetch example app",
           "morph ip checker",
@@ -1913,7 +1913,7 @@
         "file": "examples/login",
         "status": "production",
         "author": "PIYUSH",
-        "description": "A login app built with Morph: controlled text inputs, password masking, validation errors, and screen swapping by unmount \u2014 all native.",
+        "description": "A login app built with Morph: controlled text inputs, password masking, validation errors, and screen swapping by unmount — all native.",
         "keywords": [
           "morph login example",
           "morph form input",
@@ -1937,7 +1937,7 @@
         "file": "roadmap/under-construction",
         "status": "development",
         "author": "PIYUSH",
-        "description": "What's under active construction in Morph right now \u2014 features being built in parallel, with honest progress and what works today.",
+        "description": "What's under active construction in Morph right now — features being built in parallel, with honest progress and what works today.",
         "keywords": [
           "morph in progress",
           "morph under construction",
@@ -1956,7 +1956,7 @@
         "file": "future/index",
         "status": "future",
         "author": "PIYUSH",
-        "description": "Morph's full future roadmap \u2014 every planned feature documented in detail with priorities, dependencies, and what comes next in the framework.",
+        "description": "Morph's full future roadmap — every planned feature documented in detail with priorities, dependencies, and what comes next in the framework.",
         "keywords": [
           "morph roadmap",
           "morph planned features",
@@ -2689,7 +2689,7 @@
         "file": "faq/q-electron",
         "status": "production",
         "author": "PIYUSH",
-        "description": "Is Morph just Electron with extra steps? No \u2014 it's the opposite: no browser, no Chromium; your code compiles to native machine code.",
+        "description": "Is Morph just Electron with extra steps? No — it's the opposite: no browser, no Chromium; your code compiles to native machine code.",
         "keywords": [
           "morph vs electron",
           "is morph electron",
@@ -2707,7 +2707,7 @@
         "file": "faq/q-cpp",
         "status": "production",
         "author": "PIYUSH",
-        "description": "Do you need to know C++ to use Morph? No \u2014 you write .mx files; C++ is an implementation detail, optional if you want to go deeper.",
+        "description": "Do you need to know C++ to use Morph? No — you write .mx files; C++ is an implementation detail, optional if you want to go deeper.",
         "keywords": [
           "do i need c++ for morph",
           "morph c++ requirement",
@@ -2725,7 +2725,7 @@
         "file": "faq/q-react",
         "status": "production",
         "author": "PIYUSH",
-        "description": "Is Morph React? It's React-inspired \u2014 JSX, state, effects \u2014 but there's no virtual DOM; state changes re-render native nodes directly.",
+        "description": "Is Morph React? It's React-inspired — JSX, state, effects — but there's no virtual DOM; state changes re-render native nodes directly.",
         "keywords": [
           "is morph react",
           "morph react state",
@@ -2744,7 +2744,7 @@
         "file": "faq/q-virtual-dom",
         "status": "production",
         "author": "PIYUSH",
-        "description": "Does Morph use a virtual DOM like React? No \u2014 signals, dirty flags, and damage tracking re-render native nodes directly; there's no DOM and no diffing.",
+        "description": "Does Morph use a virtual DOM like React? No — signals, dirty flags, and damage tracking re-render native nodes directly; there's no DOM and no diffing.",
         "keywords": [
           "morph virtual dom",
           "morph vdom",
@@ -2763,7 +2763,7 @@
         "file": "faq/q-reactivity",
         "status": "production",
         "author": "PIYUSH",
-        "description": "Reactivity in Morph is signals pushing into a native tree: morphState signals, automatic effects, dirty flags, and damage tracking \u2014 and why this was chosen over a virtual DOM.",
+        "description": "Reactivity in Morph is signals pushing into a native tree: morphState signals, automatic effects, dirty flags, and damage tracking — and why this was chosen over a virtual DOM.",
         "keywords": [
           "morph reactivity",
           "morph signals",
@@ -2782,7 +2782,7 @@
         "file": "faq/q-games",
         "status": "production",
         "author": "PIYUSH",
-        "description": "Is Morph for games? It's for apps \u2014 a UI framework for native desktop applications, with an embedded OpenGL canvas for 2D and 3D content.",
+        "description": "Is Morph for games? It's for apps — a UI framework for native desktop applications, with an embedded OpenGL canvas for 2D and 3D content.",
         "keywords": [
           "morph games or apps",
           "morph for apps",
@@ -2800,7 +2800,7 @@
         "file": "faq/q-web",
         "status": "production",
         "author": "PIYUSH",
-        "description": "Can you build websites with Morph? No \u2014 it builds native desktop binaries; the web already has the best web tooling in existence.",
+        "description": "Can you build websites with Morph? No — it builds native desktop binaries; the web already has the best web tooling in existence.",
         "keywords": [
           "build website with morph",
           "morph web support",
@@ -2818,7 +2818,7 @@
         "file": "faq/q-js-runtime",
         "status": "production",
         "author": "PIYUSH",
-        "description": "What happens to your JavaScript at runtime in Morph? It's compiled to C++ \u2014 no interpreter, no JIT, no VM; your logic runs as native code.",
+        "description": "What happens to your JavaScript at runtime in Morph? It's compiled to C++ — no interpreter, no JIT, no VM; your logic runs as native code.",
         "keywords": [
           "morph javascript runtime",
           "morph compiled not interpreted",
@@ -2836,7 +2836,7 @@
         "file": "faq/q-npm",
         "status": "production",
         "author": "PIYUSH",
-        "description": "Can you use npm packages in Morph? Not yet \u2014 but a Morph registry for UI and native C++ modules is planned, with a security-first approach.",
+        "description": "Can you use npm packages in Morph? Not yet — but a Morph registry for UI and native C++ modules is planned, with a security-first approach.",
         "keywords": [
           "morph npm packages",
           "morph registry",
@@ -2872,7 +2872,7 @@
         "file": "faq/q-production",
         "status": "production",
         "author": "PIYUSH",
-        "description": "Is Morph production-ready? Not yet \u2014 the roadmap is honest about what's missing: platform support, accessibility, signing, and more.",
+        "description": "Is Morph production-ready? Not yet — the roadmap is honest about what's missing: platform support, accessibility, signing, and more.",
         "keywords": [
           "morph production ready",
           "morph stable release",
@@ -2986,7 +2986,7 @@
         "changefreq": "monthly"
       },
       {
-        "title": "Windows & Navigation \u2014 a vs morph-*, GL contexts, WID/RID, same-route windows",
+        "title": "Windows & Navigation — a vs morph-*, GL contexts, WID/RID, same-route windows",
         "slug": "faq/q-windows",
         "file": "faq/q-windows",
         "status": "beta",
