@@ -21,6 +21,11 @@ struct OpenConfig {
     std::string title;
     std::string id;
     JsObject data;
+    // Ownership: parent WID (`kInvalidWid` = independent), modal flag,
+    // role int (0 = default). Same fallback chain as geometry.
+    WID parent = kInvalidWid;
+    bool modal = false;
+    int role = 0;
 };
 
 inline bool close(WID wid)

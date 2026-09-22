@@ -94,6 +94,26 @@ class WindowManager {
     std::unordered_map<WID, std::vector<std::function<void()>>> m_closeHandlers;
     // Mounted route per window (empty for declarative entry windows).
     std::unordered_map<WID, MountHandle> m_mounts;
+    // Ownership: parent WID or kInvalidWid (independent top-level —
+    // browsers keep running until the last window closes, and so does
+    // the allClosed loop). Modal blocks other windows' closes; role is
+    // presentation hints only and never gates behavior.
+    std::unordered_map<WID, WID> m_parent;
+    std::unordered_map<WID, char> m_modal;
+    std::unordered_map<WID, int> m_role;
+    // Modal follow: child -> locked offset from its parent plus the
+    // child's last-seen position (dragging the follower moves the
+    // parent by the same delta; dragging the parent re-locks followers
+    // absolutely). Moves apply both directions under m_followGuard.
+    struct Follow {
+        WID parent = kInvalidWid;
+        int dx = 0;
+        int dy = 0;
+        int lastX = 0;
+        int lastY = 0;
+    };
+    std::unordered_map<WID, Follow> m_follow;
+    bool m_followGuard = false;
     // Detached pages per window (front = most recently used). A window
     // only ever restores its own pages — sharing cached state across
     // windows would leak one window's state into another. Touched only
@@ -146,6 +166,11 @@ class WindowManager {
         auto it = m_windows.find(wid);
         if (it == m_windows.end())
             return;
+        // Owners take their subtree with them (independents survive —
+        // only owned children). Collected first: destruction mutates
+        // the ownership rows.
+        for (WID child : childWindows(wid))
+            destroyLocked(child);
         auto handlers = std::move(m_closeHandlers[wid]);
         m_closeHandlers.erase(wid);
         for (auto& fn : handlers)
@@ -159,6 +184,7 @@ class WindowManager {
         forgetLocked(wid);
         clearMount(wid);
         flushPageCache(wid);
+        dropOwnership(wid);
         // ~MorphWindow binds its own context for renderer teardown and
         // detaches afterwards — no context work needed here.
         m_windows.erase(it);
@@ -191,6 +217,7 @@ public:
         // Re-registration is a new incarnation: drop any pages the
         // previous occupant detached (they can never be restored).
         flushPageCache(wid);
+        dropOwnership(wid);
         m_windows[wid] = std::move(w);
         if (m_windows[wid] && m_windows[wid]->handle())
             m_handles[m_windows[wid]->handle()] = wid;
@@ -262,10 +289,13 @@ public:
     }
 
     // Destroy + erase. Fires on_close handlers. Safe no-op returning
-    // false when the window is already gone — never crashes.
+    // false when the window is already gone — never crashes. Blocked
+    // closes (live modal elsewhere) refuse with false.
     bool close(WID wid)
     {
         if (!exists(wid))
+            return false;
+        if (isBlockedByModal(wid))
             return false;
         destroyLocked(wid);
         return true;
@@ -306,6 +336,206 @@ public:
     {
         auto it = m_mounts.find(wid);
         return it == m_mounts.end() ? -1 : it->second.rid;
+    }
+
+    // ---- Ownership (parent / modal / role) ----
+    //
+    // Owners take their subtree with them; independents (no parent)
+    // survive. A live modal refuses every other window's close. Roles
+    // are presentation hints only and never gate anything here.
+    void setWindowParent(WID wid, WID parent)
+    {
+        if (exists(wid))
+            m_parent[wid] = parent;
+    }
+
+    void setWindowModal(WID wid, bool modal)
+    {
+        if (exists(wid))
+            m_modal[wid] = modal ? 1 : 0;
+    }
+
+    void setWindowRole(WID wid, int role)
+    {
+        if (exists(wid))
+            m_role[wid] = role;
+    }
+
+    WID windowParent(WID wid) const
+    {
+        auto it = m_parent.find(wid);
+        return it == m_parent.end() ? kInvalidWid : it->second;
+    }
+
+    bool windowModal(WID wid) const
+    {
+        auto it = m_modal.find(wid);
+        return it != m_modal.end() && it->second != 0;
+    }
+
+    int windowRole(WID wid) const
+    {
+        auto it = m_role.find(wid);
+        return it == m_role.end() ? 0 : it->second;
+    }
+
+    // Direct owned children (independent windows are nobody's child).
+    std::vector<WID> childWindows(WID wid) const
+    {
+        std::vector<WID> out;
+        for (const auto& [child, parent] : m_parent)
+        {
+            if (parent == wid && exists(child))
+                out.push_back(child);
+        }
+        return out;
+    }
+
+    void dropOwnership(WID wid)
+    {
+        m_parent.erase(wid);
+        m_modal.erase(wid);
+        m_role.erase(wid);
+        m_follow.erase(wid);
+    }
+
+    bool hasLiveModalExcept(WID wid) const
+    {
+        for (const auto& [other, flag] : m_modal)
+        {
+            if (other != wid && flag != 0 && exists(other))
+                return true;
+        }
+        return false;
+    }
+
+    // Modals themselves always close; everything else waits while any
+    // modal lives (strict scope — independents included).
+    bool isBlockedByModal(WID wid) const
+    {
+        return !windowModal(wid) && hasLiveModalExcept(wid);
+    }
+
+    // Center a window over its parent and lock the offset so the two
+    // move together (both directions, see noteFollowMoved). No-op
+    // without a live parent. The locked position is the *requested*
+    // one — X11 applies moves asynchronously, so reading it back here
+    // would store a stale position and yank the parent on the first
+    // ConfigureNotify.
+    void centerOnParent(WID wid)
+    {
+        auto win = get(wid);
+        auto parent = get(windowParent(wid));
+        if (!win || !parent)
+            return;
+        int px, py;
+        parent->position(px, py);
+        int x = px + (parent->width() - win->width()) / 2;
+        int y = py + (parent->height() - win->height()) / 2;
+        win->setPosition(x, y);
+        m_follow[wid] = Follow{windowParent(wid), x - px, y - py, x, y};
+    }
+
+    // Called from the GLFW position callback (main thread, like focus).
+    // A dragged follower moves its parent by the same delta; a moved
+    // parent re-locks followers absolutely. Guarded: our own corrective
+    // moves re-fire the callback — on those, just sync the prediction,
+    // take no action.
+    void noteFollowMoved(WID wid)
+    {
+        auto fit = m_follow.find(wid);
+        if (m_followGuard)
+        {
+            if (fit != m_follow.end())
+            {
+                auto win = get(wid);
+                if (win)
+                    win->position(fit->second.lastX, fit->second.lastY);
+            }
+            return;
+        }
+        m_followGuard = true;
+        if (fit != m_follow.end())
+            dragFollowerWith(wid, fit->second);
+        for (auto& [child, f] : m_follow)
+        {
+            if (f.parent == wid && child != wid)
+                relockFollower(child, f);
+        }
+        m_followGuard = false;
+    }
+
+    // Clamp a window rect into the primary monitor work area so a
+    // requested move is always achievable. Without this, dragging a
+    // follower past a screen edge asks the parent to go where the
+    // window manager will not take it — and the follower (under an
+    // active user grab, which beats our correction) runs away alone.
+    static void clampToWorkarea(int w, int h, int& x, int& y)
+    {
+        GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+        if (!monitor)
+            return;
+        int wx, wy, ww, wh;
+        glfwGetMonitorWorkarea(monitor, &wx, &wy, &ww, &wh);
+        if (x < wx)
+            x = wx;
+        if (y < wy)
+            y = wy;
+        if (x + w > wx + ww)
+            x = wx + ww - w;
+        if (y + h > wy + wh)
+            y = wy + wh - h;
+    }
+
+    void dragFollowerWith(WID child, Follow& f)
+    {
+        auto parent = get(f.parent);
+        auto win = get(child);
+        if (!parent || !win)
+            return;
+        int cx, cy;
+        win->position(cx, cy);
+        int dx = cx - f.lastX;
+        int dy = cy - f.lastY;
+        if (dx == 0 && dy == 0)
+            return;
+        int px, py;
+        parent->position(px, py);
+        int npx = px + dx;
+        int npy = py + dy;
+        clampToWorkarea(parent->width(), parent->height(), npx, npy);
+        parent->setPosition(npx, npy);
+        // Rigid: the follower derives from the *clamped* parent target,
+        // never from its own drag alone. A parent that cannot move
+        // further stops the follower too — the pair can neither separate
+        // nor drift. Unclamped, this tracks the mouse exactly.
+        auto win2 = get(child);
+        if (win2)
+            win2->setPosition(npx + f.dx, npy + f.dy);
+        f.lastX = npx + f.dx;
+        f.lastY = npy + f.dy;
+    }
+
+    void relockFollower(WID child, Follow& f)
+    {
+        auto parent = get(f.parent);
+        auto win = get(child);
+        if (!parent || !win)
+            return;
+        int px, py;
+        parent->position(px, py);
+        win->setPosition(px + f.dx, py + f.dy);
+        f.lastX = px + f.dx;
+        f.lastY = py + f.dy;
+    }
+
+    // Handle-keyed entry for the position callback (mirrors noteFocus).
+    void noteMoved(GLFWwindow* handle)
+    {
+        auto it = m_handles.find(handle);
+        if (it == m_handles.end())
+            return;
+        noteFollowMoved(it->second);
     }
 
     // Detach wid's live mount + tree into its own page cache (no
@@ -525,8 +755,17 @@ public:
         std::vector<WID> dead;
         for (auto& [wid, w] : m_windows)
         {
-            if (w->shouldClose())
-                dead.push_back(wid);
+            if (!w->shouldClose())
+                continue;
+            if (isBlockedByModal(wid))
+            {
+                // Refused: clear the pending flag so the window does not
+                // die surprise-later once the modal closes. The user
+                // re-closes explicitly.
+                w->clearShouldClose();
+                continue;
+            }
+            dead.push_back(wid);
         }
         for (WID wid : dead)
             destroyLocked(wid);

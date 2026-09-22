@@ -62,6 +62,7 @@ public:
     static void CharCb(GLFWwindow* win, unsigned int codepoint);
     static void cursorPosCb(GLFWwindow *win, double mx, double my);
     static void windowSizeCb(GLFWwindow *win, int width, int height);
+    static void windowPosCb(GLFWwindow *win, int x, int y);
     static void scrollCb(GLFWwindow *win, double dx, double dy);
     static void windowFocusCb(GLFWwindow *win, int focused);
 
@@ -105,11 +106,19 @@ public:
     void hide();
     const std::string &title() const { return m_title; }
     void setSize(int width, int height);
+    void setPosition(int x, int y);
+    void position(int& x, int& y) const;
+    void setFloating(bool floating);
     void setConstraints(int minWidth, int minHeight, int maxWidth, int maxHeight);
     int width() const { return m_width; }
     int height() const { return m_height; }
     GLFWwindow *handle() const { return m_handle; }
     bool shouldClose() const { return m_handle && glfwWindowShouldClose(m_handle); }
+    void clearShouldClose()
+    {
+        if (m_handle)
+            glfwSetWindowShouldClose(m_handle, 0);
+    }
     bool isVisible() const { return m_visible && m_handle && !glfwWindowShouldClose(m_handle); }
 
     // Docked devtools: the panel occupies the right side of the window and the

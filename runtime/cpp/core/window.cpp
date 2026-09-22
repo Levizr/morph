@@ -385,6 +385,16 @@ void MorphWindow::windowSizeCb(GLFWwindow *win, int width, int height)
     }
 }
 
+// Modal follow: a moved window re-locks its followers (and a moved
+// follower re-locks onto its parent) via the registry. Corrective
+// moves re-fire this callback and are skipped there by guard.
+void MorphWindow::windowPosCb(GLFWwindow *win, int x, int y)
+{
+    (void)x;
+    (void)y;
+    WindowManager::get().noteMoved(win);
+}
+
 void MorphWindow::scrollCb(GLFWwindow *win, double dx, double dy)
 {
     (void)dx;
@@ -458,6 +468,7 @@ MorphWindow::MorphWindow(const std::string &title, int width, int height, bool v
         glfwSetCursorPosCallback(m_handle, cursorPosCb);
         glfwSetScrollCallback(m_handle, scrollCb);
         glfwSetWindowSizeCallback(m_handle, windowSizeCb);
+        glfwSetWindowPosCallback(m_handle, windowPosCb);
         glfwSetWindowFocusCallback(m_handle, windowFocusCb);
         s_clipboardWindow = m_handle;
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
@@ -501,6 +512,26 @@ void MorphWindow::setSize(int width, int height)
     m_height = height;
     if (m_handle)
         glfwSetWindowSize(m_handle, width, height);
+}
+
+void MorphWindow::setPosition(int x, int y)
+{
+    if (m_handle)
+        glfwSetWindowPos(m_handle, x, y);
+}
+
+void MorphWindow::position(int& x, int& y) const
+{
+    x = 0;
+    y = 0;
+    if (m_handle)
+        glfwGetWindowPos(m_handle, &x, &y);
+}
+
+void MorphWindow::setFloating(bool floating)
+{
+    if (m_handle)
+        glfwSetWindowAttrib(m_handle, GLFW_FLOATING, floating ? GLFW_TRUE : GLFW_FALSE);
 }
 
 void MorphWindow::setConstraints(int minWidth, int minHeight, int maxWidth, int maxHeight)
