@@ -184,7 +184,7 @@ impl Compiler {
         {
             "-O2"
         } else {
-            "-Os"
+            "-Oz"
         }
     }
 
@@ -231,11 +231,21 @@ impl Compiler {
             // Per-app optimization: static content pays nothing to be
             // made "faster". Animations, transforms, forge rendering,
             // and lists are where -O2's unrolling/inlining earn back
-            // their bytes — everything else ships -Os.
+            // their bytes — everything else ships -Oz. LTO + ICF fold
+            // duplicated template instantiations across TUs (slower
+            // links accepted — size is the promise).
             cmd.push(Self::opt_flag(defines).into());
+            cmd.push("-flto".into());
         }
         cmd.push("-ffunction-sections".into());
         cmd.push("-fdata-sections".into());
+        // No C++ exceptions/RTTI in shipped apps (verified: zero throws
+        // in linked TUs; shared libs abort internally instead). Kills
+        // landing pads + shrinks .eh_frame to async-unwind only.
+        cmd.push("-fno-exceptions".into());
+        cmd.push("-fno-rtti".into());
+        cmd.push("-fno-asynchronous-unwind-tables".into());
+        cmd.push("-fmerge-constants".into());
         // Generated output dir FIRST: user `#include "morph_api.h"` must
         // resolve to the per-project generated header, which shadows the
         // runtime base header by include order (and re-includes the same
@@ -270,7 +280,9 @@ impl Compiler {
         // Output
         cmd.push("-o".into());
         cmd.push(binary_path.display().to_string());
-        // GC dead code eliminated by the renderer backend dispatch
+        // GC dead code eliminated by the renderer backend dispatch.
+        // (Linker ICF would fold identical template instantiations,
+        // but the bundled ld predates it — LTO + GC carry the weight.)
         cmd.push(if is_macos() {
             "-Wl,-dead_strip".to_string()
         } else {
@@ -737,8 +749,8 @@ mod tests {
 
     #[test]
     fn opt_flag_picks_size_by_default_and_speed_for_perf_features() {
-        assert_eq!(Compiler::opt_flag(&[]), "-Os");
-        assert_eq!(Compiler::opt_flag(&["MORPH_FEATURE_TEXT".to_string()]), "-Os");
+        assert_eq!(Compiler::opt_flag(&[]), "-Oz");
+        assert_eq!(Compiler::opt_flag(&["MORPH_FEATURE_TEXT".to_string()]), "-Oz");
         for flag in [
             "MORPH_FEATURE_ANIMATION",
             "MORPH_FEATURE_TRANSFORM",

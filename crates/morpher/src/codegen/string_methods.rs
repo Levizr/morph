@@ -213,6 +213,12 @@ impl StringMethodHandler {
             ctx.needed.insert("\"../../runtime/cpp/types/js_string_helpers.h\"".to_string());
             // Also need js_types.h for JsValue and other types
             ctx.needed.insert("\"../../runtime/cpp/types/js_types.h\"".to_string());
+            // Regex-backed methods live in their own header (it uses
+            // try/catch, which is incompatible with -fno-exceptions
+            // builds — only pay for it when these methods are used).
+            if matches!(sm, StringMethod::Match | StringMethod::MatchAll | StringMethod::Search) {
+                ctx.needed.insert("\"../../runtime/cpp/types/js_regex_helpers.h\"".to_string());
+            }
 
             sm.emit_cpp(receiver, args)
         } else {

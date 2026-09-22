@@ -69,7 +69,10 @@ when unused), dev builds (all-on rule stands).
 | Baseline (self-test in binary, symtab) | 371,100 |
 | `--self-test` opt-in (default lean) | 305,100 |
 | `strip` on every release link | 227,700 |
-| … | … |
+| Template branches + TU skips + header gating | 162,100 |
+| Callback registration gating | 153,900 |
+| Forge backend skip | 145,700 |
+| `-Oz` + `-flto` + `-fno-exceptions/-rtti/-unwind` + regex-header split | 112,800 |
 
 ## Open experiments (decide with data, in order)
 
