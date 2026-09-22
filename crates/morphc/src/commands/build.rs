@@ -14,6 +14,7 @@ pub(crate) fn run(
     suppress_banner: bool,
     type_mode: Option<String>,
     upx_version: Option<String>,
+    self_test: bool,
 ) -> Result<PathBuf> {
     let cwd = std::env::current_dir()?;
     let config_path = cwd.join("morph.config.json");
@@ -295,7 +296,8 @@ pub(crate) fn run(
             morph_config::WindowRole::parse(&config.window.role)
                 .map_err(|e| anyhow::anyhow!("morph.config.json [window]: {e}"))?
                 .as_int() as i64,
-        );
+        )
+        .with_self_test(self_test);
     emitter.emit(&output_dir)?;
     write_routes_dts(&cwd, &routes);
     pb.finish_and_clear();
@@ -409,6 +411,28 @@ pub(crate) fn run(
     // Feature defines for flex, etc.
     let mut fs = morph_codegen::feature_set::FeatureSet::new();
     fs.scan(&windows);
+    // Route trees enable features the entry never touches (input,
+    // scroll, ownership, …) — defines must match the headers emit()
+    // computes, so routes scan here too.
+    fs.scan(routes_ir.iter().map(|(_, w)| w));
+    for (route, _) in &routes_ir {
+        fs.note_route_ownership(&route.parent, route.modal, &route.role);
+    }
+    fs.note_app_ownership(
+        &config.window.parent,
+        config.window.modal,
+        morph_config::WindowRole::parse(&config.window.role)
+            .map_err(|e| anyhow::anyhow!("morph.config.json [window]: {e}"))?
+            .as_int() as i64,
+    );
+    fs.note_page_cache(
+        config
+            .navigation
+            .cache
+            .capacity()
+            .map_err(|e| anyhow::anyhow!("morph.config.json: {e}"))?
+            != 0,
+    );
     let defines = fs.required_defines();
     // Ensure output dir exists (already created by emitter)
     let build_opts = morph_build::BuildOptions {

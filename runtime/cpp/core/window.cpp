@@ -462,13 +462,27 @@ MorphWindow::MorphWindow(const std::string &title, int width, int height, bool v
         // from spinning at hundreds of FPS.
         glfwSwapInterval(1);
         glfwSetWindowUserPointer(m_handle, this);
+        // Input callbacks register only for features that need them —
+        // unregistered handlers GC-drop with the callbacks that reference
+        // them (TEXT_INPUT for fields, CLICK for any onClick/link, HOVER
+        // for hover styles/cursor shapes, SCROLL for scrollables).
         glfwSetMouseButtonCallback(m_handle, mouseButtonCb);
+#ifdef MORPH_FEATURE_INPUT
         glfwSetKeyCallback(m_handle, KeyCb);
         glfwSetCharCallback(m_handle, CharCb);
+#endif
+#ifdef MORPH_FEATURE_HOVER
         glfwSetCursorPosCallback(m_handle, cursorPosCb);
+#endif
+#ifdef MORPH_FEATURE_SCROLL
         glfwSetScrollCallback(m_handle, scrollCb);
+#endif
         glfwSetWindowSizeCallback(m_handle, windowSizeCb);
+        // Modal follow needs position events; unowned apps never
+        // register the callback, so the follow chain GC-drops.
+#ifdef MORPH_FEATURE_OWNERSHIP
         glfwSetWindowPosCallback(m_handle, windowPosCb);
+#endif
         glfwSetWindowFocusCallback(m_handle, windowFocusCb);
         s_clipboardWindow = m_handle;
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
@@ -600,11 +614,11 @@ void MorphWindow::commitFrame()
 {
     if (!m_root)
         return;
-
-    if (activeRenderMode() == RenderMode::Forge)
-        forge::forgeCommit(*this);
-    else
-        flash::flashCommit(*this);
+#ifdef MORPH_RENDERER_FORGE
+    forge::forgeCommit(*this);
+#else
+    flash::flashCommit(*this);
+#endif
 }
 
 void MorphWindow::drawOpsForNode(GLRenderer &r, const RenderFrame *frame, int nodeIdx,
@@ -970,8 +984,10 @@ void MorphWindow::renderFrame(std::function<void(GLRenderer &, DirtyStats &)> ov
 
     if (activeRenderMode() == RenderMode::Forge)
     {
+#ifdef MORPH_RENDERER_FORGE
         forge::forgePresent(*this, overlayFn);
         return;
+#endif
     }
 
     // Wait for compositor to finish interpolation

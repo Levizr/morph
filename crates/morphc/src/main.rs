@@ -88,6 +88,10 @@ enum Commands {
         /// Type resolution mode for translated logic: strict or infer (default, from morph.config.json)
         #[arg(long = "types", value_name = "MODE")]
         type_mode: Option<String>,
+        /// Compile in the headless runtime self-test (`binary --morph-self-test`).
+        /// Off by default: the test body is dead weight in shipped binaries.
+        #[arg(long = "self-test")]
+        self_test: bool,
     },
     /// Build and run production binary
     Run {
@@ -217,10 +221,27 @@ fn main() {
             commands::update::run(runtime, self_update)
         }
         Some(Commands::Dev { entry }) => commands::dev::run(entry),
-        Some(Commands::Build { entry, output, static_, upx, no_upx, upx_version, type_mode }) => {
-            commands::build::run(entry, output, static_, upx, no_upx, false, type_mode, upx_version)
-                .map(|_| ())
-        }
+        Some(Commands::Build {
+            entry,
+            output,
+            static_,
+            upx,
+            no_upx,
+            upx_version,
+            type_mode,
+            self_test,
+        }) => commands::build::run(
+            entry,
+            output,
+            static_,
+            upx,
+            no_upx,
+            false,
+            type_mode,
+            upx_version,
+            self_test,
+        )
+        .map(|_| ()),
         Some(Commands::Run {
             binary,
             entry,

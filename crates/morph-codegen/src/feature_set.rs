@@ -95,6 +95,12 @@ impl FeatureSet {
             for f in Self::reactive_feature(prop) {
                 self.features.insert(f.into());
             }
+            // Color-typed props lower through the runtime setColor parser
+            // (node_emitter/logic_emitter "color" arms) — static palettes
+            // are constants, only reactive ones need it.
+            if prop.contains("color") {
+                self.features.insert("reactive_color".into());
+            }
         }
     }
 
@@ -128,6 +134,57 @@ impl FeatureSet {
         for win in windows {
             if win.renderer == "forge" {
                 self.features.insert("forge".into());
+            }
+            // Reactive runtime: any state/shared/event/effect/channel/mid
+            // decl means signals + effect machinery must link. (Static
+            // apps with none of these get a loop without the pump calls
+            // and skip effect.cpp — the lean-binary promise.)
+            if !win.state_vars.is_empty()
+                || !win.shared_vars.is_empty()
+                || !win.event_decls.is_empty()
+                || !win.effect_decls.is_empty()
+                || !win.channel_subs.is_empty()
+                || !win.mid_assignments.is_empty()
+            {
+                self.features.insert("reactivity".into());
+            }
+            if !win.event_decls.is_empty() || !win.channel_subs.is_empty() {
+                self.features.insert("channels".into());
+            }
+            // Body markers: lowered handler/effect/premain text carries
+            // API usage no decl list captures (fetch, timers, coroutines,
+            // ownership keys inside `new Window` opts).
+            let mut bodies: Vec<&str> = Vec::new();
+            for f in &win.premain_functions {
+                bodies.push(f.as_str());
+            }
+            for ed in &win.effect_decls {
+                if let Some(l) = ed.get("lambda") {
+                    bodies.push(l.as_str());
+                }
+            }
+            for sub in &win.channel_subs {
+                if let Some(b) = sub.get("body") {
+                    bodies.push(b.as_str());
+                }
+            }
+            let has = |m: &str| bodies.iter().any(|b| b.contains(m));
+            if has("morph::net::") {
+                self.features.insert("net".into());
+                // Network workers + coroutine resume run through the
+                // task scheduler — net implies tasks.
+                self.features.insert("tasks".into());
+            }
+            if has("set_timeout(") || has("set_interval(") || has("co_await") || has("morph::Task")
+            {
+                self.features.insert("tasks".into());
+            }
+            // Ownership keys inside `new Window` opts (pre-morpher text
+            // keeps `parent:`/`modal:`/`role:` literally). Over-approx is
+            // safe: a user data object with a `parent` key just keeps the
+            // (small) follow machinery linked.
+            if has("parent:") || has("modal:") || has("role:") {
+                self.features.insert("ownership".into());
             }
             for kfs in win.keyframes.values() {
                 for kf in kfs {
@@ -185,6 +242,21 @@ impl FeatureSet {
                 }
                 if !node.animations.is_empty() || !node.hover_animations.is_empty() {
                     self.features.insert("animation".into());
+                    // Keyframe/transition drivers run through effects.
+                    self.features.insert("reactivity".into());
+                }
+                // Any dynamic binding (reactive text/attrs/style, show/hide
+                // conditionals, lists) lowers to create_effect.
+                if !node.reactive_attrs.is_empty()
+                    || !node.reactive_text.is_empty()
+                    || !node.reactive_class.is_empty()
+                    || !node.reactive_style.is_empty()
+                    || !node.class_conditional_effects.is_empty()
+                    || !node.condition_expr.is_empty()
+                    || !node.list_expr.is_empty()
+                    || node.item_template.is_some()
+                {
+                    self.features.insert("reactivity".into());
                 }
                 if !node.reactive_style.is_empty() {
                     self.scan_reactive(&node.reactive_style);
@@ -197,6 +269,9 @@ impl FeatureSet {
                     for (prop, val) in eff.on_styles.iter().chain(eff.off_styles.iter()) {
                         for f in Self::reactive_feature(prop) {
                             self.features.insert(f.into());
+                        }
+                        if prop.contains("color") {
+                            self.features.insert("reactive_color".into());
                         }
                         if prop == "display" && val.trim() == "none" {
                             self.features.insert("display_none".into());
@@ -232,12 +307,43 @@ impl FeatureSet {
         }
     }
 
+    /// Route-level ownership: any non-default parent/modal/role in a
+    /// route `windowConfig` keeps the follow/policy machinery linked.
+    /// Call once per manifest route (build command owns the loop).
+    pub fn note_route_ownership(&mut self, parent: &str, modal: bool, role: &str) {
+        if !parent.is_empty() || modal || !role.is_empty() {
+            self.features.insert("ownership".into());
+        }
+    }
+
+    /// App-level `[window]` ownership defaults (`role` already interned).
+    pub fn note_app_ownership(&mut self, parent: &str, modal: bool, role: i64) {
+        if !parent.is_empty() || modal || role != 0 {
+            self.features.insert("ownership".into());
+        }
+    }
+
+    /// Page cache from resolved `navigation.cache` (0 = destroy path).
+    pub fn note_page_cache(&mut self, on: bool) {
+        if on {
+            self.features.insert("pagecache".into());
+        }
+    }
+
     pub fn required_headers(&self) -> Vec<String> {
         let mut h = vec!["ui/rect.h".to_string()];
-        // The main loop always calls process_tasks()/run_pending_effects()/
-        // destroy_all_effects(), so the reactivity headers are unconditional.
-        h.push("reactivity/task.h".into());
-        h.push("reactivity/signal.h".into());
+        // The main loop calls process_tasks()/run_pending_effects() only
+        // when the template emits them (reactive/tasks flags), so these
+        // headers follow the same flags instead of riding unconditional.
+        if self.features.contains("reactivity") || self.features.contains("tasks") {
+            h.push("reactivity/task.h".into());
+        }
+        if self.features.contains("reactivity") {
+            h.push("reactivity/signal.h".into());
+        }
+        if self.features.contains("channels") {
+            h.push("reactivity/channel.h".into());
+        }
         if self.features.contains("text") {
             h.push("ui/text.h".into());
         }
@@ -323,6 +429,43 @@ impl FeatureSet {
         }
         if self.features.contains("forge") {
             d.push("MORPH_RENDERER_FORGE".into());
+        }
+        // Cursor-position callback (hover/active visuals, cursor shapes,
+        // scrollbar drags) — one gate for the whole hover pipeline.
+        if self.features.contains("hover")
+            || self.features.contains("active")
+            || self.features.contains("cursor")
+            || self.features.contains("scroll")
+        {
+            d.push("MORPH_FEATURE_HOVER".into());
+        }
+        // No runtime `#ifdef` consumes this one (list machinery is
+        // header-only) — it exists so the build can pick -O2 for
+        // list-heavy apps (see opt_flag).
+        if self.features.contains("list") {
+            d.push("MORPH_FEATURE_LIST".into());
+        }
+        // Lean-binary subsystem flags (derived from scan, never user-set
+        // — same rule as every CSS flag above). Each gates whole TUs
+        // and/or template branches; dev builds define them all.
+        if self.features.contains("reactivity") {
+            d.push("MORPH_FEATURE_REACTIVITY".into());
+        }
+        if self.features.contains("tasks") {
+            d.push("MORPH_FEATURE_TASKS".into());
+        }
+        if self.features.contains("net") {
+            d.push("MORPH_FEATURE_NET".into());
+            // Workers + coroutine resume run through the scheduler.
+            if !self.features.contains("tasks") {
+                d.push("MORPH_FEATURE_TASKS".into());
+            }
+        }
+        if self.features.contains("ownership") {
+            d.push("MORPH_FEATURE_OWNERSHIP".into());
+        }
+        if self.features.contains("pagecache") {
+            d.push("MORPH_FEATURE_PAGECACHE".into());
         }
         d
     }

@@ -112,6 +112,20 @@ impl Compiler {
     /// The runtime .cpp sources that must be compiled and linked alongside the
     /// generated app.cpp (mirrors morph/build/compiler.py runtime_sources).
     fn runtime_sources(&self, runtime_dir: &Path) -> Vec<PathBuf> {
+        self.runtime_sources_with_features(runtime_dir, &[])
+    }
+
+    /// Runtime `.cpp` sources minus whole TUs whose feature define is
+    /// absent. `defines` are the `-D` strings (e.g. `MORPH_FEATURE_NET`)
+    /// so callers pass straight through what they already computed.
+    /// Skipped TUs also build faster; belt-and-suspenders with the
+    /// whole-file `#ifdef`s inside each skipped TU.
+    fn runtime_sources_with_features(
+        &self,
+        runtime_dir: &Path,
+        defines: &[String],
+    ) -> Vec<PathBuf> {
+        let has = |flag: &str| defines.iter().any(|d| d == flag);
         let node_dir = runtime_dir.join("core/node");
         let mut srcs = vec![
             node_dir.join("node.cpp"),
@@ -124,17 +138,54 @@ impl Compiler {
             runtime_dir.join("core/window.cpp"),
             runtime_dir.join("render/gl_renderer.cpp"),
             runtime_dir.join("core/compositor.cpp"),
-            runtime_dir.join("reactivity/effect.cpp"),
-            runtime_dir.join("reactivity/task.cpp"),
-            runtime_dir.join("net/net.cpp"),
             runtime_dir.join("renderers/renderer.cpp"),
             runtime_dir.join("renderers/flash/flash.cpp"),
             runtime_dir.join("renderers/forge/forge.cpp"),
             runtime_dir.join("renderers/forge/damage.cpp"),
         ];
+        // Unused renderer backend: the dispatch in window.cpp is
+        // compile-time (activeRenderMode), so forge.cpp is dead weight
+        // unless chosen. damage.cpp serves both backends (flash damage
+        // tracking) and always stays.
+        if has("MORPH_RENDERER_FORGE") {
+            srcs.retain(|p| !p.ends_with("flash/flash.cpp"));
+        } else {
+            srcs.retain(|p| !p.ends_with("forge/forge.cpp"));
+        }
+        // Reactive machinery only when something is reactive: the
+        // template omits the pump calls, so these TUs would link
+        // dead code otherwise.
+        if has("MORPH_FEATURE_REACTIVITY") {
+            srcs.push(runtime_dir.join("reactivity/effect.cpp"));
+        }
+        // Task scheduler only for timers/async/fetch-driven resumes.
+        if has("MORPH_FEATURE_TASKS") {
+            srcs.push(runtime_dir.join("reactivity/task.cpp"));
+        }
+        // Fetch stack only when `fetch(` appears in the project.
+        if has("MORPH_FEATURE_NET") {
+            srcs.push(runtime_dir.join("net/net.cpp"));
+        }
         // Only include sources that actually exist (some may be optional)
         srcs.retain(|p| p.exists());
         srcs
+    }
+
+    /// Optimization flag derived from the feature defines the caller
+    /// already computed: apps with perf-sensitive content (animations,
+    /// transforms, lists, forge rendering) get -O2, everything else -Os.
+    /// Derived, never user-set — same rule as every MORPH_FEATURE_*.
+    fn opt_flag(defines: &[String]) -> &'static str {
+        let has = |flag: &str| defines.iter().any(|d| d == flag);
+        if has("MORPH_FEATURE_ANIMATION")
+            || has("MORPH_FEATURE_TRANSFORM")
+            || has("MORPH_RENDERER_FORGE")
+            || has("MORPH_FEATURE_LIST")
+        {
+            "-O2"
+        } else {
+            "-Os"
+        }
     }
 
     /// Compile `source_path` → `binary_path` (executable)
@@ -177,7 +228,11 @@ impl Compiler {
             }
             cmd.extend(size_flags);
         } else {
-            cmd.push("-O2".into());
+            // Per-app optimization: static content pays nothing to be
+            // made "faster". Animations, transforms, forge rendering,
+            // and lists are where -O2's unrolling/inlining earn back
+            // their bytes — everything else ships -Os.
+            cmd.push(Self::opt_flag(defines).into());
         }
         cmd.push("-ffunction-sections".into());
         cmd.push("-fdata-sections".into());
@@ -199,8 +254,8 @@ impl Compiler {
         for extra in extra_sources {
             cmd.push(extra.display().to_string());
         }
-        // Runtime .cpp sources
-        for s in self.runtime_sources(runtime_dir) {
+        // Runtime .cpp sources (feature-gated TUs drop out via defines)
+        for s in self.runtime_sources_with_features(runtime_dir, defines) {
             cmd.push(s.display().to_string());
         }
         // Vendor C sources
@@ -437,6 +492,17 @@ impl Compiler {
         if !status.success() {
             anyhow::bail!("compilation failed with status: {status}");
         }
+        // Strip symbols: a release binary ships no symtab (tens of KB on
+        // small apps). Debug info was never emitted (no -g), so this only
+        // drops the symbol table + unneeded symbols, never debug data.
+        let strip_status = std::process::Command::new("strip")
+            .args(if is_macos() { vec!["-u", "-r"] } else { vec!["--strip-unneeded"] })
+            .arg(binary_path)
+            .status()
+            .with_context(|| "failed to execute strip (binutils)".to_string())?;
+        if !strip_status.success() {
+            anyhow::bail!("strip failed with status: {strip_status}");
+        }
         Ok(())
     }
 }
@@ -668,6 +734,20 @@ fn path_which(bin: &str) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn opt_flag_picks_size_by_default_and_speed_for_perf_features() {
+        assert_eq!(Compiler::opt_flag(&[]), "-Os");
+        assert_eq!(Compiler::opt_flag(&["MORPH_FEATURE_TEXT".to_string()]), "-Os");
+        for flag in [
+            "MORPH_FEATURE_ANIMATION",
+            "MORPH_FEATURE_TRANSFORM",
+            "MORPH_RENDERER_FORGE",
+            "MORPH_FEATURE_LIST",
+        ] {
+            assert_eq!(Compiler::opt_flag(&[flag.to_string()]), "-O2", "{flag}");
+        }
+    }
 
     #[test]
     fn static_flags_default_to_os_and_strip() {

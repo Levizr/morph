@@ -17,7 +17,7 @@ fail=0
 for fixture in tests/runtime/component-test tests/runtime/native-interop tests/runtime/window-test tests/runtime/route-test; do
   name="$(basename "$fixture")"
   echo "=== $name ==="
-  (cd "$ROOT/$fixture" && rm -f .morph/output/"$name"* && "$MORPH" build --no-upx > /dev/null)
+  (cd "$ROOT/$fixture" && rm -f .morph/output/"$name"* && "$MORPH" build --no-upx --self-test > /dev/null)
   bin="$(cd "$ROOT/$fixture" && find .morph/output -maxdepth 1 -type f -executable | head -1)"
   out="$(cd "$ROOT/$fixture" && "$bin" --morph-self-test)"
   echo "$out"

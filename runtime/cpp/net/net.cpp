@@ -1,5 +1,11 @@
 #include "net.h"
 #include "../dev/dev_net.h"
+
+// Entire file compiles to nothing without the feature define — apps
+// that never call fetch() ship zero networking code. The build also
+// skips this TU (runtime_sources_with_features); the guard covers
+// direct consumers.
+#ifdef MORPH_FEATURE_NET
  
 // ── Socket portability ────────────────────────────────────────────
 // One implementation of the HTTP stack serves every OS; only the socket
@@ -279,3 +285,4 @@ Response http_get(const std::string& url) {
 }
 
 } // namespace morph::net
+#endif // feature gate

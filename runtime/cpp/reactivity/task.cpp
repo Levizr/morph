@@ -2,6 +2,11 @@
 #include <algorithm>
 #include <vector>
 
+// Entire file compiles to nothing without the feature define — apps
+// without timers/async/fetch ship zero scheduler code. The template
+// omits the pump call and the build skips this TU.
+#ifdef MORPH_FEATURE_TASKS
+
 namespace morph {
 
 // ── Internal state ──────────────────────────────────────────────
@@ -105,3 +110,4 @@ void clear_timer(int id) {
 }
 
 } // namespace morph
+#endif // feature gate

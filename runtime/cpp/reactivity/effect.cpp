@@ -2,6 +2,11 @@
 #include <mutex>
 #include <vector>
 
+// Entire file compiles to nothing without the feature define — static
+// apps with no state/effects/events ship zero reactive machinery. The
+// template omits the pump calls and the build skips this TU.
+#ifdef MORPH_FEATURE_REACTIVITY
+
 namespace morph {
 
 thread_local EffectContext g_effect_ctx;
@@ -123,4 +128,6 @@ void destroy_all_effects() {
     s_pending.clear();
 }
 
-} // namespace morph
+} // namespace morph}
+#endif // MORPH_FEATURE_REACTIVITY
+

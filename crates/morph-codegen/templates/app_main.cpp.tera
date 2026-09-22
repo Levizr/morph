@@ -11,8 +11,8 @@
 #include "core/window_manager.h"
 #include "core/window.h"
 #include "core/renderer.h"
-#include "reactivity/channel.h"
-#include "style/style.h"
+{% if channels %}#include "reactivity/channel.h"
+{% endif %}#include "style/style.h"
 // Per-project native contract (signal/channel definitions + wrappers for
 // user C++). Included before user code: definitions live in the header so
 // user functions see declarations before use. Resolves to the generated
@@ -40,8 +40,10 @@ static void glfw_error_cb(int code, const char* msg) {
     fprintf(stderr, "[GLFW] error %d: %s\n", code, msg);
 }
 
-// Runtime color parser for reactive inline style color expressions
-namespace morph {
+// Runtime color parser for reactive inline style color expressions.
+// Emitted only when a reactive color flows through setColor — static
+// palettes lower to constants at build time.
+{% if reactive_color %}namespace morph {
 inline void setColor(float rgba[4], const std::string& c) {
     if (c.size() == 7 && c[0] == '#') {
         rgba[0] = std::stoi(c.substr(1,2), nullptr, 16) / 255.0f;
@@ -61,7 +63,7 @@ inline void setColor(float rgba[4], const std::string& c) {
     }
 }
 }
-
+{% endif %}
 {% if state_decls %}
 // ── morphState signals ──
 {% for s in state_decls %}
@@ -123,9 +125,9 @@ int main(int argc, char** argv) {
         // effects and CSS transitions keep advancing. Sleeping here instead of
         // spinning on glfwPollEvents() keeps idle CPU usage near 0%.
         glfwWaitEventsTimeout(0.016);
-        morph::process_tasks();
-        morph::run_pending_effects();
-
+{% if tasks %}        morph::process_tasks();
+{% endif %}{% if reactive %}        morph::run_pending_effects();
+{% endif %}
         auto now = std::chrono::steady_clock::now();
         float dt = std::chrono::duration<float>(now - lastFrameTime).count();
         lastFrameTime = now;
@@ -137,8 +139,8 @@ int main(int argc, char** argv) {
         wm.sweepClosed();
     }
 
-    morph::destroy_all_effects();
-    wm.stopAllCompositors();
+{% if reactive %}    morph::destroy_all_effects();
+{% endif %}    wm.stopAllCompositors();
     // glfwTerminate() runs inside ~WindowManager after every window is
     // destroyed, so GLFW calls during teardown still see a live library.
     return 0;

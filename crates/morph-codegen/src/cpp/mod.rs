@@ -24,6 +24,8 @@ pub struct CppEmitter<'a> {
     /// `[window]` in morph.config.json) for routes without their own.
     /// Parent is the raw string (`""` none, `"auto"` focused, id, route).
     app_ownership: (String, bool, i64),
+    /// Compile in the headless self-test (`--morph-self-test`).
+    self_test: bool,
 }
 
 impl<'a> CppEmitter<'a> {
@@ -35,6 +37,7 @@ impl<'a> CppEmitter<'a> {
             app_window: None,
             page_cache: 0,
             app_ownership: (String::new(), false, 0),
+            self_test: false,
         }
     }
 
@@ -71,6 +74,14 @@ impl<'a> CppEmitter<'a> {
         self
     }
 
+    /// Compile in the headless self-test body (`--morph-self-test`).
+    /// Off by default — the checks never run in shipped apps.
+    /// Chained before `emit`.
+    pub fn with_self_test(mut self, on: bool) -> Self {
+        self.self_test = on;
+        self
+    }
+
     pub fn emit(&self, output_dir: &Path) -> Result<()> {
         std::fs::create_dir_all(output_dir)?;
 
@@ -79,7 +90,18 @@ impl<'a> CppEmitter<'a> {
         // Route trees can enable features the entry never touches
         // (input, scroll, …) — scan their nodes too.
         fs.scan(self.routes_ir.iter().map(|(_, w)| w));
-        let headers = fs.required_headers();
+        let mut headers = fs.required_headers();
+        if !self.routes_ir.is_empty() {
+            // Route mount Contexts always declare EffectNode*/Channel*
+            // vectors, so the declarations must be visible even when no
+            // route uses effects or channels (link cost stays zero —
+            // unused inline/header-only code never emits).
+            for h in ["reactivity/signal.h", "reactivity/channel.h"] {
+                if !headers.contains(&h.to_string()) {
+                    headers.push(h.to_string());
+                }
+            }
+        }
         let defines = fs.required_defines();
 
         // Collect state decls
@@ -534,17 +556,28 @@ impl<'a> CppEmitter<'a> {
         ctx.insert("extra_headers", &extra_headers);
         ctx.insert("defines", &defines);
         ctx.insert("dev_mode", &false);
+        // Lean-binary template branches (derived scan, never user-set).
+        ctx.insert("reactive", &fs.features.contains("reactivity"));
+        ctx.insert("tasks", &fs.features.contains("tasks"));
+        ctx.insert("channels", &fs.features.contains("channels"));
+        ctx.insert("reactive_color", &fs.features.contains("reactive_color"));
         ctx.insert("premain_code", &premain_code);
         ctx.insert("state_decls", &state_decls);
         ctx.insert("native_mode", &native_mode);
         ctx.insert("cpp_includes", &cpp_includes);
 
         // `mid` indexed-accessor definitions (after the state signals) +
-        // headless self-test body for `--morph-self-test`.
+        // headless self-test body for `--morph-self-test` (opt-in via
+        // `morph build --self-test`; shipped binaries carry a stub so the
+        // test body — dead weight at runtime — never ships by default).
         let mid_code = generate_mid_code(self.windows, &premain_code);
         ctx.insert("mid_code", &mid_code);
-        let self_test_code = generate_self_test(self.windows, self.routes);
-        let self_test_code = resolve_window_placeholders(&self_test_code, self.routes)?;
+        let self_test_code = if self.self_test {
+            let full = generate_self_test(self.windows, self.routes);
+            resolve_window_placeholders(&full, self.routes)?
+        } else {
+            "int morph_self_test() {\n    printf(\"[morph-self-test] not compiled in (rebuild with --self-test)\\n\");\n    return 0;\n}".to_string()
+        };
         ctx.insert("self_test_code", &self_test_code);
 
         let rendered = tera::Tera::one_off(TEMPLATE, &ctx, false)
@@ -1193,7 +1226,19 @@ pub fn generate_route_mounts(
             };
             code.push(format!("    ctx->{getter}.set({init});"));
         }
-        code.push("    morph::MountScope __scope(&ctx->effects);".to_string());
+        // Effect scope links create_effect/destroy_effect (effect.cpp):
+        // emit only when this mount can own effects (a scoped, non-
+        // run-once effect), so effect-free routes never pull the TU.
+        let needs_scope = win.effect_decls.iter().any(|ed| {
+            let lambda = ed.get("lambda").map_or("", String::as_str);
+            if lambda.is_empty() {
+                return false;
+            }
+            ed.get("deps").map_or("", |d| d.trim()) != "[]"
+        });
+        if needs_scope {
+            code.push("    morph::MountScope __scope(&ctx->effects);".to_string());
+        }
         // Route state map: bare reads rewrite to context members (baked
         // `ctx->` refs survive via the member-access guard in translate_js).
         let mut state_map = std::collections::HashMap::new();
@@ -1285,10 +1330,12 @@ pub fn generate_route_mounts(
             ));
         }
         code.push(format!("    auto __teardown_{} = [ctx] {{", route.const_name));
-        code.push(
-            "        for (morph::EffectNode* e : ctx->effects) morph::destroy_effect(e);"
-                .to_string(),
-        );
+        if needs_scope {
+            code.push(
+                "        for (morph::EffectNode* e : ctx->effects) morph::destroy_effect(e);"
+                    .to_string(),
+            );
+        }
         code.push("        ctx->effects.clear();".to_string());
         code.push(
             "        for (auto& sub : ctx->subs) { if (sub.first) sub.first->off(sub.second); }"
@@ -3221,7 +3268,7 @@ mod tests {
         let windows = vec![mid_window()];
         let dir = std::env::temp_dir().join(format!("morph_mid_test_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        CppEmitter::new(&windows).emit(&dir).unwrap();
+        CppEmitter::new(&windows).with_self_test(true).emit(&dir).unwrap();
         let app = std::fs::read_to_string(dir.join("app.cpp")).unwrap();
         let api = std::fs::read_to_string(dir.join("morph_api.h")).unwrap();
         assert!(api.contains("constexpr uint32_t MID_HERO = 0;"), "const: {api}");
@@ -3236,6 +3283,31 @@ mod tests {
             "self-test: {app}"
         );
         assert!(app.contains("[morph-self-test]"), "summary: {app}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn lean_default_omits_self_test_and_reactive_calls() {
+        // Lean-binary promise: a static window emits no test body and no
+        // reactive pump calls (opt back in with with_self_test(true)).
+        let windows = vec![IRWindow {
+            window_id: "main".to_string(),
+            title: "T".to_string(),
+            width: 800,
+            height: 600,
+            visible: true,
+            renderer: "flash".to_string(),
+            ..Default::default()
+        }];
+        let dir = std::env::temp_dir().join(format!("morph_lean_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        CppEmitter::new(&windows).emit(&dir).unwrap();
+        let app = std::fs::read_to_string(dir.join("app.cpp")).unwrap();
+        assert!(!app.contains("checks, %d failures"), "no test body: {app}");
+        assert!(!app.contains("run_pending_effects"), "no effect pump: {app}");
+        assert!(!app.contains("process_tasks"), "no task pump: {app}");
+        assert!(!app.contains("inline void setColor"), "no color parser: {app}");
+        assert!(!app.contains("reactivity/channel.h"), "no channel include: {app}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

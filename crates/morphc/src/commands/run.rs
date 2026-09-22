@@ -31,6 +31,7 @@ pub(crate) fn run(
             true,
             type_mode,
             upx_version,
+            false,
         )?
     };
 
