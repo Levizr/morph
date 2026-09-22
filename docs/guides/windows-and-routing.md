@@ -74,8 +74,8 @@ New props always mount fresh: cached state was built with old props, and silentl
 Opening the same route twice creates two fully independent instances — separate windows, separate trees, separate state:
 
 ```tsx
-const a = new Window("/settings", { data: { userId: 1 } })
-const b = new Window("/settings", { data: { userId: 2 } })
+const a = new Window("/auth/login", { data: { userId: 1 } })
+const b = new Window("/auth/login", { data: { userId: 42 } })
 a.navigate("/other")  // only a moves — b stays put
 b.close()             // only b dies — a is untouched
 ```
@@ -83,6 +83,20 @@ b.close()             // only b dies — a is untouched
 When two windows share a route, the route alone can't name one of them — that's what explicit `id`s are for. `useWindow("/route")` returns the most-recently-focused live window on that route (the one the user is looking at); use the `id` form when you need precision.
 
 Shared stores (`morphShared`) and events (`morphEvent`) are deliberately **global** — two windows see the same cart, the same bus. Local state (`morphState`) is per window.
+
+## Ownership: parents, modals, roles
+
+Independence is the default — a window with no `parent` survives every other window's close (browser-style). Ownership is always explicit:
+
+```tsx
+const main = useWindow()
+const popup = new Window("/settings", { parent: main, modal: true })
+```
+
+- **`parent`** (handle, id, route, `"auto"`, or omitted/`null` for independent) links lifetimes: closing an owner destroys its owned subtree first. Declare it anywhere geometry lives — `new Window` opts → route `windowConfig` → `[window]` app defaults.
+- **`modal`** (`true`/`false`) blocks every other window's close while the modal lives — X clicks on other windows are swallowed (repeat after it closes), `close()` returns `false`. Modals always close themselves. Requires a resolvable parent.
+- **`role`** (`"default"`/`"dialog"`/`"popup"`) is presentation only — decorations and hints, never behavior.
+- Owned windows float above their parent; modals additionally center on open and move rigidly with their parent in both directions (a screen-edge-clamped parent stops the follower too — the pair never separates).
 
 ## Lifecycle
 

@@ -30,12 +30,24 @@ settings.show()
 | `config.title` | `string` | Same fallback chain as size. |
 | `config.id` | `string` | Optional explicit id (`a-z 0-9 - _`, must not start with a digit). Addressable via `useWindow(id)`. |
 | `config.data` | `object` | Delivered to the page component as `props`. |
+| `config.parent` | `handle` / `string` | Owner window: a handle (`parent: main`), an explicit id (`parent: "win1"`), a route (`parent: "/a"` → focused window on it), `"auto"` (focused window), or omitted/`null` (independent top-level — survives other closes). |
+| `config.modal` | `boolean` | `true` blocks every other window's close while open (requires a resolvable parent — hard error otherwise). |
+| `config.role` | `string` | Presentation hint only (`"default"`, `"dialog"`, `"popup"`); never gates behavior. Unknown roles fail the build. |
 
 Opening the same route twice creates two fully independent windows — separate state, separate trees. Close one and the other is untouched.
 
 ```tsx
 const a = new Window("/auth/login", { id: "login-a", data: { userId: 1 } })
 const b = new Window("/auth/login", { id: "login-b", data: { userId: 42 } })
+```
+
+## Window ownership
+
+Closing an owner destroys its owned subtree first; independent windows survive, and the app quits when the last window closes. A live modal refuses every other window's close (`close()` returns `false`; an X click is swallowed and must be repeated after the modal closes) but always closes itself. Modals center on their parent at open and move with it — both directions, rigidly (a clamped parent stops the follower too).
+
+```tsx
+const main = useWindow()
+const popup = new Window("/settings", { parent: main, modal: true, role: "popup" })
 ```
 
 ## `useWindow()`
