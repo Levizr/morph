@@ -2876,7 +2876,7 @@ impl<'a> CppTranslator<'a> {
                     pairs.push(format!("{{\"modal\", {lowered}}}"));
                 }
                 "role" => {
-                    let lowered = self.lower_role_value(&p.value);
+                    let lowered = Self::lower_role_value(&p.value);
                     pairs.push(format!("{{\"role\", {lowered}}}"));
                 }
                 _ => {
@@ -2917,7 +2917,7 @@ impl<'a> CppTranslator<'a> {
 
     /// Lower a `role` literal to its interned int (unknown roles fail the
     /// build — roles are a closed set, so anything else is a typo).
-    fn lower_role_value(&mut self, value: &Expression<'a>) -> String {
+    fn lower_role_value(value: &Expression<'a>) -> String {
         match value {
             Expression::StringLiteral(s) => {
                 match morph_config::WindowRole::parse(s.value.as_str()) {
