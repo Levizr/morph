@@ -73,6 +73,9 @@ when unused), dev builds (all-on rule stands).
 | Callback registration gating | 153,900 |
 | Forge backend skip | 145,700 |
 | `-Oz` + `-flto` + `-fno-exceptions/-rtti/-unwind` + regex-header split | 112,800 |
+| Static: HarfBuzz skipped (no shaping content) | 1,049,800 → 560,500 |
+| Static: GLFW gamepad DB stubbed + unwind-free dep builds + static `-Oz` | → **397,500** |
+| Static UPX | **~177,000** |
 
 ## Open experiments (decide with data, in order)
 
