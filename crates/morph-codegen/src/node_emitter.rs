@@ -249,16 +249,40 @@ pub(crate) fn translate_js<S: std::hash::BuildHasher>(
 
 /// Normalize `x.value` member access to `x["value"]` subscripting.
 /// JsObject payloads expose fields by subscript only (no `.value`
-/// member). Applies to any receiver so dev-mode output matches
-/// build-mode output for identical input.
+/// member). String literals pass through untouched, and longer members
+/// (`valueOf`) never match.
 pub(crate) fn normalize_value_access(s: &str) -> String {
-    s.replace("e.value", "e[\"value\"]").replace(".value", "[\"value\"]")
+    fn is_word(b: u8) -> bool {
+        (b as char).is_ascii_alphanumeric() || b == b'_' || b == b'$'
+    }
+    let bytes = s.as_bytes();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'"' || bytes[i] == b'\'' {
+            let end = js_skip_string(s, i);
+            out.push_str(&s[i..end]);
+            i = end;
+            continue;
+        }
+        if s[i..].starts_with(".value") {
+            let after = i + 6;
+            if after >= bytes.len() || !is_word(bytes[after]) {
+                out.push_str("[\"value\"]");
+                i = after;
+                continue;
+            }
+        }
+        out.push(bytes[i] as char);
+        i += 1;
+    }
+    out
 }
 
 /// Normalize list-item member access to subscripting: `__it.name` →
-/// `__it["name"]`. The factory binds `__it` to a JsValue, which has no
-/// dotted members (the `__it` name is reserved for list factories).
-/// Single level (mirrors `translate_list_key`); bare `__it` and
+/// `__it["name"]`, chained (`__it.user.name` → `__it["user"]["name"]`).
+/// The factory binds `__it` to a JsValue, which has no dotted members
+/// (the `__it` name is reserved for list factories). Bare `__it` and
 /// existing `__it[...]` forms pass through untouched.
 pub(crate) fn normalize_item_access(s: &str) -> String {
     fn is_word(b: u8) -> bool {
@@ -271,16 +295,36 @@ pub(crate) fn normalize_item_access(s: &str) -> String {
         let prev_ok = i == 0 || !is_word(bytes[i - 1]);
         if prev_ok && s[i..].starts_with("__it.") {
             let mut j = i + 5;
-            while j < bytes.len() && is_word(bytes[j]) {
-                j += 1;
-            }
-            if j > i + 5 {
-                out.push_str("__it[\"");
-                out.push_str(&s[i + 5..j]);
+            let mut seg_start = j;
+            let mut emitted = false;
+            out.push_str("__it");
+            loop {
+                while j < bytes.len() && is_word(bytes[j]) {
+                    j += 1;
+                }
+                if j == seg_start {
+                    break;
+                }
+                out.push_str("[\"");
+                out.push_str(&s[seg_start..j]);
                 out.push_str("\"]");
+                emitted = true;
+                if j < bytes.len()
+                    && bytes[j] == b'.'
+                    && j + 1 < bytes.len()
+                    && is_word(bytes[j + 1])
+                {
+                    j += 1;
+                    seg_start = j;
+                    continue;
+                }
+                break;
+            }
+            if emitted {
                 i = j;
                 continue;
             }
+            out.truncate(out.len() - "__it".len());
         }
         // ASCII fast path; multibyte chars fall through whole.
         if bytes[i] < 0x80 {
@@ -1002,7 +1046,11 @@ pub(crate) fn translate_list_key(expr: &str, item_param: &str, index_param: &str
     let s = expr.trim();
     let item = if item_param.is_empty() { "item" } else { item_param };
     if let Some(rest) = s.strip_prefix(&format!("{item}.")) {
-        return format!("__it[\"{rest}\"]");
+        let mut out = String::from("__it");
+        for seg in rest.split('.') {
+            out.push_str(&format!("[\"{seg}\"]"));
+        }
+        return out;
     }
     if s == item {
         return "__it".to_string();
@@ -2156,6 +2204,18 @@ fn raw_prop_to_enum(prop: &str) -> Option<&'static str> {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn member_access_lowering() {
+        assert_eq!(normalize_value_access("e.value"), "e[\"value\"]");
+        assert_eq!(normalize_value_access("\"my.value\""), "\"my.value\"");
+        assert_eq!(normalize_value_access("x.valueOf"), "x.valueOf");
+        assert_eq!(normalize_item_access("__it.name"), "__it[\"name\"]");
+        assert_eq!(normalize_item_access("__it.user.name"), "__it[\"user\"][\"name\"]");
+        assert_eq!(normalize_item_access("__it"), "__it");
+        assert_eq!(translate_list_key("item.user.id", "", ""), "__it[\"user\"][\"id\"]");
+        assert_eq!(translate_list_key("item", "", ""), "__it");
+    }
 
     #[test]
     fn style_enum_literals_mirror_cpp_parse_tables() {
