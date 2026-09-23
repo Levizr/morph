@@ -242,6 +242,23 @@ impl FeatureSet {
                 if !node.events.is_empty() {
                     self.features.insert("event".into());
                 }
+                // Ownership keys inside handler lambdas (`new Window`
+                // opts and desugared `<a parent/modal/role>` links).
+                // Both pre-lowering (`parent:`) and lowered
+                // (`{"parent", …}`) shapes count; over-approx is safe.
+                for ev in &node.events {
+                    let t = ev.target.as_str();
+                    if t.contains("\"parent\"")
+                        || t.contains("\"modal\"")
+                        || t.contains("\"role\"")
+                        || t.contains("parent:")
+                        || t.contains("modal:")
+                        || t.contains("role:")
+                    {
+                        self.features.insert("ownership".into());
+                        break;
+                    }
+                }
                 if !node.animations.is_empty() || !node.hover_animations.is_empty() {
                     self.features.insert("animation".into());
                     // Keyframe/transition drivers run through effects.
@@ -672,5 +689,29 @@ mod tests {
         let mut fs = FeatureSet::new();
         fs.scan(std::slice::from_ref(&win));
         assert!(fs.required_defines().contains(&"MORPH_FEATURE_HARFBUZZ".to_string()));
+    }
+
+    #[test]
+    fn ownership_detected_in_handler_lambdas() {
+        // Desugared `<a parent/modal>` links and `new Window` lambdas
+        // carry ownership keys in node events, not premain text.
+        use morph_ir::IREvent;
+        for target in [
+            "JsValue __w = __morph_create_window(1, JsObject{{\"parent\", 3}, {\"modal\", true}});",
+            "new Window(\"/settings\", { width: 500, parent: w, modal: true })",
+        ] {
+            let mut win = text_window("plain", "__text__");
+            win.nodes[0].events.push(IREvent {
+                trigger: "click".to_string(),
+                action: "call".to_string(),
+                target: target.to_string(),
+            });
+            let mut fs = FeatureSet::new();
+            fs.scan(std::slice::from_ref(&win));
+            assert!(
+                fs.required_defines().contains(&"MORPH_FEATURE_OWNERSHIP".to_string()),
+                "{target:?} should enable ownership"
+            );
+        }
     }
 }
