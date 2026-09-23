@@ -20,6 +20,8 @@ public:
     bool disabled = false;
     std::string inputType = "text";   // "text" | "password"
 
+    bool focusable() const override { return !disabled && MorphNode::focusable(); }
+
     static constexpr int BROWSER_MAX_LENGTH = 524288;
     // Horizontal content padding shared by layout, rendering and hit-testing.
     static constexpr float kPadX = 10.0f;
@@ -826,8 +828,9 @@ private:
         bool typeGroup = clean.size() <= 4 && !cpIsSpaceChar(cp0) &&
                          !cpIsAsciiPunct(cp0) && m_lastEditKind != EditKind::Other;
         bool coalesce = typeGroup && m_idleSinceEdit < 1.0f;
+        // Any new edit kills redo, coalesced or not (browser behavior).
+        m_redoStack.clear();
         if (!coalesce) {
-            m_redoStack.clear();
             m_undoStack.push_back({value, caret, selAnchor});
             if (m_undoStack.size() > kMaxUndoDepth)
                 m_undoStack.erase(m_undoStack.begin());
