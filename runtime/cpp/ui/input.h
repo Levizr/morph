@@ -110,12 +110,9 @@ public:
         std::string nv = sanitizeInputText(v);
         if (utf16Length(nv) > BROWSER_MAX_LENGTH) nv = truncateUTF16(nv, BROWSER_MAX_LENGTH);
         if (value == nv) return;
-        try {
-            value = std::move(nv);
-        } catch (const std::bad_alloc&) {
-            // Graceful truncate on allocation failure.
-            try { value = truncateUTF16(sanitizeInputText(v), BROWSER_MAX_LENGTH); } catch (...) { value.clear(); }
-        }
+        // No exceptions in shipped builds (-fno-exceptions): allocation
+        // failure terminates, same as the rest of the runtime.
+        value = std::move(nv);
 #ifdef MORPH_FEATURE_INPUT
         clampCaret();
         m_layoutValid = false;
@@ -129,7 +126,7 @@ public:
         std::string np = sanitizeInputText(p);
         if (utf16Length(np) > BROWSER_MAX_LENGTH) np = truncateUTF16(np, BROWSER_MAX_LENGTH);
         if (placeholder == np) return;
-        try { placeholder = std::move(np); } catch (const std::bad_alloc&) { placeholder.clear(); }
+        placeholder = std::move(np);
 #ifdef MORPH_FEATURE_INPUT
         m_layoutValid = false;
         markDirty(PaintDirty);
@@ -142,7 +139,7 @@ public:
 #ifdef MORPH_FEATURE_INPUT
         // If current value exceeds new cap, truncate it.
         if (utf16Length(value) > maxLength) {
-            try { value = truncateUTF16(value, maxLength); clampCaret(); } catch (...) {}
+            value = truncateUTF16(value, maxLength); clampCaret();
         }
         m_layoutValid = false;
         markDirty(PaintDirty);
@@ -200,9 +197,7 @@ public:
     // its own snapshots.) Fires no callbacks, so cannot kill `this`.
     bool pushUndo() {
         m_redoStack.clear();
-        try {
-            m_undoStack.push_back({value, caret, selAnchor});
-        } catch (const std::bad_alloc&) {}
+        m_undoStack.push_back({value, caret, selAnchor});
         if (m_undoStack.size() > kMaxUndoDepth)
             m_undoStack.erase(m_undoStack.begin());
         return true;
@@ -223,7 +218,7 @@ public:
         EditSnapshot cur{value, caret, selAnchor};
         applySnapshot(m_undoStack.back());
         m_undoStack.pop_back();
-        try { m_redoStack.push_back(std::move(cur)); } catch (...) {}
+        m_redoStack.push_back(std::move(cur));
         m_lastEditKind = EditKind::None;
         fireValueEvents("change");
     }
@@ -232,7 +227,7 @@ public:
         EditSnapshot cur{value, caret, selAnchor};
         applySnapshot(m_redoStack.back());
         m_redoStack.pop_back();
-        try { m_undoStack.push_back(std::move(cur)); } catch (...) {}
+        m_undoStack.push_back(std::move(cur));
         m_lastEditKind = EditKind::None;
         fireValueEvents("change");
     }
@@ -822,8 +817,7 @@ private:
 
     void insertText(const std::string& text) {
         // Sanitize first (paste and script paths share the same policy).
-        std::string clean;
-        try { clean = sanitizeInputText(text); } catch (const std::bad_alloc&) { return; }
+        std::string clean = sanitizeInputText(text);
         if (clean.empty()) return;
         // Undo grouping decided BEFORE any mutation: single word-char
         // keystrokes coalesce (until 1s idle or a different edit kind);
@@ -834,9 +828,7 @@ private:
         bool coalesce = typeGroup && m_idleSinceEdit < 1.0f;
         if (!coalesce) {
             m_redoStack.clear();
-            try {
-                m_undoStack.push_back({value, caret, selAnchor});
-            } catch (const std::bad_alloc&) { return; }
+            m_undoStack.push_back({value, caret, selAnchor});
             if (m_undoStack.size() > kMaxUndoDepth)
                 m_undoStack.erase(m_undoStack.begin());
         }
@@ -871,17 +863,7 @@ private:
             i += len;
         }
         if (accepted.empty()) { resetBlink(); markDirty(PaintDirty); return; }
-        try {
-            value.insert(caret, accepted);
-        } catch (const std::bad_alloc&) {
-            // Try truncated fallback.
-            try {
-                std::string fallback = truncateUTF16(clean, budget);
-                if (fallback.empty()) { resetBlink(); markDirty(PaintDirty); return; }
-                value.insert(caret, fallback);
-                accepted = std::move(fallback);
-            } catch (...) { return; }
-        }
+        value.insert(caret, accepted);
         caret += accepted.size();
         selAnchor = caret;
         valueChanged();
