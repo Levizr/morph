@@ -126,7 +126,9 @@ public:
         int px = 0, py = 0; // pixel position in source atlas
         bool isColor = false;
         float emojiScale = 1.0f; // scale factor for color emoji glyphs
-        FontAtlas *src = nullptr; // which atlas holds the pixel data
+        // True when pixels live in the emoji atlas (never a raw pointer:
+        // map inserts can rehash and move every FontAtlas).
+        bool emojiRouted = false;
     };
 
     struct FontAtlas
@@ -270,7 +272,7 @@ private:
     FontAtlas &getOrCreateAtlas(int fontSize, CSS::FontWeight weight = CSS::FontWeight::Normal);
     FontAtlas &getOrCreateEmojiAtlas(int fontSize);
     void ensureGlyph(FontAtlas &atlas, unsigned int codepoint);
-    void growAtlas(FontAtlas &atlas, bool isColor);
+    bool growAtlas(FontAtlas &atlas, bool isColor);
 
     // HarfBuzz shaping
     void shapeText(const std::string &text, FontAtlas &atlas,

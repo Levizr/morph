@@ -301,7 +301,7 @@ GLRenderer::FontAtlas &GLRenderer::getOrCreateEmojiAtlas(int fontSize)
     return m_emojiAtlases[fontSize];
 }
 
-void GLRenderer::growAtlas(FontAtlas &atlas, bool isColor)
+bool GLRenderer::growAtlas(FontAtlas &atlas, bool isColor)
 {
     int oldW = atlas.w;
     int oldH = atlas.h;
@@ -312,8 +312,10 @@ void GLRenderer::growAtlas(FontAtlas &atlas, bool isColor)
         newW = oldW * 2;
         newH = oldH;
     }
+    // Maxed out: report failure so the caller stores an empty glyph and
+    // skips (a huge single glyph or a full 4096 atlas must never hang).
     if (newW > 4096)
-        return; // max size
+        return false;
 
     if (isColor)
     {
@@ -337,6 +339,7 @@ void GLRenderer::growAtlas(FontAtlas &atlas, bool isColor)
         glBindTexture(GL_TEXTURE_2D, atlas.textureR8);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, newW, newH, 0, GL_RED, GL_UNSIGNED_BYTE, atlas.r8Pixels.data());
     }
+    return true;
 }
 
 static void ensureAtlasBuffer(GLRenderer::FontAtlas &atlas, bool isColor)
@@ -390,7 +393,7 @@ void GLRenderer::ensureGlyph(FontAtlas &atlas, unsigned int codepoint)
         // Store empty glyph to avoid retrying
         GlyphInfo gi = {};
         gi.isColor = isColor;
-        gi.src = renderAtlas;
+        gi.emojiRouted = (renderAtlas != &atlas);
         atlas.glyphs[codepoint] = gi;
         return;
     }
@@ -406,7 +409,7 @@ void GLRenderer::ensureGlyph(FontAtlas &atlas, unsigned int codepoint)
     gi.gw = (float)bmp.width;
     gi.gh = (float)bmp.rows;
     gi.isColor = isColorGlyph;
-    gi.src = renderAtlas;
+    gi.emojiRouted = (renderAtlas != &atlas);
     if (isColorGlyph && renderAtlas->actualStrikeHeight > 0)
         gi.emojiScale = (float)atlas.fontSize / (float)renderAtlas->actualStrikeHeight;
 
@@ -429,7 +432,15 @@ void GLRenderer::ensureGlyph(FontAtlas &atlas, unsigned int codepoint)
     }
     while (cursorY + glyphH + pad > renderAtlas->h)
     {
-        growAtlas(*renderAtlas, isColor);
+        // Grow the buffer actually being packed (not the routing guess)
+        // and bail out as an empty glyph when the atlas is maxed out.
+        if (!growAtlas(*renderAtlas, isColorGlyph))
+        {
+            GlyphInfo empty = {};
+            empty.emojiRouted = (renderAtlas != &atlas);
+            atlas.glyphs[codepoint] = empty;
+            return;
+        }
     }
     if (glyphH > rowH)
         rowH = glyphH;
@@ -683,7 +694,9 @@ void GLRenderer::drawText(const std::string &text, float x, float y,
         if (g.gw > 0 && g.gh > 0)
         {
             // Compute UVs from pixel coords + source atlas dimensions
-            FontAtlas *src = g.src ? g.src : &atlas;
+            // (resolved per draw — stored pointers would dangle across
+            // unordered_map rehashes when new sizes arrive).
+            FontAtlas *src = (g.emojiRouted && emojiAtlas) ? emojiAtlas : &atlas;
             float u1 = ((float)g.px + 0.5f) / src->w;
             float v1 = ((float)g.py + 0.5f) / src->h;
             float u2 = ((float)(g.px + (int)g.gw) - 0.5f) / src->w;
@@ -1037,15 +1050,8 @@ void GLRenderer::flush(const float proj[16])
     glBindVertexArray(0);
 
 #ifdef MORPH_FEATURE_TEXT
-    for (auto &[_, a] : m_atlases)
-    {
-        a.r8Pixels.clear();
-        a.r8Pixels.shrink_to_fit();
-    }
-    for (auto &[_, a] : m_emojiAtlases)
-    {
-        a.rgbaPixels.clear();
-        a.rgbaPixels.shrink_to_fit();
-    }
+    // NOTE: atlas CPU pixels are intentionally kept, not freed: growAtlas
+    // re-uploads the whole texture from them, so freeing here would wipe
+    // previously rasterized glyphs off the GPU on the next grow.
 #endif
 }
