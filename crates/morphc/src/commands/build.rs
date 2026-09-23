@@ -434,11 +434,17 @@ pub(crate) fn run(
             != 0,
     );
     let defines = fs.required_defines();
+    // Exceptions are opt-in per app: fetch rejects, regex guards, and
+    // lowered user try/catch need landing pads (~16KB static). Plain
+    // apps keep -fno-exceptions. Over-approx only costs bytes.
+    let needs_exceptions = defines.iter().any(|d| d == "MORPH_FEATURE_NET")
+        || generated_needs_exceptions(&output_dir.join("app.cpp"), &extra_sources);
     // Ensure output dir exists (already created by emitter)
     let build_opts = morph_build::BuildOptions {
         static_mode: static_,
         wayland: config.build.wayland,
         system_freetype: config.build.system_freetype,
+        exceptions: needs_exceptions,
         native: morph_build::NativeFlags {
             include_dirs: config.native.include_dirs.clone(),
             library_dirs: config.native.library_dirs.clone(),
@@ -487,6 +493,26 @@ pub(crate) fn run(
     println!();
 
     Ok(binary_path)
+}
+
+/// True when generated C++ needs exception handling: lowered user
+/// try/catch/throw, or the regex helpers header (std::regex guards).
+fn generated_needs_exceptions(app_cpp: &std::path::Path, extra: &[std::path::PathBuf]) -> bool {
+    let mut texts = Vec::new();
+    if let Ok(s) = std::fs::read_to_string(app_cpp) {
+        texts.push(s);
+    }
+    for p in extra {
+        if let Ok(s) = std::fs::read_to_string(p) {
+            texts.push(s);
+        }
+    }
+    texts.iter().any(|s| {
+        s.contains("try {")
+            || s.contains("catch (")
+            || s.contains("throw ")
+            || s.contains("js_regex_helpers.h")
+    })
 }
 
 /// Typed routes for editors: union of every manifest route id, written to

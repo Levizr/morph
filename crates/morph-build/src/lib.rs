@@ -83,6 +83,10 @@ pub struct BuildOptions {
     pub wayland: bool,
     /// Prefer the system FreeType archive instead of building the trimmed one.
     pub system_freetype: bool,
+    /// Enable C++ exceptions (landing pads + unwind tables, ~16KB static).
+    /// Set when the app needs them: fetch error paths, regex guards, or
+    /// user try/catch/throw. Otherwise shipped apps run -fno-exceptions.
+    pub exceptions: bool,
     /// User include dirs / libraries / extra flags.
     pub native: NativeFlags,
 }
@@ -242,12 +246,14 @@ impl Compiler {
         }
         cmd.push("-ffunction-sections".into());
         cmd.push("-fdata-sections".into());
-        // No C++ exceptions/RTTI in shipped apps (verified: zero throws
-        // in linked TUs; shared libs abort internally instead). Kills
-        // landing pads + shrinks .eh_frame to async-unwind only.
-        cmd.push("-fno-exceptions".into());
+        // Exceptions only when the app needs them (fetch error paths,
+        // regex guards, user try/catch): landing pads + .eh_frame cost
+        // ~16KB static. -fno-rtti always: nothing in the runtime uses it.
+        if !opts.exceptions {
+            cmd.push("-fno-exceptions".into());
+            cmd.push("-fno-asynchronous-unwind-tables".into());
+        }
         cmd.push("-fno-rtti".into());
-        cmd.push("-fno-asynchronous-unwind-tables".into());
         cmd.push("-fmerge-constants".into());
         // Generated output dir FIRST: user `#include "morph_api.h"` must
         // resolve to the per-project generated header, which shadows the
