@@ -36,10 +36,16 @@ struct SignalBase {
     std::vector<EffectNode*> subscribers_;
     std::mutex m_mutex;
 
-    void subscribe(EffectNode* node) {
+    // Returns true when newly subscribed; records the dep on the
+    // effect so cleanup()/destroy_effect() can unsubscribe (without
+    // this, branching effects stay subscribed forever and deleted
+    // effects remain in subscribers_ as dangling pointers).
+    bool subscribe(EffectNode* node) {
         for (auto* s : subscribers_)
-            if (s == node) return;
+            if (s == node) return false;
         subscribers_.push_back(node);
+        node->deps.push_back(EffectNode::Dep{this});
+        return true;
     }
 
     void unsubscribe(EffectNode* node) {

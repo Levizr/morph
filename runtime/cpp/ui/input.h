@@ -870,12 +870,14 @@ private:
     }
 
     // Deletes the selected range, recording an undo step first.
+    // Notifies like any other edit (callers return before touching
+    // more state, and all of them check isAlive first).
     bool deleteSelection() {
         if (!hasSelection()) return false;
         (void)pushUndo();
         m_lastEditKind = EditKind::Other;
         deleteSelectionRaw();
-        return true;
+        return valueChanged();
     }
 
     // Raw deletion used by paths that already recorded an undo snapshot

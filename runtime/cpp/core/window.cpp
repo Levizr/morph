@@ -189,35 +189,40 @@ void MorphWindow::mouseButtonCb(GLFWwindow *win, int btn, int act, int mods)
             else if (MorphNode::s_focusedNode)
                 MorphNode::s_focusedNode->blur();
 #endif
+#ifdef MORPH_FEATURE_SCROLL
+            // A thumb press captured the node above: grab the pointer so
+            // the drag survives past the window edge. Every press, not
+            // just rapid double-presses.
+            if (MorphNode::s_mouseCapture && MorphNode::s_mouseCapture->scrollDragging)
+            {
+                grabPointerForDrag(win);
+            }
+#endif
         }
         else
         {
-            if (MorphNode::s_activePressNode)
-                _applyActiveChain(MorphNode::s_activePressNode, false);
-            MorphNode::s_activePressNode = nullptr;
-        }
-
-        if (act == GLFW_PRESS)
-        {
-            double now = glfwGetTime();
-            e.type = EventType::Click;
-            self->m_root->dispatchEvent(e, (float)mx, (float)my);
-            if (now - s_lastClickTime < DBL_CLICK_THRESHOLD)
+            // Click fires on release, only when press and release hit the
+            // same node — press-drag-release elsewhere is a drag, not a
+            // click. DoubleClick follows the same match on second release.
+            MorphNode* pressNode = MorphNode::s_activePressNode;
+            if (pressNode)
             {
-                e.type = EventType::DoubleClick;
-        self->m_root->dispatchEvent(e, (float)mx, (float)my);
-
-#ifdef MORPH_FEATURE_SCROLL
-        // A thumb press captured the node above: grab the pointer so the
-        // drag survives past the window edge (devtools-style).
-        if (act == GLFW_PRESS && MorphNode::s_mouseCapture &&
-            MorphNode::s_mouseCapture->scrollDragging)
-        {
-            grabPointerForDrag(win);
-        }
-#endif
+                MorphNode* releaseNode = self->m_root->hitTest((float)mx, (float)my);
+                if (releaseNode == pressNode)
+                {
+                    double now = glfwGetTime();
+                    e.type = EventType::Click;
+                    self->m_root->dispatchEvent(e, (float)mx, (float)my);
+                    if (now - s_lastClickTime < DBL_CLICK_THRESHOLD)
+                    {
+                        e.type = EventType::DoubleClick;
+                        self->m_root->dispatchEvent(e, (float)mx, (float)my);
+                    }
+                    s_lastClickTime = now;
+                }
+                _applyActiveChain(pressNode, false);
             }
-            s_lastClickTime = now;
+            MorphNode::s_activePressNode = nullptr;
         }
     }
 }

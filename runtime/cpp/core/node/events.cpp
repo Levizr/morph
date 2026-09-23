@@ -151,7 +151,7 @@ bool MorphNode::dispatchEvent(MorphEvent& e, float ex, float ey) {
         float sw = style.scrollbarWidth;
         float trackX = x + w - sw;
         bool onScrollbar = (ex >= trackX && ex <= trackX + sw);
-        if (onScrollbar && (e.type == EventType::MouseDown || e.type == EventType::Click)) {
+        if (onScrollbar && e.type == EventType::MouseDown) {
             float thumbH = (h / contentH) * h;
             float thumbY = y + (scrollY / (contentH - h)) * (h - thumbH);
             if (ey >= thumbY && ey <= thumbY + thumbH) {
