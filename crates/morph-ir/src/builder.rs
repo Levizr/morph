@@ -1074,6 +1074,16 @@ impl IRBuilder {
             Self::seed_frame_name(frame, module_path, &fd.name, &qualified)?;
             seeded.insert(fd.name.clone());
         }
+        // Identifier handler refs call zero-param functions as `f()`.
+        for fd in module
+            .function_declarations
+            .iter()
+            .chain(module.components.iter().flat_map(|c| c.inner_functions.iter()))
+        {
+            if let Ok((params, _, _)) = parse_callable_source(&fd.source) {
+                frame.fn_arity.insert(fd.name.clone(), params.len());
+            }
+        }
         for ev in &module.exported_vars {
             Self::register_module_binding(module_path, &ns, "var", &ev.name, ctx);
             let qualified = format!("::{MODULE_NS_ROOT}::{ns}::{}", binding_ident(&ev.name));
@@ -2528,12 +2538,26 @@ impl IRBuilder {
                     {
                         continue;
                     }
-                    if let morph_parser::JsxPropValue::Fn(f) = v {
+                    // Bare identifier refs (`onChange={handleChange}`) wire
+                    // like arrows; a Ref synthesizes the event call.
+                    let handler_src: Option<String> = match v {
+                        morph_parser::JsxPropValue::Fn(f) => Some(capture_raw(f, frame)),
+                        morph_parser::JsxPropValue::Ref(r) => {
+                            let call = if frame.fn_arity.get(r) == Some(&0) {
+                                format!("{r}()")
+                            } else {
+                                format!("{r}(e)")
+                            };
+                            Some(capture_raw(&call, frame))
+                        }
+                        _ => None,
+                    };
+                    if let Some(src) = handler_src {
                         if let Some(trigger) = event_trigger(k) {
                             node.events.push(IREvent {
                                 trigger: trigger.into(),
                                 action: "call".into(),
-                                target: capture_raw(f, frame),
+                                target: src,
                             });
                             continue;
                         }
@@ -2550,6 +2574,54 @@ impl IRBuilder {
                         }
                         ("type", morph_parser::JsxPropValue::String(s)) => {
                             node.attrs.insert("type".into(), s.clone());
+                        }
+                        // Static input value (`value="prefilled"`).
+                        ("value", morph_parser::JsxPropValue::String(s)) => {
+                            node.attrs.insert("value".into(), s.clone());
+                        }
+                        // Controlled input (`value={name}`): re-applied by a
+                        // state effect in codegen.
+                        (
+                            "value",
+                            morph_parser::JsxPropValue::Expr(s)
+                            | morph_parser::JsxPropValue::Ref(s)
+                            | morph_parser::JsxPropValue::Template(s),
+                        ) => {
+                            if tag == "input" {
+                                node.reactive_attrs.insert("value".into(), capture_raw(s, frame));
+                            }
+                        }
+                        // `disabled`, `disabled="true"`, `disabled={true}`.
+                        ("disabled", morph_parser::JsxPropValue::Bool)
+                        | ("disabled", morph_parser::JsxPropValue::String(_)) => {
+                            let on = match v {
+                                morph_parser::JsxPropValue::Bool => true,
+                                morph_parser::JsxPropValue::String(s) => {
+                                    s.eq_ignore_ascii_case("true") || s == "1"
+                                }
+                                _ => false,
+                            };
+                            node.attrs.insert(
+                                "disabled".into(),
+                                (if on { "true" } else { "false" }).into(),
+                            );
+                        }
+                        (
+                            "disabled",
+                            morph_parser::JsxPropValue::Expr(s)
+                            | morph_parser::JsxPropValue::Ref(s)
+                            | morph_parser::JsxPropValue::Template(s),
+                        ) => {
+                            if tag == "input" {
+                                node.reactive_attrs
+                                    .insert("disabled".into(), capture_raw(s, frame));
+                            }
+                        }
+                        ("maxLength", morph_parser::JsxPropValue::String(s)) => {
+                            node.attrs.insert("maxLength".into(), s.clone());
+                        }
+                        ("minLength", morph_parser::JsxPropValue::String(s)) => {
+                            node.attrs.insert("minLength".into(), s.clone());
                         }
                         // Static class strings only drive build-time matching;
                         // only dynamic className={...} becomes a reactive
@@ -2786,6 +2858,10 @@ struct InstanceFrame {
     types: HashMap<String, String>,
     /// Visible event channel ids keyed by local name (own exports + imports).
     events: HashMap<String, String>,
+    /// Declared parameter counts of visible functions (inner + module
+    /// level), keyed by local name. Drives identifier handler refs:
+    /// zero-param handlers are called as `f()`, others as `f(e)`.
+    fn_arity: HashMap<String, usize>,
     /// `props` in `function C(props: {...})`; empty when destructured/absent.
     props_param: String,
     renames: HashMap<String, String>,
@@ -2799,6 +2875,7 @@ impl InstanceFrame {
             vars: HashMap::new(),
             types: HashMap::new(),
             events: HashMap::new(),
+            fn_arity: HashMap::new(),
             props_param: String::new(),
             renames: HashMap::new(),
             prop_binds: HashMap::new(),
@@ -2811,6 +2888,7 @@ impl InstanceFrame {
             vars: HashMap::new(),
             types: HashMap::new(),
             events: HashMap::new(),
+            fn_arity: HashMap::new(),
             props_param: String::new(),
             renames: HashMap::new(),
             prop_binds: HashMap::new(),
@@ -6867,6 +6945,7 @@ export default function App() {
             vars: HashMap::new(),
             types: HashMap::new(),
             events: HashMap::new(),
+            fn_arity: HashMap::new(),
             props_param: String::new(),
             renames,
             prop_binds: HashMap::new(),
@@ -6879,6 +6958,7 @@ export default function App() {
             vars: HashMap::new(),
             types: HashMap::new(),
             events: HashMap::new(),
+            fn_arity: HashMap::new(),
             props_param: "props".to_string(),
             renames: HashMap::new(),
             prop_binds: HashMap::new(),

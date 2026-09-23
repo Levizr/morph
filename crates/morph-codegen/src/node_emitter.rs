@@ -737,6 +737,19 @@ pub fn emit_node_with_state(
                     t.replace('"', "\\\"")
                 ));
             }
+            if node.attrs.get("disabled").is_some_and(|d| d == "true") {
+                lines.push(format!("{}{}->disabled = true;", indent, node.node_id));
+            }
+            if let Some(m) = node.attrs.get("maxLength") {
+                if let Ok(n) = m.trim().parse::<i32>() {
+                    lines.push(format!("{}{}->setMaxLength({});", indent, node.node_id, n));
+                }
+            }
+            if let Some(m) = node.attrs.get("minLength") {
+                if let Ok(n) = m.trim().parse::<i32>() {
+                    lines.push(format!("{}{}->minLength = {};", indent, node.node_id, n));
+                }
+            }
         }
         "img" => {
             let src = node.attrs.get("src").map_or("", String::as_str);
@@ -1995,6 +2008,10 @@ fn emit_reactive_effects(
             } else if attr_key == "value" && node.node_type == "input" {
                 lines.push(format!(
                     "{indent}    static_cast<InputNode*>({id})->setValue(morph::str({cpp}));"
+                ));
+            } else if attr_key == "disabled" && node.node_type == "input" {
+                lines.push(format!(
+                    "{indent}    static_cast<InputNode*>({id})->disabled = (bool)({cpp});"
                 ));
             } else {
                 lines.push(format!("{indent}    {id}->{attr_key} = morph::str({cpp});"));

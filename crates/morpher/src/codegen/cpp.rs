@@ -1828,6 +1828,17 @@ impl<'a> CppTranslator<'a> {
         self.ctx.need(&final_ret);
         let outer_fn = self.ctx.current_fn.clone();
         self.ctx.current_fn = Some(name.clone());
+        // A parameter named `e` is the JsObject event by Morph convention
+        // (docs, emitter lambdas): member reads lower to subscripts.
+        let mut event_params = Vec::new();
+        for p in &f.params.items {
+            let (pname, _) = self.binding_to_identifier(&p.pattern);
+            if pname == "e" {
+                event_params.push(pname);
+            }
+        }
+        let old_handlers = self.ctx.js_object_params.clone();
+        self.ctx.js_object_params.extend(event_params);
         self.ctx.fn_body_depth += 1;
         if is_async {
             self.ctx.is_async_fn += 1;
@@ -1872,6 +1883,7 @@ impl<'a> CppTranslator<'a> {
         let result = format!("{}{}\n{}", tp, header, body);
         self.ctx.has_infinite_loop = old_has_loop || self.ctx.has_infinite_loop;
         self.ctx.current_fn = outer_fn;
+        self.ctx.js_object_params = old_handlers;
         Some(result)
     }
 
@@ -4264,6 +4276,9 @@ impl<'a> CppTranslator<'a> {
 
     fn should_use_bracket(&self, obj_node: &Expression<'a>, obj_str: &str) -> bool {
         if let Expression::Identifier(id) = obj_node {
+            if self.ctx.js_object_params.contains(id.name.as_str()) {
+                return true;
+            }
             return matches!(
                 self.ctx.var_types.get(id.name.as_str()).map(|s| s.as_str()),
                 Some("JsObject") | Some("JsValue")
