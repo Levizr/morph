@@ -39,7 +39,38 @@ static void markSubtreePaintDirty(MorphNode* n) {
     n->markDirty(PaintDirty);
     for (auto* c : n->children) markSubtreePaintDirty(c);
 }
+#endif
 
+// Measure passes (`c->layout(0, 0, cw, 0, r)` below) must not leave live
+// geometry behind in the measured subtree: an item whose own layout pass
+// is skipped as clean would otherwise keep measure positions (e.g. text
+// centered in an un-shrunk wide box) instead of its real ones. Snapshot
+// and restore the item's children around each measure; the item's own
+// measured box is kept (flex/inline math reads it).
+struct GeoSnap {
+    MorphNode* n;
+    float x, y, w, h;
+};
+
+static void snapshotSubtree(MorphNode* n, std::vector<GeoSnap>& out) {
+    out.push_back({n, n->x, n->y, n->w, n->h});
+    for (auto* c : n->children) snapshotSubtree(c, out);
+}
+
+static void snapshotChildren(MorphNode* n, std::vector<GeoSnap>& out) {
+    for (auto* c : n->children) snapshotSubtree(c, out);
+}
+
+static void restoreSubtree(const std::vector<GeoSnap>& snaps) {
+    for (auto& s : snaps) {
+        s.n->x = s.x;
+        s.n->y = s.y;
+        s.n->w = s.w;
+        s.n->h = s.h;
+    }
+}
+
+#ifdef MORPH_FEATURE_POSITION
 // `position: sticky` — keeps its normal-flow box (m_flowX/m_flowY) but gets
 // clamped against the nearest scroll container's scrollport, between the
 // top/bottom (and left/right) offsets and its containing block.
@@ -380,6 +411,8 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 
         for (auto* c : normal) {
             if (c->isWhitespaceOnly()) continue;
+            std::vector<GeoSnap> measureSnap;
+            snapshotChildren(c, measureSnap);
             c->layout(0.0f, 0.0f, cw, 0.0f, r);
 
             if (isRow && c->style.explicitWidth < 0.0f) {
@@ -393,7 +426,8 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
             bool cmlA = c->style.marginAuto[3], cmrA = c->style.marginAuto[1];
             float childMain = isCol ? (c->h + cmt + cmb) : (c->w + cml + cmr);
             float childCross = isCol ? (c->w + cml + cmr) : (c->h + cmt + cmb);
-            items.push_back({c, childMain, childCross, cmt, cmr, cmb, cml, cmtA, cmbA, cmlA, cmrA});
+            restoreSubtree(measureSnap);
+            items.push_back({c, childMain, childCross, cmt, cmr, cmb, cml, cmtA, cmbA, cmrA});
         }
 
         float mainAvail = isCol ? ch : cw;
@@ -661,6 +695,8 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
             struct InlineItem { MorphNode* node; float w, h; bool ws; };
             std::vector<InlineItem> items;
             for (auto* c : currentInline) {
+                std::vector<GeoSnap> measureSnap;
+                snapshotChildren(c, measureSnap);
                 c->layout(0.0f, 0.0f, cw, 0.0f, r);
                 float iw = 0.0f;
                 if (c->style.explicitWidth >= 0.0f) {
@@ -670,6 +706,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                 }
                 if (iw <= 0.0f) iw = cw;
                 float ih = (c->h > 0.0f) ? c->h : (c->style.fontSize * 1.4f);
+                restoreSubtree(measureSnap);
                 items.push_back({c, iw, ih, c->isWhitespaceOnly()});
             }
 
@@ -749,6 +786,16 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                     p.node->w = (p.w < cw) ? p.w : cw;
                     p.node->h = p.h;
                     for (auto* child : p.node->children) {
+                        // Block children fill the item's new width; inline
+                        // runs keep their own flow positions (the item's own
+                        // layout pass sets those — stretching them here
+                        // would stick when that pass is skipped as clean).
+                        if (child->style.display == CSS::Display::Inline
+                            || child->style.display == CSS::Display::InlineBlock
+                            || child->type == NodeType::Text
+                            || child->type == NodeType::Expr) {
+                            continue;
+                        }
                         float cBw = 0.0f;
 #ifdef MORPH_FEATURE_BORDER
                         cBw = p.node->style.borderWidth;
