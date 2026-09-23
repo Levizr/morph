@@ -231,15 +231,25 @@ public:
     std::function<void(JsObject)> onBlur;
 
     // ── Keyboard focus model (browser-style) ────────────────────
+    // Nodes opt out (disabled inputs) by overriding focusable().
+    virtual bool focusable() const {
+        return style.display != CSS::Display::None;
+    }
     // Gives this node keyboard focus. The previously focused node gets
-    // blurred first; Focus/Blur handlers fire around the swap.
+    // blurred first; Focus/Blur handlers fire around the swap. Blur runs
+    // before the switch (like browsers), so a blur handler that moves
+    // focus elsewhere wins and this request is dropped.
     void requestFocus() {
-        if (s_focusedNode == this && focused) return;
+        if (s_focusedNode == this) {
+            if (!focused) {
+                focused = true;
+                markDirty(PaintDirty);
+            }
+            return;
+        }
+        if (!focusable()) return;
         MorphNode* old = s_focusedNode;
-        s_focusedNode = this;
-        focused = true;
-        markDirty(PaintDirty);
-        if (old && old != this) {
+        if (old) {
             old->focused = false;
             old->markDirty(PaintDirty);
             if (old->onBlur) {
@@ -247,7 +257,11 @@ public:
                 evt.set("type", JsString("blur"));
                 old->onBlur(evt);
             }
+            if (s_focusedNode != old) return;
         }
+        s_focusedNode = this;
+        focused = true;
+        markDirty(PaintDirty);
         if (onFocus) {
             JsObject evt;
             evt.set("type", JsString("focus"));
@@ -472,6 +486,7 @@ public:
         if (this == s_lastHoveredNode) s_lastHoveredNode = nullptr;
         if (this == s_activePressNode) s_activePressNode = nullptr;
         if (this == s_mouseCapture) s_mouseCapture = nullptr;
+        if (this == s_focusedNode) s_focusedNode = nullptr;
         for (auto* ef : m_associatedEffects) ef->dead = true;
         m_associatedEffects.clear();
         delete hoverStyle; delete activeStyle;
