@@ -91,7 +91,7 @@ void MorphNode::applySticky() {
             if (newY > maxY) newY = maxY;
         }
         if (parent) {
-            float cbTop = parent->x + bw + parent->style.padding[0];
+            float cbTop = parent->y + bw + parent->style.padding[0];
             float cbH = parent->h - 2.0f * bw - parent->style.padding[0] - parent->style.padding[2];
             if (cbH < 0.0f) cbH = 0.0f;
             if (newY < cbTop) newY = cbTop;
@@ -404,7 +404,8 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
         FlexLine curLine;
 
         for (auto& item : items) {
-            if (flexWrap && !curLine.fItems.empty() && curLine.totalMain + item.main > mainAvail) {
+            if (flexWrap && !curLine.fItems.empty()
+                && curLine.totalMain + style.gap + item.main > mainAvail) {
                 lines.push_back(curLine);
                 curLine = FlexLine();
             }
@@ -451,6 +452,53 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                     }
                 }
             }
+
+            // Grow/shrink run after the child's own layout pass, so
+            // re-apply its min/max clamp on the main axis (which that
+            // pass already enforced before flex touched the size).
+#ifdef MORPH_FEATURE_MIN_MAX
+            for (auto* item : line.fItems) {
+                auto& st = item->node->style;
+                if (isRow) {
+                    if (st.minWidth > 0.0f && item->node->w < st.minWidth) {
+                        item->main += st.minWidth - item->node->w;
+                        item->node->w = st.minWidth;
+                    }
+                    if (st.maxWidth > 0.0f && item->node->w > st.maxWidth) {
+                        item->main -= item->node->w - st.maxWidth;
+                        item->node->w = st.maxWidth;
+                    }
+                    if (item->node->w < 0.0f) {
+                        item->main -= item->node->w;
+                        item->node->w = 0.0f;
+                    }
+                } else {
+                    if (st.minHeight > 0.0f && item->node->h < st.minHeight) {
+                        item->main += st.minHeight - item->node->h;
+                        item->node->h = st.minHeight;
+                    }
+                    if (st.maxHeight > 0.0f && item->node->h > st.maxHeight) {
+                        item->main -= item->node->h - st.maxHeight;
+                        item->node->h = st.maxHeight;
+                    }
+                    if (item->node->h < 0.0f) {
+                        item->main -= item->node->h;
+                        item->node->h = 0.0f;
+                    }
+                }
+            }
+#else
+            for (auto* item : line.fItems) {
+                if (isRow && item->node->w < 0.0f) {
+                    item->main -= item->node->w;
+                    item->node->w = 0.0f;
+                }
+                if (!isRow && item->node->h < 0.0f) {
+                    item->main -= item->node->h;
+                    item->node->h = 0.0f;
+                }
+            }
+#endif
         }
 
         float mainStart = isCol ? cy : cx;
@@ -496,7 +544,8 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                     item->main += perAuto;
                 }
                 // Recompute free after auto margin absorption
-                float newTotal = 0.0f;
+                // (totalMain already held the gaps; keep them out).
+                float newTotal = extraGap;
                 for (auto* item : line.fItems) newTotal += item->main;
                 free = mainAvail - newTotal;
             }
