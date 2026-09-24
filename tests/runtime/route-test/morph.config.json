@@ -2,7 +2,7 @@
   "name": "route-test",
   "entry": "src/App.mx",
   "window": {
-    "width": 640,
+    "width": 900,
     "height": 480,
     "title": "Route Test"
   },

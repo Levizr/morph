@@ -1,7 +1,7 @@
 import { morphState, Window, useWindow } from 'morph'
 import { mountSettings, unmountSettings, openSettingsCpp, closeSettingsCpp } from './native.cpp'
 
-export const windowConfig = { title: "Route Test", width: 640, height: 480 }
+export const windowConfig = { title: "Route Test", width: 900, height: 480 }
 
 export default function App() {
   const [status, setStatus] = morphState("idle")

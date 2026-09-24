@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Route Test (browser reference)</title>
+<style>
+  body { margin: 0; background: #fff; color: #010101; font-size: 16px;
+         font-family: sans-serif; width: 640px; }
+  .title { font-size: 16px; }
+  button {
+    display: inline-block;
+    background-color: #efefef;
+    color: #010101;
+    border: 1px solid #767676;
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 13.33px;
+    text-align: center;
+  }
+  a { color: #0000ee; display: inline; cursor: pointer; }
+  .value { font-size: 16px; }
+</style>
+</head>
+<body>
+  <div class="title" id="title">routes — manifest scan + RID interning</div>
+  <button id="btn-mount">mount settings</button>
+  <button id="btn-unmount">unmount settings</button>
+  <button id="btn-login">open login (JSX)</button>
+  <button id="btn-set1">settings user 1</button>
+  <button id="btn-set2">settings user 2</button>
+  <button id="btn-cpp-open">settings via C++</button>
+  <button id="btn-cpp-close">close C++ one</button>
+  <button id="btn-title">retitle (useWindow)</button>
+  <button id="btn-go">go login (navigate)</button>
+  <button id="btn-modal">settings modal (owned)</button>
+  <a id="link-login" href="/auth/login">go login (link)</a>
+  <a id="link-popup" href="/settings" target="_blank">settings popup (link)</a>
+  <a id="link-owned" href="/settings" target="_blank">settings owned (link)</a>
+  <a id="link-help" href="https://example.com/help">help (external link)</a>
+  <div class="value" id="status">idle</div>
+</body>
+</html>

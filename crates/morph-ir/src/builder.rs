@@ -2368,7 +2368,9 @@ impl IRBuilder {
                 // Presentational hints lose to every stylesheet rule: HTML
                 // width/height attributes apply only when the cascade left
                 // the property unset (browsers treat them as weakest).
-                if style.width.is_none() {
+                // Never for links: their width/height/parent/modal/role
+                // configure the opened window, not the element box.
+                if tag != "a" && style.width.is_none() {
                     if let Some(morph_parser::JsxPropValue::String(raw)) = props.get("width") {
                         if let Some(px) = parse_length(raw) {
                             style.width = Some(px);
@@ -2376,7 +2378,7 @@ impl IRBuilder {
                         }
                     }
                 }
-                if style.height.is_none() {
+                if tag != "a" && style.height.is_none() {
                     if let Some(morph_parser::JsxPropValue::String(raw)) = props.get("height") {
                         if let Some(px) = parse_length(raw) {
                             style.height = Some(px);
@@ -2695,7 +2697,9 @@ impl IRBuilder {
                         keyframes,
                     )?;
                     if child_node.node_type == "__text__"
-                        && child_node.text_content.trim().is_empty()
+                        && (child_node.text_content.is_empty()
+                            || (child_node.text_content.trim().is_empty()
+                                && child_node.text_content != " "))
                     {
                         continue;
                     }
