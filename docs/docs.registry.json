@@ -727,7 +727,26 @@
         ],
         "lastUpdated": "2026-09-16",
         "publishedAt": "2026-09-16",
-        "priority": "0.9",
+        "priority": 0.9,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "DOM Events Reference",
+        "slug": "api/events",
+        "file": "api/events",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Morph DOM event handlers and the React-style event object: clientX/clientY, key, modifiers, target/currentTarget, input value, and click-on-release semantics.",
+        "keywords": [
+          "morph onclick",
+          "morph event object",
+          "morph clientX",
+          "morph e.target.value",
+          "morph keyboard events"
+        ],
+        "lastUpdated": "2026-09-24",
+        "publishedAt": "2026-09-24",
+        "priority": 0.9,
         "changefreq": "monthly"
       },
       {

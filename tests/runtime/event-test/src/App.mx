@@ -1,0 +1,31 @@
+import { morphState } from "morph"
+import "./style.css"
+
+export const windowConfig = { title: "Event Test", width: 640, height: 520 }
+
+export default function App() {
+  const [info, setInfo] = morphState("click the box, press keys");
+  const [keyinfo, setKeyinfo] = morphState("key: -");
+
+  function onBox(e):void {
+    setInfo(e.type + " @" + e.clientX + "," + e.clientY + " btn=" + e.button + " id=" + e.target.id + " type=" + e.target.type);
+  }
+
+  function onKey(e):void {
+    setKeyinfo("key: " + e.key + " repeat=" + e.repeat + " ctrl=" + e.ctrlKey);
+  }
+
+  function onInput(e):void {
+    setInfo("input value=" + e.target.value);
+  }
+
+  return (
+    <body>
+      <div className="pad" id="pad" onClick={onBox} onMouseDown={onBox} onKeyDown={onKey}>
+        <p className="line">{info}</p>
+        <p className="line">{keyinfo}</p>
+        <input className="field" id="box" value="" placeholder="type here" onInput={onInput} onKeyDown={onKey} />
+      </div>
+    </body>
+  )
+}
