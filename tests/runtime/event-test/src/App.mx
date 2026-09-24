@@ -30,10 +30,10 @@ export default function App() {
 
   return (
     <body>
-      <div className="pad" id="pad" onClick={onBox} onMouseDown={onBox} onMouseMove={onMove} onKeyDown={onKey}>
+      <div className="pad" id="pad" onClick={onBox} onMouseDown={onBox} onMouseMove={onMove} onKeyDown={onKey} onKeyUp={onKey}>
         <p className="line">{info}</p>
         <p className="line">{keyinfo}</p>
-        <input className="field" id="box" value="" placeholder="type here" onInput={onInput} onKeyDown={onKey} />
+        <input className="field" id="box" value="" placeholder="type here" onInput={onInput} onKeyDown={onKey} onKeyUp={onKey} />
         <div className="pad2" id="pad2" onDoubleClick={onMore} onContextMenu={onMore} onWheel={onMore} onPointerDown={onMore} onMouseEnter={onMore} onMouseLeave={onMore}>
           <p className="line">{more}</p>
         </div>
