@@ -1237,14 +1237,27 @@ void MorphWindow::render(std::function<void(GLRenderer &, DirtyStats &)> overlay
 
 void MorphWindow::bodyClearColor(float out[4]) const
 {
-    // Prefer the committed frame's body node (matches what the compositor /
-    // forge paths draw). Fall back to the live tree, then opaque white.
+    // The clear color follows the app body's background (black body =
+    // black clear). m_root is the window container, so the body is its
+    // first child. Prefer the committed frame (matches what the
+    // compositor / forge paths draw), fall back to the live tree, then
+    // opaque white.
     auto *frame = m_frameChannel.frontFrame.load(std::memory_order_acquire);
     if (frame)
     {
+        int rootIdx = -1;
+        for (size_t i = 0; i < frame->nodes.size(); i++)
+        {
+            if (frame->nodes[i].parentId == -1)
+            {
+                rootIdx = (int)i;
+                break;
+            }
+        }
         for (const auto &n : frame->nodes)
         {
-            if (n.parentId == -1 && n.bgColor[3] > 0.0f)
+            bool isBody = (rootIdx >= 0) ? (n.parentId == rootIdx) : (n.parentId == -1);
+            if (isBody && n.bgColor[3] > 0.0f)
             {
                 out[0] = n.bgColor[0]; out[1] = n.bgColor[1];
                 out[2] = n.bgColor[2]; out[3] = n.bgColor[3];
@@ -1254,10 +1267,17 @@ void MorphWindow::bodyClearColor(float out[4]) const
     }
     if (m_root)
     {
-        auto &bg = m_root->style.bgColor;
+        const MorphNode* body = m_root->children.empty() ? m_root : m_root->children[0];
+        auto &bg = body->style.bgColor;
         if (bg[3] > 0.0f)
         {
             out[0] = bg[0]; out[1] = bg[1]; out[2] = bg[2]; out[3] = bg[3];
+            return;
+        }
+        auto &wbg = m_root->style.bgColor;
+        if (wbg[3] > 0.0f)
+        {
+            out[0] = wbg[0]; out[1] = wbg[1]; out[2] = wbg[2]; out[3] = wbg[3];
             return;
         }
     }

@@ -387,6 +387,10 @@ public:
             onMouseUp(evt);
             return true;
         }
+        if (e.type == EventType::MouseMove && onMouseMove) {
+            onMouseMove(evt);
+            return true;
+        }
         if (e.type == EventType::KeyDown && onKeyDown) {
             onKeyDown(evt);
             return true;
