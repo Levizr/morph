@@ -28,6 +28,11 @@ RepaintHookFn g_repaintHook = nullptr;
 // Double-click detection: threshold in seconds
 static double s_lastClickTime = 0.0;
 static const double DBL_CLICK_THRESHOLD = 0.3;
+// Pressed-button bitmask for e.buttons (bit = GLFW button index).
+static int s_buttonsDown = 0;
+// Consecutive click count for e.detail + last clicked node.
+static int s_clickCount = 0;
+static MorphNode* s_lastClickNode = nullptr;
 // True while an X11 pointer grab for a scrollbar drag is held.
 static bool s_pointerGrabActive = false;
 
@@ -130,6 +135,29 @@ static void _applyActiveChain(MorphNode* n, bool state) {
 
 void MorphWindow::mouseButtonCb(GLFWwindow *win, int btn, int act, int mods)
 {
+    // Right press opens the context menu (no press tracking or focus
+    // change); the release only updates the button mask and dispatches.
+    if (btn == GLFW_MOUSE_BUTTON_2)
+    {
+        auto *self = (MorphWindow *)glfwGetWindowUserPointer(win);
+        if (!self || !self->m_root)
+            return;
+        double mx, my;
+        glfwGetCursorPos(win, &mx, &my);
+        MorphEvent e;
+        e.button = btn;
+        e.x = (float)mx;
+        e.y = (float)my;
+        if (act == GLFW_PRESS)
+            s_buttonsDown |= (1 << btn);
+        else
+            s_buttonsDown &= ~(1 << btn);
+        e.buttons = s_buttonsDown;
+        e.type = (act == GLFW_PRESS) ? EventType::ContextMenu : EventType::MouseUp;
+        e.detail = 0;
+        self->m_root->dispatchEvent(e, (float)mx, (float)my);
+        return;
+    }
     if (btn == GLFW_MOUSE_BUTTON_1)
     {
         (void)mods;
@@ -143,7 +171,26 @@ void MorphWindow::mouseButtonCb(GLFWwindow *win, int btn, int act, int mods)
         e.button = btn;
         e.x = (float)mx;
         e.y = (float)my;
+        if (act == GLFW_PRESS)
+            s_buttonsDown |= (1 << btn);
+        else
+            s_buttonsDown &= ~(1 << btn);
+        e.buttons = s_buttonsDown;
 
+        // Press node + click count up front so every dispatched event
+        // (down, up, pointer, click) carries the current e.detail.
+        MorphNode* pressNodeNow = nullptr;
+        if (act == GLFW_PRESS)
+        {
+            pressNodeNow = self->m_root->hitTest((float)mx, (float)my);
+            double now = glfwGetTime();
+            if (pressNodeNow == s_lastClickNode && now - s_lastClickTime < DBL_CLICK_THRESHOLD)
+                s_clickCount++;
+            else
+                s_clickCount = 1;
+            s_lastClickNode = pressNodeNow;
+        }
+        e.detail = s_clickCount;
         // End a mouse drag started inside a captured node (e.g. <input>
         // selection, scrollbar thumb) even when the button is released
         // outside its box. Without this a release outside the scrollbar
@@ -169,13 +216,25 @@ void MorphWindow::mouseButtonCb(GLFWwindow *win, int btn, int act, int mods)
         }
 
         self->m_root->dispatchEvent(e, (float)mx, (float)my);
+        if (act == GLFW_PRESS)
+        {
+            e.type = EventType::PointerDown;
+            self->m_root->dispatchEvent(e, (float)mx, (float)my);
+            e.type = EventType::MouseDown;
+        }
+        else
+        {
+            e.type = EventType::PointerUp;
+            self->m_root->dispatchEvent(e, (float)mx, (float)my);
+            e.type = EventType::MouseUp;
+        }
 
         // :active pseudo-class — apply on press, release on button up
         if (act == GLFW_PRESS)
         {
             if (MorphNode::s_activePressNode)
                 _applyActiveChain(MorphNode::s_activePressNode, false);
-            MorphNode::s_activePressNode = self->m_root->hitTest((float)mx, (float)my);
+            MorphNode::s_activePressNode = pressNodeNow;
             if (MorphNode::s_activePressNode)
                 _applyActiveChain(MorphNode::s_activePressNode, true);
 
@@ -254,6 +313,44 @@ static std::string keyEventName(int key, int scancode)
     if (const char *n = glfwGetKeyName(key, scancode))
         return n;
     if (key == GLFW_KEY_SPACE) return "space";
+    if (key == GLFW_KEY_LEFT_SHIFT || key == GLFW_KEY_RIGHT_SHIFT) return "shift";
+    if (key == GLFW_KEY_LEFT_CONTROL || key == GLFW_KEY_RIGHT_CONTROL) return "control";
+    if (key == GLFW_KEY_LEFT_ALT || key == GLFW_KEY_RIGHT_ALT) return "alt";
+    if (key == GLFW_KEY_LEFT_SUPER || key == GLFW_KEY_RIGHT_SUPER) return "meta";
+    return "";
+}
+
+// Physical key code (KeyA, Digit1, Escape, …) for e.code.
+static std::string keyCodeName(int key)
+{
+    if (key >= GLFW_KEY_A && key <= GLFW_KEY_Z)
+        return std::string("Key") + (char)('A' + key - GLFW_KEY_A);
+    if (key >= GLFW_KEY_0 && key <= GLFW_KEY_9)
+        return std::string("Digit") + (char)('0' + key - GLFW_KEY_0);
+    if (key >= GLFW_KEY_F1 && key <= GLFW_KEY_F12)
+        return "F" + std::to_string(key - GLFW_KEY_F1 + 1);
+    switch (key) {
+        case GLFW_KEY_ESCAPE: return "Escape";
+        case GLFW_KEY_ENTER: case GLFW_KEY_KP_ENTER: return "Enter";
+        case GLFW_KEY_TAB: return "Tab";
+        case GLFW_KEY_BACKSPACE: return "Backspace";
+        case GLFW_KEY_INSERT: return "Insert";
+        case GLFW_KEY_DELETE: return "Delete";
+        case GLFW_KEY_RIGHT: return "ArrowRight";
+        case GLFW_KEY_LEFT: return "ArrowLeft";
+        case GLFW_KEY_DOWN: return "ArrowDown";
+        case GLFW_KEY_UP: return "ArrowUp";
+        case GLFW_KEY_PAGE_UP: return "PageUp";
+        case GLFW_KEY_PAGE_DOWN: return "PageDown";
+        case GLFW_KEY_HOME: return "Home";
+        case GLFW_KEY_END: return "End";
+        case GLFW_KEY_SPACE: return "Space";
+        case GLFW_KEY_LEFT_SHIFT: case GLFW_KEY_RIGHT_SHIFT: return "Shift";
+        case GLFW_KEY_LEFT_CONTROL: case GLFW_KEY_RIGHT_CONTROL: return "Control";
+        case GLFW_KEY_LEFT_ALT: case GLFW_KEY_RIGHT_ALT: return "Alt";
+        case GLFW_KEY_LEFT_SUPER: case GLFW_KEY_RIGHT_SUPER: return "Meta";
+        default: break;
+    }
     return "";
 }
 
@@ -267,10 +364,21 @@ void MorphWindow::KeyCb(GLFWwindow *win, int key, int scancode, int act, int mod
     MorphEvent e;
     e.type = (act == GLFW_PRESS || act == GLFW_REPEAT) ? EventType::KeyDown : EventType::KeyUp;
     e.key = keyEventName(key, scancode);
+    e.code = keyCodeName(key);
     e.x = (float)mx;
     e.y = (float)my;
     e.mods = mods;
+    // GLFW does not report a modifier as active on its own press event;
+    // browsers do (Control keydown has ctrlKey=true), so set it here.
+    // Releases read the live mask (the key is already up).
+    if (act == GLFW_PRESS || act == GLFW_REPEAT) {
+        if (key == GLFW_KEY_LEFT_SHIFT || key == GLFW_KEY_RIGHT_SHIFT) e.mods |= 0x01;
+        else if (key == GLFW_KEY_LEFT_CONTROL || key == GLFW_KEY_RIGHT_CONTROL) e.mods |= 0x02;
+        else if (key == GLFW_KEY_LEFT_ALT || key == GLFW_KEY_RIGHT_ALT) e.mods |= 0x04;
+        else if (key == GLFW_KEY_LEFT_SUPER || key == GLFW_KEY_RIGHT_SUPER) e.mods |= 0x08;
+    }
     e.repeat = (act == GLFW_REPEAT);
+    e.buttons = s_buttonsDown;
 
     // ── Focus routing ───────────────────────────────────────
     // A focused node (e.g. an <input>) gets keys first; consuming the
@@ -315,7 +423,10 @@ void MorphWindow::cursorPosCb(GLFWwindow *win, double mx, double my)
                 he.type = EventType::MouseLeave;
                 he.x = (float)mx;
                 he.y = (float)my;
-                hovered->onMouseLeave(hovered->buildEventJs(he));
+                he.buttons = s_buttonsDown;
+                JsObject evt = hovered->buildEventJs(he);
+                if (newHover) evt.set("relatedTarget", newHover->targetJs());
+                hovered->onMouseLeave(evt);
             }
         }
         if (newHover)
@@ -326,7 +437,10 @@ void MorphWindow::cursorPosCb(GLFWwindow *win, double mx, double my)
                 he.type = EventType::MouseEnter;
                 he.x = (float)mx;
                 he.y = (float)my;
-                newHover->onMouseEnter(newHover->buildEventJs(he));
+                he.buttons = s_buttonsDown;
+                JsObject evt = newHover->buildEventJs(he);
+                if (hovered) evt.set("relatedTarget", hovered->targetJs());
+                newHover->onMouseEnter(evt);
             }
         }
         hovered = newHover;
@@ -336,6 +450,7 @@ void MorphWindow::cursorPosCb(GLFWwindow *win, double mx, double my)
     e.type = EventType::MouseMove;
     e.x = (float)mx;
     e.y = (float)my;
+    e.buttons = s_buttonsDown;
 
     // Mouse-drag capture: a node that started a drag (e.g. <input> drag
     // selection, scrollbar thumb) keeps receiving moves even when the
@@ -353,6 +468,8 @@ void MorphWindow::cursorPosCb(GLFWwindow *win, double mx, double my)
 #endif
     }
 
+    self->m_root->dispatchEvent(e, (float)mx, (float)my);
+    e.type = EventType::PointerMove;
     self->m_root->dispatchEvent(e, (float)mx, (float)my);
 
 #ifdef MORPH_FEATURE_CURSOR
@@ -414,6 +531,7 @@ void MorphWindow::scrollCb(GLFWwindow *win, double dx, double dy)
     e.scroll = (float)dy;
     e.x = (float)mx;
     e.y = (float)my;
+    e.buttons = s_buttonsDown;
     self->m_root->dispatchEvent(e, (float)mx, (float)my);
 }
 

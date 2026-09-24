@@ -6,25 +6,37 @@ export const windowConfig = { title: "Event Test", width: 640, height: 520 }
 export default function App() {
   const [info, setInfo] = morphState("click the box, press keys");
   const [keyinfo, setKeyinfo] = morphState("key: -");
+  const [more, setMore] = morphState("dblclick / right-click / wheel here");
 
   function onBox(e):void {
-    setInfo(e.type + " @" + e.clientX + "," + e.clientY + " btn=" + e.button + " id=" + e.target.id + " type=" + e.target.type);
+    setInfo(e.type + " @" + e.clientX + "," + e.clientY + " btn=" + e.button + " buttons=" + e.buttons + " detail=" + e.detail + " id=" + e.target.id);
+  }
+
+  function onMove(e):void {
+    setInfo(e.type + " @" + e.clientX + "," + e.clientY + " buttons=" + e.buttons + " off=" + e.offsetX + "," + e.offsetY);
   }
 
   function onKey(e):void {
-    setKeyinfo("key: " + e.key + " repeat=" + e.repeat + " ctrl=" + e.ctrlKey);
+    setKeyinfo("key: " + e.key + " code=" + e.code + " repeat=" + e.repeat + " ctrl=" + e.ctrlKey);
   }
 
   function onInput(e):void {
     setInfo("input value=" + e.target.value);
   }
 
+  function onMore(e):void {
+    setMore(e.type + " off=" + e.offsetX + "," + e.offsetY + " rel=" + e.relatedTarget.id);
+  }
+
   return (
     <body>
-      <div className="pad" id="pad" onClick={onBox} onMouseDown={onBox} onKeyDown={onKey}>
+      <div className="pad" id="pad" onClick={onBox} onMouseDown={onBox} onMouseMove={onMove} onKeyDown={onKey}>
         <p className="line">{info}</p>
         <p className="line">{keyinfo}</p>
         <input className="field" id="box" value="" placeholder="type here" onInput={onInput} onKeyDown={onKey} />
+        <div className="pad2" id="pad2" onDoubleClick={onMore} onContextMenu={onMore} onWheel={onMore} onPointerDown={onMore} onMouseEnter={onMore} onMouseLeave={onMore}>
+          <p className="line">{more}</p>
+        </div>
       </div>
     </body>
   )

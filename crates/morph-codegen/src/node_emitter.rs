@@ -862,6 +862,7 @@ pub fn emit_node_with_state(
     for ev in &node.events {
         let member = match ev.trigger.as_str() {
             "click" => "onClick",
+            "dblclick" => "onDoubleClick",
             "input" => "onInput",
             "change" => "onChange",
             "focus" => "onFocus",
@@ -872,6 +873,12 @@ pub fn emit_node_with_state(
             "mouseleave" => "onMouseLeave",
             "mousedown" => "onMouseDown",
             "mouseup" => "onMouseUp",
+            "mousemove" => "onMouseMove",
+            "scroll" => "onWheel",
+            "contextmenu" => "onContextMenu",
+            "pointerdown" => "onPointerDown",
+            "pointermove" => "onPointerMove",
+            "pointerup" => "onPointerUp",
             other => other,
         };
         let rhs = if ev.target.trim_start().starts_with("[&]")
