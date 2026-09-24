@@ -288,35 +288,41 @@ void MorphWindow::mouseButtonCb(GLFWwindow *win, int btn, int act, int mods)
 
 // glfwGetKeyName only names printable keys; control keys (arrows, Home,
 // End, Delete...) come back NULL, so map the common ones by GLFW code.
-static std::string keyEventName(int key, int scancode)
+static std::string keyEventName(int key, int scancode, int mods)
 {
+    // Shifted letters report uppercase like browsers ("A", not "a").
+    bool shift = (mods & 0x01) != 0;
+    if (const char *n = glfwGetKeyName(key, scancode))
+    {
+        if (shift && n[0] >= 'a' && n[0] <= 'z' && n[1] == '\0')
+            return std::string(1, (char)(n[0] - 'a' + 'A'));
+        return n;
+    }
     switch (key) {
-        case GLFW_KEY_ESCAPE:     return "escape";
-        case GLFW_KEY_ENTER:      return "enter";
-        case GLFW_KEY_KP_ENTER:   return "kp_enter";
-        case GLFW_KEY_TAB:        return "tab";
-        case GLFW_KEY_BACKSPACE:  return "backspace";
-        case GLFW_KEY_INSERT:     return "insert";
-        case GLFW_KEY_DELETE:     return "delete";
-        case GLFW_KEY_RIGHT:      return "right";
-        case GLFW_KEY_LEFT:       return "left";
-        case GLFW_KEY_DOWN:       return "down";
-        case GLFW_KEY_UP:         return "up";
-        case GLFW_KEY_PAGE_UP:    return "page_up";
-        case GLFW_KEY_PAGE_DOWN:  return "page_down";
-        case GLFW_KEY_HOME:       return "home";
-        case GLFW_KEY_END:        return "end";
+        case GLFW_KEY_ESCAPE:     return "Escape";
+        case GLFW_KEY_ENTER:      return "Enter";
+        case GLFW_KEY_KP_ENTER:   return "Enter";
+        case GLFW_KEY_TAB:        return "Tab";
+        case GLFW_KEY_BACKSPACE:  return "Backspace";
+        case GLFW_KEY_INSERT:     return "Insert";
+        case GLFW_KEY_DELETE:     return "Delete";
+        case GLFW_KEY_RIGHT:      return "ArrowRight";
+        case GLFW_KEY_LEFT:       return "ArrowLeft";
+        case GLFW_KEY_DOWN:       return "ArrowDown";
+        case GLFW_KEY_UP:         return "ArrowUp";
+        case GLFW_KEY_PAGE_UP:    return "PageUp";
+        case GLFW_KEY_PAGE_DOWN:  return "PageDown";
+        case GLFW_KEY_HOME:       return "Home";
+        case GLFW_KEY_END:        return "End";
         default: break;
     }
     if (key >= GLFW_KEY_F1 && key <= GLFW_KEY_F12)
-        return "f" + std::to_string(key - GLFW_KEY_F1 + 1);
-    if (const char *n = glfwGetKeyName(key, scancode))
-        return n;
-    if (key == GLFW_KEY_SPACE) return "space";
-    if (key == GLFW_KEY_LEFT_SHIFT || key == GLFW_KEY_RIGHT_SHIFT) return "shift";
-    if (key == GLFW_KEY_LEFT_CONTROL || key == GLFW_KEY_RIGHT_CONTROL) return "control";
-    if (key == GLFW_KEY_LEFT_ALT || key == GLFW_KEY_RIGHT_ALT) return "alt";
-    if (key == GLFW_KEY_LEFT_SUPER || key == GLFW_KEY_RIGHT_SUPER) return "meta";
+        return "F" + std::to_string(key - GLFW_KEY_F1 + 1);
+    if (key == GLFW_KEY_SPACE) return " ";
+    if (key == GLFW_KEY_LEFT_SHIFT || key == GLFW_KEY_RIGHT_SHIFT) return "Shift";
+    if (key == GLFW_KEY_LEFT_CONTROL || key == GLFW_KEY_RIGHT_CONTROL) return "Control";
+    if (key == GLFW_KEY_LEFT_ALT || key == GLFW_KEY_RIGHT_ALT) return "Alt";
+    if (key == GLFW_KEY_LEFT_SUPER || key == GLFW_KEY_RIGHT_SUPER) return "Meta";
     return "";
 }
 
@@ -345,10 +351,14 @@ static std::string keyCodeName(int key)
         case GLFW_KEY_HOME: return "Home";
         case GLFW_KEY_END: return "End";
         case GLFW_KEY_SPACE: return "Space";
-        case GLFW_KEY_LEFT_SHIFT: case GLFW_KEY_RIGHT_SHIFT: return "Shift";
-        case GLFW_KEY_LEFT_CONTROL: case GLFW_KEY_RIGHT_CONTROL: return "Control";
-        case GLFW_KEY_LEFT_ALT: case GLFW_KEY_RIGHT_ALT: return "Alt";
-        case GLFW_KEY_LEFT_SUPER: case GLFW_KEY_RIGHT_SUPER: return "Meta";
+        case GLFW_KEY_LEFT_SHIFT: return "ShiftLeft";
+        case GLFW_KEY_RIGHT_SHIFT: return "ShiftRight";
+        case GLFW_KEY_LEFT_CONTROL: return "ControlLeft";
+        case GLFW_KEY_RIGHT_CONTROL: return "ControlRight";
+        case GLFW_KEY_LEFT_ALT: return "AltLeft";
+        case GLFW_KEY_RIGHT_ALT: return "AltRight";
+        case GLFW_KEY_LEFT_SUPER: return "MetaLeft";
+        case GLFW_KEY_RIGHT_SUPER: return "MetaRight";
         default: break;
     }
     return "";
@@ -363,19 +373,24 @@ void MorphWindow::KeyCb(GLFWwindow *win, int key, int scancode, int act, int mod
     glfwGetCursorPos(win, &mx, &my);
     MorphEvent e;
     e.type = (act == GLFW_PRESS || act == GLFW_REPEAT) ? EventType::KeyDown : EventType::KeyUp;
-    e.key = keyEventName(key, scancode);
+    e.key = keyEventName(key, scancode, mods);
     e.code = keyCodeName(key);
     e.x = (float)mx;
     e.y = (float)my;
     e.mods = mods;
-    // GLFW does not report a modifier as active on its own press event;
-    // browsers do (Control keydown has ctrlKey=true), so set it here.
-    // Releases read the live mask (the key is already up).
+    // GLFW does not report a modifier as active on its own press event,
+    // and X11 still reports it as active on its release event; browsers
+    // set the bit on press and clear it on release, so do both here.
     if (act == GLFW_PRESS || act == GLFW_REPEAT) {
         if (key == GLFW_KEY_LEFT_SHIFT || key == GLFW_KEY_RIGHT_SHIFT) e.mods |= 0x01;
         else if (key == GLFW_KEY_LEFT_CONTROL || key == GLFW_KEY_RIGHT_CONTROL) e.mods |= 0x02;
         else if (key == GLFW_KEY_LEFT_ALT || key == GLFW_KEY_RIGHT_ALT) e.mods |= 0x04;
         else if (key == GLFW_KEY_LEFT_SUPER || key == GLFW_KEY_RIGHT_SUPER) e.mods |= 0x08;
+    } else {
+        if (key == GLFW_KEY_LEFT_SHIFT || key == GLFW_KEY_RIGHT_SHIFT) e.mods &= ~0x01;
+        else if (key == GLFW_KEY_LEFT_CONTROL || key == GLFW_KEY_RIGHT_CONTROL) e.mods &= ~0x02;
+        else if (key == GLFW_KEY_LEFT_ALT || key == GLFW_KEY_RIGHT_ALT) e.mods &= ~0x04;
+        else if (key == GLFW_KEY_LEFT_SUPER || key == GLFW_KEY_RIGHT_SUPER) e.mods &= ~0x08;
     }
     e.repeat = (act == GLFW_REPEAT);
     e.buttons = s_buttonsDown;

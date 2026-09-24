@@ -22,6 +22,21 @@ public:
 
     bool focusable() const override { return !disabled && MorphNode::focusable(); }
 
+    // Reserve one text line like browsers: without it an empty input is
+    // only padding + border tall (content height zero).
+    void layout(float px, float py, float parentW, float parentH,
+                Renderer* r = nullptr) override {
+        MorphNode::layout(px, py, parentW, parentH, r);
+        if (style.explicitHeight < 0.0f) {
+            float need = style.fontSize * 1.4f + style.padding[0] + style.padding[2];
+#ifdef MORPH_FEATURE_BORDER
+            need += style.borderWidth * 2.0f;
+#endif
+            if (h < need) h = need;
+            if (contentH < need) contentH = need;
+        }
+    }
+
     static constexpr int BROWSER_MAX_LENGTH = 524288;
     // Horizontal content padding shared by layout, rendering and hit-testing.
     static constexpr float kPadX = 10.0f;

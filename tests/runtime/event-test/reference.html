@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Event Test (browser reference)</title>
+<style>
+  body { margin: 0; background: #fff; font-family: sans-serif; }
+  .pad {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 24px;
+    background-color: #0f172a;
+    color: #e2e8f0;
+    min-height: 400px;
+  }
+  .line { font-size: 16px; margin: 0; min-height: 20px; }
+  .field {
+    background-color: #1e293b;
+    color: #e2e8f0;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 8px;
+    font-size: 15px;
+  }
+  .pad2 {
+    background-color: #1e293b;
+    border-radius: 8px;
+    padding: 16px;
+  }
+</style>
+</head>
+<body>
+  <div class="pad" id="pad">
+    <p class="line" id="info">click the box, press keys</p>
+    <p class="line" id="keyinfo">key: -</p>
+    <input class="field" id="box" value="" placeholder="type here">
+    <div class="pad2" id="pad2">
+      <p class="line" id="more">dblclick / right-click / wheel here</p>
+    </div>
+  </div>
+<script>
+  let n = 0;
+  const info = document.getElementById('info');
+  const keyinfo = document.getElementById('keyinfo');
+  const more = document.getElementById('more');
+  const pad = document.getElementById('pad');
+  const pad2 = document.getElementById('pad2');
+  const box = document.getElementById('box');
+
+  function onBox(e) {
+    info.textContent = e.type + ' @' + e.clientX + ',' + e.clientY
+      + ' btn=' + e.button + ' buttons=' + e.buttons
+      + ' detail=' + e.detail + ' id=' + e.target.id;
+  }
+  function onMove(e) {
+    info.textContent = e.type + ' @' + e.clientX + ',' + e.clientY
+      + ' buttons=' + e.buttons + ' off=' + e.offsetX + ',' + e.offsetY;
+  }
+  function onKey(e) {
+    keyinfo.textContent = 'key: ' + e.key + ' code=' + e.code
+      + ' repeat=' + e.repeat + ' ctrl=' + e.ctrlKey;
+  }
+  function onInput(e) {
+    info.textContent = 'input value=' + e.target.value;
+  }
+  function onMore(e) {
+    n += 1;
+    const rel = e.relatedTarget ? e.relatedTarget.id : '';
+    more.textContent = e.type + ' #' + n
+      + ' off=' + e.offsetX + ',' + e.offsetY + ' rel=' + rel;
+  }
+
+  pad.addEventListener('click', onBox);
+  pad.addEventListener('mousedown', onBox);
+  pad.addEventListener('mousemove', onMove);
+  pad.addEventListener('keydown', onKey);
+  pad.addEventListener('keyup', onKey);
+  box.addEventListener('input', onInput);
+  box.addEventListener('keydown', onKey);
+  box.addEventListener('keyup', onKey);
+  pad2.addEventListener('dblclick', onMore);
+  pad2.addEventListener('contextmenu', (e) => { e.preventDefault(); onMore(e); });
+  pad2.addEventListener('wheel', onMore, { passive: true });
+  pad2.addEventListener('pointerdown', onMore);
+  pad2.addEventListener('mouseenter', onMore);
+  pad2.addEventListener('mouseleave', onMore);
+</script>
+</body>
+</html>
