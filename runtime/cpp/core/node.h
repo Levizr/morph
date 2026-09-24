@@ -2,6 +2,7 @@
 #include <vector>
 #include <string>
 #include <algorithm>
+#include <chrono>
 #include <functional>
 #include "../style/style.h"
 #include "event.h"
@@ -221,8 +222,14 @@ public:
     std::function<void(JsObject)> onDoubleClick;
     std::function<void(JsObject)> onMouseDown;
     std::function<void(JsObject)> onMouseUp;
+    std::function<void(JsObject)> onMouseMove;
     std::function<void(JsObject)> onMouseEnter;
     std::function<void(JsObject)> onMouseLeave;
+    std::function<void(JsObject)> onContextMenu;
+    std::function<void(JsObject)> onPointerDown;
+    std::function<void(JsObject)> onPointerMove;
+    std::function<void(JsObject)> onPointerUp;
+    std::function<void(JsObject)> onWheel;
     std::function<void(JsObject)> onKeyDown;
     std::function<void(JsObject)> onKeyUp;
     std::function<void(JsObject)> onChange;
@@ -290,6 +297,14 @@ public:
     // with shift/dead-key handling already applied.
     virtual void onTextChar(unsigned int codepoint) { (void)codepoint; }
 
+    // {id, type} identity object for target/currentTarget/relatedTarget.
+    JsObject targetJs() {
+        JsObject target;
+        target.set("id", JsString(nodeId));
+        target.set("type", JsString(toString(type)));
+        return target;
+    }
+
     // React-style event object for handler callbacks. Legacy x/y stay
     // (clientX/clientY alias them); key is the printable string;
     // target/currentTarget carry {id, type} (no bubbling: both are this).
@@ -299,20 +314,35 @@ public:
         evt.set("y", JsNumber(e.y));
         evt.set("clientX", JsNumber(e.x));
         evt.set("clientY", JsNumber(e.y));
+        evt.set("offsetX", JsNumber(e.x - x));
+        evt.set("offsetY", JsNumber(e.y - y));
+        float pageY = e.y;
+        for (MorphNode* p = parent; p; p = p->parent) pageY += p->scrollY;
+        evt.set("pageX", JsNumber(e.x));
+        evt.set("pageY", JsNumber(pageY));
+        const auto ms = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+        evt.set("timeStamp", JsNumber((float)ms));
         evt.set("button", JsNumber(e.button));
+        evt.set("buttons", JsNumber(e.buttons));
+        evt.set("detail", JsNumber(e.detail));
         evt.set("key", JsString(e.key));
+        evt.set("code", JsString(e.code));
         evt.set("repeat", JsBoolean(e.repeat));
         evt.set("scroll", JsNumber(e.scroll));
         evt.set("deltaY", JsNumber(e.scroll));
+        evt.set("deltaX", JsNumber(0));
         evt.set("ctrlKey", JsBoolean((e.mods & 0x02) != 0));
         evt.set("shiftKey", JsBoolean((e.mods & 0x01) != 0));
         evt.set("altKey", JsBoolean((e.mods & 0x04) != 0));
         evt.set("metaKey", JsBoolean((e.mods & 0x08) != 0));
-        JsObject target;
-        target.set("id", JsString(nodeId));
-        target.set("type", JsString(toString(type)));
+        JsObject target = targetJs();
         evt.set("target", target);
         evt.set("currentTarget", target);
+        evt.set("relatedTarget", JsNull{});
+        evt.set("pointerId", JsNumber(1));
+        evt.set("pointerType", JsString("mouse"));
+        evt.set("isPrimary", JsBoolean(true));
         {
             const char* tn = "unknown";
             switch (e.type) {
@@ -329,6 +359,10 @@ public:
                 case EventType::Blur: tn = "blur"; break;
                 case EventType::MouseEnter: tn = "mouseenter"; break;
                 case EventType::MouseLeave: tn = "mouseleave"; break;
+                case EventType::ContextMenu: tn = "contextmenu"; break;
+                case EventType::PointerDown: tn = "pointerdown"; break;
+                case EventType::PointerMove: tn = "pointermove"; break;
+                case EventType::PointerUp: tn = "pointerup"; break;
             }
             evt.set("type", JsString(tn));
         }
@@ -359,6 +393,26 @@ public:
         }
         if (e.type == EventType::KeyUp && onKeyUp) {
             onKeyUp(evt);
+            return true;
+        }
+        if (e.type == EventType::ContextMenu && onContextMenu) {
+            onContextMenu(evt);
+            return true;
+        }
+        if (e.type == EventType::PointerDown && onPointerDown) {
+            onPointerDown(evt);
+            return true;
+        }
+        if (e.type == EventType::PointerMove && onPointerMove) {
+            onPointerMove(evt);
+            return true;
+        }
+        if (e.type == EventType::PointerUp && onPointerUp) {
+            onPointerUp(evt);
+            return true;
+        }
+        if (e.type == EventType::Scroll && onWheel) {
+            onWheel(evt);
             return true;
         }
         return false;

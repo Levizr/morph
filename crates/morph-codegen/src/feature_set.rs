@@ -242,6 +242,17 @@ impl FeatureSet {
                 if !node.events.is_empty() {
                     self.features.insert("event".into());
                 }
+                // Mouse/pointer tracking needs the cursor callback even
+                // with no :hover styles present.
+                for ev in &node.events {
+                    if matches!(
+                        ev.trigger.as_str(),
+                        "mousemove" | "mouseenter" | "mouseleave" | "pointermove"
+                    ) {
+                        self.features.insert("hover".into());
+                        break;
+                    }
+                }
                 // Ownership keys inside handler lambdas (`new Window`
                 // opts and desugared `<a parent/modal/role>` links).
                 // Both pre-lowering (`parent:`) and lowered

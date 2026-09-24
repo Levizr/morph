@@ -4438,6 +4438,7 @@ fn is_external_href(href: &str) -> bool {
 fn event_trigger(prop: &str) -> Option<&'static str> {
     match prop {
         "onClick" => Some("click"),
+        "onDoubleClick" => Some("dblclick"),
         "onInput" => Some("input"),
         "onChange" => Some("change"),
         "onFocus" => Some("focus"),
@@ -4448,6 +4449,13 @@ fn event_trigger(prop: &str) -> Option<&'static str> {
         "onMouseLeave" => Some("mouseleave"),
         "onMouseDown" => Some("mousedown"),
         "onMouseUp" => Some("mouseup"),
+        "onMouseMove" => Some("mousemove"),
+        "onWheel" => Some("scroll"),
+        "onScroll" => Some("scroll"),
+        "onContextMenu" => Some("contextmenu"),
+        "onPointerDown" => Some("pointerdown"),
+        "onPointerMove" => Some("pointermove"),
+        "onPointerUp" => Some("pointerup"),
         _ => None,
     }
 }
