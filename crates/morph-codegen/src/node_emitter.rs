@@ -247,10 +247,13 @@ pub(crate) fn translate_js<S: std::hash::BuildHasher>(
     }
 }
 
-/// Normalize `x.value` member access to `x["value"]` subscripting.
-/// JsObject payloads expose fields by subscript only (no `.value`
-/// member). String literals pass through untouched, and longer members
-/// (`valueOf`) never match.
+/// Normalize event-object member access to subscripting. The handler
+/// lambda binds `e` to a JsObject, which exposes fields by subscript
+/// only: `e.value`/`e.target`/`e.clientX` → `e["value"]`/`e["target"]`/
+/// `e["clientX"]`. Non-`e` `.value` reads lower the same way (JsObject
+/// payloads have no `.value` member). String literals pass through
+/// untouched, longer members (`valueOf`) and calls (`e.foo(`) never
+/// match.
 pub(crate) fn normalize_value_access(s: &str) -> String {
     fn is_word(b: u8) -> bool {
         (b as char).is_ascii_alphanumeric() || b == b'_' || b == b'$'
@@ -264,6 +267,25 @@ pub(crate) fn normalize_value_access(s: &str) -> String {
             out.push_str(&s[i..end]);
             i = end;
             continue;
+        }
+        // `e.<field>` read (not a call): the lambda event parameter.
+        if (i == 0 || !is_word(bytes[i - 1]))
+            && s[i..].starts_with("e.")
+            && i + 2 < bytes.len()
+            && (bytes[i + 2] as char).is_ascii_alphabetic()
+        {
+            let mut j = i + 2;
+            while j < bytes.len() && is_word(bytes[j]) {
+                j += 1;
+            }
+            let is_call = j < bytes.len() && bytes[j] == b'(';
+            if !is_call {
+                out.push_str("e[\"");
+                out.push_str(&s[i + 2..j]);
+                out.push_str("\"]");
+                i = j;
+                continue;
+            }
         }
         if s[i..].starts_with(".value") {
             let after = i + 6;
@@ -821,6 +843,15 @@ pub fn emit_node_with_state(
         lines.push(format!("{}{}->y = {};", indent, node.node_id, fmt(node.y)));
         lines.push(format!("{}{}->w = {};", indent, node.node_id, fmt(node.w)));
         lines.push(format!("{}{}->h = {};", indent, node.node_id, fmt(node.h)));
+    }
+    // Element id feeds e.target.id in handler event objects.
+    if let Some(id) = node.attrs.get("id") {
+        lines.push(format!(
+            "{}{}->nodeId = \"{}\";",
+            indent,
+            node.node_id,
+            id.replace('\\', "\\\\").replace('"', "\\\"")
+        ));
     }
     lines.push(set_style(node, indent, parent_style, features, false));
     lines.push(emit_hover_style(node, indent, features, false));
@@ -2208,6 +2239,9 @@ mod tests {
     #[test]
     fn member_access_lowering() {
         assert_eq!(normalize_value_access("e.value"), "e[\"value\"]");
+        assert_eq!(normalize_value_access("e.target.value"), "e[\"target\"][\"value\"]");
+        assert_eq!(normalize_value_access("e.clientX"), "e[\"clientX\"]");
+        assert_eq!(normalize_value_access("e.preventDefault()"), "e.preventDefault()");
         assert_eq!(normalize_value_access("\"my.value\""), "\"my.value\"");
         assert_eq!(normalize_value_access("x.valueOf"), "x.valueOf");
         assert_eq!(normalize_item_access("__it.name"), "__it[\"name\"]");

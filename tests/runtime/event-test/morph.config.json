@@ -1,0 +1,28 @@
+{
+  "name": "event-test",
+  "entry": "src/App.mx",
+  "window": {
+    "width": 640,
+    "height": 520,
+    "title": "Event Test"
+  },
+  "dependencies": {},
+  "cpp_sources": [],
+  "build": {
+    "wayland": false,
+    "system_freetype": false,
+    "upx": false,
+    "upx_version": "",
+    "upx_flags": [],
+    "cxx": "",
+    "dev_cxx": "",
+    "cmake": ""
+  },
+  "native": {
+    "include_dirs": [],
+    "library_dirs": [],
+    "libraries": [],
+    "cflags": [],
+    "ldflags": []
+  }
+}

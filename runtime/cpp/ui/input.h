@@ -793,9 +793,17 @@ private:
     // current value (React normalizes change → input for text fields).
     // Returns false if `this` was deleted inside a callback.
     bool fireValueEvents(const char* tn) {
-        JsObject evt;
+        MorphEvent me;
+        me.type = EventType::Focus;
+        JsObject evt = buildEventJs(me);
         evt.set("value", JsString(value));
         evt.set("type", JsString(tn));
+        JsObject target;
+        target.set("value", JsString(value));
+        target.set("id", JsString(nodeId));
+        target.set("type", JsString("input"));
+        evt.set("target", target);
+        evt.set("currentTarget", target);
         if (onInput) onInput(evt);
         if (!isAlive(this)) return false;
         if (onChange) onChange(evt);

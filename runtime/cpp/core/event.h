@@ -3,7 +3,8 @@
 
 enum class EventType {
     Click, DoubleClick, MouseMove, MouseDown, MouseUp,
-    KeyDown, KeyUp, Scroll, Resize, Focus, Blur
+    KeyDown, KeyUp, Scroll, Resize, Focus, Blur,
+    MouseEnter, MouseLeave
 };
 
 struct MorphEvent {
@@ -13,4 +14,5 @@ struct MorphEvent {
     int   button = 0;
     float scroll = 0;
     int   mods = 0;     // GLFW key modifier bitmask (Shift/Ctrl/Alt/Super)
+    bool  repeat = false;
 };

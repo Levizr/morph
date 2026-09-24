@@ -253,9 +253,9 @@ public:
             old->focused = false;
             old->markDirty(PaintDirty);
             if (old->onBlur) {
-                JsObject evt;
-                evt.set("type", JsString("blur"));
-                old->onBlur(evt);
+                MorphEvent be;
+                be.type = EventType::Blur;
+                old->onBlur(buildEventJs(be));
             }
             if (s_focusedNode != old) return;
         }
@@ -263,9 +263,9 @@ public:
         focused = true;
         markDirty(PaintDirty);
         if (onFocus) {
-            JsObject evt;
-            evt.set("type", JsString("focus"));
-            onFocus(evt);
+            MorphEvent fe;
+            fe.type = EventType::Focus;
+            onFocus(buildEventJs(fe));
         }
     }
     // Releases keyboard focus if this node currently holds it.
@@ -290,13 +290,29 @@ public:
     // with shift/dead-key handling already applied.
     virtual void onTextChar(unsigned int codepoint) { (void)codepoint; }
 
-    virtual bool onEvent(MorphEvent& e) {
+    // React-style event object for handler callbacks. Legacy x/y stay
+    // (clientX/clientY alias them); key is the printable string;
+    // target/currentTarget carry {id, type} (no bubbling: both are this).
+    JsObject buildEventJs(const MorphEvent& e) {
         JsObject evt;
         evt.set("x", JsNumber(e.x));
         evt.set("y", JsNumber(e.y));
+        evt.set("clientX", JsNumber(e.x));
+        evt.set("clientY", JsNumber(e.y));
         evt.set("button", JsNumber(e.button));
-        evt.set("key", JsNumber(e.key));
+        evt.set("key", JsString(e.key));
+        evt.set("repeat", JsBoolean(e.repeat));
         evt.set("scroll", JsNumber(e.scroll));
+        evt.set("deltaY", JsNumber(e.scroll));
+        evt.set("ctrlKey", JsBoolean((e.mods & 0x02) != 0));
+        evt.set("shiftKey", JsBoolean((e.mods & 0x01) != 0));
+        evt.set("altKey", JsBoolean((e.mods & 0x04) != 0));
+        evt.set("metaKey", JsBoolean((e.mods & 0x08) != 0));
+        JsObject target;
+        target.set("id", JsString(nodeId));
+        target.set("type", JsString(toString(type)));
+        evt.set("target", target);
+        evt.set("currentTarget", target);
         {
             const char* tn = "unknown";
             switch (e.type) {
@@ -311,9 +327,16 @@ public:
                 case EventType::Resize: tn = "resize"; break;
                 case EventType::Focus: tn = "focus"; break;
                 case EventType::Blur: tn = "blur"; break;
+                case EventType::MouseEnter: tn = "mouseenter"; break;
+                case EventType::MouseLeave: tn = "mouseleave"; break;
             }
             evt.set("type", JsString(tn));
         }
+        return evt;
+    }
+
+    virtual bool onEvent(MorphEvent& e) {
+        JsObject evt = buildEventJs(e);
         if (e.type == EventType::Click && onClick) {
             onClick(evt);
             return true;

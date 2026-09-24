@@ -270,6 +270,7 @@ void MorphWindow::KeyCb(GLFWwindow *win, int key, int scancode, int act, int mod
     e.x = (float)mx;
     e.y = (float)my;
     e.mods = mods;
+    e.repeat = (act == GLFW_REPEAT);
 
     // ── Focus routing ───────────────────────────────────────
     // A focused node (e.g. an <input>) gets keys first; consuming the
@@ -310,22 +311,22 @@ void MorphWindow::cursorPosCb(GLFWwindow *win, double mx, double my)
         {
             if (hovered->onMouseLeave)
             {
-                JsObject evt;
-                evt.set("x", JsNumber((float)mx));
-                evt.set("y", JsNumber((float)my));
-                evt.set("type", JsString("mouseleave"));
-                hovered->onMouseLeave(evt);
+                MorphEvent he;
+                he.type = EventType::MouseLeave;
+                he.x = (float)mx;
+                he.y = (float)my;
+                hovered->onMouseLeave(hovered->buildEventJs(he));
             }
         }
         if (newHover)
         {
             if (newHover->onMouseEnter)
             {
-                JsObject evt;
-                evt.set("x", JsNumber((float)mx));
-                evt.set("y", JsNumber((float)my));
-                evt.set("type", JsString("mouseenter"));
-                newHover->onMouseEnter(evt);
+                MorphEvent he;
+                he.type = EventType::MouseEnter;
+                he.x = (float)mx;
+                he.y = (float)my;
+                newHover->onMouseEnter(newHover->buildEventJs(he));
             }
         }
         hovered = newHover;
