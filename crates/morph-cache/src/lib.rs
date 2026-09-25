@@ -413,6 +413,49 @@ pub fn write_stored_fingerprint(cwd: &Path, binary_name: &str, fingerprint: &str
     Ok(())
 }
 
+/// Read the previously stored codegen fingerprint for `binary_name`, if any.
+///
+/// Layout is `{hash}\n{emitted rel path}\n...`: the first line is the hash
+/// over all codegen inputs, the rest are the generated files (relative to
+/// the output dir) that hash covered. A missing line set means nothing was
+/// recorded yet.
+pub fn read_stored_codegen(cwd: &Path, binary_name: &str) -> Option<(String, Vec<String>)> {
+    let dir = project_hash_dir(cwd);
+    let content =
+        std::fs::read_to_string(dir.join(format!("{binary_name}.codegen.fingerprint"))).ok()?;
+    let mut lines = content.lines();
+    let hash = lines.next()?.trim().to_string();
+    if hash.is_empty() {
+        return None;
+    }
+    let files: Vec<String> =
+        lines.map(str::trim).filter(|l| !l.is_empty()).map(str::to_string).collect();
+    Some((hash, files))
+}
+
+/// Store the codegen fingerprint plus the emitted file list (paths relative
+/// to the output dir) under <cwd>/.morph/hash.
+pub fn write_stored_codegen(
+    cwd: &Path,
+    binary_name: &str,
+    fingerprint: &str,
+    emitted: &[String],
+) -> Result<()> {
+    let dir = project_hash_dir(cwd);
+    std::fs::create_dir_all(&dir)?;
+    let mut out = String::from(fingerprint.trim());
+    out.push('\n');
+    for f in emitted {
+        let f = f.trim();
+        if !f.is_empty() {
+            out.push_str(f);
+            out.push('\n');
+        }
+    }
+    std::fs::write(dir.join(format!("{binary_name}.codegen.fingerprint")), out)?;
+    Ok(())
+}
+
 /// Create morph.lock file
 pub fn write_lock_file(
     project_dir: &Path,
@@ -433,4 +476,42 @@ pub fn write_lock_file(
     let path = project_dir.join("morph.lock");
     std::fs::write(&path, serde_json::to_string_pretty(&lock)?)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scratch_dir(name: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("morph-cache-test-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        dir
+    }
+
+    #[test]
+    fn codegen_fingerprint_round_trip() {
+        let cwd = scratch_dir("codegen");
+        assert!(read_stored_codegen(&cwd, "app").is_none());
+        write_stored_codegen(
+            &cwd,
+            "app",
+            "abc123",
+            &["app.cpp".to_string(), "extra.ts.cpp".to_string()],
+        )
+        .expect("write");
+        let (hash, files) = read_stored_codegen(&cwd, "app").expect("read");
+        assert_eq!(hash, "abc123");
+        assert_eq!(files, vec!["app.cpp".to_string(), "extra.ts.cpp".to_string()]);
+        let _ = std::fs::remove_dir_all(&cwd);
+    }
+
+    #[test]
+    fn codegen_fingerprint_rejects_empty_hash() {
+        let cwd = scratch_dir("codegen-empty");
+        write_stored_codegen(&cwd, "app", "", &[]).expect("write");
+        assert!(read_stored_codegen(&cwd, "app").is_none());
+        let _ = std::fs::remove_dir_all(&cwd);
+    }
 }

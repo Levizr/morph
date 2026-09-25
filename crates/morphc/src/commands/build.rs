@@ -279,60 +279,102 @@ pub(crate) fn run(
             })?;
         routes_ir.push((route.clone(), route_win));
     }
-    let emitter = morph_codegen::CppEmitter::new(&windows)
-        .with_routes(&routes)
-        .with_routes_ir(&routes_ir)
-        .with_app_window(config.window.title.clone(), config.window.width, config.window.height)
-        .with_page_cache(
-            config
-                .navigation
-                .cache
-                .capacity()
-                .map_err(|e| anyhow::anyhow!("morph.config.json: {e}"))?,
-        )
-        .with_window_ownership(
-            config.window.parent.clone(),
-            config.window.modal,
-            morph_config::WindowRole::parse(&config.window.role)
-                .map_err(|e| anyhow::anyhow!("morph.config.json [window]: {e}"))?
-                .as_int() as i64,
-        )
-        .with_self_test(self_test);
-    emitter.emit(&output_dir)?;
-    write_routes_dts(&cwd, &routes);
-    pb.finish_and_clear();
-    crate::logger::log_success(&format!("C++ generated → {}", output_dir.display()));
-
-    // ── Translate companion TypeScript files into linkable fragments ──
-    // Graph-referenced .ts plus src/**/*.ts, each translated in the
-    // configured type mode and compiled+linked below. Failures here are
-    // hard errors: silently dropping app logic would miscompile the app.
+    // Companion TypeScript sources (raw contents feed the codegen
+    // fingerprint below; translation + writing happens after emit).
     let fragment_inputs = collect_typescript_sources(&cwd, &graph)?;
+    // ── Regenerate C++ only when inputs changed ──
+    // Hand-edited files under the output dir (app.cpp, headers, *.ts.cpp)
+    // survive rebuilds while every Morph source is unchanged; the compile
+    // step below still rebuilds the binary from them (its fingerprint
+    // covers generated contents).
+    let codegen_fp = codegen_fingerprint(
+        &cwd,
+        &config_path,
+        &source,
+        &graph,
+        &routes,
+        &remote_css,
+        &fragment_inputs,
+        static_,
+        &type_mode,
+        self_test,
+    );
+    let stored_codegen = morph_cache::read_stored_codegen(&cwd, &clean_name);
+    let codegen_fresh = match &stored_codegen {
+        Some((fp, files)) if fp == &codegen_fp => files.iter().all(|f| output_dir.join(f).exists()),
+        _ => false,
+    };
+    let ts_out_names = ts_output_names(&fragment_inputs);
+    // extra_sources: identical file set in both paths so the compile step
+    // below sees the same inputs whether we regenerated or reused.
     let mut extra_sources: Vec<PathBuf> = Vec::new();
-    if !fragment_inputs.is_empty() {
-        let pb = crate::logger::spinner("Translating TypeScript...");
-        let mut used_names: std::collections::HashSet<String> = std::collections::HashSet::new();
-        for (ts_path, ts_source) in &fragment_inputs {
-            let filename = ts_path.file_name().and_then(|n| n.to_str()).unwrap_or("file.ts");
-            let mut options = morpher::TranslateOptions { type_mode, ..Default::default() };
-            let code = morpher::translate_fragment(ts_source, filename, options)
-                .map_err(|e| anyhow::anyhow!("translating {}: {}", ts_path.display(), e))?;
-            let stem = ts_path.file_stem().and_then(|s| s.to_str()).unwrap_or("fragment");
-            let mut out_name = format!("{stem}.ts.cpp");
-            let mut counter = 2;
-            while !used_names.insert(out_name.clone()) {
-                out_name = format!("{stem}_{counter}.ts.cpp");
-                counter += 1;
-            }
-            let out_path = output_dir.join(&out_name);
-            std::fs::write(&out_path, &code)?;
-            extra_sources.push(out_path);
-        }
+    // Generated files recorded alongside the codegen fingerprint (drives
+    // the compile freshness check below).
+    let mut emitted_files: Vec<String> = Vec::new();
+    if codegen_fresh {
         pb.finish_and_clear();
         crate::logger::log_success(&format!(
-            "Translated {} TypeScript file(s)",
-            fragment_inputs.len()
+            "C++ unchanged — reusing generated sources in {}",
+            output_dir.display()
         ));
+        extra_sources = ts_out_names.iter().map(|n| output_dir.join(n)).collect();
+        if let Some((_, files)) = &stored_codegen {
+            emitted_files = files.clone();
+        }
+    } else {
+        let emitter = morph_codegen::CppEmitter::new(&windows)
+            .with_routes(&routes)
+            .with_routes_ir(&routes_ir)
+            .with_app_window(config.window.title.clone(), config.window.width, config.window.height)
+            .with_page_cache(
+                config
+                    .navigation
+                    .cache
+                    .capacity()
+                    .map_err(|e| anyhow::anyhow!("morph.config.json: {e}"))?,
+            )
+            .with_window_ownership(
+                config.window.parent.clone(),
+                config.window.modal,
+                morph_config::WindowRole::parse(&config.window.role)
+                    .map_err(|e| anyhow::anyhow!("morph.config.json [window]: {e}"))?
+                    .as_int() as i64,
+            )
+            .with_self_test(self_test);
+        emitter.emit(&output_dir)?;
+        write_routes_dts(&cwd, &routes);
+        pb.finish_and_clear();
+        crate::logger::log_success(&format!("C++ generated → {}", output_dir.display()));
+
+        // ── Translate companion TypeScript files into linkable fragments ──
+        // Graph-referenced .ts plus src/**/*.ts, each translated in the
+        // configured type mode and compiled+linked below. Failures here are
+        // hard errors: silently dropping app logic would miscompile the app.
+        if !fragment_inputs.is_empty() {
+            let pb = crate::logger::spinner("Translating TypeScript...");
+            for ((ts_path, ts_source), out_name) in fragment_inputs.iter().zip(&ts_out_names) {
+                let filename = ts_path.file_name().and_then(|n| n.to_str()).unwrap_or("file.ts");
+                let mut options = morpher::TranslateOptions { type_mode, ..Default::default() };
+                let code = morpher::translate_fragment(ts_source, filename, options)
+                    .map_err(|e| anyhow::anyhow!("translating {}: {}", ts_path.display(), e))?;
+                let out_path = output_dir.join(&out_name);
+                std::fs::write(&out_path, &code)?;
+                extra_sources.push(out_path);
+            }
+            pb.finish_and_clear();
+            crate::logger::log_success(&format!(
+                "Translated {} TypeScript file(s)",
+                fragment_inputs.len()
+            ));
+        }
+        // Record what emit + translation wrote (drives freshness checks).
+        emitted_files =
+            vec!["app.cpp".to_string(), "morph_api.h".to_string(), "morph_routes.h".to_string()];
+        if output_dir.join("_morph_state.h").exists() {
+            emitted_files.push("_morph_state.h".to_string());
+        }
+        emitted_files.extend(ts_out_names.clone());
+        morph_cache::write_stored_codegen(&cwd, &clean_name, &codegen_fp, &emitted_files)?;
     }
 
     // ── Compile (skip when nothing changed, like cargo run) ──
@@ -350,49 +392,18 @@ pub(crate) fn run(
 
     // A build is "fresh" (cargo-style) only when every input fingerprint is
     // unchanged AND the binary already exists. On any change we rebuild.
-    // ── Fingerprinting: include all transitive modules + CSS + TS ──
-    let config_text = std::fs::read_to_string(&config_path).unwrap_or_default();
-    let runtime_hash = morph_cache::hash_tree(&runtime_dir);
+    // ── Fingerprinting: codegen hash (all Morph sources) + generated
+    // file contents + compiler ──
+    // Because generated contents are hashed, hand edits to app.cpp (or the
+    // emitted headers/fragments) recompile without regenerating; source
+    // edits regenerate first (above) and then recompile.
     let mut owned_inputs: Vec<(String, String)> = vec![
-        ("morph.config.json".to_string(), config_text),
-        ("entry".to_string(), source),
-        ("runtime".to_string(), runtime_hash),
-        ("static".to_string(), static_.to_string()),
+        ("codegen".to_string(), codegen_fp.clone()),
+        ("cxx".to_string(), compiler_name.clone()),
     ];
-    // All transitive modules in the component graph.
-    for module_path in graph.all_paths() {
-        let text = std::fs::read_to_string(module_path).unwrap_or_default();
-        owned_inputs.push((module_path.display().to_string(), text));
-    }
-    // Local CSS / C++ imports referenced from any graph module.
-    for mod_path in graph.all_paths() {
-        let Some(resolved) = graph.get(mod_path) else {
-            continue;
-        };
-        for imp in &resolved.source.imports {
-            // Module sources are already fingerprinted above; skip to avoid dupes.
-            if imp.kind.is_module_source() {
-                continue;
-            }
-            let path = match &imp.kind {
-                morph_parser::MxImportKind::CssLocal { path }
-                | morph_parser::MxImportKind::Component { path, .. }
-                | morph_parser::MxImportKind::CppLocal { path, .. } => path,
-                morph_parser::MxImportKind::CssUrl { .. } => continue,
-            };
-            let candidates = [resolved.dir.join(path), cwd.join(path)];
-            let text = candidates
-                .iter()
-                .find(|c| c.exists())
-                .map_or_else(String::new, |cand| std::fs::read_to_string(cand).unwrap_or_default());
-            owned_inputs.push((path.clone(), text));
-        }
-    }
-    for (ts_path, ts_source) in &fragment_inputs {
-        owned_inputs.push((format!("ts:{}", ts_path.display()), ts_source.clone()));
-    }
-    for (url, text) in &remote_css {
-        owned_inputs.push((format!("css:{url}"), text.clone()));
+    for f in &emitted_files {
+        let p = output_dir.join(f);
+        owned_inputs.push((f.clone(), std::fs::read_to_string(&p).unwrap_or_default()));
     }
     let fingerprint_inputs: Vec<(&str, &str)> =
         owned_inputs.iter().map(|(p, c)| (p.as_str(), c.as_str())).collect();
@@ -493,6 +504,100 @@ pub(crate) fn run(
     println!();
 
     Ok(binary_path)
+}
+
+/// Hash of every input that determines generated C++: config, entry +
+/// transitive modules, route files, CSS (local imports + remote), raw TS
+/// sources, the runtime tree, and flags that alter output (static, type
+/// mode, self-test). Compared against the stored codegen fingerprint to
+/// decide whether regenerating would change anything — when it matches,
+/// hand-edited files under the output dir are left untouched.
+#[allow(clippy::too_many_arguments)]
+fn codegen_fingerprint(
+    cwd: &Path,
+    config_path: &Path,
+    entry_source: &str,
+    graph: &morph_parser::ModuleGraph,
+    routes: &[morph_parser::routes::RouteEntry],
+    remote_css: &[(String, String)],
+    fragment_inputs: &[(PathBuf, String)],
+    static_: bool,
+    type_mode: &morpher::TypeMode,
+    self_test: bool,
+) -> String {
+    let config_text = std::fs::read_to_string(config_path).unwrap_or_default();
+    let runtime_hash = morph_cache::hash_tree(&morph_build::find_runtime_dir(cwd));
+    let mut owned: Vec<(String, String)> = vec![
+        ("morph.config.json".to_string(), config_text),
+        ("entry".to_string(), entry_source.to_string()),
+        ("runtime".to_string(), runtime_hash),
+        ("static".to_string(), static_.to_string()),
+        ("type_mode".to_string(), type_mode.to_string()),
+        ("self_test".to_string(), self_test.to_string()),
+    ];
+    // All transitive modules in the component graph.
+    for module_path in graph.all_paths() {
+        let text = std::fs::read_to_string(module_path).unwrap_or_default();
+        owned.push((module_path.display().to_string(), text));
+    }
+    // Route files aren't in the import graph but shape generated mounts.
+    for route in routes {
+        let text = std::fs::read_to_string(&route.file).unwrap_or_default();
+        owned.push((format!("route:{}", route.file.display()), text));
+    }
+    // Local CSS / C++ imports referenced from any graph module (a style
+    // change must regenerate just like a code change).
+    for mod_path in graph.all_paths() {
+        let Some(resolved) = graph.get(mod_path) else {
+            continue;
+        };
+        for imp in &resolved.source.imports {
+            // Module sources are already fingerprinted above; skip to avoid dupes.
+            if imp.kind.is_module_source() {
+                continue;
+            }
+            let path = match &imp.kind {
+                morph_parser::MxImportKind::CssLocal { path }
+                | morph_parser::MxImportKind::Component { path, .. }
+                | morph_parser::MxImportKind::CppLocal { path, .. } => path,
+                morph_parser::MxImportKind::CssUrl { .. } => continue,
+            };
+            let candidates = [resolved.dir.join(path), cwd.join(path)];
+            let text = candidates
+                .iter()
+                .find(|c| c.exists())
+                .map_or_else(String::new, |cand| std::fs::read_to_string(cand).unwrap_or_default());
+            owned.push((path.clone(), text));
+        }
+    }
+    for (ts_path, ts_source) in fragment_inputs {
+        owned.push((format!("ts:{}", ts_path.display()), ts_source.clone()));
+    }
+    for (url, text) in remote_css {
+        owned.push((format!("css:{url}"), text.clone()));
+    }
+    let refs: Vec<(&str, &str)> = owned.iter().map(|(p, c)| (p.as_str(), c.as_str())).collect();
+    morph_cache::fingerprint_inputs(&refs)
+}
+
+/// Deterministic output names for translated TypeScript fragments
+/// (`{stem}.ts.cpp`, `{stem}_2.ts.cpp`, …). Shared by the translate step
+/// and the reuse path so both agree on file locations without writing.
+fn ts_output_names(fragment_inputs: &[(PathBuf, String)]) -> Vec<String> {
+    let mut used_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+    fragment_inputs
+        .iter()
+        .map(|(ts_path, _)| {
+            let stem = ts_path.file_stem().and_then(|s| s.to_str()).unwrap_or("fragment");
+            let mut out_name = format!("{stem}.ts.cpp");
+            let mut counter = 2;
+            while !used_names.insert(out_name.clone()) {
+                out_name = format!("{stem}_{counter}.ts.cpp");
+                counter += 1;
+            }
+            out_name
+        })
+        .collect()
 }
 
 /// True when generated C++ needs exception handling: lowered user
