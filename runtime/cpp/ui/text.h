@@ -49,6 +49,7 @@ public:
     }
 
     bool isTextRun() const override { return true; }
+    bool isEmptyText() const override { return text.empty(); }
 
     void recordDisplayList(Renderer& r) override {
         m_displayList.clear();

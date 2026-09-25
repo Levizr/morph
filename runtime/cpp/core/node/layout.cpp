@@ -27,17 +27,33 @@ static float vBonus(const MorphStyle& s) {
 #endif
 }
 
+// Translate every descendant by (dx, dy) so the subtree keeps the relative
+// layout its own passes computed (inline runs stay side-by-side, blocks
+// stay stacked). Used when a parent moves an item without re-laying it out.
+static void shiftChildrenSubtree(MorphNode* n, float dx, float dy)
+{
+    for (auto* c : n->children)
+    {
+        c->x += dx;
+        c->y += dy;
+        shiftChildrenSubtree(c, dx, dy);
+    }
+}
+
+// Display lists bake absolute coordinates, so any node moved without a full
+// layout pass must repaint its subtree. Used by the inline positioner and
+// the button label centering below (production has no DEV geometry diff).
+static void markSubtreePaintDirty(MorphNode* n) {
+    n->markDirty(PaintDirty);
+    for (auto* c : n->children) markSubtreePaintDirty(c);
+}
+
 #ifdef MORPH_FEATURE_POSITION
 // Shift a sticky node and every descendant so children stay glued to it.
 static void shiftStickySubtree(MorphNode* n, float dx, float dy) {
     n->x += dx;
     n->y += dy;
     for (auto* c : n->children) shiftStickySubtree(c, dx, dy);
-}
-
-static void markSubtreePaintDirty(MorphNode* n) {
-    n->markDirty(PaintDirty);
-    for (auto* c : n->children) markSubtreePaintDirty(c);
 }
 
 // `position: sticky` — keeps its normal-flow box (m_flowX/m_flowY) but gets
@@ -668,7 +684,11 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                 } else if (c->contentWidth(r) > 0.0f) {
                     iw = c->contentWidth(r);
                 }
-                if (iw <= 0.0f) iw = cw;
+                // Empty text runs (e.g. an expression before its effect
+                // delivers content) measure zero — never a full line, which
+                // would push siblings down a line until content arrives.
+                if (iw <= 0.0f)
+                    iw = c->isEmptyText() ? 0.0f : cw;
                 float ih = (c->h > 0.0f) ? c->h : (c->style.fontSize * 1.4f);
                 items.push_back({c, iw, ih, c->isWhitespaceOnly()});
             }
@@ -744,28 +764,46 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                 for (size_t j = lineStart; j < end; j++) {
                     auto& p = items[j];
                     float pml = p.node->style.margin[3];
+                    // Child-to-parent: the item's box comes from its own
+                    // measured size; children keep whatever THEIR layout
+                    // pass computed, translated by the item's move delta.
+                    // Siblings are never restacked and widths are never
+                    // overwritten here — every child preserves its laid-out
+                    // offset relative to the item (inline runs stay
+                    // side-by-side, blocks stay stacked).
+                    float prevX = p.node->x, prevY = p.node->y;
+                    float prevW = p.node->w, prevH = p.node->h;
                     p.node->x = itemX + pml;
                     p.node->y = lineY;
                     p.node->w = (p.w < cw) ? p.w : cw;
                     p.node->h = p.h;
-                    for (auto* child : p.node->children) {
-                        float cBw = 0.0f;
-#ifdef MORPH_FEATURE_BORDER
-                        cBw = p.node->style.borderWidth;
-#endif
-                        child->x = p.node->x + cBw + p.node->style.padding[3]
-                                 + child->style.margin[3];
-                        child->y = p.node->y + cBw + p.node->style.padding[0]
-                                 + child->style.margin[0];
-                        float childW = p.node->w
-                                     - cBw * 2.0f
-                                     - p.node->style.padding[3]
-                                     - p.node->style.padding[1]
-                                     - child->style.margin[3]
-                                     - child->style.margin[1];
-                        if (childW < 0) childW = 0;
-                        child->w = childW;
+                    float dx = p.node->x - prevX;
+                    float dy = p.node->y - prevY;
+                    bool resized = (p.node->w != prevW || p.node->h != prevH);
+                    if (dx != 0.0f || dy != 0.0f)
+                    {
+                        shiftChildrenSubtree(p.node, dx, dy);
+                        markSubtreePaintDirty(p.node);
                     }
+                    if (resized)
+                    {
+                        // The item's size changed after measure: re-run its
+                        // OWN layout at the final box so content resolves
+                        // against real dimensions (centering, wrapping).
+                        // Measure-time positions (e.g. text centered in the
+                        // full container width) would otherwise stick, since
+                        // the item is skipped as clean afterwards. Each
+                        // child is positioned by the item's own flow logic —
+                        // never restacked at one shared origin.
+                        p.node->layout(p.node->x, p.node->y,
+                                       p.node->w, p.node->h, r);
+                        markSubtreePaintDirty(p.node);
+                    }
+                    // NOTE: children are never assigned here directly. The
+                    // item's own passes own their geometry (child-to-parent);
+                    // re-laying siblings at one shared origin is what merged
+                    // inline runs (the +/- overlap). An oversized item's
+                    // content visibly overflows, like a browser.
                     itemX += pml + p.w + p.node->style.margin[1];
                 }
             };
@@ -1024,6 +1062,9 @@ after_children:
 #endif
                         if (c->isWhitespaceOnly()) continue;
                         c->y += offset;
+                        // Direct move outside any layout pass: repaint
+                        // (display lists bake absolute coordinates).
+                        markSubtreePaintDirty(c);
                     }
             }
         }

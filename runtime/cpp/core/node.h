@@ -454,6 +454,9 @@ public:
     virtual float contentWidth(Renderer* r);
     virtual bool isWhitespaceOnly() const { return false; }
     virtual bool isTextRun() const { return false; }
+    // True for text/expression runs holding no characters: they measure
+    // zero instead of falling back to the full container width.
+    virtual bool isEmptyText() const { return false; }
     MorphNode* hitTest(float ex, float ey);
     // Recursive hit test carrying the inverse accumulated transform
     // (nullptr when no transform is compiled, else the identity for the

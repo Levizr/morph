@@ -837,6 +837,24 @@ void MorphWindow::drawScrollbar(GLRenderer &r, const FlatRenderNode &node,
     r.drawRoundedRect(trackX, thumbY, sbw, thumbH, radius, (float *)node.scrollbarThumbColor);
 }
 
+// True when every descendant box lies inside (x,y,w,h): the clip rect the
+// caller would otherwise enforce. Skipping a no-op clip is pixel-identical
+// (nothing is removed) and sidesteps clip-path failures swallowing content
+// that already fits — e.g. button labels vanishing inside their own box.
+static bool subtreeFitsBox(const RenderFrame *frame, int nodeIdx,
+                           float x, float y, float w, float h)
+{
+    for (int childIdx : frame->nodes[nodeIdx].children)
+    {
+        const auto &c = frame->nodes[childIdx];
+        if (c.x < x || c.y < y || c.x + c.w > x + w || c.y + c.h > y + h)
+            return false;
+        if (!subtreeFitsBox(frame, childIdx, x, y, w, h))
+            return false;
+    }
+    return true;
+}
+
 void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx,
                              const DamageSet *damageClip, float scrollOffset)
 {
@@ -851,6 +869,13 @@ void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx,
 
     bool overflowClipped = (node.overflow != CSS::Overflow::Visible);
     bool radiusClip = node.borderRadius > 0.0f;
+    // Rounded-only clips (buttons, cards) with fully-fitting content enforce
+    // nothing — skip them. Scroll/overflow-hidden clips are untouched.
+    if (radiusClip && !overflowClipped
+        && subtreeFitsBox(frame, nodeIdx, sx, sy, sw, sh))
+    {
+        radiusClip = false;
+    }
     bool scrolling = node.scrollEnabled && node.contentH > sh;
 
     // Effective screen position: node coords are absolute root-space but do
