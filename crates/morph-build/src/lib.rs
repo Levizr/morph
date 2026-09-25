@@ -1,6 +1,7 @@
 pub mod css_fetch;
 pub mod dev;
 pub mod devrt;
+pub mod doctor;
 pub mod ipc;
 pub mod logic;
 pub mod platform;

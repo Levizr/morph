@@ -272,24 +272,9 @@ impl StaticDeps {
             return Ok(path);
         }
         std::fs::create_dir_all(&self.src_dir)?;
-        let mut last_err = String::new();
-        for url in s.urls {
-            if !self.silent {
-                eprintln!("  … Downloading {} ...", s.archive);
-            }
-            let status = std::process::Command::new("curl")
-                .args(["-fsSL", "--retry", "2", "-o"])
-                .arg(&path)
-                .arg(url)
-                .status();
-            match status {
-                Ok(st) if st.success() => return Ok(path),
-                Ok(_) => last_err = format!("download failed: {url}"),
-                Err(e) => last_err = format!("curl missing? {e}"),
-            }
-            eprintln!("  ⚠ Download failed ({url}): {last_err}");
-        }
-        anyhow::bail!("Could not obtain {}: {}", s.archive, last_err)
+        crate::doctor::download_to_file(s.urls, &path, s.archive)
+            .with_context(|| format!("Could not obtain {}", s.archive))?;
+        Ok(path)
     }
 
     fn extract(&self, dep: &str, tarball: &Path) -> Result<PathBuf> {
@@ -784,7 +769,7 @@ fn reset_dir(d: &Path) -> Result<()> {
 }
 
 fn load_manifest(cache: &Path) -> HashMap<String, (String, String)> {
-    let text = std::fs::read_to_string(cache.join("manifest.jsont.json")).unwrap_or_default();
+    let text = std::fs::read_to_string(cache.join("manifest.json")).unwrap_or_default();
     let parsed: HashMap<String, HashMap<String, String>> =
         serde_json::from_str(&text).unwrap_or_default();
     parsed

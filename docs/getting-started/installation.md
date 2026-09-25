@@ -9,8 +9,8 @@ You only need a C++ compiler with C++23 support. Morph's build system will downl
 ### Linux (Debian/Ubuntu)
 
 ```bash
-# C++ toolchain
-sudo apt install g++ cmake make pkg-config
+# C++ toolchain (g++-14+ required for C++23)
+sudo apt install g++-14 cmake make pkg-config
 
 # Graphics
 sudo apt install libglfw3-dev libgl1-mesa-dev libx11-dev
@@ -80,7 +80,7 @@ Checks your toolchain (g++, cmake, pkg-config), graphics libs (GLFW, OpenGL), an
 morph doctor -v    # show detailed version info
 ```
 
-> Note: `morph doctor -y` is accepted but auto-install of missing system packages is not implemented yet — it only reports what's missing.
+> Note: `morph doctor -y` auto-installs missing system packages via your native package manager (no prompt). Without `-y`, doctor prompts before installing.
 
 ## Supported Package Managers (for `morph doctor -y`)
 

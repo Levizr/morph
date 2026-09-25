@@ -123,10 +123,12 @@ enum Commands {
         #[arg(long)]
         migrate: bool,
     },
-    /// Verify system dependencies
+    /// Verify system dependencies (toolchain + mandatory GLFW/FreeType/HarfBuzz)
     Doctor {
+        /// Show detailed version info for every check
         #[arg(short, long)]
         verbose: bool,
+        /// Auto-install missing packages without prompting
         #[arg(short, long)]
         yes: bool,
     },

@@ -40,13 +40,13 @@ morph --version
 morph doctor
 ```
 
-`morph doctor` checks your toolchain (g++, cmake, pkg-config), graphics libs (GLFW, OpenGL), and text libs (FreeType, HarfBuzz).
+`morph doctor` checks your toolchain (C++ compiler with g++-14+ / C++23 support, cmake, pkg-config), graphics libs (GLFW, OpenGL), and text libs (FreeType, HarfBuzz).
 
 ```bash
 morph doctor -v    # show detailed version info
 ```
 
-> Note: `morph doctor -y` is accepted but auto-install of missing system packages is not implemented yet — it only reports what's missing.
+> Note: `morph doctor -y` auto-installs missing system packages via your native package manager (no prompt). Without `-y`, doctor prompts before installing.
 
 ## From Source (Latest Features)
 

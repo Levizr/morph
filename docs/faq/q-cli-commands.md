@@ -56,7 +56,7 @@ morph update --self       # upgrade morph (downloads the release tarball)
 
 **`morph check`** — Exit code 0 = clean (warnings only don't fail), 1 = errors (CI-friendly).
 
-**`morph doctor`** — Reports required tools (g++, clang++, cmake, pkg-config), optional graphics/text libs, and project state. `-v` shows verbose version info. Auto-install of missing system packages via `-y` is not implemented yet.
+**`morph doctor`** — Reports required tools (g++, cmake, make, pkg-config), mandatory graphics/text libs (GLFW, FreeType, HarfBuzz), and project state. `-v` shows verbose version info. Missing packages can be auto-installed via `-y` (no prompt) or an interactive prompt.
 
 ## Version System
 

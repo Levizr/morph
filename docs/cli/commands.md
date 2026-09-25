@@ -126,7 +126,7 @@ morph check [PATH] [--entry src/App.mx] [--migrate]
 morph doctor [-v/--verbose] [-y/--yes]
 ```
 
-Checks: `g++`/`clang++`, `cmake`, `pkg-config`, GLFW, OpenGL, FreeType, HarfBuzz.
+Checks: `g++`, `cmake`, `make`, `pkg-config` (required; `clang++` reported when present), plus mandatory `GLFW`, `OpenGL`/`X11` (Linux), `FreeType`, `HarfBuzz` — detected via `pkg-config` with header fallbacks. Exit code `1` when anything mandatory is missing. `-y` auto-installs via the native package manager (apt/dnf/pacman/zypper/apk/brew/winget/choco); without `-y`, doctor prompts first.
 
 ### `morph cache` — Manage Fetched CSS Cache
 
