@@ -224,4 +224,40 @@ mod tests {
         let err = translate_snippet("let = ;;;\n", "handler.ts", TranslateOptions::default());
         assert!(err.is_err());
     }
+
+    #[test]
+    fn effect_cleanup_closure_captures_timer_handle() {
+        // Regression for docs/dev/bugs#4: the cleanup arrow must capture
+        // the timer handle with shared ownership instead of `[]`, and the
+        // void `clearInterval` call must not be `return`ed from `-> auto`.
+        let out = translate_snippet(
+            "() => {\n  const id = setInterval(() => {}, 1000);\n  return () => clearInterval(id);\n}\n",
+            "snippet.ts",
+            TranslateOptions::default(),
+        )
+        .unwrap();
+        assert!(out.body.starts_with("[]() -> auto"), "outer keeps `[]`: {}", out.body);
+        assert!(
+            out.body.contains("std::shared_ptr<int64_t> id = "),
+            "handle is shared: {}",
+            out.body
+        );
+        assert!(
+            out.body.contains("[&, id]() -> void { morph::clear_timer((*id)); }"),
+            "cleanup captures by value: {}",
+            out.body
+        );
+    }
+
+    #[test]
+    fn plain_effect_body_keeps_empty_capture() {
+        let out = translate_snippet(
+            "() => {\n  console.log(count);\n}\n",
+            "handler.ts",
+            snippet_options(),
+        )
+        .unwrap();
+        assert!(out.body.starts_with("[]() -> auto"), "body: {}", out.body);
+        assert!(!out.body.contains("shared_ptr"), "body: {}", out.body);
+    }
 }

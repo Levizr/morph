@@ -166,6 +166,13 @@ pub struct EscapeAnalyzer {
     loop_depth: usize,
     branch_depth: usize,
     func_depth: usize,
+    /// Names bound by enclosing arrow bodies (params plus top-level block
+    /// locals), innermost last. The capture scan in
+    /// `analyze_arrow_function` runs before body analysis registers
+    /// declarations, so without this an arrow-local read by a nested
+    /// closure is invisible and the closure captures nothing
+    /// (docs/dev/bugs#4). Consulted only by the capture gate.
+    arrow_scope_names: Vec<HashSet<String>>,
     narrow_splits: Vec<NarrowSplit>,
     last_reads: HashMap<String, HashMap<String, u32>>,
 }
@@ -223,6 +230,29 @@ fn last_read_spans(stmts: &[Statement]) -> HashMap<String, u32> {
     scan.reads
 }
 
+/// Names bound at the top level of an arrow body block. Only plain
+/// identifiers — complex patterns stay invisible to the capture pre-scan,
+/// exactly as today.
+fn collect_block_declared(stmts: &[Statement], out: &mut HashSet<String>) {
+    for stmt in stmts {
+        if let Statement::VariableDeclaration(d) = stmt {
+            for decl in &d.declarations {
+                pattern_bound_names(&decl.id, out);
+            }
+        }
+    }
+}
+
+fn pattern_bound_names(pat: &BindingPattern, out: &mut HashSet<String>) {
+    match pat {
+        BindingPattern::BindingIdentifier(id) => {
+            out.insert(id.name.to_string());
+        }
+        BindingPattern::AssignmentPattern(a) => pattern_bound_names(&a.left, out),
+        _ => {}
+    }
+}
+
 impl EscapeAnalyzer {
     pub fn new() -> Self {
         Self {
@@ -242,6 +272,7 @@ impl EscapeAnalyzer {
             loop_depth: 0,
             branch_depth: 0,
             func_depth: 0,
+            arrow_scope_names: Vec::new(),
             narrow_splits: Vec::new(),
             last_reads: HashMap::new(),
         }
@@ -1572,6 +1603,23 @@ impl EscapeAnalyzer {
                 self.analyze_expression(default_value);
             }
         }
+        // Names this arrow binds: params plus top-level body declarations.
+        // The capture scan below runs before body analysis registers them
+        // in `var_infos`, so they are staged here as candidates; body
+        // analysis then records them fully. A top-level body binding
+        // shadows any outer one for the whole body, so resolving reads to
+        // it is correct, not approximate. Popped right after the scan.
+        let mut arrow_locals = HashSet::new();
+        for param in &f.params.items {
+            let (param_name, _) = self.binding_to_identifier(&param.pattern);
+            if !param_name.is_empty() && !param_name.starts_with("/*") {
+                arrow_locals.insert(param_name);
+            }
+        }
+        if let Some(block) = f.body.as_function_body() {
+            collect_block_declared(&block.statements, &mut arrow_locals);
+        }
+        self.arrow_scope_names.push(arrow_locals);
         self.func_depth += 1;
         // Find captured variables
         let mut captured = HashSet::new();
@@ -1592,6 +1640,7 @@ impl EscapeAnalyzer {
                 .or_default()
                 .insert(var.clone());
         }
+        self.arrow_scope_names.pop();
 
         if let Some(body) = f.body.as_expression() {
             self.analyze_expression(body);
@@ -1608,7 +1657,7 @@ impl EscapeAnalyzer {
     fn find_captured_vars_in_expr(&self, expr: &Expression, captured: &mut HashSet<String>) {
         match expr {
             Expression::Identifier(id) => {
-                if self.var_infos.contains_key(id.name.as_str()) {
+                if self.is_capture_candidate(id.name.as_str()) {
                     captured.insert(id.name.to_string());
                 }
             }
@@ -1794,7 +1843,7 @@ impl EscapeAnalyzer {
     ) {
         match target {
             SimpleAssignmentTarget::AssignmentTargetIdentifier(id) => {
-                if self.var_infos.contains_key(id.name.as_str()) {
+                if self.is_capture_candidate(id.name.as_str()) {
                     captured.insert(id.name.to_string());
                 }
             }
@@ -1819,7 +1868,7 @@ impl EscapeAnalyzer {
     ) {
         match target {
             AssignmentTarget::AssignmentTargetIdentifier(id) => {
-                if self.var_infos.contains_key(id.name.as_str()) {
+                if self.is_capture_candidate(id.name.as_str()) {
                     captured.insert(id.name.to_string());
                 }
             }
@@ -1859,7 +1908,7 @@ impl EscapeAnalyzer {
     ) {
         match prop {
             AssignmentTargetProperty::AssignmentTargetPropertyIdentifier(p) => {
-                if self.var_infos.contains_key(p.binding.name.as_str()) {
+                if self.is_capture_candidate(p.binding.name.as_str()) {
                     captured.insert(p.binding.name.to_string());
                 }
                 if let Some(init) = &p.init {
@@ -1883,7 +1932,7 @@ impl EscapeAnalyzer {
                 self.find_captured_vars_in_expr(&with_default.init, captured);
             }
             AssignmentTargetMaybeDefault::AssignmentTargetIdentifier(id) => {
-                if self.var_infos.contains_key(id.name.as_str()) {
+                if self.is_capture_candidate(id.name.as_str()) {
                     captured.insert(id.name.to_string());
                 }
             }
@@ -1911,7 +1960,7 @@ impl EscapeAnalyzer {
                 for prop in &o.properties {
                     match prop {
                         AssignmentTargetProperty::AssignmentTargetPropertyIdentifier(p) => {
-                            if self.var_infos.contains_key(p.binding.name.as_str()) {
+                            if self.is_capture_candidate(p.binding.name.as_str()) {
                                 captured.insert(p.binding.name.to_string());
                             }
                             if let Some(init) = &p.init {
@@ -2207,6 +2256,15 @@ impl EscapeAnalyzer {
         self.escapes.insert(name.to_string(), EscapeKind::max(current, kind));
     }
 
+    /// True when `name` may be captured by a nested closure: a known
+    /// variable, or a name bound by an enclosing arrow body (params and
+    /// top-level locals) whose declaration body analysis has not
+    /// registered yet. The capture scan is the only consumer.
+    fn is_capture_candidate(&self, name: &str) -> bool {
+        self.var_infos.contains_key(name)
+            || self.arrow_scope_names.iter().any(|scope| scope.contains(name))
+    }
+
     fn current_site(&self) -> StmtSite {
         StmtSite {
             index: self.statement_index,
@@ -2423,6 +2481,20 @@ mod tests {
             "    return bump();\n}",
         ));
         assert_eq!(result.escapes.get("count"), Some(&EscapeKind::ClosureCapture));
+    }
+
+    #[test]
+    fn arrow_local_read_by_nested_closure_marks_shared_ownership() {
+        // Regression for docs/dev/bugs#4: `id` is declared in the arrow
+        // body and read by the returned cleanup closure. The capture scan
+        // runs before body analysis registers the declaration, so without
+        // pre-registration the closure captures nothing.
+        let result = analyze_source(concat!(
+            "() => {\n",
+            "    const id = setInterval(() => {}, 1000);\n",
+            "    return () => clearInterval(id);\n}\n",
+        ));
+        assert_eq!(result.escapes.get("id"), Some(&EscapeKind::ClosureCapture));
     }
 
     #[test]

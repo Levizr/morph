@@ -39,6 +39,19 @@ EffectNode* create_effect(std::function<void()> fn) {
     return node;
 }
 
+EffectNode* create_effect_cleanup(std::function<std::function<void()>()> fn) {
+    auto* node = new EffectNode();
+    node->fn = [node, f = std::move(fn)]() {
+        node->cleanup_fn = f();
+    };
+    {
+        std::lock_guard<std::mutex> lock(s_pending_mutex);
+        s_pool.push_back(node);
+    }
+    node->run();
+    return node;
+}
+
 void EffectNode::cleanup() {
     for (auto& dep : deps) {
         std::lock_guard<std::mutex> lock(dep.sig->m_mutex);

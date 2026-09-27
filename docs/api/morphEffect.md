@@ -67,10 +67,12 @@ export default function Timer() {
   const [seconds, setSeconds] = morphState(0)
 
   morphEffect(() => {
-    const id = setInterval(() => setSeconds(s => s + 1), 1000)
-    // Cleanup: clear interval on unmount
-    return () => clearInterval(id)
-  }, [])
+    // Reading `seconds` subscribes the effect: every tick schedules the
+    // next timeout, and the previous one is cleared first.
+    const id = setTimeout(() => setSeconds(seconds + 1), 1000)
+    // Cleanup: runs before re-run or unmount
+    return () => clearTimeout(id)
+  }, [seconds])
 
   return <text>{seconds}s</text>
 }
@@ -88,10 +90,10 @@ export default function Timer() {
 ## How It Works
 
 1. `morphEffect(fn, deps?)` creates a `morph::create_effect` in the C++ runtime.
-2. If `deps` is `[]`, the effect runs once after the first render and never re-runs.
+2. If `deps` is `[]`, the effect runs once after the first render and never re-runs. Run-once effects are fire-and-forget: a returned cleanup is not stored, so timers started there live for the app's lifetime.
 3. If `deps` lists state getters, the effect re-runs only when a listed dependency changes — other signals read in the body do not re-trigger it. If `deps` is omitted, the effect subscribes to whatever signals the body reads.
 4. When any dependency changes, the effect is re-scheduled to run after the next render.
-5. The cleanup function (if returned) runs before re-run or unmount, in a thread-local active context.
+5. The cleanup function (if returned by an effect with deps or an auto-subscribed effect) runs before re-run or unmount, in a thread-local active context.
 6. All effect bodies execute in the morph reactivity thread, coordinated with signal updates.
 
 ## Common Patterns

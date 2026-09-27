@@ -5,6 +5,7 @@
 #include <functional>
 #include <string>
 #include <cstddef>
+#include <type_traits>
 #include "../types/js_types.h"
 namespace morph {
 
@@ -88,6 +89,43 @@ struct Signal : SignalBase {
 // ── create_effect ──
 EffectNode* create_effect(std::function<void()> fn);
 
+// ── create_effect with cleanup ──
+// An effect callback may return its cleanup closure: the closure is stored
+// on the node and runs before the next run and on destroy — the documented
+// `morphEffect` contract (docs/dev/bugs#4). Overload resolution picks this
+// form only when the callback returns a cleanup (exact match beats the
+// discarded-return conversion), so every existing `void`-body call site
+// keeps the overload above unchanged.
+EffectNode* create_effect_cleanup(std::function<std::function<void()>()> fn);
+
+template <typename F, std::enable_if_t<!std::is_void_v<std::invoke_result_t<F>> &&
+                                      std::is_convertible_v<std::invoke_result_t<F>,
+                                                            std::function<void()>>,
+                                      int> = 0>
+inline EffectNode* create_effect(F&& fn) {
+    return create_effect_cleanup(
+        std::function<std::function<void()>()>(std::forward<F>(fn)));
+}
+
+// ── Run a dep-guarded effect body, keeping a returned cleanup ──
+// Plain `void` bodies run as before; a returned cleanup closure is stored
+// on the currently-running effect node (no-op without one).
+template <typename F>
+inline void run_guarded_effect(F&& f) {
+    if constexpr (std::is_void_v<std::invoke_result_t<F>>) {
+        f();
+    } else if constexpr (std::is_convertible_v<std::invoke_result_t<F>,
+                                               std::function<void()>>) {
+        if (g_effect_ctx.current != nullptr) {
+            g_effect_ctx.current->cleanup_fn = f();
+        } else {
+            f();
+        }
+    } else {
+        f();
+    }
+}
+
 // ── Destroy one effect (unmount path) ──
 // Marks dead (skipped by the run path), unsubscribes, removes from the
 // pool/pending queue, deletes. Unmount-only — never on a hot path.
@@ -105,6 +143,19 @@ extern thread_local MountScopeState g_mount_scope;
 
 inline EffectNode* create_effect_scoped(std::function<void()> fn) {
     EffectNode* node = create_effect(std::move(fn));
+    if (g_mount_scope.effects)
+        g_mount_scope.effects->push_back(node);
+    return node;
+}
+
+// Mount-scoped variant of the cleanup overload above: overload resolution
+// picks this form only when the callback returns a cleanup closure.
+template <typename F, std::enable_if_t<!std::is_void_v<std::invoke_result_t<F>> &&
+                                      std::is_convertible_v<std::invoke_result_t<F>,
+                                                            std::function<void()>>,
+                                      int> = 0>
+inline EffectNode* create_effect_scoped(F&& fn) {
+    EffectNode* node = create_effect(std::forward<F>(fn));
     if (g_mount_scope.effects)
         g_mount_scope.effects->push_back(node);
     return node;

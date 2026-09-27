@@ -1290,7 +1290,10 @@ fn emit_rewire(
             rewire.push(format!("            std::string __sig = {sig_expr};"));
             rewire.push(format!("            if (__sig == __esig_{guard_idx}) return;"));
             rewire.push(format!("            __esig_{guard_idx} = __sig;"));
-            rewire.push("            __ef();".to_string());
+            // A returned cleanup closure is kept on the effect node (plain
+            // `void` bodies run as before) — the documented morphEffect
+            // contract (docs/dev/bugs#4).
+            rewire.push("            morph::run_guarded_effect(__ef);".to_string());
             rewire.push("        });".to_string());
             rewire.push("    }".to_string());
             guard_idx += 1;

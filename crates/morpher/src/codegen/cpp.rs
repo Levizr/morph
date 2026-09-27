@@ -104,6 +104,19 @@ fn cpp_char_literal(value: &str) -> String {
     out
 }
 
+/// True for expression-arrow bodies that lower to a void runtime call
+/// (`clearTimeout`/`clearInterval` → `morph::clear_timer`). Emitting those
+/// as `-> auto { return <void>; }` is ill-formed, so they need a `-> void`
+/// body with a bare call instead (docs/dev/bugs#4).
+fn is_void_timer_call(expr: &Expression<'_>) -> bool {
+    if let Expression::CallExpression(call) = expr {
+        if let Expression::Identifier(id) = &call.callee {
+            return id.name.as_str() == "clearTimeout" || id.name.as_str() == "clearInterval";
+        }
+    }
+    false
+}
+
 impl<'a> CppTranslator<'a> {
     pub fn new(
         source: &'a str,
@@ -1224,6 +1237,20 @@ impl<'a> CppTranslator<'a> {
                 Some("JsValue".to_string())
             }
             Expression::Identifier(id) => self.ctx.var_types.get(id.name.as_str()).cloned(),
+            Expression::CallExpression(c) => {
+                // Timer handles are ints in the runtime (`task.h`): naming
+                // the type (instead of `auto`) lets escaping declarations
+                // wrap in `shared_ptr` so cleanup closures capture the
+                // handle safely (docs/dev/bugs#4).
+                if let Expression::Identifier(id) = &c.callee {
+                    match id.name.as_str() {
+                        "setTimeout" | "setInterval" => Some("int".to_string()),
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            }
             _ => None,
         }
     }
@@ -4474,6 +4501,17 @@ impl<'a> CppTranslator<'a> {
 
     fn emit_arrow(&mut self, f: &ArrowFunctionExpression<'a>) -> String {
         let capture = self.lambda_capture(&f.params);
+        // Nested arrows capture enclosing arrow locals (e.g. an effect's
+        // timer handle read by its cleanup closure): `lambda_capture`
+        // consults this depth, so it is raised before the body emits.
+        // The current arrow's own capture above still sees the outer depth.
+        self.ctx.arrow_depth += 1;
+        let out = self.emit_arrow_body(f, &capture);
+        self.ctx.arrow_depth -= 1;
+        out
+    }
+
+    fn emit_arrow_body(&mut self, f: &ArrowFunctionExpression<'a>, capture: &str) -> String {
         let is_async = f.r#async;
         let params = self.format_params(&f.params);
         let mut ret = if let Some(rt) = &f.return_type {
@@ -4522,6 +4560,13 @@ impl<'a> CppTranslator<'a> {
         if is_expr {
             if let Some(expr) = f.body.as_expression() {
                 let e = self.emit_expression(expr);
+                // `() => clearInterval(id)` lowers to the void runtime call
+                // `morph::clear_timer(id)`: `-> auto { return <void>; }` is
+                // ill-formed, so these arrows are `-> void` with a bare
+                // call instead (docs/dev/bugs#4).
+                if !is_async && is_void_timer_call(expr) {
+                    return format!("{capture}({params}) -> void {{ {e}; }}");
+                }
                 let kw = if is_async { "co_return" } else { "return" };
                 return format!("{}({}) -> {} {{ {} {}; }}", capture, params, ret, kw, e);
             }
@@ -4546,11 +4591,14 @@ impl<'a> CppTranslator<'a> {
     /// captures are held by value (`[&, count]`) so an escaping closure
     /// keeps its state alive; everything else keeps today's default.
     /// Names are sorted so output is deterministic across runs. File-scope
-    /// lambdas always stay `[]`: namespace scope forbids captures, and
-    /// file statics are visible without them. Parameters shadowing an
-    /// outer name are never captured: the body reads the parameter.
+    /// lambdas stay `[]` unless nested inside another arrow body, where
+    /// enclosing arrow locals (an effect's timer handle, say) must capture
+    /// like any function-local lambda (docs/dev/bugs#4). Namespace scope
+    /// forbids captures, and file statics are visible without them.
+    /// Parameters shadowing an outer name are never captured: the body
+    /// reads the parameter.
     fn lambda_capture(&self, params: &FormalParameters<'a>) -> String {
-        if self.ctx.fn_body_depth == 0 {
+        if self.ctx.fn_body_depth == 0 && self.ctx.arrow_depth == 0 {
             return "[]".to_string();
         }
         let scope = self.ctx.current_fn.clone().unwrap_or_default();
@@ -4789,5 +4837,18 @@ mod tests {
         assert_eq!(cpp_char_literal("a"), "'a'");
         assert_eq!(cpp_char_literal("\n"), "'\\n'");
         assert_eq!(cpp_char_literal("'"), "'\\''");
+    }
+
+    #[test]
+    fn clear_interval_expression_arrow_is_void() {
+        // `() => clearInterval(id)` lowers to the void runtime call
+        // `morph::clear_timer`: emitting `-> auto { return <void>; }`
+        // would not compile (docs/dev/bugs#4).
+        let out = translate_stmts("const cleanup = () => clearInterval(id);\n");
+        assert!(
+            out.contains("[]() -> void { morph::clear_timer(id); }"),
+            "{out}"
+        );
+        assert!(!out.contains("return morph::clear_timer"), "{out}");
     }
 }
