@@ -430,6 +430,12 @@ pub(crate) fn run(
     // scroll, ownership, …) — defines must match the headers emit()
     // computes, so routes scan here too.
     fs.scan(routes_ir.iter().map(|(_, w)| w));
+    // Stylesheet declarations enable features even when their classes apply
+    // dynamically at runtime (docs/dev/bugs#2): the IR static style never
+    // sees a runtime class swap, so the rules are scanned directly.
+    for (_, rule) in &css_rules {
+        fs.scan_css_map(&rule.properties);
+    }
     for (route, _) in &routes_ir {
         fs.note_route_ownership(&route.parent, route.modal, &route.role);
     }

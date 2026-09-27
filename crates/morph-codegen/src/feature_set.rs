@@ -1,5 +1,5 @@
 use morph_ir::{IRNode, IRStyle, IRWindow};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Default)]
 pub struct FeatureSet {
@@ -128,6 +128,39 @@ impl FeatureSet {
             "animation" | "animation-name" | "animation-duration" => vec!["animation"],
             _ => vec![],
         }
+    }
+
+    /// Enable features for raw CSS declarations (stylesheet rules and
+    /// conditional-class swaps). A `position: fixed` rule must keep
+    /// `MORPH_FEATURE_POSITION` linked even when its class applies
+    /// dynamically at runtime — the IR static style never sees that swap,
+    /// so scanning only static styles misses it (docs/dev/bugs#2).
+    /// Over-approx is safe: an unused rule only keeps a small behavior linked.
+    pub fn scan_css_map(&mut self, props: &HashMap<String, String>) {
+        for (prop, val) in props {
+            for f in Self::reactive_feature(prop) {
+                self.features.insert(f.into());
+            }
+            if prop.contains("color") {
+                self.features.insert("reactive_color".into());
+            }
+            if prop == "display" && val.trim() == "none" {
+                self.features.insert("display_none".into());
+            }
+            match prop.as_str() {
+                "flex" | "flex-grow" | "flex-shrink" | "flex-basis" => {
+                    self.features.insert("flex".into());
+                }
+                "border" | "border-top" | "border-right" | "border-bottom" | "border-left" => {
+                    self.features.insert("border".into());
+                }
+                "overflow-x" | "overflow-y" => {
+                    self.features.insert("scroll".into());
+                }
+                _ => {}
+            }
+        }
+        self.derive_features();
     }
 
     pub fn scan<'a>(&mut self, windows: impl IntoIterator<Item = &'a IRWindow>) {
@@ -303,33 +336,20 @@ impl FeatureSet {
                 // styles do — otherwise e.g. a swapped-in `display: none`
                 // compiles against a runtime with the behavior compiled out.
                 for eff in &node.class_conditional_effects {
-                    for (prop, val) in eff.on_styles.iter().chain(eff.off_styles.iter()) {
-                        for f in Self::reactive_feature(prop) {
-                            self.features.insert(f.into());
-                        }
-                        if prop.contains("color") {
-                            self.features.insert("reactive_color".into());
-                        }
-                        if prop == "display" && val.trim() == "none" {
-                            self.features.insert("display_none".into());
-                        }
-                        match prop.as_str() {
-                            "flex" | "flex-grow" | "flex-shrink" | "flex-basis" => {
-                                self.features.insert("flex".into());
-                            }
-                            "border" | "border-top" | "border-right" | "border-bottom"
-                            | "border-left" => {
-                                self.features.insert("border".into());
-                            }
-                            "overflow-x" | "overflow-y" => {
-                                self.features.insert("scroll".into());
-                            }
-                            _ => {}
-                        }
-                    }
+                    self.scan_css_map(&eff.on_styles);
+                    self.scan_css_map(&eff.off_styles);
                 }
             }
         }
+        self.derive_features();
+    }
+
+    /// Cross-feature implications: dirty rendering follows any interactive
+    /// feature, and animation always needs the transform-revert path.
+    /// Runs at the end of every scan entry point so independently-added
+    /// features (e.g. stylesheet rules scanned after the window walk) imply
+    /// the same machinery.
+    fn derive_features(&mut self) {
         if ["scroll", "event", "cursor", "animation", "hover", "active"]
             .iter()
             .any(|f| self.features.contains(*f))
@@ -723,6 +743,54 @@ mod tests {
                 fs.required_defines().contains(&"MORPH_FEATURE_OWNERSHIP".to_string()),
                 "{target:?} should enable ownership"
             );
+        }
+    }
+
+    #[test]
+    fn stylesheet_position_rule_enables_position_feature() {
+        // Regression for docs/dev/bugs#2: `.toast { position: fixed }` must
+        // keep MORPH_FEATURE_POSITION linked even when no static node style
+        // carries it (the class applies dynamically at runtime).
+        let win = text_window("plain", "__text__");
+        let mut fs = FeatureSet::new();
+        fs.scan(std::slice::from_ref(&win));
+        assert!(!fs.required_defines().contains(&"MORPH_FEATURE_POSITION".to_string()));
+        let props = HashMap::from([
+            ("position".to_string(), "fixed".to_string()),
+            ("bottom".to_string(), "22px".to_string()),
+        ]);
+        fs.scan_css_map(&props);
+        assert!(fs.required_defines().contains(&"MORPH_FEATURE_POSITION".to_string()));
+    }
+
+    #[test]
+    fn static_position_style_enables_position_feature() {
+        let mut win = text_window("plain", "__text__");
+        win.nodes[0].style.position = "fixed".to_string();
+        let mut fs = FeatureSet::new();
+        fs.scan(std::slice::from_ref(&win));
+        assert!(fs.required_defines().contains(&"MORPH_FEATURE_POSITION".to_string()));
+    }
+
+    #[test]
+    fn stylesheet_shorthands_enable_matching_features() {
+        let mut fs = FeatureSet::new();
+        let props = HashMap::from([
+            ("display".to_string(), "none".to_string()),
+            ("overflow-x".to_string(), "auto".to_string()),
+            ("border".to_string(), "1px solid #fff".to_string()),
+            ("flex".to_string(), "1".to_string()),
+        ]);
+        fs.scan_css_map(&props);
+        let defines = fs.required_defines();
+        for want in [
+            "MORPH_FEATURE_DISPLAY_NONE",
+            "MORPH_FEATURE_SCROLL",
+            "MORPH_FEATURE_BORDER",
+            "MORPH_FEATURE_FLEX",
+            "MORPH_FEATURE_DIRTY_RENDERING",
+        ] {
+            assert!(defines.contains(&want.to_string()), "{want} should be defined");
         }
     }
 }
