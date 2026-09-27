@@ -180,7 +180,9 @@ inline TextAlign parseTextAlign(std::string_view s)
 
 inline FontWeight parseFontWeight(std::string_view s)
 {
-    if (s == "bold" || s == "700" || s == "800" || s == "900")
+    // CSS Fonts 4 §5.2: with only 400/700 faces available, a desired
+    // weight of 600+ matches the bold face (ascending from 600 hits 700).
+    if (s == "bold" || s == "600" || s == "700" || s == "800" || s == "900")
         return FontWeight::Bold;
     return FontWeight::Normal;
 }

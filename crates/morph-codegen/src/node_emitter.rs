@@ -50,6 +50,7 @@ pub(crate) fn style_enum_literal(prop: &str, value: &str) -> Option<&'static str
         ("textAlign", "justify") => Some("CSS::TextAlign::Justify"),
         ("fontWeight", "normal") => Some("CSS::FontWeight::Normal"),
         ("fontWeight", "bold")
+        | ("fontWeight", "600")
         | ("fontWeight", "700")
         | ("fontWeight", "800")
         | ("fontWeight", "900") => Some("CSS::FontWeight::Bold"),
@@ -2280,7 +2281,7 @@ mod tests {
         assert_eq!(style_enum_literal("fontWeight", "bold"), Some("CSS::FontWeight::Bold"));
         assert_eq!(style_enum_literal("fontWeight", "900"), Some("CSS::FontWeight::Bold"));
         assert_eq!(style_enum_literal("fontWeight", "normal"), Some("CSS::FontWeight::Normal"));
-        assert_eq!(style_enum_literal("fontWeight", "600"), None);
+        assert_eq!(style_enum_literal("fontWeight", "600"), Some("CSS::FontWeight::Bold"));
         assert_eq!(
             style_enum_literal("flexDirection", "column"),
             Some("CSS::FlexDirection::Column")
