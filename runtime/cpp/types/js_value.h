@@ -606,6 +606,21 @@ inline JsString operator+(const JsString& a, const JsValue& b) {
 inline JsString operator+(const JsValue& a, const JsString& b) {
     return _js_to_string(a) + b.value;
 }
+// string-literal + JsValue (`"" + payload.message`): without these the
+// literal converts equally well to JsString and JsValue, so overload
+// resolution is ambiguous and the expression does not compile.
+inline JsString operator+(const char* a, const JsValue& b) {
+    return std::string(a) + _js_to_string(b);
+}
+inline JsString operator+(const JsValue& a, const char* b) {
+    return _js_to_string(a) + std::string(b);
+}
+inline JsString operator+(const std::string& a, const JsValue& b) {
+    return a + _js_to_string(b);
+}
+inline JsString operator+(const JsValue& a, const std::string& b) {
+    return _js_to_string(a) + b;
+}
 
 // ── JsValue arithmetic (extract numbers, fall back to undefined) ──
 
