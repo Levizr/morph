@@ -18,6 +18,7 @@ pub struct IRBuilder {
     counter: std::cell::Cell<usize>,
     type_mode: morpher::TypeMode,
     app_window: Option<(String, u32, u32)>,
+    project_root: Option<PathBuf>,
 }
 
 impl IRBuilder {
@@ -27,6 +28,7 @@ impl IRBuilder {
             counter: std::cell::Cell::new(0),
             type_mode: morpher::TypeMode::default(),
             app_window: None,
+            project_root: None,
         }
     }
 
@@ -45,6 +47,34 @@ impl IRBuilder {
     pub const fn with_type_mode(mut self, mode: morpher::TypeMode) -> Self {
         self.type_mode = mode;
         self
+    }
+
+    /// Project root for resolving user `.cpp` imports: the importing
+    /// module's directory wins, the project root is the fallback (the same
+    /// two-anchor rule component, CSS, and TS imports already use). Without
+    /// it only the module directory is tried.
+    #[must_use]
+    pub fn with_project_root(mut self, root: PathBuf) -> Self {
+        self.project_root = Some(root);
+        self
+    }
+
+    /// Resolve a user `.cpp` import against the importing module's directory
+    /// first, then the project root (docs/dev/bugs#3). An unresolvable path
+    /// keeps the module-anchored form so the later compiler error points at
+    /// the import as written.
+    fn resolve_cpp_import(&self, base: &Path, raw: &str) -> PathBuf {
+        let first = base.join(raw);
+        if first.is_file() {
+            return first.canonicalize().unwrap_or(first);
+        }
+        if let Some(root) = self.project_root.as_ref() {
+            let second = root.join(raw);
+            if second.is_file() {
+                return second.canonicalize().unwrap_or(second);
+            }
+        }
+        first.canonicalize().unwrap_or(first)
     }
 
     /// Assign the next flat `node_NNNN` id (Python-style global counter).
@@ -240,8 +270,7 @@ impl IRBuilder {
                 .map(|ci| {
                     let base =
                         Path::new(&source.filename).parent().unwrap_or_else(|| Path::new("."));
-                    let path = base.join(&ci.path);
-                    let abs_path = path.canonicalize().unwrap_or(path);
+                    let abs_path = self.resolve_cpp_import(base, &ci.path);
                     let mut m = HashMap::new();
                     m.insert("path".into(), abs_path.display().to_string());
                     m.insert("specifiers".into(), ci.specifiers.join(", "));
@@ -471,8 +500,7 @@ impl IRBuilder {
             }
             let base = module.dir.clone();
             for ci in &module.source.cpp_imports {
-                let path = base.join(&ci.path);
-                let abs_path = path.canonicalize().unwrap_or(path);
+                let abs_path = self.resolve_cpp_import(&base, &ci.path);
                 let key = abs_path.display().to_string();
                 if !seen_cpp.insert(key.clone()) {
                     continue;
@@ -676,8 +704,7 @@ impl IRBuilder {
             }
             let base = module.dir.clone();
             for ci in &module.source.cpp_imports {
-                let path = base.join(&ci.path);
-                let abs_path = path.canonicalize().unwrap_or(path);
+                let abs_path = self.resolve_cpp_import(&base, &ci.path);
                 let key = abs_path.display().to_string();
                 if !seen_cpp.insert(key.clone()) {
                     continue;
@@ -6031,6 +6058,37 @@ export function Badge(props: { text: number }) {
     fn build_root(root: &Path) -> Vec<IRWindow> {
         let graph = morph_parser::resolve_graph(&root.join("App.mx"), root).unwrap();
         IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).expect("build_with_graph")
+    }
+
+    #[test]
+    fn cpp_import_falls_back_to_project_root() {
+        // Regression for docs/dev/bugs#3: `import { f } from 'cpp/x.cpp'`
+        // resolves project-root-relative when the module-anchored candidate
+        // does not exist (same two-anchor rule as CSS/TS imports).
+        let root = scratch("cpp-root");
+        write_file(
+            &root,
+            "src/App.mx",
+            "import { Clock } from './components/Clock.mx'\nexport default function App() { return (<body><Clock /></body>) }",
+        );
+        write_file(
+            &root,
+            "src/components/Clock.mx",
+            "import { osTime } from 'cpp/clock/clock.cpp'\nexport function Clock() { return (<div><text>{osTime()}</text></div>) }",
+        );
+        write_file(&root, "cpp/clock/clock.cpp", "JsString osTime() { return \"t\"; }\n");
+        let graph = morph_parser::resolve_graph(&root.join("src/App.mx"), &root).unwrap();
+        let plain = IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).expect("build");
+        let plain_path = plain[0].cpp_imports[0].get("path").cloned().unwrap_or_default();
+        assert!(!Path::new(&plain_path).is_file(), "module-anchored miss: {plain_path}");
+        let rooted = IRBuilder::new()
+            .with_project_root(root.clone())
+            .build_with_graph(&graph, &[], &HashMap::new())
+            .expect("build");
+        let rooted_path = rooted[0].cpp_imports[0].get("path").cloned().unwrap_or_default();
+        assert!(Path::new(&rooted_path).is_file(), "project-root hit: {rooted_path}");
+        assert!(rooted_path.ends_with("cpp/clock/clock.cpp"), "{rooted_path}");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     fn route_entry(id: &str) -> morph_parser::routes::RouteEntry {

@@ -35,6 +35,10 @@ double area(double w, double h) {
 3. Functions are callable directly from JSX event handlers
 4. `morph_api.h` is generated with signal/channel definitions plus thin wrappers, so C++ can read/write state, emit events, and address tagged instances
 
+Import paths resolve against the importing `.mx` file's directory first,
+then the project root — so `src/components/Clock.mx` can reach shared
+native code either as `../../cpp/clock/clock.cpp` or as `cpp/clock/clock.cpp`.
+
 ## Generated Headers
 
 User C++ includes one header: `morph_api.h`. Two headers are generated per project, split by ownership:

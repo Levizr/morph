@@ -451,11 +451,14 @@ fn build_windows(cmd: &Session) -> Result<Vec<morph_ir::IRWindow>> {
         .ok_or_else(|| anyhow::anyhow!("component graph has no entry module"))?;
     let entry_path = cmd.cwd.join(&cmd.entry);
     let (css_rules, css_keyframes) = collect_css(&cmd.cwd, &entry_path, &entry_mod.source.imports);
-    let builder = morph_ir::IRBuilder::new().with_type_mode(cmd.type_mode).with_app_window(
-        cmd.app_window.0.clone(),
-        cmd.app_window.1,
-        cmd.app_window.2,
-    );
+    let builder = morph_ir::IRBuilder::new()
+        .with_type_mode(cmd.type_mode)
+        .with_project_root(cmd.cwd.clone())
+        .with_app_window(
+            cmd.app_window.0.clone(),
+            cmd.app_window.1,
+            cmd.app_window.2,
+        );
     let windows = builder.build_with_graph(&cmd.graph, &css_rules, &css_keyframes)?;
     if windows.is_empty() {
         anyhow::bail!("Build failed — no windows in {}", cmd.entry);
