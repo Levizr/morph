@@ -8,6 +8,7 @@ Everything on Morph's roadmap, documented in detail. Each feature page covers wh
 |---|---|---|---|
 | `<morph-viewport>` — embedded OpenGL canvas | [Viewport](viewport.md) | High | — |
 | Imperative `Window` / `App` API | [Window API](window-api.md) | High | — |
+| Window ownership (`parent` / `modal` / `role`) | [Window Ownership](shipped/window-ownership.md) | ✅ Shipped | Window API |
 | File-based windows & pages (`route.mx` convention) | [File Routing](file-routing.md) | High | Window API |
 | `Menu` / `Tray` / `Dialog` / `Notification` modules | [Native Modules](native-modules.md) | Medium | Window API |
 | Multi-window navigation (`useWindow`) | [Multi-Window](multi-window.md) | High | File Routing |
@@ -26,10 +27,10 @@ Everything on Morph's roadmap, documented in detail. Each feature page covers wh
 | Hidden classes, compositor-safe properties | [Performance](performance.md) | Low | — |
 | Full Rust runtime (`--lang rust`, cross-language interop) | [Rust Support](rust.md) | High | — |
 | Vulkan / Metal / DirectX backends (pluggable graphics) | [Graphics APIs](graphics-api.md) | High | — |
-| Rust compiler (SWC/Oxc) + native CLI, Python removed | [Rust Compiler](compiler.md) | ✅ Shipped (Sept 2026) | — |
+| Rust compiler (SWC/Oxc) + native CLI, Python removed | [Rust Compiler](shipped/compiler.md) | ✅ Shipped (Sept 2026) | — |
 | **State, Events & Native C++ Interop** | [State/Events/Native](state-events-native-interop.md) | High | Rust Compiler |
 | **Universal Module Bindings** (import/export/native calls for functions, vars, classes) | [Module Bindings](universal-module-bindings.md) | High | State/Events/Native |
-| **Kill All Runtime Strings** (CSS/node/value enums, hash lookups) | [Kill Strings](kill-runtime-strings.md) | High | State/Events/Native |
+| **Kill All Runtime Strings** (CSS/node/value enums, hash lookups) | [Kill Strings](shipped/kill-runtime-strings.md) | ✅ Complete (Sept 2026) | — |
 | **Dynamic Styles & Classes** (state-driven keyword styles, dynamic className) | [Dynamic Styles](dynamic-styles.md) | Medium | Kill Strings |
 
 **Status meanings:** `production` — shipped and stable · `beta` — shipped, known bugs · `development` — under active construction · `future` — planned, not built yet.

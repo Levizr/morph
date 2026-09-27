@@ -73,8 +73,8 @@ On scroll of an `overflow: auto/scroll` container, **don't re-raster** — shift
 |---|---|
 | Flash/Forge seam + dev toggle | ✅ Shipped |
 | `DamageSet` + retained FBO + damage-limited present | ✅ Shipped (beta, known bugs) |
-| Tile pool (`TileKey`/`Tile`/`TilePool` + LRU) | ❌ Phase 4 |
-| Retained layers (`RetainedLayer`) | ❌ Phase 5 |
+| Tile pool (`TileKey`/`Tile`/`TilePool` + LRU) | ✅ Shipped (`runtime/cpp/renderers/forge/tile.h`, `tile_pool.h` — 16 MB default budget, epoch + LRU eviction) |
+| Retained layers (`RetainedLayer`) | ✅ Shipped (`runtime/cpp/renderers/forge/layer.h`) |
 | Scroll-shift (`scroll_shift.cpp`) | ❌ Phase 6 |
 | Production single-renderer builds | ❌ Phase 8 |
 

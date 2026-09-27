@@ -4,7 +4,7 @@
 
 People ask this a lot. The toolchain (parser, compiler, code generator) is Python — why not something "fast"?
 
-The answer is in the [compiler page](../future/compiler.md) ("Why Python first — and why the move now"), but in short:
+The answer is in the [compiler page](../future/shipped/compiler.md) ("Why Python first — and why the move now"), but in short:
 
 ## Concept validation came first
 
@@ -24,4 +24,4 @@ The most important point: **Python is build-time only**. It never runs in the ap
 
 ## The catch
 
-Python is slow at *compile time*, and as real projects get bigger, that starts to hurt — hot reload rebuilds the IR constantly, and interpreter startup + dict-heavy IR adds up. That's exactly why the roadmap moves the compiler to Rust (SWC/Oxc) for a native CLI ([Rust Compiler & Native CLI](../future/compiler.md)). But Python is the reason Morph exists at all — it was the fastest possible way to find out whether the idea could work.
+Python is slow at *compile time*, and as real projects get bigger, that starts to hurt — hot reload rebuilds the IR constantly, and interpreter startup + dict-heavy IR adds up. That's exactly why the roadmap moves the compiler to Rust (SWC/Oxc) for a native CLI ([Rust Compiler & Native CLI](../future/shipped/compiler.md)). But Python is the reason Morph exists at all — it was the fastest possible way to find out whether the idea could work.

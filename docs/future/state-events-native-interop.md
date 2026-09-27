@@ -388,7 +388,7 @@ This is the best design we've found given the constraints (zero runtime strings,
 - [FAQ: choosing API](../api/faq/choosing.md) · [FAQ: morphShared](../api/faq/morphShared.md) · [FAQ: morphEvent](../api/faq/morphEvent.md)
 - [Dev Internals: State & Events](../dev/state/state-events-internals.md) — compiler pipeline details
 - [C++ / JSX Interop Guide](../guides/native-cpp.md) — user-facing native.cpp guide
-- [Compiler & CLI](compiler.md) — Rust compiler shipped Sept 2026
+- [Compiler & CLI](shipped/compiler.md) — Rust compiler shipped Sept 2026
 
 ---
 

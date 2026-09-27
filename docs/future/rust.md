@@ -126,7 +126,7 @@ The `TSToCppTranslator` gets a sibling translator. Type mapping:
 
 `morph translate file.ts --lang rust` emits `.rs`. The existing `morph check` diagnostics apply unchanged — they audit the JS surface, not the backend.
 
-> **Related:** the toolchain is already in Rust (Oxc parsing, native CLI, Python removed) — see [Rust Compiler](compiler.md).
+> **Related:** the toolchain is already in Rust (Oxc parsing, native CLI, Python removed) — see [Rust Compiler](shipped/compiler.md).
 
 ## What stays identical for users
 

@@ -1,20 +1,23 @@
 # Dynamic Styles & Classes (Runtime Path)
 
-**Status:** `future` · **Priority:** medium · **Shipped parts:** none (deferred; investigation done, plan below)
+**Status:** `future` · **Priority:** medium · **Shipped parts:** template-literal `className`, state-driven float/color/inline styles ([user docs](../guides/dynamic-styles.md), proven by `examples/dynamic`)
 
-> State-driven `:style` values on keyword fields and fully-dynamic `:class` bindings. Static dynamics already resolve at compile time; this page tracks what is left for the runtime path. No performance emergency: see §3.
+> State-driven `:style` values on **keyword (enum) fields** and fully-dynamic `:class` bindings. Everything else dynamic already resolves — this page tracks only the runtime path that remains. No performance emergency: see §3.
 
 ---
 
-## 1. What Works Today (Compile Time)
+## 1. What Works Today (Shipped)
 
+- **Template-literal classes** (`` className={`header ${theme == "light" ? "bg-white" : "bg-gray-900"}} ``) — each branch becomes a reactive style effect ([user docs](../guides/dynamic-styles.md), `examples/dynamic`).
+- **State-driven float/color/inline styles** (`style={{ width: bodyWidth, backgroundColor: accent }}`) — the `float`/`color` emitter arms handle any expression.
 - **Ternary classes** (`:class="cond ? 'a' : 'b'"`) resolve each branch to static styles at build time (`analyze_dynamic_class` in `morph-ir`). No runtime selector matching exists — in either flow.
 - **Static style values** (stylesheet rules, hover/active diffs, conditional-class branches) emit enum literals after Kill-Strings batches 1–2.
+- **Runtime `parseX` helpers exist** (`CSS::parseDisplay`, `parseOverflow`, … in `runtime/cpp/style/css_enums.h`) — the emitter side below is the only missing piece.
 - **Fully-dynamic `:class="someVar"`** never applied styles at all — `setClassName` only *tracks* the string for the inspector. Nothing re-matches selectors at runtime.
 
 ## 2. The Gap
 
-**State-driven `:style` values on converted keyword fields.** `:style="{display: myDisplay}"` translates the *expression* (`__st_myDisplay.get()`), but the emitters only know how to emit static literals — a string lands in an enum field and compilation fails. Pre-Kill-Strings this "worked" via runtime string compares (the exact cost that project kills).
+**State-driven `:style` values on converted keyword fields.** `:style="{display: myDisplay}"` translates the *expression* (`__st_myDisplay.get()`), but both emitters only know the string path — `node_emitter.rs` (`"string"` arm) and `logic_emitter.rs::emit_style_effects` (`"string"` arm) emit `style.display = morph::str(expr)`, and `display` is now a `CSS::Display` enum, so compilation fails. Pre-Kill-Strings this "worked" via runtime string compares (the exact cost that project kills).
 
 ## 3. Performance Analysis (Why This Can Wait)
 
@@ -53,4 +56,4 @@ Dynamic classes cost nothing (compile-time resolved; the fully-dynamic form is a
 
 ---
 
-*Related: [Kill All Runtime Strings](kill-runtime-strings.md) · [C++ / JSX Interop Guide](../guides/native-cpp.md)*
+*Related: [Kill All Runtime Strings](shipped/kill-runtime-strings.md) · [C++ / JSX Interop Guide](../guides/native-cpp.md)*

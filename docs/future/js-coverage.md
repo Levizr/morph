@@ -15,7 +15,7 @@ The translator (`crates/morpher/`) is the heart of the "write JS, get native bin
 - Statements: `if`/`while`/`for`/`do-while`/`switch`/`try-catch`/`throw`, variable declarations, functions + arrow functions, classes/interfaces (inheritance, `super`, generics), `return`/`break`/`continue`
 - Expressions: binary/unary/ternary/sequence/update/assignment, template literals, array literals **with spread**, object literals, `new`, member access, calls, `await`
 - Builtins: `fetch()`, `console.*`, `setTimeout`/`setInterval`/`clearTimeout`, `morphState`/`morphEffect`, `Error`
-- Value semantics: truthiness, `==`/`!=`, `typeof`, string concatenation coercion, array `push`/`pop`/index, object `has`/`keys`, string `toUpperCase`/`toLowerCase`/`trim`/`indexOf`/`substring`/`slice`/`replace`/`charAt`
+- Value semantics: truthiness, `==`/`!=`, `typeof`, string concatenation coercion, array `push`/`pop`/index, object `has`/`keys`, string `toUpperCase`/`toLowerCase`/`trim`/`indexOf`/`substring`/`slice`/`replace`/`charAt`/`split`/`includes`/`startsWith`/`endsWith`, optional chaining `?.`, nullish coalescing `??`
 
 ## Missing — operators (currently compiled to `/* comment */` or rejected)
 
@@ -27,7 +27,7 @@ The translator (`crates/morpher/`) is the heart of the "write JS, get native bin
 | `void` / `delete` | `/* void */` / `/* delete */` | JS idioms |
 | `&&=` / `\|\|=` / `??=` | `/* ... */` | shorthand assign |
 | `instanceof` / `in` | error | type/containment checks |
-| Optional chaining `?.` | error ("null check silently dropped") | safe deep access |
+| Optional chaining `?.` | ✅ Shipped (`emit_chain` in morpher) | safe deep access |
 | Generator functions / `yield` | error | lazy sequences |
 | `for...in` / `for...of` | error | iteration over keys/values |
 | Destructuring (except `morphState` pattern) | error | multi-return unpacking |
@@ -54,9 +54,9 @@ Interesting candidates (the ones a native UI framework plausibly implements):
 State values implement only `{length, push, pop, get, toString}`. Strings implement `{length, empty, toUpperCase, toLowerCase, substring, slice, charAt, indexOf, replace, trim, toString}`.
 
 - **Arrays:** `map`, `filter`, `forEach`, `reduce`, `includes`, `indexOf`, `find`, `join`, `concat`, `sort`
-- **Strings:** `split`, `includes`, `startsWith`, `endsWith`, `padStart`, `padEnd`, `repeat`, `match`
+- **Strings:** `startsWith`/`endsWith`/`includes`/`split` ✅ shipped; still missing: `padStart`, `padEnd`, `repeat`, `match`
 
-`split` and array `map`/`filter`/`forEach`/`includes` are the highest-value additions — they'd cover most real-world UI logic.
+Array `map`/`filter`/`forEach`/`includes` are the highest-value additions — JSX list rendering already does `.map` in templates, but the general method form is unbuilt.
 
 ## Note on `morph check`
 
@@ -67,13 +67,14 @@ All of the above are already audited with precise diagnostics and suggestions (`
 | Piece | State |
 |---|---|
 | Array spread + `slice` + `.length` semantics | ✅ Shipped (latest cycle) |
+| Optional chaining `?.` + `??` + `String.split/includes/startsWith/endsWith` | ✅ Shipped |
 | Operator / builtin / method coverage above | ❌ Missing (each item either comments itself out or errors) |
 | `morph check` diagnostics for every missing item | ✅ Shipped |
 
 ## Suggested order
 
 1. `Math` + `parseInt`/`parseFloat` (trivial, high usage)
-2. `Array.map/filter/forEach/includes` (JSX list rendering already does `.map` — the pattern is proven)
-3. `String.split/includes/startsWith/endsWith`
-4. Optional chaining `?.` (biggest ergonomics win)
+2. `Array.map/filter/forEach/includes` (JSX list rendering already does `.map` in templates — the pattern is proven)
+3. ~~`String.split/includes/startsWith/endsWith`~~ ✅ Shipped
+4. ~~Optional chaining `?.` (biggest ergonomics win)~~ ✅ Shipped
 5. `Map`/`Set`, `Date`, `JSON`, `requestAnimationFrame`

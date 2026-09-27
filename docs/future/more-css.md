@@ -4,7 +4,7 @@
 
 > **Note:** This is a future plan, not a commitment. The syntax and API shown here are proposals — they can be completely different when actually implemented.
 
-Three CSS features with existing scaffolding or a long-standing spot on the roadmap.
+Three CSS features — one shipped, two with dormant scaffolding.
 
 ## `box-shadow`
 
@@ -37,12 +37,12 @@ struct BoxShadow {
 
 ## Margin collapse
 
-Already on the v0.1.0 list. **Planned behavior (CSS 2.1 §8.3.1):**
+~~Already on the v0.1.0 list.~~ **Shipped** — implemented in `runtime/cpp/core/node/layout.cpp` behind `MORPH_FEATURE_MARGIN_COLLAPSE` (CSS 2.1 §8.3.1):
 
 - Adjacent vertical margins collapse to the larger of the two
-- Empty elements' top/bottom margins collapse together
-- Collapsing suppressed by padding/border/clearance, or by `overflow: hidden` ancestors
-- Layout-engine change in `crates/morph-ir/` (Rust) + `runtime/cpp/core/layout.cpp` (C++) — must stay pixel-identical between dev and build modes
+- Parent–child collapse-through via `m_computedMargin` (boundary-less block parents pass first-child top / last-child bottom margins up)
+- Collapsing suppressed by padding/border, inline content before/after, and flex containers
+- Provisional-then-final child layout keeps the first pass correct (no stale margins)
 
 ## Why low priority
 
@@ -55,11 +55,11 @@ Already on the v0.1.0 list. **Planned behavior (CSS 2.1 §8.3.1):**
 |---|---|
 | `BoxShadow` / `ShadowStyle` structs | ✅ Declared, dormant |
 | `OutlineStyle` struct | ✅ Declared, dormant |
-| Margin collapse | ❌ Not started (roadmap item) |
+| Margin collapse | ✅ Shipped (`MORPH_FEATURE_MARGIN_COLLAPSE` in `layout.cpp`) |
 | SDF shadow rendering | ❌ Not started |
 
-## Build steps (when picked up)
+## Build steps (remaining)
 
 1. `box-shadow`: include `shadow.h` in `style.h`, emit `MORPH_FEATURE_SHADOW` in `feature_set.py`, add parser + SDF shader path
 2. `outline`: same wiring + draw outside the box
-3. Margin collapse: implement in the Python layout engine, mirror in C++, add collapse suppression cases to the flexbox tests
+3. ~~Margin collapse: implement in the Python layout engine, mirror in C++, add collapse suppression cases to the flexbox tests~~ ✅ Shipped (Rust + C++, feature-gated)

@@ -2057,10 +2057,10 @@
         "changefreq": "monthly"
       },
       {
-        "title": "Morph Window Ownership: Parent, Modal & Role (Planned)",
+        "title": "Morph Window Ownership: Parent, Modal & Role (Shipped)",
         "slug": "future/window-ownership",
-        "file": "future/window-ownership",
-        "status": "future",
+        "file": "future/shipped/window-ownership",
+        "status": "production",
         "author": "PIYUSH",
         "description": "Window ownership shipped record for Morph: parent/child relationships, modal close-blocking, presentation roles, owner cascade, modal follow, plus invariants and remainders.",
         "keywords": [
@@ -2116,6 +2116,25 @@
         "changefreq": "monthly"
       },
       {
+        "title": "Morph Route Mounts & Per-Instance State (Design Record)",
+        "slug": "future/route-mounts",
+        "file": "future/route-mounts",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "Route mounts design record for Morph: per-mount state contexts, scoped effects, per-mount mid dispatch, JsObject props extraction, and the page-cache model behind independent windows.",
+        "keywords": [
+          "morph route mounts",
+          "morph per-instance state",
+          "morph mount context",
+          "morph route props",
+          "morph page cache"
+        ],
+        "lastUpdated": "2026-09-27",
+        "publishedAt": "2026-09-27",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
         "title": "Morph Menu, Tray, Dialog & Notification (Planned)",
         "slug": "future/native-modules",
         "file": "future/native-modules",
@@ -2158,14 +2177,14 @@
         "file": "future/forge-renderer",
         "status": "future",
         "author": "PIYUSH",
-        "description": "Future work planned for the Morph forge renderer: a tile pool, retained layers, and scroll-shift for faster GPU rendering.",
+        "description": "Future work for the Morph forge renderer: tile pool and retained layers shipped, scroll-shift and production single-renderer builds remain.",
         "keywords": [
           "morph forge tile pool",
           "morph retained layers",
           "morph scroll shift",
           "morph gpu rendering future"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-27",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2194,14 +2213,14 @@
         "file": "future/js-coverage",
         "status": "future",
         "author": "PIYUSH",
-        "description": "Broader TypeScript-to-C++ translator coverage planned for Morph: more of your everyday JavaScript running natively without caveats.",
+        "description": "TypeScript-to-C++ translator coverage in Morph: optional chaining, nullish coalescing, and more string methods shipped; Math, JSON, Map/Set, and array higher-order methods remain.",
         "keywords": [
           "morph typescript coverage",
           "morph javascript translator",
           "morph c++ translator",
           "morph js feature coverage"
         ],
-        "lastUpdated": "2026-09-14",
+        "lastUpdated": "2026-09-27",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2212,7 +2231,7 @@
         "file": "future/text-input",
         "status": "future",
         "author": "PIYUSH",
-        "description": "Text input planned for Morph: caret, focus, selection, and full keyboard input so text fields behave like a real native control.",
+        "description": "Text input in Morph: caret, focus, selection, undo/redo, and clipboard are shipped in InputNode with user docs; select/textarea and the :focus pseudo-class remain future.",
         "keywords": [
           "morph text input",
           "morph caret focus",
@@ -2220,7 +2239,7 @@
           "morph keyboard input",
           "morph input field"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-27",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2231,14 +2250,14 @@
         "file": "future/more-css",
         "status": "future",
         "author": "PIYUSH",
-        "description": "More CSS planned for Morph: box-shadow, outline, and proper margin collapse for richer, more web-like styling.",
+        "description": "More CSS in Morph: margin collapse shipped behind MORPH_FEATURE_MARGIN_COLLAPSE; box-shadow, outline, and SDF shadow rendering remain future.",
         "keywords": [
           "morph box-shadow",
           "morph outline css",
           "morph margin collapse",
           "morph more css properties"
         ],
-        "lastUpdated": "2026-09-14",
+        "lastUpdated": "2026-09-27",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2431,7 +2450,7 @@
       {
         "title": "Morph Rust Compiler & Native CLI (Shipped)",
         "slug": "future/compiler",
-        "file": "future/compiler",
+        "file": "future/shipped/compiler",
         "status": "production",
         "author": "PIYUSH",
         "description": "Morph's Rust compiler and native CLI, shipped September 2026: Oxc parsing, lightningcss, the full Rust CLI (morphc), intent-based codegen, and Python removed from the repository.",
@@ -2501,10 +2520,10 @@
         "changefreq": "monthly"
       },
       {
-        "title": "Kill All Runtime Strings",
+        "title": "Kill All Runtime Strings (Shipped)",
         "slug": "future/kill-runtime-strings",
-        "file": "future/kill-runtime-strings",
-        "status": "development",
+        "file": "future/shipped/kill-runtime-strings",
+        "status": "production",
         "author": "PIYUSH",
         "description": "Replace every hot-path runtime string (style values, node types, JsObject/JsArray lookups) with enums, hashes, and convert-once-at-boundary: per-layer changes, behavior contract, and batches.",
         "keywords": [
@@ -2524,14 +2543,14 @@
         "file": "future/dynamic-styles",
         "status": "future",
         "author": "PIYUSH",
-        "description": "State-driven :style values on keyword fields and fully-dynamic :class bindings: what resolves at compile time, the runtime gap, performance analysis, and the scheduled fix plan.",
+        "description": "State-driven :style values on keyword fields and fully-dynamic :class bindings: template-literal classes and float/color styles shipped, the enum-field runtime gap, and the scheduled fix plan.",
         "keywords": [
           "morph dynamic styles",
           "reactive style runtime",
           "dynamic className",
           "keyword parse wrapper"
         ],
-        "lastUpdated": "2026-09-19",
+        "lastUpdated": "2026-09-27",
         "publishedAt": "2026-09-19",
         "priority": 0.6,
         "changefreq": "monthly"

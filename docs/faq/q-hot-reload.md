@@ -15,4 +15,4 @@ So the compiled core (the renderer, the window, the layout engine) never restart
 
 CSS and JSX structure changes re-run the front of the pipeline (parse → IR → node tree) and re-mount the affected part of the tree. Your app state persists across the swap, and the loop is near-instant for small changes.
 
-The [Dev Mode](../concepts/dev-mode.md) page has the full pipeline diagram. And when the compiler moves to Rust ([Rust Compiler & Native CLI](../future/compiler.md)), this loop gets dramatically faster — compile time is the only slow part of the cycle.
+The [Dev Mode](../concepts/dev-mode.md) page has the full pipeline diagram. And when the compiler moves to Rust ([Rust Compiler & Native CLI](../future/shipped/compiler.md)), this loop gets dramatically faster — compile time is the only slow part of the cycle.
