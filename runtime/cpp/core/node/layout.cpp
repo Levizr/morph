@@ -27,6 +27,7 @@ static float vBonus(const MorphStyle& s) {
 #endif
 }
 
+#ifdef MORPH_FEATURE_INLINE
 // Translate every descendant by (dx, dy) so the subtree keeps the relative
 // layout its own passes computed (inline runs stay side-by-side, blocks
 // stay stacked). Used when a parent moves an item without re-laying it out.
@@ -40,6 +41,57 @@ static void shiftChildrenSubtree(MorphNode* n, float dx, float dy)
     }
 }
 
+// True for inline-level containers with no box decoration of their own
+// (no background, border, padding, margins, explicit size, scrolling):
+// browsers lay their children out in the parent flow instead of treating
+// the box as atomic, so links and spans can break across lines mid-text.
+static bool isTransparentInline(MorphNode* n)
+{
+    if (n->style.display != CSS::Display::Inline) return false;
+    if (n->style.bgColor[3] != 0.0f) return false;
+#ifdef MORPH_FEATURE_BORDER
+    if (n->style.borderWidth != 0.0f) return false;
+#endif
+    if (n->style.padding[0] != 0.0f || n->style.padding[1] != 0.0f
+        || n->style.padding[2] != 0.0f || n->style.padding[3] != 0.0f)
+        return false;
+    if (n->style.margin[0] != 0.0f || n->style.margin[1] != 0.0f
+        || n->style.margin[2] != 0.0f || n->style.margin[3] != 0.0f)
+        return false;
+    if (n->style.explicitWidth >= 0.0f || n->style.explicitHeight >= 0.0f) return false;
+    if (n->scrollEnabled) return false;
+    if (n->style.overflow != CSS::Overflow::Visible) return false;
+    for (auto* c : n->children)
+    {
+        if (c->style.display != CSS::Display::Inline
+            && c->style.display != CSS::Display::InlineBlock
+            && c->type != NodeType::Text && c->type != NodeType::Expr)
+            return false;
+    }
+    return true;
+}
+
+// Push a node into the inline run, splicing transparent inline containers
+// (links, spans) so their children flow directly: order preserved, tree
+// untouched (paint, hit-testing and events still resolve through it).
+// Spliced containers are recorded in unwrapped (pre-order); their boxes
+// are rebuilt from children at the end of the run, so a later real layout
+// of the container (dirty flags) repositions children identically instead
+// of clobbering run positions with stale ones.
+static void pushInlineRunNode(std::vector<MorphNode*>& run, MorphNode* n,
+                              std::vector<MorphNode*>* unwrapped)
+{
+    if (isTransparentInline(n))
+    {
+        if (unwrapped) unwrapped->push_back(n);
+        for (auto* c : n->children)
+            pushInlineRunNode(run, c, unwrapped);
+        return;
+    }
+    run.push_back(n);
+}
+#endif
+
 // Display lists bake absolute coordinates, so any node moved without a full
 // layout pass must repaint its subtree. Used by the inline positioner and
 // the button label centering below (production has no DEV geometry diff).
@@ -47,6 +99,118 @@ static void markSubtreePaintDirty(MorphNode* n) {
     n->markDirty(PaintDirty);
     for (auto* c : n->children) markSubtreePaintDirty(c);
 }
+
+#ifdef MORPH_FEATURE_INLINE
+// Split text into space/tab-separated words (browser line-breaking units).
+// Newlines make a run unsplittable (TextNode wraps those itself); the
+// caller checks for them. Splitting is deterministic so layout and paint
+// agree without shared caches.
+static std::vector<std::string> splitInlineWords(const std::string& text)
+{
+    std::vector<std::string> words;
+    size_t i = 0;
+    while (i < text.size())
+    {
+        while (i < text.size() && (text[i] == ' ' || text[i] == '\t')) i++;
+        if (i >= text.size() || text[i] == '\n') break;
+        size_t j = i;
+        while (j < text.size() && text[j] != ' ' && text[j] != '\t' && text[j] != '\n') j++;
+        words.push_back(text.substr(i, j - i));
+        i = j;
+    }
+    return words;
+}
+
+static std::string joinInlineWords(
+    const std::vector<std::string>& words, size_t start, size_t count)
+{
+    std::string out;
+    for (size_t k = 0; k < count; k++)
+    {
+        if (k > 0) out += ' ';
+        out += words[start + k];
+    }
+    return out;
+}
+
+// One entry of an inline run under layout: either a whole node or a word
+// fragment slice of a split text run ([fw0, fw0 + fwn), painted as
+// fragText). fwn == 0 means the whole node (legacy path, no fragment).
+struct InlineItem
+{
+    MorphNode* node;
+    float w, h;
+    bool ws;
+    size_t fw0 = 0, fwn = 0;
+    std::string fragText;
+};
+
+// Shrink items[i] (a multi-word text run overflowing the line) to the
+// longest word-prefix fitting availW, inserting the remainder as a new
+// entry right after it. Boundary spaces are dropped on both sides, like
+// browsers. Returns true on split; false keeps legacy atomic breaking
+// (single word, fixed-width box, no renderer, empty prefix).
+static bool trySplitInlineItem(std::vector<InlineItem>& items, size_t i,
+                               float availW, Renderer* r)
+{
+    InlineItem& it = items[i];
+    MorphNode* n = it.node;
+    if (r == nullptr) return false;
+    if (n->type != NodeType::Text && n->type != NodeType::Expr) return false;
+    if (it.ws) return false;
+    if (n->style.explicitWidth >= 0.0f) return false;
+    std::string text = n->textContent();
+    if (text.find('\n') != std::string::npos) return false;
+    std::vector<std::string> words = splitInlineWords(text);
+    size_t start = (it.fwn == 0) ? 0 : it.fw0;
+    size_t total = (it.fwn == 0) ? words.size() : it.fwn;
+    if (total < 2 || start + total > words.size()) return false;
+    float fontSize = n->style.fontSize;
+    float spaceW = r->measureTextWidth(" ", fontSize, n->style.fontWeight);
+    float acc = 0.0f;
+    size_t take = 0;
+    for (size_t k = 0; k < total; k++)
+    {
+        float ww = r->measureTextWidth(words[start + k], fontSize, n->style.fontWeight);
+        float add = (k == 0) ? ww : (spaceW + ww);
+        if (acc + add <= availW + 0.01f) { acc += add; take = k + 1; }
+        else break;
+    }
+    if (take == 0 || take >= total) return false;
+    // Fragments each hold one visual line: single-line height, not the
+    // whole node's measured height (multi-line measured text would inflate
+    // every spanned row otherwise).
+    float fragH = (n->style.fontSize > 0.0f) ? (n->style.fontSize * 1.4f) : it.h;
+    // The boundary space belongs to the prefix box (it separates the frags
+    // visually when both land on one row) while staying invisible at a line
+    // end when the remainder wraps, like browsers.
+    it.w = acc + spaceW;
+    it.h = fragH;
+    it.fw0 = start;
+    it.fwn = take;
+    // The boundary space rides with the prefix as a trailing blank: it
+    // renders as the gap when both frags share a row, and vanishes
+    // harmlessly at a line end when the remainder wraps (browsers drop
+    // edge spaces the same way). The remainder never takes a leading
+    // space, so a fresh line starts clean.
+    it.fragText = joinInlineWords(words, start, take) + " ";
+    InlineItem rest;
+    rest.node = n;
+    rest.h = fragH;
+    rest.ws = false;
+    rest.fw0 = start + take;
+    rest.fwn = total - take;
+    rest.fragText = joinInlineWords(words, start + take, total - take);
+    rest.w = 0.0f;
+    for (size_t k = 0; k < rest.fwn; k++)
+    {
+        float ww = r->measureTextWidth(words[rest.fw0 + k], fontSize, n->style.fontWeight);
+        rest.w += (k == 0) ? ww : (spaceW + ww);
+    }
+    items.insert(items.begin() + (ptrdiff_t)(i + 1), std::move(rest));
+    return true;
+}
+#endif
 
 #ifdef MORPH_FEATURE_POSITION
 // Shift a sticky node and every descendant so children stay glued to it.
@@ -666,6 +830,9 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 #endif
 #ifdef MORPH_FEATURE_INLINE
         std::vector<MorphNode*> currentInline;
+        // Transparent containers spliced into the run (links, spans):
+        // boxes rebuilt from children at flush end. Cleared with the run.
+        std::vector<MorphNode*> unwrappedInline;
 
         auto flushInline = [&]() {
             if (currentInline.empty()) return;
@@ -674,9 +841,10 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
             if (!firstBlockChild) inlineBeforeFirstBlock = true;
             else inlineAfterLastBlock = true;
 #endif
-            struct InlineItem { MorphNode* node; float w, h; bool ws; };
             std::vector<InlineItem> items;
             for (auto* c : currentInline) {
+                if (c->type == NodeType::Text || c->type == NodeType::Expr)
+                    c->m_frags.clear();
                 c->layout(0.0f, 0.0f, cw, 0.0f, r);
                 float iw = 0.0f;
                 if (c->style.explicitWidth >= 0.0f) {
@@ -709,6 +877,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                     c->h = 0.0f;
                 }
                 currentInline.clear();
+                unwrappedInline.clear();
 #ifdef MORPH_FEATURE_MARGIN_COLLAPSE
                 prevMb = 0.0f;
 #endif
@@ -763,7 +932,11 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                 float itemX = alignX;
                 for (size_t j = lineStart; j < end; j++) {
                     auto& p = items[j];
-                    float pml = p.node->style.margin[3];
+                    // Continuation fragments carry no margins (accounted on
+                    // the run's first fragment).
+                    bool cont = (p.fwn != 0 && p.fw0 != 0);
+                    float pml = cont ? 0.0f : p.node->style.margin[3];
+                    float pmr = cont ? 0.0f : p.node->style.margin[1];
                     // Child-to-parent: the item's box comes from its own
                     // measured size; children keep whatever THEIR layout
                     // pass computed, translated by the item's move delta.
@@ -785,7 +958,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                         shiftChildrenSubtree(p.node, dx, dy);
                         markSubtreePaintDirty(p.node);
                     }
-                    if (resized)
+                    if (resized && p.fwn == 0)
                     {
                         // The item's size changed after measure: re-run its
                         // OWN layout at the final box so content resolves
@@ -795,39 +968,72 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                         // the item is skipped as clean afterwards. Each
                         // child is positioned by the item's own flow logic —
                         // never restacked at one shared origin.
+                        // (Skipped for word fragments: their geometry comes
+                        // from line breaking, and re-laying the whole node
+                        // at a fragment box would clobber sibling frags.)
                         p.node->layout(p.node->x, p.node->y,
                                        p.node->w, p.node->h, r);
                         markSubtreePaintDirty(p.node);
+                    }
+                    // Word fragments paint from their own slice: record the
+                    // box + text now (the node box below is shared across
+                    // fragments and gets unioned after the run).
+                    if (p.fwn != 0)
+                    {
+                        MorphNode::TextFrag frag;
+                        frag.text = p.fragText;
+                        frag.x = p.node->x;
+                        frag.y = p.node->y;
+                        frag.w = p.node->w;
+                        frag.h = p.node->h;
+                        p.node->m_frags.push_back(std::move(frag));
                     }
                     // NOTE: children are never assigned here directly. The
                     // item's own passes own their geometry (child-to-parent);
                     // re-laying siblings at one shared origin is what merged
                     // inline runs (the +/- overlap). An oversized item's
-                    // content visibly overflows, like a browser.
-                    itemX += pml + p.w + p.node->style.margin[1];
+                    // content visibly overflows, like a browser, instead of
+                    // merging.
+                    itemX += pml + p.w + pmr;
                 }
             };
 
             for (size_t i = 0; i < items.size(); i++) {
-                auto& it = items[i];
-                float ml = it.node->style.margin[3];
-                float mr = it.node->style.margin[1];
-                float need = ml + it.w + mr;
+                // Continuation fragments (word range past the first) carry
+                // no margins of their own — the run's margins were already
+                // accounted on its first fragment.
+                auto isCont = [&](size_t k) -> bool {
+                    return items[k].fwn != 0 && items[k].fw0 != 0;
+                };
+                float ml = isCont(i) ? 0.0f : items[i].node->style.margin[3];
+                float mr = isCont(i) ? 0.0f : items[i].node->style.margin[1];
+                float need = ml + items[i].w + mr;
 
                 if (i > lineStart && lineX + need > cx + cw) {
-                    positionItems(i);
-                    lineY += lineH;
-                    lineX = cx;
-                    lineH = 0.0f;
-                    lineStart = i;
-                    if (items[i].ws) {
-                        items[i].w = 0.0f;
-                        items[i].h = 0.0f;
+                    // Overflow with content on the line: try splitting a
+                    // multi-word text run at word boundaries (browser line
+                    // breaking). On success items[i] shrinks to the fitting
+                    // prefix and the remainder is inserted right after it,
+                    // so it flows onto the following lines.
+                    if (trySplitInlineItem(items, i, (cx + cw) - lineX - ml - mr, r)) {
+                        ml = isCont(i) ? 0.0f : items[i].node->style.margin[3];
+                        mr = isCont(i) ? 0.0f : items[i].node->style.margin[1];
+                        need = ml + items[i].w + mr;
+                    } else {
+                        positionItems(i);
+                        lineY += lineH;
+                        lineX = cx;
+                        lineH = 0.0f;
+                        lineStart = i;
+                        if (items[i].ws) {
+                            items[i].w = 0.0f;
+                            items[i].h = 0.0f;
+                        }
                     }
                 }
 
                 lineX += need;
-                if (it.h > lineH) lineH = it.h;
+                if (items[i].h > lineH) lineH = items[i].h;
             }
 
             positionItems(items.size());
@@ -837,14 +1043,65 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 #ifdef MORPH_FEATURE_MARGIN_COLLAPSE
             prevMb = 0.0f;
 #endif
+            // Fragmented runs span lines: restore each fragmented node's
+            // box to the union of its fragment boxes (hit-testing,
+            // centering, clipping). Unfragmented nodes are untouched.
+            for (auto* c : currentInline) {
+                if (c->m_frags.empty()) continue;
+                float ux0 = c->m_frags[0].x, uy0 = c->m_frags[0].y;
+                float ux1 = ux0 + c->m_frags[0].w, uy1 = uy0 + c->m_frags[0].h;
+                for (auto& f : c->m_frags) {
+                    if (f.x < ux0) ux0 = f.x;
+                    if (f.y < uy0) uy0 = f.y;
+                    if (f.x + f.w > ux1) ux1 = f.x + f.w;
+                    if (f.y + f.h > uy1) uy1 = f.y + f.h;
+                }
+                c->x = ux0; c->y = uy0;
+                c->w = ux1 - ux0; c->h = uy1 - uy0;
+            }
+            // Spliced transparent containers (links, spans): rebuild each
+            // box from its children, innermost first, so a later real
+            // layout of the container repositions children identically
+            // instead of clobbering run positions with stale ones.
+            for (auto it = unwrappedInline.rbegin(); it != unwrappedInline.rend(); ++it) {
+                MorphNode* n = *it;
+                bool any = false;
+                float ux0 = 0, uy0 = 0, ux1 = 0, uy1 = 0;
+                for (auto* c : n->children) {
+                    if (!any) {
+                        ux0 = c->x; uy0 = c->y;
+                        ux1 = c->x + c->w; uy1 = c->y + c->h;
+                        any = true;
+                    } else {
+                        if (c->x < ux0) ux0 = c->x;
+                        if (c->y < uy0) uy0 = c->y;
+                        if (c->x + c->w > ux1) ux1 = c->x + c->w;
+                        if (c->y + c->h > uy1) uy1 = c->y + c->h;
+                    }
+                }
+                if (any) {
+                    n->x = ux0; n->y = uy0;
+                    n->w = ux1 - ux0; n->h = uy1 - uy0;
+                    markSubtreePaintDirty(n);
+                    // Stand the container down for this pass: the run
+                    // already resolved the whole subtree, so a later real
+                    // layout of the container would only clobber run
+                    // positions with stale-box ones (link labels landing
+                    // rows away from their boxes). Future dirt re-arms it.
+                    n->clearDirty(LayoutDirty);
+                    n->clearDirty(StyleDirty);
+                    n->clearDirty(SubtreeDirty);
+                }
+            }
             currentInline.clear();
+            unwrappedInline.clear();
         };
 
         for (auto* c : normal) {
             if (c->style.display == CSS::Display::Inline
                 || c->style.display == CSS::Display::InlineBlock
                 || c->type == NodeType::Text || c->type == NodeType::Expr) {
-                currentInline.push_back(c);
+                pushInlineRunNode(currentInline, c, &unwrappedInline);
             } else {
                 flushInline();
 

@@ -38,6 +38,7 @@ public:
     void setText(const std::string& newText) {
         if (text == newText) return;
         text = newText;
+        m_frags.clear();
         markDirty(LayoutDirty);
         markDirty(PaintDirty);
     }
@@ -50,10 +51,29 @@ public:
 
     bool isTextRun() const override { return true; }
     bool isEmptyText() const override { return text.empty(); }
+    std::string textContent() const override { return text; }
 
     void recordDisplayList(Renderer& r) override {
         m_displayList.clear();
         m_textOps.clear();
+        if (!m_frags.empty()) {
+            // Word fragments placed by the line breaker: paint each slice
+            // at its own box instead of the whole wrapped lines.
+            for (auto& frag : m_frags) {
+                TextOp top;
+                top.text = frag.text;
+                top.x = frag.x;
+                top.y = frag.y;
+                top.color[0] = style.color[0]; top.color[1] = style.color[1];
+                top.color[2] = style.color[2]; top.color[3] = style.color[3];
+                top.align = TextAlign::Left;
+                top.fontSize = _effFontSize();
+                top.fontWeight = _effFontWeight();
+                top.centerInk = m_centerInk;
+                m_textOps.push_back(top);
+            }
+            return;
+        }
         float lh = _effFontSize() * 1.4f;
         float py = y;
         for (auto& line : lines) {

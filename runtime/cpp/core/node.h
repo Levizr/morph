@@ -457,6 +457,8 @@ public:
     // True for text/expression runs holding no characters: they measure
     // zero instead of falling back to the full container width.
     virtual bool isEmptyText() const { return false; }
+    // Raw text for word-splitting during line breaking (empty by default).
+    virtual std::string textContent() const { return {}; }
     MorphNode* hitTest(float ex, float ey);
     // Recursive hit test carrying the inverse accumulated transform
     // (nullptr when no transform is compiled, else the identity for the
@@ -522,6 +524,15 @@ public:
 
     // Dirty rendering
     std::vector<struct DrawOp> m_displayList;
+    // Word fragments for text split across lines by the line breaker
+    // (browser-style mid-run wraps). Painted instead of whole lines when
+    // non-empty; rebuilt every layout pass that breaks the node.
+    struct TextFrag
+    {
+        std::string text;
+        float x = 0, y = 0, w = 0, h = 0;
+    };
+    std::vector<TextFrag> m_frags;
     virtual void layoutIfNeeded(float px, float py, float parentW, float parentH,
                                 Renderer* r = nullptr, DirtyStats* stats = nullptr,
                                 bool force = false);
