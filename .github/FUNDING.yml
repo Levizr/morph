@@ -1,0 +1,3 @@
+# GitHub Sponsors configuration — enables the Sponsor button.
+# Razorpay is not a natively supported platform, so it goes under `custom`.
+custom: ["https://razorpay.me/@levizr"]

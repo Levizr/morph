@@ -22,6 +22,7 @@ No browser. No Electron. No WebView. Just a lightweight native binary.
 [![C++](https://img.shields.io/badge/C++-23-4da6ff?style=flat-square&logo=cplusplus&logoColor=white)](https://isocpp.org)
 [![OpenGL](https://img.shields.io/badge/OpenGL-3.3-f06449?style=flat-square)](https://opengl.org)
 [![Version](https://img.shields.io/badge/version-0.1.0-7c6af5?style=flat-square)]()
+[![Sponsor](https://img.shields.io/badge/Sponsor-Razorpay-3395ff?style=flat-square&logo=razorpay)](https://razorpay.me/@levizr)
 
 <br/>
 
@@ -290,6 +291,16 @@ Morph is built by a small, enthusiastic team and we'd love to hear from you.
 - **Show what you built** — Share your Morph projects, we'd love to see them
 
 Every contribution matters, no matter how small. A typo fix or a bug report is just as valuable as a new feature.
+
+---
+
+## Sponsor
+
+Morph is free and independent. If it saves you megabytes, help keep it alive:
+
+**👉 https://razorpay.me/@levizr**
+
+See [SPONSORS.md](SPONSORS.md) for where your support goes.
 
 ---
 
