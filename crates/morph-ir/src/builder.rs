@@ -17,6 +17,7 @@ pub struct IRBuilder {
     tailwind: TailwindResolver,
     counter: std::cell::Cell<usize>,
     type_mode: morpher::TypeMode,
+    app_window: Option<(String, u32, u32)>,
 }
 
 impl IRBuilder {
@@ -25,7 +26,17 @@ impl IRBuilder {
             tailwind: TailwindResolver::new(),
             counter: std::cell::Cell::new(0),
             type_mode: morpher::TypeMode::default(),
+            app_window: None,
         }
+    }
+
+    /// App-wide window defaults from `[window]` config: title/width/height
+    /// used when the entry has no `windowConfig` export (documented chain:
+    /// call-site → file export → `[window]` config → built-in defaults).
+    #[must_use]
+    pub fn with_app_window(mut self, title: String, width: u32, height: u32) -> Self {
+        self.app_window = Some((title, width, height));
+        self
     }
 
     /// Type mode for translating embedded logic (handlers, effects, globals).
@@ -190,11 +201,17 @@ impl IRBuilder {
         }
         extra_headers.sort();
         extra_headers.dedup();
+        // Window identity: `windowConfig` export wins, `[window]` config
+        // (`with_app_window`) is the fallback, built-ins last.
+        let (app_title, app_w, app_h) = self
+            .app_window
+            .as_ref()
+            .map_or_else(|| ("Morph App".to_string(), 800, 600), |(t, w, h)| (t.clone(), *w, *h));
         let mut window = IRWindow {
             window_id: self.next_id(),
-            title: wc.map_or_else(|| "Morph App".into(), |w| w.title.clone()),
-            width: wc.map_or(800, |w| w.width),
-            height: wc.map_or(600, |w| w.height),
+            title: wc.map_or_else(|| app_title.clone(), |w| w.title.clone()),
+            width: wc.map_or(app_w, |w| w.width),
+            height: wc.map_or(app_h, |w| w.height),
             visible: true,
             min_width: wc.and_then(|w| w.min_width),
             max_width: wc.and_then(|w| w.max_width),
@@ -440,6 +457,11 @@ impl IRBuilder {
         extra_headers.sort();
         extra_headers.dedup();
         let wc = entry_mod.source.window_config.as_ref();
+        // Same fallback chain as `build` (keep the two in sync).
+        let (app_title, app_w, app_h) = self
+            .app_window
+            .as_ref()
+            .map_or_else(|| ("Morph App".to_string(), 800, 600), |(t, w, h)| (t.clone(), *w, *h));
         let mut cpp_imports = Vec::new();
         let mut seen_cpp = HashSet::new();
         for module_path in &graph.order {
@@ -463,9 +485,9 @@ impl IRBuilder {
         }
         let window = IRWindow {
             window_id: self.next_id(),
-            title: wc.map_or_else(|| "Morph App".into(), |w| w.title.clone()),
-            width: wc.map_or(800, |w| w.width),
-            height: wc.map_or(600, |w| w.height),
+            title: wc.map_or_else(|| app_title.clone(), |w| w.title.clone()),
+            width: wc.map_or(app_w, |w| w.width),
+            height: wc.map_or(app_h, |w| w.height),
             visible: true,
             min_width: wc.and_then(|w| w.min_width),
             max_width: wc.and_then(|w| w.max_width),

@@ -82,6 +82,7 @@ pub(crate) fn run(entry: Option<String>) -> Result<()> {
         cwd: cwd.clone(),
         entry: entry_file.clone(),
         type_mode,
+        app_window: (config.window.title.clone(), config.window.width, config.window.height),
         runtime_dir,
         cache_dir: cwd.join(".morph").join("cache"),
         output_dir: cwd.join(&config.output),
@@ -199,6 +200,7 @@ struct Session {
     cwd: PathBuf,
     entry: String,
     type_mode: morpher::TypeMode,
+    app_window: (String, u32, u32),
     runtime_dir: PathBuf,
     cache_dir: PathBuf,
     output_dir: PathBuf,
@@ -449,7 +451,11 @@ fn build_windows(cmd: &Session) -> Result<Vec<morph_ir::IRWindow>> {
         .ok_or_else(|| anyhow::anyhow!("component graph has no entry module"))?;
     let entry_path = cmd.cwd.join(&cmd.entry);
     let (css_rules, css_keyframes) = collect_css(&cmd.cwd, &entry_path, &entry_mod.source.imports);
-    let builder = morph_ir::IRBuilder::new().with_type_mode(cmd.type_mode);
+    let builder = morph_ir::IRBuilder::new().with_type_mode(cmd.type_mode).with_app_window(
+        cmd.app_window.0.clone(),
+        cmd.app_window.1,
+        cmd.app_window.2,
+    );
     let windows = builder.build_with_graph(&cmd.graph, &css_rules, &css_keyframes)?;
     if windows.is_empty() {
         anyhow::bail!("Build failed — no windows in {}", cmd.entry);
