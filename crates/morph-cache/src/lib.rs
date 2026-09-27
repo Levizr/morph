@@ -54,22 +54,25 @@ pub fn sha256_bytes(bytes: &[u8]) -> String {
 }
 
 /// Download runtime from GitHub Releases, resolving in order:
-///   1. global cache `~/.morph/cache/runtimes/{type}/v{version}/` (version-verified)
-///   2. a *matching-version* nearby local `runtime/{type}/` (dev)
+///   1. a *matching-version* nearby local `runtime/{type}/` (dev)
+///   2. global cache `~/.morph/cache/runtimes/{type}/v{version}/` (version-verified)
 ///   3. GitHub Release tarball for the exact version
+///
+/// Local wins over cache on purpose: inside the Morph repo (or any checkout
+/// shipping `runtime/cpp/`) the working tree is newer than the last release
+/// tarball, and a stale cache must never shadow it (see docs/dev/bugs#1).
 pub fn download_runtime(runtime_type: &str, version: &str) -> Result<PathBuf> {
     let cached_dir = global_runtime_version_dir(runtime_type, version)?;
 
-    if is_runtime_cached(runtime_type, version) {
-        println!("  ✓ Found in cache: {}", cached_dir.display());
-        return Ok(cached_dir);
-    }
-
     // Nearby local runtime — only when its version marker matches exactly.
+    // Synced first so a stale cache never shadows the working tree.
     if let Some((local, local_version)) = find_local_runtime(runtime_type) {
         if local_version == version {
-            println!("  ℹ Using local runtime {} (v{})", local.display(), local_version);
-            cache_local_runtime(&local, &cached_dir, runtime_type, version)?;
+            if sync_cache_from_local(&local, &cached_dir, runtime_type, version)? {
+                println!("  ℹ Using local runtime {} (v{})", local.display(), local_version);
+            } else {
+                println!("  ✓ Found in cache: {}", cached_dir.display());
+            }
             return Ok(cached_dir);
         }
         println!(
@@ -78,6 +81,11 @@ pub fn download_runtime(runtime_type: &str, version: &str) -> Result<PathBuf> {
             local_version,
             version
         );
+    }
+
+    if is_runtime_cached(runtime_type, version) {
+        println!("  ✓ Found in cache: {}", cached_dir.display());
+        return Ok(cached_dir);
     }
 
     // Download from GitHub
@@ -127,7 +135,10 @@ fn chrono_string() -> String {
 /// Find a nearby local `runtime/{type}/` directory that carries a version marker
 /// (manifest.json). Returns the runtime path together with its declared version.
 /// Only marked runtimes are eligible so a mismatched local copy is never used.
-fn find_local_runtime(runtime_type: &str) -> Option<(PathBuf, String)> {
+///
+/// Public so `morph install` / `ensure_runtime` can prefer the working tree
+/// over a stale release cache (see docs/dev/bugs#1).
+pub fn find_local_runtime(runtime_type: &str) -> Option<(PathBuf, String)> {
     let mut candidates: Vec<PathBuf> = vec![
         PathBuf::from(format!("runtime/{runtime_type}")),
         PathBuf::from(format!("../runtime/{runtime_type}")),
@@ -181,7 +192,14 @@ fn read_runtime_manifest(dir: &Path, runtime_type: &str) -> Option<String> {
     }
 }
 
+/// Copy a matching local runtime into the global cache, replacing any stale
+/// contents. The destination is cleared first so files removed from the
+/// working tree (e.g. an old `core/node/style.h` layout) do not linger next
+/// to the new tree.
 fn cache_local_runtime(src: &Path, dest: &Path, runtime_type: &str, version: &str) -> Result<()> {
+    if dest.exists() {
+        std::fs::remove_dir_all(dest)?;
+    }
     std::fs::create_dir_all(dest)?;
 
     // If src is a directory, copy contents
@@ -221,6 +239,73 @@ fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Hash of a runtime tree excluding its `manifest.json`. Cache bookkeeping
+/// differs between a working-tree copy (`sha256: "local"`, fresh timestamps)
+/// and a release tarball even when every source file matches, so the marker
+/// itself must not count toward staleness.
+fn runtime_tree_hash(dir: &Path) -> String {
+    if !dir.is_dir() {
+        return String::new();
+    }
+    let mut entries: Vec<String> = Vec::new();
+    for entry in WalkDir::new(dir).min_depth(1) {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        if entry.file_type().is_dir() {
+            continue;
+        }
+        let rel = match entry.path().strip_prefix(dir) {
+            Ok(r) => r.to_string_lossy().replace('\\', "/"),
+            Err(_) => continue,
+        };
+        if rel == "manifest.json" {
+            continue;
+        }
+        if rel.split('/').any(|c| c == ".git" || c.starts_with('.')) {
+            continue;
+        }
+        let content = std::fs::read(entry.path()).unwrap_or_default();
+        let mut h = Sha256::new();
+        h.update(&content);
+        entries.push(format!("{}:{}", rel, hex::encode(h.finalize())));
+    }
+    entries.sort();
+    sha256_string(&entries.join("\n"))
+}
+
+/// Copy `local` into `cached_dir` when the cached copy is missing, unmarked,
+/// or content-different from the working tree. Returns true when the cache
+/// was (re)written.
+fn sync_cache_from_local(
+    local: &Path,
+    cached_dir: &Path,
+    runtime_type: &str,
+    version: &str,
+) -> Result<bool> {
+    let fresh = !is_runtime_cached(runtime_type, version)
+        || runtime_tree_hash(local) != runtime_tree_hash(cached_dir);
+    if fresh {
+        cache_local_runtime(local, cached_dir, runtime_type, version)?;
+    }
+    Ok(fresh)
+}
+
+/// Refresh the global cache from a matching nearby local runtime when the
+/// cached copy is missing or stale. Returns true when the cache was written.
+/// No-op (false) when no local runtime matches `version`.
+pub fn sync_cached_runtime_from_local(runtime_type: &str, version: &str) -> Result<bool> {
+    let Some((local, local_version)) = find_local_runtime(runtime_type) else {
+        return Ok(false);
+    };
+    if local_version != version {
+        return Ok(false);
+    }
+    let cached_dir = global_runtime_version_dir(runtime_type, version)?;
+    sync_cache_from_local(&local, &cached_dir, runtime_type, version)
 }
 
 fn download_bytes(url: &str) -> Result<Vec<u8>> {
@@ -513,5 +598,77 @@ mod tests {
         write_stored_codegen(&cwd, "app", "", &[]).expect("write");
         assert!(read_stored_codegen(&cwd, "app").is_none());
         let _ = std::fs::remove_dir_all(&cwd);
+    }
+
+    fn write_tree(dir: &Path, files: &[(&str, &str)]) {
+        for (rel, content) in files {
+            let p = dir.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, content).unwrap();
+        }
+    }
+
+    #[test]
+    fn local_sync_clears_stale_cached_files() {
+        // Regression for docs/dev/bugs#1: a cached release with the old
+        // layout (core/node/style.h) must not survive a sync from the new
+        // working tree (style/style.h).
+        let root = scratch_dir("local-wins");
+        let local = root.join("local");
+        let cached = root.join("cached");
+        write_tree(
+            &local,
+            &[("style/style.h", "new"), ("manifest.json", r#"{"version":"0.1.0"}"#)],
+        );
+        write_tree(
+            &cached,
+            &[
+                ("core/node/style.h", "old"),
+                ("manifest.json", r#"{"version":"0.1.0","runtime_type":"cpp"}"#),
+            ],
+        );
+        assert!(sync_cache_from_local(&local, &cached, "cpp", "0.1.0").unwrap());
+        assert!(!cached.join("core/node/style.h").exists(), "stale file removed");
+        assert_eq!(std::fs::read_to_string(cached.join("style/style.h")).unwrap(), "new");
+        assert!(is_runtime_cached_for_dir(&cached, "cpp", "0.1.0"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn local_sync_skips_identical_trees() {
+        let root = scratch_dir("local-fresh");
+        let local = root.join("local");
+        let cached = root.join("cached");
+        write_tree(&local, &[("style/style.h", "same")]);
+        write_tree(&cached, &[("style/style.h", "same")]);
+        std::fs::write(
+            cached.join("manifest.json"),
+            r#"{"version":"0.1.0","runtime_type":"cpp","sha256":"local","size":0,"cached_at":"1"}"#,
+        )
+        .unwrap();
+        assert!(!sync_cache_from_local(&local, &cached, "cpp", "0.1.0").unwrap());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn tree_hash_ignores_manifest_bookkeeping() {
+        let root = scratch_dir("tree-hash");
+        let a = root.join("a");
+        let b = root.join("b");
+        write_tree(&a, &[("node.h", "x"), ("manifest.json", r#"{"sha256":"local"}"#)]);
+        write_tree(
+            &b,
+            &[("node.h", "x"), ("manifest.json", r#"{"sha256":"abc","cached_at":"9"}"#)],
+        );
+        assert_eq!(runtime_tree_hash(&a), runtime_tree_hash(&b));
+        write_tree(&b, &[("node.h", "y")]);
+        assert_ne!(runtime_tree_hash(&a), runtime_tree_hash(&b));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Manifest check against an explicit dir (the global helper reads the
+    /// shared `~/.morph` cache, which tests must not touch).
+    fn is_runtime_cached_for_dir(dir: &Path, runtime_type: &str, version: &str) -> bool {
+        read_runtime_manifest(dir, runtime_type).is_some_and(|v| v == version)
     }
 }

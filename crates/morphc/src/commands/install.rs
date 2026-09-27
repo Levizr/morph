@@ -33,17 +33,32 @@ pub(crate) fn run_with_dir(project_dir: &Path) -> Result<()> {
     crate::logger::log_step("Checking global cache");
     let cached_dir = morph_cache::global_runtime_version_dir(runtime_type, version)?;
 
-    if morph_cache::is_runtime_cached(runtime_type, version) {
+    // A matching nearby local runtime (the repo's own `runtime/cpp/`) wins
+    // over the release cache: the working tree is newer than the last
+    // tarball, and a stale cache must never shadow it (docs/dev/bugs#1).
+    // `download_runtime` re-syncs the cache from local when they differ.
+    let local_match = morph_cache::find_local_runtime(runtime_type)
+        .is_some_and(|(_, local_version)| &local_version == version);
+
+    if !local_match && morph_cache::is_runtime_cached(runtime_type, version) {
         crate::logger::log_success(&format!(
             "Found in cache: {}",
             cached_dir.display().to_string().dimmed()
         ));
     } else {
-        crate::logger::log_info(&format!(
-            "Not cached, downloading {} v{}...",
-            runtime_type.cyan(),
-            version.dimmed()
-        ));
+        if local_match {
+            crate::logger::log_info(&format!(
+                "Using local runtime for {} v{} (refreshing cache)...",
+                runtime_type.cyan(),
+                version.dimmed()
+            ));
+        } else {
+            crate::logger::log_info(&format!(
+                "Not cached, downloading {} v{}...",
+                runtime_type.cyan(),
+                version.dimmed()
+            ));
+        }
         let pb = crate::logger::spinner("Downloading runtime...");
         morph_cache::download_runtime(runtime_type, version).with_context(|| {
             pb.finish_and_clear();
@@ -136,6 +151,11 @@ pub(crate) fn ensure_runtime(project_dir: &Path) -> Result<PathBuf> {
     // Already linked with the exact version the config pins?
     if let Some(linked_version) = morph_cache::project_runtime_version(&morph_dir) {
         if &linked_version == version {
+            // The link may point at a stale cache while the working tree
+            // moved on — refresh and relink when they differ.
+            if morph_cache::sync_cached_runtime_from_local(runtime_type, version)? {
+                morph_cache::link_runtime_to_project(runtime_type, version, &morph_dir)?;
+            }
             check_version_compatibility(version);
             return Ok(project_runtime);
         }
@@ -145,6 +165,10 @@ pub(crate) fn ensure_runtime(project_dir: &Path) -> Result<PathBuf> {
     } else {
         crate::logger::log_info("Runtime not linked, linking from cache...");
     }
+
+    // A matching local runtime installs itself: sync the cache first so the
+    // link below never points at a stale release tarball.
+    let _ = morph_cache::sync_cached_runtime_from_local(runtime_type, version)?;
 
     if morph_cache::is_runtime_cached(runtime_type, version) {
         morph_cache::link_runtime_to_project(runtime_type, version, &morph_dir)?;
