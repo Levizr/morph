@@ -419,6 +419,24 @@
     "category": "Bugs",
     "items": [
       {
+        "title": "Bug Report — 2026-09-28",
+        "slug": "bugs/2026-09-28",
+        "file": "dev/bugs/2026-09-28",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "22 morpher (TS→C++) bugs found by translating legal TypeScript and syntax-checking generated C++: function expression param dropping, nested fn illegals, default/rest/destructured params, generators, mutual recursion, operator token-paste (delete/typeof), instanceof/in verbatim, private field hash, BigInt literal, Span leak, missing includes (cstdint, js_types.h), spread array, closure lambda return, arrow this capture, namespace silent drop, require verbatim, unknown class extends.",
+        "keywords": [
+          "morph bugs",
+          "morph issues",
+          "morpher translator",
+          "ts to cpp bugs"
+        ],
+        "lastUpdated": "2026-09-28",
+        "publishedAt": "2026-09-28",
+        "priority": 0.8,
+        "changefreq": "monthly"
+      },
+      {
         "title": "Bug Report — 2026-09-19",
         "slug": "bugs/2026-09-19",
         "file": "dev/bugs/2026-09-19",
