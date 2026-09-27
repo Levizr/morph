@@ -862,17 +862,27 @@ void GLRenderer::beginClip(float x, float y, float w, float h)
     float cy = y + m_scrollY;
     glEnable(GL_SCISSOR_TEST);
     glScissor((GLint)cx, m_fbHeight - (GLint)(cy + h), (GLsizei)w, (GLsizei)h);
+    m_scissorStack.push_back({cx, cy, w, h});
     m_scissorClipDepth++;
 }
 
 void GLRenderer::endClip()
 {
     flush(m_proj);
+    if (!m_scissorStack.empty())
+        m_scissorStack.pop_back();
     m_scissorClipDepth--;
-    if (m_scissorClipDepth <= 0)
+    if (m_scissorClipDepth <= 0 || m_scissorStack.empty())
     {
         m_scissorClipDepth = 0;
+        m_scissorStack.clear();
         glDisable(GL_SCISSOR_TEST);
+    }
+    else
+    {
+        const auto& outer = m_scissorStack.back();
+        glScissor((GLint)outer[0], m_fbHeight - (GLint)(outer[1] + outer[3]),
+                  (GLsizei)outer[2], (GLsizei)outer[3]);
     }
 }
 

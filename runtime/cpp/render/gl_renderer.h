@@ -1,6 +1,7 @@
 #pragma once
 #include "vendor/glad/glad.h"
 #include <vector>
+#include <array>
 #include <unordered_map>
 #include <cstring>
 #include <cmath>
@@ -185,6 +186,10 @@ private:
     GLint m_uStencilMode = -1;
     int m_stencilClipDepth = 0;
     int m_scissorClipDepth = 0;
+    // GL keeps a single scissor rect, so nested clips maintain their own
+    // stack and re-issue the outer rect on pop. Otherwise the inner rect
+    // would keep clipping everything drawn after the inner clip ends.
+    std::vector<std::array<float, 4>> m_scissorStack;
     bool m_ready = false;
     std::vector<Instance> m_batch;
     float m_proj[16] = {};
