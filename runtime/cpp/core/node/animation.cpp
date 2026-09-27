@@ -240,14 +240,18 @@ inline void restoreProp(MorphNode* node, KeyframeProperty prop,
             node->markDirty(PaintDirty);
             break;
         case KeyframeProperty::Left:
+#ifdef MORPH_FEATURE_POSITION
             node->style.left = base.left;
             node->markDirty(LayoutDirty);
             node->markDirty(PaintDirty);
+#endif
             break;
         case KeyframeProperty::Top:
+#ifdef MORPH_FEATURE_POSITION
             node->style.top = base.top;
             node->markDirty(LayoutDirty);
             node->markDirty(PaintDirty);
+#endif
             break;
         case KeyframeProperty::Transform:
             std::memcpy(node->style.matrix, base.matrix, sizeof(float) * 16);
