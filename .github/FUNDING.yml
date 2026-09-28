@@ -1,3 +1,4 @@
 # GitHub Sponsors configuration — enables the Sponsor button.
 # Razorpay is not a natively supported platform, so it goes under `custom`.
-custom: ["https://razorpay.me/@levizr"]
+# Points at the sponsor page (USD + INR via Razorpay) instead of Razorpay directly.
+custom: ["https://morph.levizr.com/sponsor"]

@@ -22,7 +22,7 @@ No browser. No Electron. No WebView. Just a lightweight native binary.
 [![C++](https://img.shields.io/badge/C++-23-4da6ff?style=flat-square&logo=cplusplus&logoColor=white)](https://isocpp.org)
 [![OpenGL](https://img.shields.io/badge/OpenGL-3.3-f06449?style=flat-square)](https://opengl.org)
 [![Version](https://img.shields.io/badge/version-0.1.0-7c6af5?style=flat-square)]()
-[![Sponsor](https://img.shields.io/badge/Sponsor-Razorpay-3395ff?style=flat-square&logo=razorpay)](https://razorpay.me/@levizr)
+[![Sponsor](https://img.shields.io/badge/Sponsor-morph.levizr.com-3395ff?style=flat-square&logo=razorpay)](https://morph.levizr.com/sponsor)
 
 <br/>
 
@@ -298,7 +298,7 @@ Every contribution matters, no matter how small. A typo fix or a bug report is j
 
 Morph is free and independent. If it saves you megabytes, help keep it alive:
 
-**👉 https://razorpay.me/@levizr**
+**👉 https://morph.levizr.com/sponsor**
 
 See [SPONSORS.md](SPONSORS.md) for where your support goes.
 

@@ -4,9 +4,9 @@ Morph is free, open-source, and built by [Levizr Technologies](https://www.leviz
 
 ## How to support
 
-**Donate — one link:**
+**Donate — one link (international + India):**
 
-👉 **https://razorpay.me/@levizr**
+👉 **https://morph.levizr.com/sponsor**
 
 Every amount helps — server costs, test devices, and full-time work on the compiler, renderer, and docs.
 
@@ -30,7 +30,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for code setup (`cargo build --workspace`
 
 ## Sponsor link
 
-- Razorpay (UPI / cards / netbanking): **https://razorpay.me/@levizr**
+- Sponsor page (USD + INR via Razorpay): **https://morph.levizr.com/sponsor**
+- Direct Razorpay link: **https://razorpay.me/@levizr**
 
 Thank you — every contribution, no matter how small, matters.
 
