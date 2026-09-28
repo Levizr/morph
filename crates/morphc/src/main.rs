@@ -272,6 +272,15 @@ fn main() {
         for cause in e.chain().skip(1) {
             eprintln!("      {} {}", "caused by:".dimmed(), cause);
         }
+        // Bare docs URL on its own line so terminals render it clickable.
+        // Only `mx-*` codes have reference pages.
+        let full = format!("{e:?}");
+        if let Some(code) = full.split_whitespace().find_map(|w| {
+            let t = w.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '-' && c != '_');
+            (t.starts_with("mx-") && t.len() > 4).then_some(t)
+        }) {
+            eprintln!("      {} {}", "Learn more:".dimmed(), morph_parser::docs_url(code));
+        }
         eprintln!();
         std::process::exit(1);
     }

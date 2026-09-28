@@ -98,6 +98,10 @@ public:
     // deleted (e.g. a click handler swapped a conditional branch) never walks
     // freed memory.
     static MorphNode* s_activePressNode;
+    // Last clicked node for double-click detection (pointer compare only,
+    // never dereferenced; still cleared by the dtor so heap reuse across
+    // navigations cannot forge a double-click).
+    static MorphNode* s_lastClickNode;
 
     float x = 0, y = 0, w = 0, h = 0;
     MorphStyle style;
@@ -582,6 +586,7 @@ public:
         if (this == s_activePressNode) s_activePressNode = nullptr;
         if (this == s_mouseCapture) s_mouseCapture = nullptr;
         if (this == s_focusedNode) s_focusedNode = nullptr;
+        if (this == s_lastClickNode) s_lastClickNode = nullptr;
         for (auto* ef : m_associatedEffects) ef->dead = true;
         m_associatedEffects.clear();
         delete hoverStyle; delete activeStyle;

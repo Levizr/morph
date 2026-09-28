@@ -8,6 +8,7 @@ MorphNode* MorphNode::s_lastHoveredNode = nullptr;
 MorphNode* MorphNode::s_focusedNode = nullptr;
 MorphNode* MorphNode::s_mouseCapture = nullptr;
 MorphNode* MorphNode::s_activePressNode = nullptr;
+MorphNode* MorphNode::s_lastClickNode = nullptr;
 
 void MorphNode::markDirty(DirtyFlag f) {
     if (f == Clean) return;

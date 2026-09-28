@@ -11,8 +11,8 @@ pub mod routes;
 pub use ast_types::*;
 pub use linter::{check as lint_check, docs_url, lint};
 pub use resolve::{
-    module_ns_path, module_ns_segments, resolve_graph, resolve_import_path, ModuleGraph,
-    ResolvedModule,
+    module_ns_path, module_ns_path_from_base, module_ns_segments, module_ns_segments_from_base,
+    resolve_graph, resolve_import_path, ModuleGraph, ResolvedModule,
 };
 
 /// Parse an .mx file (which is TSX) and return a structured representation.

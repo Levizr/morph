@@ -367,48 +367,25 @@ impl<'a> CppEmitter<'a> {
                 state_map.insert(name.clone(), format!("{name}()"));
             }
             for n in logic_emitter::collect_list_nodes(&w.nodes) {
-                if let Some(ref tmpl) = n.item_template {
-                    // Item templates resolve the map callback's parameters
-                    // (`item`/`index`, whatever the user named them) to the
-                    // factory's `__it` / `__index`. Scoped clone: the outer
-                    // map must not see these bindings.
-                    let mut tmpl_map = state_map.clone();
-                    if n.list_item_param.is_empty() {
-                        tmpl_map.insert("item".to_string(), "__it".to_string());
-                    } else {
-                        tmpl_map.insert(n.list_item_param.clone(), "__it".to_string());
-                    }
-                    if !n.list_index_param.is_empty() {
-                        tmpl_map.insert(n.list_index_param.clone(), "__index".to_string());
-                    }
-                    let body = node_emitter::emit_node_with_state(
-                        tmpl,
-                        None,
-                        &fs.features,
-                        &tmpl_map,
-                        None,
-                    );
-                    let mut caps = String::new();
-                    if body.contains("__it") {
-                        caps.push_str(", &__it");
-                    }
-                    if body.contains("__index") {
-                        caps.push_str(", &__index");
-                    }
-                    let body = body.replace("__LCAPS__", &caps);
-                    let mut fac = format!(
-                        "static MorphNode* __list_factory_{}(morph::ListItemBinding& __b) {{\n",
-                        n.node_id
-                    );
-                    if body.contains("__it") {
-                        fac.push_str("    JsValue& __it = __b.item;\n");
-                    }
-                    if body.contains("__index") {
-                        fac.push_str("    int& __index = __b.index;\n");
-                    }
-                    fac.push_str(&body);
-                    fac.push_str(&format!("\n    return {};\n}}", tmpl.node_id));
+                if let Some(fac) = list_factory_for(n, &state_map, &fs.features) {
                     factories.push(fac);
+                }
+            }
+        }
+        // Route list factories ride the same emission with the mount
+        // state map. A factory body touching `ctx->` cannot compile at
+        // namespace scope — that stays a clear `mx-route-state` error.
+        for (route, win) in self.routes_ir {
+            let state_map = route_state_map(win);
+            for n in logic_emitter::collect_list_nodes(&win.nodes) {
+                match list_factory_for(n, &state_map, &fs.features) {
+                    Some(fac) if fac.contains("ctx->") => anyhow::bail!(
+                        "mx-route-state: route {} reads mount state inside keyed-list item `{}`; move the read out of the template or into shared state. Learn more: https://morph.levizr.com/docs/errors/mx-route-state",
+                        route.id,
+                        n.node_id
+                    ),
+                    Some(fac) => factories.push(fac),
+                    None => {}
                 }
             }
         }
@@ -442,20 +419,64 @@ impl<'a> CppEmitter<'a> {
             self.windows.iter().flat_map(|w| w.premain_functions.clone()).collect();
         // Route module globals join the app-global premain (route
         // functions are app-global by design). Exact duplicates
-        // (helpers shared with the entry) emit once. Anything referencing
-        // mount context (`ctx->`) is a build error — namespace-scope code
-        // has no context; helpers take explicit parameters instead.
+        // (helpers shared with the entry) emit once. Helpers touching
+        // mount state (`ctx->`) become context-taking templates (one
+        // definition serves every mount); anything else untranslatable
+        // keeps the `mx-route-state` error.
+        let mut ctx_helpers: Vec<String> = Vec::new();
         for (route, win) in self.routes_ir {
+            let mut entries: Vec<&String> = Vec::new();
             for entry in &win.premain_functions {
-                if entry.contains("ctx->") {
-                    anyhow::bail!(
-                        "route {} references route state/props from module scope ({}); move it into the component body or pass explicit parameters",
-                        route.id,
-                        entry.lines().next().unwrap_or("?").trim()
-                    );
+                if !entries.contains(&entry) {
+                    entries.push(entry);
                 }
-                if !premain_entries.contains(entry) {
-                    premain_entries.push(entry.clone());
+            }
+            let mut done: Vec<(String, String, String)> = Vec::new();
+            loop {
+                let mut made = false;
+                for entry in &entries {
+                    if done.iter().any(|(_, original, _)| original == *entry) {
+                        continue;
+                    }
+                    let needs = {
+                        let refs: Vec<&str> = done.iter().map(|(n, _, _)| n.as_str()).collect();
+                        entry.contains("ctx->") || calls_helper(entry, &refs)
+                    };
+                    if !needs {
+                        continue;
+                    }
+                    match route_ctx_helper(entry) {
+                        Some((name, body)) => {
+                            done.push((name, (*entry).clone(), body));
+                            made = true;
+                        }
+                        None => anyhow::bail!(
+                            "mx-route-state: route {} references route state/props from module scope ({}); move it into the component body or pass explicit parameters. Learn more: https://morph.levizr.com/docs/errors/mx-route-state",
+                            route.id,
+                            entry.lines().next().unwrap_or("?").trim()
+                        ),
+                    }
+                }
+                if !made {
+                    break;
+                }
+            }
+            let names: Vec<String> = done.iter().map(|(n, _, _)| n.clone()).collect();
+            for (name, _, body) in &done {
+                if !ctx_helpers.contains(name) {
+                    ctx_helpers.push(name.clone());
+                }
+                let body = rewrite_helper_calls(body, &names);
+                if !premain_entries.contains(&body) {
+                    premain_entries.push(body);
+                }
+            }
+            for entry in &entries {
+                if done.iter().any(|(_, original, _)| original == *entry) {
+                    continue;
+                }
+                if !premain_entries.contains(*entry) {
+                    premain_entries.push((*entry).clone());
                 }
             }
         }
@@ -525,6 +546,7 @@ impl<'a> CppEmitter<'a> {
         // window placeholder resolves against the manifest. Channel
         // placeholders lower like window code.
         let route_mounts = generate_route_mounts(self.routes_ir, &fs.features, &channel_lower);
+        let route_mounts = rewrite_helper_calls(&route_mounts, &ctx_helpers);
         let route_mounts = route_mounts.replace("__morph_current_window()", "__wid");
         let route_mounts = resolve_window_placeholders(&route_mounts, self.routes)?;
         let mut route_mounts = lower_channels(route_mounts);
@@ -1111,6 +1133,324 @@ pub(crate) fn retarget_captures(code: &str) -> String {
     res
 }
 
+/// Template parameter for context-taking route helpers (see
+/// [`route_ctx_helper`]).
+const ROUTE_CTX_TPARAM: &str = "__MorphCtx";
+
+/// Byte is an identifier character for call-site matching.
+fn is_call_ident(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_' || b == b'$'
+}
+
+/// Match any of `names` as a `name (` call at byte `i` (word boundary,
+/// not member access). Returns `(name_idx, paren_idx)`.
+fn helper_call_at(code: &str, i: usize, names: &[&str]) -> Option<(usize, usize)> {
+    let bytes = code.as_bytes();
+    for (idx, name) in names.iter().enumerate() {
+        if !code.get(i..).is_some_and(|s| s.starts_with(*name)) {
+            continue;
+        }
+        if i > 0 && is_call_ident(bytes[i - 1]) {
+            continue;
+        }
+        let mut j = i + name.len();
+        while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+            j += 1;
+        }
+        if bytes.get(j) != Some(&b'(') {
+            continue;
+        }
+        let mut k = i;
+        while k > 0 && bytes[k - 1].is_ascii_whitespace() {
+            k -= 1;
+        }
+        let member = (k >= 1 && bytes[k - 1] == b'.')
+            || (k >= 2 && bytes[k - 2] == b'-' && bytes[k - 1] == b'>');
+        if member {
+            continue;
+        }
+        return Some((idx, j));
+    }
+    None
+}
+
+/// Walk word-boundary `name (` occurrences outside string literals and
+/// comments. `on_call(name_idx, name_start, paren_idx)` returns true to
+/// stop early. Member accesses (`x.name(`, `p->name(`) are never our free
+/// helpers; qualified calls (`ns::name(`) are.
+fn scan_helper_calls(
+    code: &str,
+    names: &[&str],
+    mut on_call: impl FnMut(usize, usize, usize) -> bool,
+) {
+    let bytes = code.as_bytes();
+    let mut i = 0;
+    // 0 normal, 1 `"`, 2 `'`, 3 `//`, 4 `/* */`.
+    let mut state: u8 = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        let next = bytes.get(i + 1).copied();
+        match state {
+            1 => {
+                if b == b'\\' {
+                    i += 2;
+                } else {
+                    if b == b'"' {
+                        state = 0;
+                    }
+                    i += 1;
+                }
+                continue;
+            }
+            2 => {
+                if b == b'\\' {
+                    i += 2;
+                } else {
+                    if b == b'\'' {
+                        state = 0;
+                    }
+                    i += 1;
+                }
+                continue;
+            }
+            3 => {
+                if b == b'\n' {
+                    state = 0;
+                }
+                i += 1;
+                continue;
+            }
+            4 => {
+                if b == b'*' && next == Some(b'/') {
+                    state = 0;
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+                continue;
+            }
+            _ => {}
+        }
+        if b == b'"' {
+            state = 1;
+        } else if b == b'\'' {
+            state = 2;
+        } else if b == b'/' && next == Some(b'/') {
+            state = 3;
+            i += 1;
+        } else if b == b'/' && next == Some(b'*') {
+            state = 4;
+            i += 1;
+        } else if let Some((idx, paren)) = helper_call_at(code, i, names) {
+            if on_call(idx, i, paren) {
+                return;
+            }
+        }
+        i += 1;
+    }
+}
+
+/// Index of the `)` matching the `(` at `paren`, string/comment aware.
+fn match_paren(code: &str, paren: usize) -> Option<usize> {
+    let bytes = code.as_bytes();
+    if bytes.get(paren) != Some(&b'(') {
+        return None;
+    }
+    let mut depth = 0i32;
+    let mut i = paren;
+    let mut state: u8 = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        let next = bytes.get(i + 1).copied();
+        match state {
+            1 => {
+                if b == b'\\' {
+                    i += 2;
+                } else {
+                    if b == b'"' {
+                        state = 0;
+                    }
+                    i += 1;
+                }
+                continue;
+            }
+            2 => {
+                if b == b'\\' {
+                    i += 2;
+                } else {
+                    if b == b'\'' {
+                        state = 0;
+                    }
+                    i += 1;
+                }
+                continue;
+            }
+            3 => {
+                if b == b'\n' {
+                    state = 0;
+                }
+                i += 1;
+                continue;
+            }
+            4 => {
+                if b == b'*' && next == Some(b'/') {
+                    state = 0;
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+                continue;
+            }
+            _ => {}
+        }
+        if b == b'"' {
+            state = 1;
+        } else if b == b'\'' {
+            state = 2;
+        } else if b == b'/' && next == Some(b'/') {
+            state = 3;
+            i += 1;
+        } else if b == b'/' && next == Some(b'*') {
+            state = 4;
+            i += 1;
+        } else if b == b'(' {
+            depth += 1;
+        } else if b == b')' {
+            depth -= 1;
+            if depth == 0 {
+                return Some(i);
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
+/// True when `code` calls any of `names` outside literals/comments.
+fn calls_helper(code: &str, names: &[&str]) -> bool {
+    if names.is_empty() {
+        return false;
+    }
+    let mut found = false;
+    scan_helper_calls(code, names, |_, _, _| {
+        found = true;
+        true
+    });
+    found
+}
+
+/// Rewrite one route helper that touches mount state (`ctx->`) into a
+/// context-taking function template, so a single definition serves every
+/// mount that shares it (each route has its own `Context` type — the
+/// template deduces it per call):
+///
+///   `Ret name(Args)` → `template <typename __MorphCtx>`
+///                       `Ret name(std::shared_ptr<__MorphCtx> ctx[, Args])`
+///
+/// `shared_ptr` by value keeps the mount alive across `co_await`
+/// suspension (navigate-away mid-fetch cannot dangle). Call sites are
+/// rewritten separately by [`rewrite_helper_calls`]. Returns
+/// `(name, transformed_entry)`, or None when the entry is not a plain
+/// free-function definition (classes, lambdas, globals keep the
+/// `mx-route-state` error).
+fn route_ctx_helper(entry: &str) -> Option<(String, String)> {
+    if !entry.contains("ctx->") {
+        return None;
+    }
+    let decl = logic_emitter::extract_function_decl(entry)?;
+    let name = logic_emitter::fn_name(&decl)?;
+    // Definition = first `name(` whose parens are followed by `{`.
+    let names = [name.as_str()];
+    let mut def: Option<(usize, usize)> = None;
+    scan_helper_calls(entry, &names, |_, start, paren| {
+        if let Some(close) = match_paren(entry, paren) {
+            let mut k = close + 1;
+            while k < entry.len() && entry.as_bytes()[k].is_ascii_whitespace() {
+                k += 1;
+            }
+            if entry.as_bytes().get(k) == Some(&b'{') {
+                def = Some((start, paren));
+                return true;
+            }
+        }
+        false
+    });
+    let (_, def_paren) = def?;
+    let def_close = match_paren(entry, def_paren)?;
+    let params = entry[def_paren + 1..def_close].trim();
+    let ctx_param = if params.is_empty() {
+        format!("std::shared_ptr<{ROUTE_CTX_TPARAM}> ctx")
+    } else {
+        format!("std::shared_ptr<{ROUTE_CTX_TPARAM}> ctx, {params}")
+    };
+    let mut body = String::with_capacity(entry.len() + 80);
+    body.push_str(&entry[..def_paren + 1]);
+    body.push_str(&ctx_param);
+    body.push_str(&entry[def_close..]);
+    // Template line precedes the definition, inside a leading namespace
+    // block when the entry has one.
+    let first_nl = body.find('\n');
+    let insert_at = match first_nl {
+        Some(nl) if body[..nl].trim_start().starts_with("namespace") => nl + 1,
+        _ => 0,
+    };
+    body.insert_str(insert_at, &format!("template <typename {ROUTE_CTX_TPARAM}>\n"));
+    Some((name, body))
+}
+
+/// Rewrite `name(` → `name(ctx[, ...])` for context-taking helpers —
+/// word-boundary, literal/comment safe, member accesses skipped, calls
+/// already passing `ctx` (or the fresh `std::shared_ptr<…>` definition
+/// site) left alone.
+fn rewrite_helper_calls(code: &str, names: &[String]) -> String {
+    if names.is_empty() {
+        return code.to_string();
+    }
+    let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+    let mut out = String::with_capacity(code.len() + 64);
+    let mut last = 0;
+    scan_helper_calls(code, &refs, |_, start, paren| {
+        if start < last {
+            return false;
+        }
+        out.push_str(&code[last..start]);
+        let mut k = paren + 1;
+        while k < code.len() && code.as_bytes()[k].is_ascii_whitespace() {
+            k += 1;
+        }
+        if code.as_bytes().get(k) == Some(&b')') {
+            out.push_str(&code[start..paren + 1]);
+            out.push_str("ctx)");
+            last = k + 1;
+            return false;
+        }
+        let mut w = k;
+        while w < code.len() && is_call_ident(code.as_bytes()[w]) {
+            w += 1;
+        }
+        let word = code.get(k..w).unwrap_or("");
+        let mut q = w;
+        while q < code.len() && code.as_bytes()[q].is_ascii_whitespace() {
+            q += 1;
+        }
+        // Already passing `ctx`, or the transformed definition site
+        // (`name(std::shared_ptr<…> ctx …)`) — copy through.
+        if (word == "ctx" || word == "std")
+            && matches!(code.as_bytes().get(q), Some(b',') | Some(b')') | Some(b':'))
+        {
+            out.push_str(&code[start..paren + 1]);
+            last = paren + 1;
+            return false;
+        }
+        out.push_str(&code[start..paren + 1]);
+        out.push_str("ctx, ");
+        last = paren + 1;
+        false
+    });
+    out.push_str(&code[last..]);
+    out
+}
+
 /// Mount-prologue extraction for one declared prop: plain C++ out of the
 /// runtime `props` object (the only JsValue touchpoint — see
 /// route-mounts.md). Returns (member declaration, assignment statement).
@@ -1151,6 +1491,96 @@ fn route_zero_value(class: &str) -> &'static str {
         "bool" => "false",
         _ => "{}",
     }
+}
+
+/// State map for one route mount: bare reads rewrite to context members
+/// (baked `ctx->` refs survive via the member-access guard in
+/// translate_js). Single source for mount bodies and route list
+/// factories.
+fn route_state_map(win: &IRWindow) -> std::collections::HashMap<String, String> {
+    let mut state_map = std::collections::HashMap::new();
+    for sv in &win.state_vars {
+        if let (Some(getter), Some(_)) = (sv.get("getter"), sv.get("setter")) {
+            state_map.insert(getter.clone(), format!("ctx->{getter}.get()"));
+            if let Some(setter) = sv.get("setter") {
+                state_map.insert(setter.clone(), format!("ctx->{getter}.set"));
+            }
+        }
+    }
+    for sv in &win.shared_vars {
+        if let (Some(getter), Some(accessor)) = (sv.get("getter"), sv.get("accessor")) {
+            let ns = sv.get("ns").map_or("", String::as_str);
+            let read = shared_expr(ns, accessor);
+            state_map.insert(getter.clone(), format!("{read}.get()"));
+            if let Some(setter) = sv.get("setter") {
+                state_map.insert(setter.clone(), format!("{read}.set"));
+            }
+        }
+    }
+    for b in &win.module_bindings {
+        let kind = b.get("kind").map_or("", String::as_str);
+        if kind == "import" {
+            if let (Some(local), Some(expr)) = (b.get("local"), b.get("expr")) {
+                if !local.is_empty() && !expr.is_empty() {
+                    state_map.insert(local.clone(), expr.clone());
+                }
+            }
+            continue;
+        }
+        if kind != "function" && kind != "var" && kind != "class" {
+            continue;
+        }
+        if let (Some(ns), Some(name)) = (b.get("ns"), b.get("name")) {
+            if !ns.is_empty() && !name.is_empty() {
+                state_map.insert(name.clone(), morph_ir::qualified_binding_ref(ns, name));
+            }
+        }
+    }
+    for name in &win.reactive_consts {
+        state_map.insert(name.clone(), format!("{name}()"));
+    }
+    state_map
+}
+
+/// One keyed-list item factory (`static`, namespace scope). Item
+/// templates resolve the map callback's parameters (`item`/`index`,
+/// whatever the user named them) to the factory's `__it` / `__index`.
+/// Returns None when the node carries no item template.
+fn list_factory_for(
+    n: &morph_ir::IRNode,
+    state_map: &std::collections::HashMap<String, String>,
+    features: &std::collections::HashSet<String>,
+) -> Option<String> {
+    let tmpl = n.item_template.as_ref()?;
+    let mut tmpl_map = state_map.clone();
+    if n.list_item_param.is_empty() {
+        tmpl_map.insert("item".to_string(), "__it".to_string());
+    } else {
+        tmpl_map.insert(n.list_item_param.clone(), "__it".to_string());
+    }
+    if !n.list_index_param.is_empty() {
+        tmpl_map.insert(n.list_index_param.clone(), "__index".to_string());
+    }
+    let body = node_emitter::emit_node_with_state(tmpl, None, features, &tmpl_map, None);
+    let mut caps = String::new();
+    if body.contains("__it") {
+        caps.push_str(", &__it");
+    }
+    if body.contains("__index") {
+        caps.push_str(", &__index");
+    }
+    let body = body.replace("__LCAPS__", &caps);
+    let mut fac =
+        format!("static MorphNode* __list_factory_{}(morph::ListItemBinding& __b) {{\n", n.node_id);
+    if body.contains("__it") {
+        fac.push_str("    JsValue& __it = __b.item;\n");
+    }
+    if body.contains("__index") {
+        fac.push_str("    int& __index = __b.index;\n");
+    }
+    fac.push_str(&body);
+    fac.push_str(&format!("\n    return {};\n}}", tmpl.node_id));
+    Some(fac)
 }
 
 /// Per-route mount functions: `Context` (props as plain C++ members,
@@ -1241,47 +1671,7 @@ pub fn generate_route_mounts(
         }
         // Route state map: bare reads rewrite to context members (baked
         // `ctx->` refs survive via the member-access guard in translate_js).
-        let mut state_map = std::collections::HashMap::new();
-        for sv in &win.state_vars {
-            if let (Some(getter), Some(_)) = (sv.get("getter"), sv.get("setter")) {
-                state_map.insert(getter.clone(), format!("ctx->{getter}.get()"));
-                if let Some(setter) = sv.get("setter") {
-                    state_map.insert(setter.clone(), format!("ctx->{getter}.set"));
-                }
-            }
-        }
-        for sv in &win.shared_vars {
-            if let (Some(getter), Some(accessor)) = (sv.get("getter"), sv.get("accessor")) {
-                let ns = sv.get("ns").map_or("", String::as_str);
-                let read = shared_expr(ns, accessor);
-                state_map.insert(getter.clone(), format!("{read}.get()"));
-                if let Some(setter) = sv.get("setter") {
-                    state_map.insert(setter.clone(), format!("{read}.set"));
-                }
-            }
-        }
-        for b in &win.module_bindings {
-            let kind = b.get("kind").map_or("", String::as_str);
-            if kind == "import" {
-                if let (Some(local), Some(expr)) = (b.get("local"), b.get("expr")) {
-                    if !local.is_empty() && !expr.is_empty() {
-                        state_map.insert(local.clone(), expr.clone());
-                    }
-                }
-                continue;
-            }
-            if kind != "function" && kind != "var" && kind != "class" {
-                continue;
-            }
-            if let (Some(ns), Some(name)) = (b.get("ns"), b.get("name")) {
-                if !ns.is_empty() && !name.is_empty() {
-                    state_map.insert(name.clone(), morph_ir::qualified_binding_ref(ns, name));
-                }
-            }
-        }
-        for name in &win.reactive_consts {
-            state_map.insert(name.clone(), format!("{name}()"));
-        }
+        let state_map = route_state_map(win);
         for node in &win.nodes {
             let c =
                 node_emitter::emit_node_with_state(node, Some("win"), features, &state_map, None);
@@ -3005,6 +3395,54 @@ mod tests {
         assert_eq!(route_ns_name("/settings"), "settings");
         assert_eq!(route_ns_name("/"), "root");
         assert_eq!(route_ns_name("/a-b/(group)"), "a_b_group");
+    }
+
+    #[test]
+    fn route_ctx_helper_templates_stateful_helper() {
+        let entry = "morph::Result<JsValue> inst0_checkIp()\n{\n    if (r.ok()) {\n        ctx->inst0_ip.set(r.text());\n    }\n}";
+        let (name, body) = route_ctx_helper(entry).expect("template");
+        assert_eq!(name, "inst0_checkIp");
+        assert!(body.starts_with("template <typename __MorphCtx>\n"), "{body}");
+        assert!(body.contains("inst0_checkIp(std::shared_ptr<__MorphCtx> ctx)"), "{body}");
+        assert!(body.contains("ctx->inst0_ip.set"), "{body}");
+    }
+
+    #[test]
+    fn route_ctx_helper_keeps_existing_params() {
+        let entry =
+            "void inst1_refresh(int tries)\n{\n    if (tries > 0) { ctx->x.set(tries); }\n}";
+        let (_, body) = route_ctx_helper(entry).expect("template");
+        assert!(body.contains("(std::shared_ptr<__MorphCtx> ctx, int tries)"), "{body}");
+    }
+
+    #[test]
+    fn route_ctx_helper_rejects_non_functions() {
+        assert!(route_ctx_helper("int plain = 1;").is_none());
+        assert!(route_ctx_helper("auto cb = [](int x) { return x; };").is_none());
+        assert!(route_ctx_helper("void pure() {\n log(\"hi\");\n}").is_none());
+        assert!(route_ctx_helper("class Thing {\n void m() { ctx->x.set(1); }\n};").is_none());
+    }
+
+    #[test]
+    fn rewrite_helper_calls_passes_ctx() {
+        let names = vec!["inst0_checkIp".to_string()];
+        assert_eq!(rewrite_helper_calls("inst0_checkIp();", &names), "inst0_checkIp(ctx);");
+        assert_eq!(
+            rewrite_helper_calls("x = inst0_checkIp(a, b);", &names),
+            "x = inst0_checkIp(ctx, a, b);"
+        );
+        assert_eq!(rewrite_helper_calls("ns::inst0_checkIp();", &names), "ns::inst0_checkIp(ctx);");
+        assert_eq!(rewrite_helper_calls("inst0_checkIp(ctx);", &names), "inst0_checkIp(ctx);");
+        assert_eq!(rewrite_helper_calls("obj.inst0_checkIp();", &names), "obj.inst0_checkIp();");
+        assert_eq!(
+            rewrite_helper_calls("log(\"inst0_checkIp()\");", &names),
+            "log(\"inst0_checkIp()\");"
+        );
+        assert_eq!(
+            rewrite_helper_calls("// inst0_checkIp()\ninst0_checkIp();", &names),
+            "// inst0_checkIp()\ninst0_checkIp(ctx);"
+        );
+        assert_eq!(rewrite_helper_calls("otherIp();", &names), "otherIp();");
     }
 
     #[test]

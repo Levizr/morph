@@ -203,11 +203,7 @@ pub(crate) fn run(
     let builder = morph_ir::IRBuilder::new()
         .with_type_mode(type_mode)
         .with_project_root(cwd.clone())
-        .with_app_window(
-            config.window.title.clone(),
-            config.window.width,
-            config.window.height,
-        );
+        .with_app_window(config.window.title.clone(), config.window.width, config.window.height);
     let windows =
         builder.build_with_graph(&graph, &css_rules, &css_keyframes).inspect_err(|_e| {
             pb.finish_and_clear();
@@ -274,16 +270,37 @@ pub(crate) fn run(
     // Per-route IR for mount emission: one module graph rooted at each
     // route.mx (shared components compile into every mount that uses
     // them — same rule as the entry build, no cross-route sharing).
+    // Namespaces rebase to the source root so `src/add/route.mx` can
+    // import shared `src/components/…` via `../components/…`.
+    let canonical_src_root = src_root.canonicalize().unwrap_or_else(|_| src_root.clone());
     let mut routes_ir: Vec<(morph_parser::routes::RouteEntry, morph_ir::IRWindow)> = Vec::new();
     for route in &routes {
-        let route_graph = morph_parser::resolve_graph(&route.file, &cwd).inspect_err(|_e| {
+        let mut route_graph = morph_parser::resolve_graph(&route.file, &cwd).inspect_err(|_e| {
             pb.finish_and_clear();
         })?;
-        let route_win = builder
-            .build_route(&route_graph, route, &css_rules, &css_keyframes)
-            .inspect_err(|_e| {
+        route_graph.set_ns_base(canonical_src_root.clone());
+        let route_win = match builder.build_route(&route_graph, route, &css_rules, &css_keyframes) {
+            Ok(win) => win,
+            Err(e) => {
                 pb.finish_and_clear();
-            })?;
+                // Pinpoint which route failed; the message itself names the
+                // offending `src/…` path, the fix, and the docs URL.
+                crate::logger::log_error(&format!("route `{}`: {e}", route.id));
+                let msg = e.to_string();
+                if let Some(code) = msg.split_whitespace().find_map(|w| {
+                    let t = w.trim_matches(|c: char| {
+                        !(c.is_ascii_alphanumeric() || c == '-' || c == '_')
+                    });
+                    (t.starts_with("mx-") && t.len() > 4).then_some(t)
+                }) {
+                    crate::logger::log_dim(&format!(
+                        "  Learn more: {}",
+                        morph_parser::docs_url(code)
+                    ));
+                }
+                return Err(e);
+            }
+        };
         routes_ir.push((route.clone(), route_win));
     }
     // Companion TypeScript sources (raw contents feed the codegen

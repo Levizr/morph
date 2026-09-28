@@ -429,7 +429,7 @@ impl IRBuilder {
             }
         }
         Self::preseed_sibling_names(root_comp, &mut frame, None);
-        self.expand_component_sources(root_comp, &frame, &mut ctx, &mut extra_headers)?;
+        self.expand_component_sources(root_comp, &mut frame, &mut ctx, &mut extra_headers)?;
         for log in root_comp.console_logs.iter().chain(entry_mod.source.console_logs.iter()) {
             if !ctx.logs.contains(log) {
                 ctx.logs.push(log.clone());
@@ -643,7 +643,7 @@ impl IRBuilder {
             }
         }
         Self::preseed_sibling_names(root_comp, &mut frame, None);
-        self.expand_component_sources(root_comp, &frame, &mut ctx, &mut extra_headers)?;
+        self.expand_component_sources(root_comp, &mut frame, &mut ctx, &mut extra_headers)?;
         for log in root_comp.console_logs.iter().chain(route_mod.source.console_logs.iter()) {
             if !ctx.logs.contains(log) {
                 ctx.logs.push(log.clone());
@@ -864,7 +864,7 @@ impl IRBuilder {
     fn expand_component_sources(
         &self,
         comp: &morph_parser::MxComponent,
-        frame: &InstanceFrame,
+        frame: &mut InstanceFrame,
         ctx: &mut BuilderCtx,
         extra_headers: &mut Vec<String>,
     ) -> anyhow::Result<()> {
@@ -882,6 +882,19 @@ impl IRBuilder {
                 continue;
             }
             extra_headers.extend(include_lines(&out.includes));
+            // `useWindow()` consts stay lazy: an eager namespace-scope
+            // const would evaluate "current window" once at startup.
+            // Bound to the placeholder instead, each use site resolves
+            // to its own window (entry WID, route `__wid`).
+            if expr.contains("__morph_current_window()") || expr.contains("__morph_use_window(") {
+                let mangled = frame.renames.get(&cst.name).cloned();
+                frame.vars.insert(cst.name.clone(), expr.to_string());
+                frame.renames.insert(cst.name.clone(), expr.to_string());
+                if let Some(mangled) = mangled {
+                    frame.vars.insert(mangled, expr.to_string());
+                }
+                continue;
+            }
             let mangled = frame.renames.get(&cst.name).cloned().unwrap_or_else(|| cst.name.clone());
             ctx.premain.push(format!("auto {mangled} = []() {{ return ({expr}); }};"));
             if !ctx.const_names.contains(&mangled) {
@@ -1962,7 +1975,7 @@ impl IRBuilder {
             line,
             col,
         )?;
-        self.expand_component_sources(&comp, &frame, ctx, extra_headers)?;
+        self.expand_component_sources(&comp, &mut frame, ctx, extra_headers)?;
         for log in &comp.console_logs {
             if !ctx.logs.contains(log) {
                 ctx.logs.push(log.clone());
@@ -2284,6 +2297,7 @@ impl IRBuilder {
     ) -> IRNode {
         let empty_graph = morph_parser::ModuleGraph {
             entry: PathBuf::new(),
+            ns_base: PathBuf::new(),
             modules: HashMap::new(),
             order: Vec::new(),
         };
@@ -3324,12 +3338,14 @@ fn is_ident_char_at(src: &str, byte_idx: usize) -> bool {
     src[byte_idx..].chars().next().is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '$')
 }
 
-/// Human-computable C++ namespace path for a module: entry-relative
+/// Human-computable C++ namespace path for a module: source-root-relative
 /// segments joined with `::` (`src/components/ShopStore.mx` →
 /// `components::shopstore`). No hash leaf — `mx-naming` hard gates make
-/// the mapping 1:1 (see `validate_namespaces`).
+/// the mapping 1:1 (see `validate_namespaces`). Route graphs are rebased
+/// to `src/` so shared components stay in-tree.
 fn ns_of(graph: &morph_parser::ModuleGraph, module: &Path) -> anyhow::Result<String> {
-    morph_parser::module_ns_path(&graph.entry, module).map_err(|msg| anyhow::anyhow!("{msg}"))
+    morph_parser::module_ns_path_from_base(graph.ns_base(), module)
+        .map_err(|msg| anyhow::anyhow!("{msg}"))
 }
 
 /// Reject normalized namespace collisions across the graph before
@@ -3341,14 +3357,29 @@ fn validate_namespaces(graph: &morph_parser::ModuleGraph) -> anyhow::Result<()> 
         let ns = ns_of(graph, path)?;
         if let Some(first) = seen.get(&ns) {
             anyhow::bail!(
-                "module {} normalizes to namespace `{ns}`, already claimed by {}: rename one (mx-naming)",
-                path.display(),
-                first.display()
+                "mx-naming: `{}` and `{}` both normalize to `{ns}` — rename one. Learn more: https://morph.levizr.com/docs/errors/mx-naming",
+                short_ns_path(graph.ns_base(), path),
+                short_ns_path(graph.ns_base(), first)
             );
         }
         seen.insert(ns, path.clone());
     }
     Ok(())
+}
+
+/// `src/…`-relative display for namespace errors (never an absolute path).
+fn short_ns_path(base: &Path, module: &Path) -> String {
+    if let Ok(rel) = module.strip_prefix(base) {
+        let root = base.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        if root.is_empty() {
+            return rel.display().to_string();
+        }
+        return format!("{root}/{}", rel.display());
+    }
+    module
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| module.display().to_string())
 }
 
 /// C++ identifier for a module-level binding name. Must match what
@@ -4211,16 +4242,34 @@ fn infer_state_type(init: &str) -> Option<String> {
 /// function so it gets external linkage in the app TU (mirrors Python's
 /// `strip_static_function`, visible to user .cpp code).
 fn strip_static_linkage(cpp: &str) -> String {
-    let mut text = cpp.trim().to_string();
-    for prefix in ["static inline", "static"] {
-        if text.starts_with(prefix)
-            && text[prefix.len()..].chars().next().is_some_and(char::is_whitespace)
-        {
-            text = text[prefix.len()..].trim_start().to_string();
-            break;
+    // morpher may emit multiple top-level declarations (e.g. a forward
+    // declaration followed by the definition). Strip `static`/`static inline`
+    // from the start of each top-level declaration (separated by blank lines).
+    // Forward-declaration-only blocks are dropped outright: each snippet
+    // holds a single function whose definition follows in the same body,
+    // so the prototype is redundant — and downstream string passes
+    // (namespace computation, call rewriting) mistake `name();` protos
+    // for zero-arg call sites.
+    let mut out = String::new();
+    for block in cpp.split("\n\n") {
+        let mut block = block.trim().to_string();
+        for prefix in ["static inline", "static"] {
+            if block.starts_with(prefix)
+                && block[prefix.len()..].chars().next().is_some_and(char::is_whitespace)
+            {
+                block = block[prefix.len()..].trim_start().to_string();
+                break;
+            }
         }
+        if !block.contains('{') && block.contains('(') && block.trim_end().ends_with(';') {
+            continue;
+        }
+        if !out.is_empty() {
+            out.push_str("\n\n");
+        }
+        out.push_str(&block);
     }
-    text
+    out
 }
 
 /// Analyze a dynamic `className` template/expression for ternary branches
@@ -6187,6 +6236,56 @@ export default function SettingsPage(props: { userId: number }) {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    #[test]
+    fn usewindow_const_stays_lazy_in_routes_and_entry() {
+        let root = scratch("usewindow_lazy");
+        write_file(
+            &root,
+            "add/route.mx",
+            "import Nav from '../components/Nav.mx'\nexport default function Add() { return (<body><Nav /></body>) }",
+        );
+        write_file(
+            &root,
+            "components/Nav.mx",
+            r#"
+import { useWindow } from 'morph'
+export default function Nav() {
+  const win = useWindow();
+  return (<div><button onClick={() => win.navigate("/ledger")}>go</button></div>)
+}
+"#,
+        );
+        write_file(
+            &root,
+            "App.mx",
+            "import Nav from './components/Nav.mx'\nexport default function App() { return (<body><Nav /></body>) }",
+        );
+        let mut graph = morph_parser::resolve_graph(&root.join("add/route.mx"), &root).unwrap();
+        graph.set_ns_base(root.clone());
+        let win = IRBuilder::new()
+            .build_route(&graph, &route_entry("/add"), &[], &HashMap::new())
+            .expect("build_route");
+        assert!(
+            win.premain_functions.iter().all(|p| !p.contains("__morph_current_window")),
+            "no eager current-window in route premain: {:?}",
+            win.premain_functions
+        );
+        let egraph = morph_parser::resolve_graph(&root.join("App.mx"), &root).unwrap();
+        let ewin =
+            &IRBuilder::new().build_with_graph(&egraph, &[], &HashMap::new()).expect("entry")[0];
+        assert!(
+            ewin.premain_functions.iter().all(|p| !p.contains("__morph_current_window")),
+            "no eager current-window in entry premain: {:?}",
+            ewin.premain_functions
+        );
+        let dumped = format!("{:?}", win.nodes);
+        assert!(
+            dumped.contains("__morph_current_window().navigate(") && dumped.contains("ledger"),
+            "handle call keeps the lazy placeholder for codegen"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     const LINK_APP: &str = r#"
 export default function App() {
   return (
@@ -6789,11 +6888,11 @@ export default function App() { return (<body><Store /><Store2 /></body>) }
         let graph = morph_parser::resolve_graph(&root.join("App.mx"), &root).unwrap();
         let lints = morph_parser::linter::lint_graph(&graph);
         assert!(
-            lints.iter().any(|l| l.code == "mx-naming" && l.message.contains("already claimed")),
+            lints.iter().any(|l| l.code == "mx-naming" && l.message.contains("both normalize to")),
             "{lints:?}"
         );
         let err = IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap_err();
-        assert!(err.to_string().contains("already claimed"), "{err}");
+        assert!(err.to_string().contains("both normalize to"), "{err}");
         let _ = std::fs::remove_dir_all(&root);
     }
 

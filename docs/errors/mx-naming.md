@@ -8,14 +8,12 @@ A source file or directory name violates the module naming gates, or two
 modules normalize to the same C++ namespace:
 
 ```
-error : mx-naming : module `src/Shop/Item.mx` is outside the entry tree / has an invalid segment
-  hint: Use lowercase letters, digits and underscores in file and directory names
+error : mx-naming : directory `Ledger` in `src/Ledger/list.mx` should be `ledger` (lowercase `[a-z0-9_]` only). Rename it.
   Learn more: https://morph.levizr.com/docs/errors/mx-naming
 ```
 
 ```
-error : mx-naming : module a/utils.ts normalizes to namespace `app::utils`, already claimed by ...
-  hint: Lowercased path segments must be unique across the project
+error : mx-naming : `src/Shop/item.mx` and `src/shop/item.mx` both normalize to `shop::item` — rename one.
   Learn more: https://morph.levizr.com/docs/errors/mx-naming
 ```
 
@@ -34,10 +32,27 @@ predict the generated namespace from the path. Digit-leading segments are
 
 ```
 src/
-  Shop/            # ❌ uppercase directory — mx-naming
-    Item.mx
+  Ledger/            # ❌ should be `ledger`
+    list.mx
   shop/
-    item.mx        # ❌ normalizes same as Shop/Item on case-fold — collision
+    Item.mx          # ❌ should be `item.mx`
+```
+
+Routes share the same source root, so shared components are fine:
+
+```
+src/
+  add/
+    route.mx         # ✅ `import NavBar from "../components/NavBar.mx"`
+  components/
+    NavBar.mx        # ✅ same `src/` tree — one namespace `components::navbar`
+```
+
+A file genuinely outside `src/` is still rejected:
+
+```
+error : mx-naming : `shared/NavBar.mx` is outside the source tree `src` — move it under `src/`.
+  Learn more: https://morph.levizr.com/docs/errors/mx-naming
 ```
 
 ## How to fix
@@ -52,9 +67,11 @@ src/
 
 Rules:
 
-- Directories and stems: lowercase `[a-z0-9_]` only (`my_shop`, not
-  `My-Shop`).
-- Nothing outside the entry directory tree.
+- Directories and stems: lowercase `[a-z0-9_]` only (`src/ledger`, not
+  `src/Ledger`; `item.mx`, not `Item.mx`).
+- Every module in one build must live under the source root (`src/`).
+  Routes (`src/add/route.mx`) and the entry (`src/App.mx`) share it, so
+  `../components/…` imports are in-tree.
 - After lowercasing, every module path must be unique project-wide.
 - Leading digits are `_`-prefixed automatically — avoid them where possible.
 

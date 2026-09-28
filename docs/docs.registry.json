@@ -1892,6 +1892,23 @@
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"
+      },
+      {
+        "title": "mx-route-state — Route Helper Reads Mount State From Module Scope",
+        "slug": "errors/mx-route-state",
+        "file": "errors/mx-route-state",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-route-state: helpers that capture route state must run in the component body or take explicit parameters.",
+        "keywords": [
+          "mx-route-state",
+          "morph route module scope",
+          "morph route state props"
+        ],
+        "lastUpdated": "2026-09-27",
+        "publishedAt": "2026-09-27",
+        "priority": 0.7,
+        "changefreq": "monthly"
       }
     ]
   },

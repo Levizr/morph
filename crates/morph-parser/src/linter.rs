@@ -2139,19 +2139,18 @@ fn check_scope_call(
 pub fn lint_graph(graph: &crate::resolve::ModuleGraph) -> Vec<LintError> {
     let mut out = Vec::new();
     // mx-naming: lowercase `[a-z0-9_]` segments + no normalized collisions.
+    // Namespaces resolve against the graph's source root so route graphs
+    // (rebased to `src/`) accept shared `src/components/…` imports.
     {
         let mut seen: HashMap<String, String> = HashMap::new();
         for mod_path in graph.all_paths() {
             let file = mod_path.display().to_string();
-            match crate::resolve::module_ns_path(&graph.entry, mod_path) {
+            match crate::resolve::module_ns_path_from_base(graph.ns_base(), mod_path) {
                 Err(msg) => out.push(LintError {
                     severity: "error".into(),
                     code: "mx-naming".into(),
                     message: msg,
-                    suggestion: Some(
-                        "Use lowercase letters, digits and underscores in file and directory names"
-                            .into(),
-                    ),
+                    suggestion: None,
                     file_path: file,
                     line: 1,
                     col: 1,
@@ -2162,11 +2161,9 @@ pub fn lint_graph(graph: &crate::resolve::ModuleGraph) -> Vec<LintError> {
                             severity: "error".into(),
                             code: "mx-naming".into(),
                             message: format!(
-                                "module {file} normalizes to namespace `{ns}`, already claimed by {first}: rename one (mx-naming)"
+                                "mx-naming: `{file}` and `{first}` both normalize to `{ns}` — rename one. Learn more: https://morph.levizr.com/docs/errors/mx-naming"
                             ),
-                            suggestion: Some(
-                                "Lowercased path segments must be unique across the project".into(),
-                            ),
+                            suggestion: None,
                             file_path: file,
                             line: 1,
                             col: 1,

@@ -30,9 +30,8 @@ static double s_lastClickTime = 0.0;
 static const double DBL_CLICK_THRESHOLD = 0.3;
 // Pressed-button bitmask for e.buttons (bit = GLFW button index).
 static int s_buttonsDown = 0;
-// Consecutive click count for e.detail + last clicked node.
+// Consecutive click count for e.detail.
 static int s_clickCount = 0;
-static MorphNode* s_lastClickNode = nullptr;
 // True while an X11 pointer grab for a scrollbar drag is held.
 static bool s_pointerGrabActive = false;
 
@@ -184,11 +183,11 @@ void MorphWindow::mouseButtonCb(GLFWwindow *win, int btn, int act, int mods)
         {
             pressNodeNow = self->m_root->hitTest((float)mx, (float)my);
             double now = glfwGetTime();
-            if (pressNodeNow == s_lastClickNode && now - s_lastClickTime < DBL_CLICK_THRESHOLD)
+            if (pressNodeNow == MorphNode::s_lastClickNode && now - s_lastClickTime < DBL_CLICK_THRESHOLD)
                 s_clickCount++;
             else
                 s_clickCount = 1;
-            s_lastClickNode = pressNodeNow;
+            MorphNode::s_lastClickNode = pressNodeNow;
         }
         e.detail = s_clickCount;
         // End a mouse drag started inside a captured node (e.g. <input>
@@ -279,7 +278,14 @@ void MorphWindow::mouseButtonCb(GLFWwindow *win, int btn, int act, int mods)
                     }
                     s_lastClickTime = now;
                 }
-                _applyActiveChain(pressNode, false);
+                // The handler may have navigated (tree deleted — the node
+                // destructor nulled the static). Re-read instead of
+                // trusting the local; a deleted press cancels like a drag.
+                pressNode = MorphNode::s_activePressNode;
+                if (pressNode)
+                {
+                    _applyActiveChain(pressNode, false);
+                }
             }
             MorphNode::s_activePressNode = nullptr;
         }

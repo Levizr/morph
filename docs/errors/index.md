@@ -108,3 +108,4 @@ rule off or change its severity in `morph.config.json`:
 
 - [mx-route-unknown](mx-route-unknown.md) — unknown route id
 - [mx-route-no-export](mx-route-no-export.md) — route file without default export
+- [mx-route-state](mx-route-state.md) — route helper reads mount state from module scope

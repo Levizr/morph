@@ -2,11 +2,17 @@ use morph_ir::{IRNode, IRStyle};
 use std::fmt::Write as _;
 
 /// Handler bodies mentioning window constructs (`new Window(…)` /
-/// `useWindow(`) translate through morpher (placeholder lowering +
+/// `useWindow(`, or the already-substituted `__morph_current_window(` /
+/// `__morph_use_window(` placeholders from cross-snippet `const win`
+/// bindings) translate through morpher (placeholder lowering +
 /// handle tracking); everything else keeps the textual path.
 /// Nonzero indent avoids `static` locals — handlers run per event.
 fn translate_window_handler(body: &str) -> Option<String> {
-    if !(body.contains("new Window(") || body.contains("useWindow(")) {
+    if !(body.contains("new Window(")
+        || body.contains("useWindow(")
+        || body.contains("__morph_current_window(")
+        || body.contains("__morph_use_window("))
+    {
         return None;
     }
     // Unwrap the arrow and braced block to bare statements first:
@@ -2243,6 +2249,20 @@ fn raw_prop_to_enum(prop: &str) -> Option<&'static str> {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn window_handler_lowers_placeholder_handles() {
+        let out = translate_window_handler("() => __morph_current_window().navigate(\"/ledger\")")
+            .expect("placeholder handler lowers");
+        assert!(
+            out.contains("__morph_win_navigate(__morph_current_window(), \"/ledger\", JsObject{})"),
+            "{out}"
+        );
+        assert!(
+            translate_window_handler("() => setCount(count + 1)").is_none(),
+            "plain handlers keep the textual path"
+        );
+    }
 
     #[test]
     fn member_access_lowering() {

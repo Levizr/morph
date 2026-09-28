@@ -21,54 +21,119 @@ pub struct ResolvedModule {
 #[derive(Debug)]
 pub struct ModuleGraph {
     pub entry: PathBuf,
+    /// Base directory C++ namespaces are computed relative to.
+    ///
+    /// Defaults to the entry file's parent directory (`src/` for
+    /// `src/App.mx`). Route graphs rebase this to the source root so a
+    /// route like `src/add/route.mx` can import shared siblings such as
+    /// `src/components/NavBar.mx` via `../components/…` — without the
+    /// rebase every shared import looks "outside the entry tree".
+    pub ns_base: PathBuf,
     pub modules: HashMap<PathBuf, ResolvedModule>,
     pub order: Vec<PathBuf>,
 }
 
-/// C++ namespace segments for a module, relative to the entry file's
-/// directory (`src/components/shop/ShopStore.mx` →
+/// Show a path relative to the source root (`src/…`) instead of an
+/// absolute path. Falls back to the `src/…` suffix when the module is
+/// outside the base, and to the file name when there is no `src`.
+fn short_path(base: &Path, module: &Path) -> String {
+    if let Ok(rel) = module.strip_prefix(base) {
+        let root = base.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        if root.is_empty() {
+            return rel.display().to_string();
+        }
+        return format!("{root}/{}", rel.display());
+    }
+    let comps: Vec<String> =
+        module.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
+    if let Some(i) = comps.iter().rposition(|c| c == "src") {
+        return comps[i..].join("/");
+    }
+    module
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| module.display().to_string())
+}
+
+/// Short display name for the namespace base itself (`src`, not `/abs/…/src`).
+fn short_base(base: &Path) -> String {
+    base.file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| base.display().to_string())
+}
+
+/// C++ namespace segments for a module, relative to a base directory
+/// (`src/components/shop/ShopStore.mx` with base `src/` →
 /// `["components", "shop", "shopstore"]`).
 ///
 /// Hard `mx-naming` gates: every segment is lowercased and must match
-/// `[a-z0-9_]` (CamelCase complies automatically; spaces/dashes/dots do
-/// not — rename the file). A leading digit is `_`-prefixed for C++
-/// validity. Modules outside the entry directory tree (`..`) are
-/// rejected. Two modules normalizing to the same segments are a
-/// collision (checked by the linter/builder, not here).
-pub fn module_ns_segments(entry: &Path, module: &Path) -> Result<Vec<String>, String> {
-    let entry_dir = entry.parent().unwrap_or_else(|| Path::new("."));
-    let rel = module.strip_prefix(entry_dir).map_err(|_| {
+/// `[a-z0-9_]`. Pinpoint errors name the offending `src/…` path and its
+/// fix, plus the docs URL.
+pub fn module_ns_segments_from_base(base: &Path, module: &Path) -> Result<Vec<String>, String> {
+    let rel = module.strip_prefix(base).map_err(|_| {
         format!(
-            "module {} is outside the entry directory tree {} (mx-naming)",
-            module.display(),
-            entry_dir.display()
+            "mx-naming: `{}` is outside the source tree `{}` — move it under `{}/`. Learn more: https://morph.levizr.com/docs/errors/mx-naming",
+            short_path(base, module),
+            short_base(base),
+            short_base(base)
         )
     })?;
     let mut segs: Vec<String> = Vec::new();
     for comp in rel.components().take(rel.components().count().saturating_sub(1)) {
-        let s = comp.as_os_str().to_string_lossy().to_lowercase();
+        let raw = comp.as_os_str().to_string_lossy().to_string();
+        let s = raw.to_lowercase();
         if s.is_empty()
             || !s.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
         {
+            let fixed: String = s
+                .chars()
+                .map(|c| {
+                    if c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' {
+                        c
+                    } else if c == '-' || c == ' ' || c == '.' {
+                        '_'
+                    } else {
+                        '_'
+                    }
+                })
+                .collect();
             return Err(format!(
-                "directory `{s}` in {} violates mx-naming (lowercase `[a-z0-9_]` only): rename it",
-                module.display()
+                "mx-naming: directory `{}` in `{}` should be `{}` (lowercase `[a-z0-9_]` only). Rename it. Learn more: https://morph.levizr.com/docs/errors/mx-naming",
+                raw,
+                short_path(base, module),
+                fixed
             ));
         }
         segs.push(if s.starts_with(|c: char| c.is_ascii_digit()) { format!("_{s}") } else { s });
     }
-    let stem = module
+    let raw_stem = module
         .file_stem()
-        .map(|s| s.to_string_lossy().to_lowercase())
+        .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "m".to_string());
+    let stem = raw_stem.to_lowercase();
     // Strip a leftover compound suffix (`foo.test` from `foo.test.mx` can
     // never be a clean segment).
     if stem.is_empty()
         || !stem.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
     {
+        let fixed: String = stem
+            .chars()
+            .map(|c| {
+                if c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' {
+                    c
+                } else if c == '-' || c == ' ' || c == '.' {
+                    '_'
+                } else {
+                    '_'
+                }
+            })
+            .collect();
         return Err(format!(
-            "file stem `{stem}` in {} violates mx-naming (lowercase `[a-z0-9_]` only): rename it",
-            module.display()
+            "mx-naming: file `{}` in `{}` should be `{}{}` (lowercase `[a-z0-9_]` only). Rename it. Learn more: https://morph.levizr.com/docs/errors/mx-naming",
+            raw_stem,
+            short_path(base, module),
+            fixed,
+            module.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default()
         ));
     }
     segs.push(if stem.starts_with(|c: char| c.is_ascii_digit()) {
@@ -79,12 +144,39 @@ pub fn module_ns_segments(entry: &Path, module: &Path) -> Result<Vec<String>, St
     Ok(segs)
 }
 
+/// C++ namespace segments for a module, relative to the entry file's
+/// directory. Kept for single-entry builds; route builds use
+/// [`module_ns_segments_from_base`] with the source root so shared
+/// `src/components/…` imports are inside the tree.
+pub fn module_ns_segments(entry: &Path, module: &Path) -> Result<Vec<String>, String> {
+    let base = entry.parent().unwrap_or_else(|| Path::new("."));
+    module_ns_segments_from_base(base, module)
+}
+
 /// C++ namespace path (`a::b::c`) for a module, or an `mx-naming` error.
 pub fn module_ns_path(entry: &Path, module: &Path) -> Result<String, String> {
     module_ns_segments(entry, module).map(|s| s.join("::"))
 }
 
+/// C++ namespace path relative to an explicit source root, or an
+/// `mx-naming` error. Route builds use this with `src/` as the base.
+pub fn module_ns_path_from_base(base: &Path, module: &Path) -> Result<String, String> {
+    module_ns_segments_from_base(base, module).map(|s| s.join("::"))
+}
+
 impl ModuleGraph {
+    /// Base directory namespaces resolve against. Defaults to the entry
+    /// file's parent; route graphs rebase it to `src/`.
+    pub fn ns_base(&self) -> &Path {
+        &self.ns_base
+    }
+
+    /// Rebase namespaces to the source root (route builds call this with
+    /// `src/` so shared `src/components/…` imports stay in-tree).
+    pub fn set_ns_base(&mut self, base: PathBuf) {
+        self.ns_base = base;
+    }
+
     pub fn entry_module(&self) -> Option<&ResolvedModule> {
         self.modules.get(&self.entry)
     }
@@ -130,8 +222,13 @@ pub fn resolve_graph(entry: &Path, cwd: &Path) -> anyhow::Result<ModuleGraph> {
     let entry_canon = entry
         .canonicalize()
         .map_err(|e| anyhow::anyhow!("cannot resolve entry {}: {}", entry.display(), e))?;
-    let mut graph =
-        ModuleGraph { entry: entry_canon.clone(), modules: HashMap::new(), order: Vec::new() };
+    let ns_base = entry_canon.parent().map_or_else(|| cwd.to_path_buf(), Path::to_path_buf);
+    let mut graph = ModuleGraph {
+        entry: entry_canon.clone(),
+        ns_base,
+        modules: HashMap::new(),
+        order: Vec::new(),
+    };
     let mut queue = VecDeque::from([entry_canon]);
     while let Some(path) = queue.pop_front() {
         if graph.modules.contains_key(&path) {
@@ -364,6 +461,46 @@ export default function Base() {
         );
         let graph = resolve_graph(&root.join("src/App.mx"), &root).unwrap();
         assert_eq!(graph.len(), 1);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn route_graph_rebased_to_src_root_allows_shared_components() {
+        let root = scratch("rebased");
+        write(
+            &root,
+            "src/add/route.mx",
+            "import NavBar from '../components/NavBar.mx'\nexport default function Add() { return (<body><NavBar /></body>) }",
+        );
+        write(&root, "src/components/NavBar.mx", "export function NavBar() { return (<div/>) }");
+        let mut graph = resolve_graph(&root.join("src/add/route.mx"), &root).unwrap();
+        // Without the rebase the shared sibling is "outside the tree".
+        let err = module_ns_path(&graph.entry, &graph.order[1]).unwrap_err();
+        assert!(err.contains("mx-naming"), "{err}");
+        assert!(!err.contains(&root.display().to_string()), "{err}");
+        // Rebasing to `src/` (what `morph build` does per route) fixes it
+        // and keeps namespaces entry-consistent (`components::navbar`).
+        graph.set_ns_base(root.join("src").canonicalize().unwrap_or(root.join("src")));
+        let shared = graph.order[1].clone();
+        assert_eq!(
+            module_ns_path_from_base(graph.ns_base(), &shared).unwrap(),
+            "components::navbar"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn naming_errors_pinpoint_src_relative_paths() {
+        let root = scratch("pinpoint");
+        write(&root, "src/Bad-Dir/list.mx", "export function List() { return (<div/>) }");
+        let base = root.join("src").canonicalize().unwrap_or(root.join("src"));
+        let module = base.join("Bad-Dir/list.mx");
+        let err = module_ns_segments_from_base(&base, &module).unwrap_err();
+        assert!(err.contains("src/Bad-Dir/list.mx"), "{err}");
+        assert!(err.contains("bad_dir"), "{err}");
+        assert!(err.contains("mx-naming"), "{err}");
+        assert!(err.contains("https://morph.levizr.com/docs/errors/mx-naming"), "{err}");
+        assert!(!err.contains(&root.display().to_string()), "{err}");
         let _ = std::fs::remove_dir_all(&root);
     }
 }

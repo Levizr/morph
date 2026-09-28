@@ -83,6 +83,14 @@ A function defined in `route.mx` is a namespaced module binding (`app::routes::a
 
 Consequence: route module-level functions, classes, and globals **must not reference route state or props** — they emit at namespace scope where no `ctx` exists (a baked `ctx->` there is a build error with a clear message, mirroring "entry components must not declare props"). Helpers take explicit parameters instead. Effects, handlers, and node code reference `ctx` freely — they all emit inside the mount function.
 
+### Known hit: stateful shared helpers in routes (2026-09-27, `mx-route-state`)
+
+The budget example hit this live: `src/add/route.mx` → `NavBar` → `IpBadge.checkIp()`, an `async` helper closing over `setIp`/`setStatus`. Entry build is green (setters are globals); both route mounts fail at codegen with [`mx-route-state`](../errors/mx-route-state.md). The constraint above holds transitively — any helper reachable from a route, however deep the import chain, must be context-free.
+
+**Fixed 2026-09-28.** Plain-function helpers rewrite into context-taking templates (`template <typename __MorphCtx>` + `shared_ptr` context parameter, threaded through mount bodies and helper-to-helper calls — one definition serves every mount, and the `shared_ptr` keeps a navigated-away mount alive across `co_await`). Remaining `mx-route-state` cases: classes/lambdas/consts at module scope and mount-state reads inside keyed-list item templates.
+
+Workarounds (in preference order): inline the logic in the effect body; pass setters as explicit parameters; keep the stateful component in the entry tree and use stateless components plus `morphShared` stores inside routes.
+
 ### Props: `JsObject` in, plain C++ out (decided 2026-09-20, ✅ shipped)
 
 User-facing rules: [Windows & Routes](../guides/windows-and-routing.md#props). Internals: one extraction per declared prop in the mount prologue (the only `JsValue` touchpoint) via total `as_*` coercions — never throw, unconvertible yields zero values, strings never parsed as numbers. Composite props keep `JsArray`/`JsObject` members. Missing *required* props log loudly at mount. The prologue is the single choke point for all future callers.
@@ -90,6 +98,8 @@ User-facing rules: [Windows & Routes](../guides/windows-and-routing.md#props). I
 ### `useWindow()` lowers to a captured `__wid`
 
 The mount function receives the mounting window's WID; generated code binds it as `__wid`, and `useWindow()` (no arg) lowers to that variable. Entry windows bind `__wid` as their constant WID. One rule, both paths — no ambient context crosses any boundary.
+
+**Fixed 2026-09-28.** `const win = useWindow()` in any component body (entry or route, root or child) stays lazy: the const binds to the `__morph_current_window()` placeholder instead of an eager namespace-scope evaluation, so each use site resolves to its own window. `win.navigate/close/show/hide/on` on such cross-snippet handles lowers through the same placeholders as same-snippet handles.
 
 ```cpp
 // inside mount(auth_login): generated
