@@ -2251,7 +2251,7 @@ impl<'a> CppTranslator<'a> {
     fn format_params(&mut self, params: &FormalParameters<'a>) -> String {
         let mut parts = Vec::new();
         for p in &params.items {
-            let destructured = self.expand_destructured_param(p, &p.pattern);
+            let destructured = self.expand_destructured_param(&p.pattern);
             if !destructured.is_empty() {
                 parts.extend(destructured);
                 continue;
@@ -2298,11 +2298,7 @@ impl<'a> CppTranslator<'a> {
         parts.join(", ")
     }
 
-    fn expand_destructured_param(
-        &mut self,
-        param: &FormalParameter<'a>,
-        pattern: &BindingPattern<'a>,
-    ) -> Vec<String> {
+    fn expand_destructured_param(&mut self, pattern: &BindingPattern<'a>) -> Vec<String> {
         let mut out = Vec::new();
         match pattern {
             BindingPattern::ObjectPattern(obj) => {
@@ -2310,15 +2306,11 @@ impl<'a> CppTranslator<'a> {
                     if prop.computed {
                         continue;
                     }
-                    let Some(key) = EscapeAnalyzer::pattern_key_name(&prop.key) else {
+                    let Some(_key) = EscapeAnalyzer::pattern_key_name(&prop.key) else {
                         continue;
                     };
                     if let Some(bound_name) = self.binding_name_from_pattern(&prop.value) {
-                        let cpp_type = if let Some(ta) = &param.type_annotation {
-                            "auto".to_string()
-                        } else {
-                            "auto".to_string()
-                        };
+                        let cpp_type = "auto".to_string();
                         let cpp_type = self.wrap_type(&cpp_type);
                         self.ctx.need(&cpp_type);
                         self.ctx.var_types.insert(bound_name.clone(), cpp_type.clone());
