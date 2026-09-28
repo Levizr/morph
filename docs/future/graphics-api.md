@@ -8,7 +8,7 @@ Morph renders through **OpenGL 3.3** today. The future is a pluggable graphics l
 
 ## Why it matters
 
-- **macOS** — OpenGL is deprecated on Apple platforms; a Metal backend is effectively required for first-class macOS support (see [Platforms](platform.md))
+- **macOS** — OpenGL is deprecated on Apple platforms; a Metal backend is the long-term rendering path (macOS builds already ship on GL — see [Platforms](shipped/platform.md))
 - **Windows** — DirectX is the native API; Vulkan/D3D backends make Windows a first-class target
 - **Vulkan** — the only truly cross-platform modern API (Linux/Windows/macOS/Android); explicit GPU control maps naturally to Morph's retained [Forge](forge-renderer.md) tile architecture
 - **Performance headroom** — low-overhead APIs (explicit barriers, command buffers, async compute) for the large-UI cases Forge targets
@@ -99,15 +99,15 @@ The compositor-thread model stays: each backend owns its device context on the c
 1. **Seam refactor** — extract `GLRenderer` behind `gpu.h`; zero behavior change (the Flash/Forge Phase-1 pattern, reused)
 2. **SPIR-V pipeline** — GLSL → SPIR-V → per-API shader; render an identity test image on all backends
 3. **Vulkan backend** — init, swapchain, command buffers, batched draws, stencil clipping
-4. **Metal backend** — macOS target (unblocks first-class [macOS support](platform.md))
-5. **D3D11/12 backend** — Windows target (unblocks [Windows support](platform.md))
+4. **Metal backend** — modern macOS rendering (builds already ship — see [macOS support](shipped/platform.md))
+5. **D3D11/12 backend** — modern Windows rendering (builds already ship — see [Windows support](shipped/platform.md))
 6. **Auto-selection** — `"graphics": "auto"` per platform + forced overrides + dev runtime switch
 7. **Forge on new backends** — damage/tiles/scroll-shift map to retained resources (Vulkan and D3D12 are the natural homes for Forge's tile pool)
 8. **Parity matrix** — pixel-identical rendering across all backends + the C++/Rust runtimes
 
 ## Open questions
 
-- **Which first?** Metal (unblocks macOS) and D3D (unblocks Windows) are platform-critical; Vulkan is the ambitious cross-platform one. Order depends on whether [Platforms](platform.md) or raw Vulkan matters more
+- **Which first?** Metal and D3D replace deprecated/foreign GL on already-shipped targets ([Platforms](shipped/platform.md)); Vulkan is the ambitious cross-platform one (and the Android path)
 - **Vulkan boilerplate** — full explicit Vulkan is a huge surface; do we use a helper layer (volk/glslang) or write it raw?
 - **Rust runtime** — if the Rust side uses `wgpu`, the abstraction is inherited; should the C++ side mirror wgpu's surface (hal-like) for symmetry?
 - **Dev-mode multi-backend** — compile all backends in dev for live switching, or one backend per dev build?

@@ -61,6 +61,18 @@ The compositor currently interpolates a fixed set of properties at vsync: **X/Y 
 - **Text measurement** — `estimate_text_width` runs per layout pass; caching measured widths per (string, font, size) is a low-risk win for text-heavy UIs
 - **Layout** — the dirty-flag system already skips clean nodes; the remaining cost is deep-tree re-layout after single-node changes (subtree dirty propagation could be smarter)
 
+## Perf overlay (full support)
+
+Optimizations you can't see are optimizations nobody believes in. The full-support plan pairs every optimization above with a DevTools overlay that proves it — because "trust me, it's fast" is not a profiling strategy:
+
+- **Frame-time strip** — per-frame ms with vsync markers; dropped frames glow accusingly
+- **Damage visualization** — Forge already computes damage rects; paint them on screen so over-invalidation is *visible* (the fastest way to find a widget that repaints the world on every keystroke)
+- **Signal ledger** — per-store subscriber counts + set() frequency; the store updated 400 times per second names itself
+- **Effect accounting** — effect run counts per frame; a cached page re-running on global traffic (see the page-cache cost note in [Windows & Routes](../guides/windows-and-routing.md#page-cache)) shows up here, not in a profiler you forgot to open
+- **Layout heat** — nodes re-laid-out per frame, deep-tree re-layout highlighted; dirty-flag misses become obvious
+
+Toggle with a dev-only hotkey, zero code in release binaries (compiled out, not just hidden — your users' binaries stay lean).
+
 ## Current state
 
 | Piece | State |
@@ -69,3 +81,4 @@ The compositor currently interpolates a fixed set of properties at vsync: **X/Y 
 | Shape fast path | ❌ Deferred (design complete, see above) |
 | Compositor-safe property set | ✅ Shipped (fixed set, marked extensible) |
 | Text-measure caching | ❌ Not started |
+| Perf overlay (frame strip, damage viz, signal ledger) | ❌ Not built (spec above) |

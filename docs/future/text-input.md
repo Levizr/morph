@@ -44,6 +44,10 @@ The `<input>` element is registered and fully implemented, so users can type int
 - **Focus ring** — CSS `:focus` pseudo-class is a natural pairing (currently unsupported)
 - **Clipboard** — X11 clipboard integration for Ctrl+C/V
 
+## Beyond plain input: rich text (future, full support later)
+
+Plain fields cover forms; docs, notes, and chat need *rich* text — bold/italic, links, lists, inline images, and ideally markdown in/out. Full support means a `<richtext>` element with a document model (block + inline spans, not a string with aspirations), selection across blocks, IME-safe composition, and copy/paste that preserves structure (HTML on the clipboard, not flattened text). Explicitly *not* v1: collaborative editing — that's a server with opinions, and this is a text box. It builds on the shipped caret/selection/clipboard plumbing above; the new work is the document model and the clipboard fidelity.
+
 ## Build steps (remaining)
 
 1. ~~Focus model: `focused` lifecycle, Focus/Blur events, key routing to focused node~~ ✅ (except event dispatch)
@@ -51,3 +55,4 @@ The `<input>` element is registered and fully implemented, so users can type int
 3. ~~Selection + editing shortcuts~~ ✅
 4. `:focus` CSS pseudo-class + Focus/Blur event dispatch
 5. `textarea` (multi-line) + `select` (dropdown)
+6. `<richtext>` document model + structured clipboard (full support, later)

@@ -6,29 +6,24 @@
 
 The developer-experience and ecosystem layer. Nothing here is a prerequisite for the core framework — it all compounds on top of a stable core.
 
-## VSCode extension
+## VSCode extension (full support)
 
-**Planned:** syntax highlighting, IntelliSense, and project tooling for `.mx` files in VSCode.
+**Planned:** the extension is the front door most devs walk through — it gets the full treatment, not just highlighting:
 
-- `.mx` is JSX + TS + CSS in one file — highlighting needs a custom TextMate grammar or a grammar composition
-- Autocomplete can reuse the shipped `node_modules/morph` `.d.ts` (already in every project for editor support)
-- Nice-to-haves: `morph dev` task integration, error squiggles via `morph check` output, hover docs
+- **Grammar** — custom TextMate composition for `.mx` (JSX + TS + CSS regions, plus `windowConfig` and `morphShared`/`morphEvent` scope tinting so misplaced calls *look* wrong before the linter says so)
+- **Diagnostics** — `morph check` output as squiggles with fixes (rename-on-ambiguous-import as a one-click code action, not a chore)
+- **Hover docs** — registry-fed tooltips for every API, route ids with go-to-`route.mx`
+- **Run integration** — `morph dev` / `morph build` / [`morph test`](test-runner.md) as tasks with problem matchers; failing tests jump to the exact line
+- **Debugger attach** — breakpoints in `.mx` mapped through to generated C++ (the source-map story from the compiler pipeline, surfaced where devs live)
+- **Timeline view** — the [time-travel](time-travel.md) strip embedded beside the editor, because scrubbing state without leaving your editor is how you stay in flow
 
 ## `morph-icons` (first-party package)
 
-**Planned:** an icon package installable via `morph pkg install morph-icons` (see [Packages](packages.md)).
-
-- Icon set rendered as text (icon font via FreeType) or as vector SDF paths
-- SDF rendering fits Morph's shader stack perfectly (rounded rects already use SDF)
-- Depends on the package JS→C++ bridge landing so icons ship as a real package
+Full design now lives at [Icons & SVG](icons-svg.md): `<svg>` path subset first, then the tree-shaken `morph-icons` set, then `morph icons:add` for project sets. This section keeps the package-angle summary — the icon set ships via `morph pkg install morph-icons` (see [Packages](packages.md)) once the bridge lands.
 
 ## `morph-animate` (animation library)
 
-**Planned:** a higher-level animation library built on top of the CSS animation engine.
-
-- The runtime already has: CSS `@keyframes` + `animation-*` properties, easing functions, property interpolation, `HoverTransition` interpolation, and a compositor that interpolates compositor-safe properties at vsync
-- `morph-animate` would add: imperative tween API (`animate(el, { opacity: 0 }, { duration: 300 })`), sequenced/timeline animations, spring easing
-- Could ship as a package (same dependency on [Packages](packages.md)) or as a built-in module
+Full design now lives at [Animations](animations.md): enter/exit transitions, springs, shared-element morphing, page-transition orchestration. `morph-animate` survives as the imperative escape hatch (`animate(el, { opacity: 0 }, { duration: 300 })`, timelines) for the 5% declarations can't express — same dependency on [Packages](packages.md).
 
 ## Why low priority
 
@@ -43,4 +38,6 @@ The developer-experience and ecosystem layer. Nothing here is a prerequisite for
 | CSS animation engine | ✅ Shipped |
 | Package CLI | ✅ Shipped |
 | Package build bridge | ❌ (see [Packages](packages.md)) |
-| VSCode extension / icons / animate | ❌ Not started |
+| VSCode extension (full spec above) | ❌ Not started |
+| `morph test` runner | ❌ Spec at [Test Runner](test-runner.md) |
+| Icons / animate (full designs linked above) | ❌ Not started |

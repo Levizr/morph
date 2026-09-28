@@ -19,7 +19,7 @@ Everything on Morph's roadmap, documented in detail. Each feature page covers wh
 | `box-shadow`, `outline`, margin collapse | [More CSS](more-css.md) | Low | CSS Cascade |
 | Package JS→C++ build bridge | [Packages](packages.md) | Medium | — |
 | Full Node.js support (`morph/*` imports with `node:*` aliases, npm packages, servers as native binaries) | [Node.js Support](nodejs-support.md) | Medium | JS Coverage |
-| Windows / macOS support | [Platforms](platform.md) | Medium | — |
+| Windows / macOS support | [Platforms](shipped/platform.md) | ✅ Shipped | — |
 | OS accessibility reader (screen readers, focus, keyboard nav) | [Accessibility](accessibility.md) | Medium | Platforms |
 | WebView — embed HTML via the OS webview (Tauri-style hybrid apps) | [WebView](webview.md) | Medium | — |
 | Code signing, notarization, secure updates & store packaging | [Security & Commercial Release](security.md) | Medium | Platforms |
@@ -32,6 +32,13 @@ Everything on Morph's roadmap, documented in detail. Each feature page covers wh
 | **Universal Module Bindings** (import/export/native calls for functions, vars, classes) | [Module Bindings](universal-module-bindings.md) | High | State/Events/Native |
 | **Kill All Runtime Strings** (CSS/node/value enums, hash lookups) | [Kill Strings](shipped/kill-runtime-strings.md) | ✅ Complete (Sept 2026) | — |
 | **Dynamic Styles & Classes** (state-driven keyword styles, dynamic className) | [Dynamic Styles](dynamic-styles.md) | Medium | Kill Strings |
+| Desktop integration (hotkeys, deep links, single-instance, drag-drop, theme, badge) | [Desktop Integration](desktop-integration.md) | High | Window API |
+| Time-travel debugger (multi-window record/replay) | [Time-Travel](time-travel.md) | Medium | State/Events/Native |
+| `morph test` headless E2E runner | [Test Runner](test-runner.md) | Medium | Time-Travel |
+| Transitions, springs & shared-element animation | [Animations](animations.md) | Medium | Forge Renderer |
+| Virtualized lists (100k rows) | [Virtualized Lists](virtualized-lists.md) | Medium | Forge Renderer |
+| SVG element & `morph-icons` system | [Icons & SVG](icons-svg.md) | Medium | Packages |
+| Android & iOS from the same `.mx` codebase | [Mobile](mobile.md) | Medium | Platforms |
 
 **Status meanings:** `production` — shipped and stable · `beta` — shipped, known bugs · `development` — under active construction · `future` — planned, not built yet.
 

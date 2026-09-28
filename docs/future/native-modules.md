@@ -52,6 +52,17 @@ n.show()
 - One canonical example per module using **named imports** (`import { Menu } from 'morph'`)
 - A single `API.md` (or docs section) lists all public exports — the contract checklist when adding modules
 
+## Full support (commitment)
+
+Partial coverage here would be worse than none — an app with dialogs but no menus still can't ship. So the commitment is the full set, in dependency order (each step independently shippable, none useful half-done):
+
+1. **`Dialog` first** — most self-contained (no persistent state, no window chrome interplay). `showOpen`/`showSave`/message boxes, async via the coroutine scheduler. Unblocks every file-handling app on day one.
+2. **`Menu` second** — app menu bar + context menus. Most visible value; every commercial app needs File/Edit/View before anything else.
+3. **`Notification` third** — class lifecycle (show/close/click-action), grouping + actions per OS convention. Background apps are pointless without a way to tap the user on the shoulder.
+4. **`Tray` last** — singleton with icon + menu, depending on [Desktop Integration](desktop-integration.md) (single-instance + login-item are what make tray-first apps real).
+
+Full scope per module (not just the happy path): disabled states + separators + accelerators for menus; multi-select + filters + default-path for dialogs; action buttons + reply fields for notifications; tooltip + click/double-click distinction for tray. The boring completeness is the feature — users file bugs about the *second* menu separator, never the first.
+
 ## Current state
 
 | Module | State |
@@ -61,7 +72,7 @@ n.show()
 
 ## Open questions
 
-- **GLFW-only now** — Menu/Tray/Dialog need OS APIs (GTK/Qt-style native dialogs, X11 tray). Morph is GLFW/EGL-based; native module depth depends on platform abstraction work (see [Platforms](platform.md)).
+- **Beyond GLFW** — Menu/Tray/Dialog need OS APIs (native dialogs, tray icons) that GLFW doesn't provide. Windowing itself ships on all three desktops ([Platforms](shipped/platform.md)); what these modules need is an OS-API layer *above* it.
 - **Async dialogs** — `Dialog.showOpen` returning a `Promise` fits the existing coroutine scheduler (`morph::Result<T>`), but blocking native dialogs run on which thread?
 - **Ordering** — build `Dialog` first (most self-contained, no persistent state) or `Menu` (most visible value)?
 

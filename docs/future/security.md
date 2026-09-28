@@ -83,7 +83,7 @@ morph publish       # upload release + sign the auto-update manifest
 | Piece | State |
 |---|---|
 | Single native binary output (`morph build`) | ✅ Shipped |
-| Windows / macOS support (prerequisite for signing & stores) | ❌ Not built — see [Platforms](platform.md) |
+| Windows / macOS support (prerequisite for signing & stores) | ✅ Shipped — see [Platforms](shipped/platform.md) |
 | `morph sign` / `morph notarize` | ❌ Not built |
 | `morph package` (MSIX, DMG, AppImage, …) | ❌ Not built |
 | `AutoUpdater` with signed manifests | ❌ Not built |
@@ -97,7 +97,7 @@ morph publish       # upload release + sign the auto-update manifest
 
 ## Build steps (when picked up)
 
-1. [Platforms](platform.md) — Windows + macOS targets
+1. ~~[Platforms](platform.md) — Windows + macOS targets~~ ✅ Shipped ([Platforms](shipped/platform.md)) — signing builds on it
 2. `morph sign` (Windows Authenticode, macOS codesign) + `morph notarize`
 3. `morph package` for the main formats (MSIX, DMG, AppImage)
 4. `AutoUpdater` — signed manifest, atomic swap, rollback

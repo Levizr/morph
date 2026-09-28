@@ -2026,7 +2026,7 @@
           "morph feature priorities",
           "whats next in morph"
         ],
-        "lastUpdated": "2026-09-09",
+        "lastUpdated": "2026-09-29",
         "publishedAt": "2026-08-20",
         "priority": 0.7,
         "changefreq": "weekly"
@@ -2164,7 +2164,7 @@
           "morph desktop modules",
           "morph tray icon"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-29",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2317,19 +2317,19 @@
         "changefreq": "monthly"
       },
       {
-        "title": "Morph Windows and macOS Support (Planned)",
-        "slug": "future/platform",
-        "file": "future/platform",
-        "status": "future",
+        "title": "Morph Windows & macOS Support (Shipped)",
+        "slug": "future/shipped/platform",
+        "file": "future/shipped/platform",
+        "status": "production",
         "author": "PIYUSH",
-        "description": "Windows and macOS support planned for Morph: targets, builds, and the cross-platform roadmap beyond Linux.",
+        "description": "Windows and macOS support shipped for Morph: CI release builds, per-platform toolchains, and what remains.",
         "keywords": [
           "morph windows support",
           "morph macos support",
           "morph cross-platform",
           "morph platform roadmap"
         ],
-        "lastUpdated": "2026-09-14",
+        "lastUpdated": "2026-09-29",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2348,7 +2348,7 @@
           "morph keyboard navigation",
           "morph uia at-spi"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-29",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2385,7 +2385,7 @@
           "morph store packaging",
           "morph security"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-29",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2459,8 +2459,135 @@
           "morph graphics api backend",
           "morph opengl alternative"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-29",
         "publishedAt": "2026-08-20",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Desktop Integration — Hotkeys, Deep Links & OS Hooks",
+        "slug": "future/desktop-integration",
+        "file": "future/desktop-integration",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "Desktop integration planned for Morph: global hotkeys, deep links, single-instance, autostart, drag-drop, theme listener, badges.",
+        "keywords": [
+          "morph global hotkeys",
+          "morph deep links",
+          "morph single instance",
+          "morph drag drop",
+          "morph desktop integration"
+        ],
+        "lastUpdated": "2026-09-29",
+        "publishedAt": "2026-09-28",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Time-Travel Debugger — Rewind Your Whole App (Planned)",
+        "slug": "future/time-travel",
+        "file": "future/time-travel",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "Time-travel debugging planned for Morph: multi-window signal and event record/replay with timeline scrubbing.",
+        "keywords": [
+          "morph time travel debugger",
+          "morph replay",
+          "morph devtools timeline",
+          "morph session recording"
+        ],
+        "lastUpdated": "2026-09-28",
+        "publishedAt": "2026-09-28",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "morph test — Headless E2E Runner (Planned)",
+        "slug": "future/test-runner",
+        "file": "future/test-runner",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "A headless end-to-end test runner planned for Morph: drive windows, assert state, screenshot on failure, replay sessions.",
+        "keywords": [
+          "morph test runner",
+          "morph e2e testing",
+          "morph headless tests",
+          "morph screenshots"
+        ],
+        "lastUpdated": "2026-09-29",
+        "publishedAt": "2026-09-28",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Animations — Transitions, Springs & Shared Elements (Planned)",
+        "slug": "future/animations",
+        "file": "future/animations",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "Animation system planned for Morph: enter/exit transitions, spring physics, shared-element morphing, page transitions.",
+        "keywords": [
+          "morph animations",
+          "morph transitions",
+          "morph springs",
+          "morph shared element"
+        ],
+        "lastUpdated": "2026-09-28",
+        "publishedAt": "2026-09-28",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Virtualized Lists — 100k Rows (Planned)",
+        "slug": "future/virtualized-lists",
+        "file": "future/virtualized-lists",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "Virtualized lists planned for Morph: render only the visible window of huge lists with node recycling.",
+        "keywords": [
+          "morph virtualized list",
+          "morph long lists",
+          "morph list performance"
+        ],
+        "lastUpdated": "2026-09-28",
+        "publishedAt": "2026-09-28",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Icons & SVG — morph-icons System (Planned)",
+        "slug": "future/icons-svg",
+        "file": "future/icons-svg",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "SVG and icon system planned for Morph: svg element subset, tree-shaken morph-icons, custom icon sets.",
+        "keywords": [
+          "morph svg",
+          "morph icons",
+          "morph-icons package",
+          "morph vector icons"
+        ],
+        "lastUpdated": "2026-09-28",
+        "publishedAt": "2026-09-28",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Morph on Mobile — Android & iOS (Planned)",
+        "slug": "future/mobile",
+        "file": "future/mobile",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "Mobile support planned for Morph: same .mx codebase compiling to Android APK and iOS IPA, touch, sensors, and store submission.",
+        "keywords": [
+          "morph android",
+          "morph ios",
+          "morph mobile support",
+          "morph apk ipa",
+          "morph smartphones"
+        ],
+        "lastUpdated": "2026-09-29",
+        "publishedAt": "2026-09-29",
         "priority": 0.5,
         "changefreq": "monthly"
       },
@@ -2980,7 +3107,7 @@
           "morph commercial use",
           "morph roadmap gaps"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-29",
         "publishedAt": "2026-08-20",
         "priority": 0.7,
         "changefreq": "yearly"
