@@ -18,6 +18,18 @@ struct JsArray {
 
     JsArray(std::initializer_list<JsValue> init);
 
+    // Construct from a native vector (spread sources, vector-typed locals).
+    // Each element converts through JsValue's implicit constructors. The body
+    // instantiates at the use site, where JsValue is complete.
+    template <typename T>
+    JsArray(const std::vector<T>& vec) : JsArray()
+    {
+        for (const auto& v : vec)
+        {
+            elements->push_back(JsValue(v));
+        }
+    }
+
     // Copy constructor / assignment — shared_ptr copies the pointer, not the data
     JsArray(const JsArray&) = default;
     JsArray& operator=(const JsArray&) = default;

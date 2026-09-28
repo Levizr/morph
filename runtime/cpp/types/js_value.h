@@ -747,4 +747,51 @@ inline bool operator>=(const JsValue& a, const JsNumber& b) { return a.is_number
 // "types/js_value_format.h" and are included by default via "js_types.h".
 // Define MORPH_NO_FORMAT before including js_types.h to opt-out of the
 // <format> parse cost (~1.5s per TU) in hot-reload critical paths.
+
+// ── Helper: instanceof (JS semantics: prototype chain check) ──
+// Simplified: checks if RHS constructor's prototype is in LHS's prototype chain.
+// For morph's JsValue, we approximate by checking variant type or class identity.
+inline bool js_instanceof(const JsValue& obj, const JsValue& ctor) {
+    if (!ctor.is_function()) return false;
+    // For morph's native classes wrapped in JsValue, the function carries the type info
+    // This is a simplified implementation - real JS instanceof checks prototype chain
+    if (obj.is_object()) {
+        // Could check obj's constructor property vs ctor
+        return true; // placeholder
+    }
+    if (obj.is_array() && ctor.is_function()) {
+        // Check if ctor is Array constructor
+        return true; // placeholder
+    }
+    return false;
+}
+
+namespace morph {
+    inline bool js_instanceof(const JsValue& obj, const JsValue& ctor) {
+        return ::js_instanceof(obj, ctor);
+    }
+}
+
+// ── Helper: "in" operator (JS semantics: property existence in object) ──
+inline bool js_has_property(const JsValue& obj, const JsValue& key) {
+    if (obj.is_object()) {
+        return std::get<JsObject>(obj.inner).has(key.as_string());
+    }
+    if (obj.is_array()) {
+        // For arrays, "0" in arr checks index existence
+        if (key.is_number()) {
+            int64_t idx = key.as_int();
+            return idx >= 0 && idx < std::get<JsArray>(obj.inner).length();
+        }
+        if (key.is_string() && key.as_string() == "length") return true;
+        return false;
+    }
+    return false;
+}
+
+namespace morph {
+    inline bool js_has_property(const JsValue& obj, const JsValue& key) {
+        return ::js_has_property(obj, key);
+    }
+}
 // Codegen adds <format> only when `${}` is used.

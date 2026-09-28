@@ -63,6 +63,9 @@ pub struct Ctx {
     /// `new Window()` results. Method/property lowering applies only
     /// to these names — user objects with same-named methods are untouched.
     pub window_vars: HashSet<String>,
+    /// Private field names per class: class name -> set of private field names
+    /// (original TS names). Used to mangle `#field` to `__private_class_field`.
+    pub private_fields: HashMap<String, HashSet<String>>,
     pub async_fns: HashSet<String>,
     pub fn_return_types: HashMap<String, String>,
     pub current_fn: Option<String>,
@@ -93,6 +96,7 @@ impl Default for Ctx {
             state_vars: HashMap::new(),
             js_object_params: HashSet::new(),
             window_vars: HashSet::new(),
+            private_fields: HashMap::new(),
             async_fns: HashSet::new(),
             fn_return_types: HashMap::new(),
             current_fn: None,
@@ -161,6 +165,9 @@ impl Ctx {
         }
         for (k, v) in child.fn_return_types {
             self.fn_return_types.insert(k, v);
+        }
+        for (k, v) in child.private_fields {
+            self.private_fields.entry(k).or_default().extend(v);
         }
     }
 

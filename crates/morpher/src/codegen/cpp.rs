@@ -155,6 +155,52 @@ impl<'a> CppTranslator<'a> {
         INDENT.repeat(self.ctx.indent_level)
     }
 
+    // Forward-declaration signature for one top-level function. Nested
+    // functions lower to capturing lambdas inline (no prototype needed).
+    fn fn_decl_sig(&mut self, f: &Function<'a>) -> Option<(String, String)> {
+        let id = f.id.as_ref()?;
+        let name = id.name.to_string();
+        if f.body.is_none() || name == "main" {
+            return None;
+        }
+        let ret = if let Some(rt) = &f.return_type {
+            resolve_type_annotation(
+                Some(rt),
+                "auto",
+                &self.ctx.template_params,
+                false,
+                &self.ctx.class_names,
+            )
+        } else if f.r#async {
+            "JsValue".to_string()
+        } else if self.has_return(f.body.as_ref().unwrap()) {
+            "auto".to_string()
+        } else {
+            "void".to_string()
+        };
+        let mut final_ret = ret.clone();
+        if f.r#async {
+            final_ret = self.ctx.async_result_type(&final_ret);
+        }
+        if !f.r#async && final_ret == "JsValue" {
+            if let Some(body_ref) = f.body.as_ref() {
+                if Self::returns_only_lambdas(body_ref) {
+                    final_ret = "auto".to_string();
+                }
+            }
+        }
+        let params = self.format_params(&f.params);
+        let tp = if let Some(tp) = &f.type_parameters {
+            let decls: Vec<String> =
+                tp.params.iter().map(|p| format!("typename {}", p.name.name)).collect();
+            format!("template <{}>\n", decls.join(", "))
+        } else {
+            String::new()
+        };
+        let sig = format!("{}{} {}({})", tp, final_ret, name, params);
+        Some((name, sig))
+    }
+
     pub fn translate_program(&mut self, program: &Program<'a>) -> String {
         // Analysis always runs: escape analysis, type widening, comparison
         // tracking, and integer-range proofs feed the single emitter path.
@@ -169,7 +215,44 @@ impl<'a> CppTranslator<'a> {
                 );
             }
         }
+        // Pre-register every class-like name so later-defined bases,
+        // `new C()` sites, and `instanceof` targets resolve regardless
+        // of declaration order.
+        for stmt in &program.body {
+            match stmt {
+                Statement::ClassDeclaration(c) => {
+                    if let Some(id) = &c.id {
+                        self.ctx.class_names.insert(id.name.to_string());
+                    }
+                }
+                Statement::TSInterfaceDeclaration(i) => {
+                    self.ctx.class_names.insert(i.id.name.to_string());
+                }
+                Statement::TSEnumDeclaration(e) => {
+                    self.ctx.class_names.insert(e.id.name.to_string());
+                }
+                _ => {}
+            }
+        }
+        // First pass: forward declarations for top-level functions
+        // (needed for mutual recursion where a() calls later-defined b()).
+        // Nested functions lower to capturing lambdas inline instead.
+        let mut fn_decls: Vec<(String, String)> = Vec::new(); // (name, signature)
+        for stmt in &program.body {
+            if let Statement::FunctionDeclaration(f) = stmt {
+                if let Some(decl) = self.fn_decl_sig(f) {
+                    fn_decls.push(decl);
+                }
+            }
+        }
         let mut lines = Vec::new();
+        // Emit forward declarations
+        for (_, sig) in &fn_decls {
+            lines.push(format!("static inline {};", sig));
+        }
+        if !fn_decls.is_empty() {
+            lines.push(String::new()); // blank line after forward decls
+        }
         for stmt in &program.body {
             if self.is_main_call(stmt) {
                 continue;
@@ -271,6 +354,7 @@ impl<'a> CppTranslator<'a> {
                 let inner = self.emit_statement(&l.body).unwrap_or_default();
                 Some(format!("{}// label {}:\n{}", self.indent(), l.label.name, inner))
             }
+            Statement::TSNamespaceDeclaration(n) => self.emit_namespace(n),
             Statement::WithStatement(_) => {
                 Some(format!("{}/* with not supported */", self.indent()))
             }
@@ -835,6 +919,13 @@ impl<'a> CppTranslator<'a> {
                 cpp_type = stripped;
             }
         }
+        // Spread arrays concatenate at runtime, so the declaration must be
+        // a JsArray no matter what element inference or widening said.
+        if let Some(init) = &d.init {
+            if Self::is_spread_array(init) {
+                cpp_type = "JsArray".to_string();
+            }
+        }
         let new_class_name = self.new_class_name_of(&cpp_type, &d.init);
         if let Some(class_name) = &new_class_name {
             cpp_type = class_name.clone();
@@ -1177,6 +1268,14 @@ impl<'a> CppTranslator<'a> {
                 if arr.elements.is_empty() {
                     Some("std::vector<JsValue>".to_string())
                 } else {
+                    // Arrays with spread elements need runtime handling -> JsArray
+                    let has_spread = arr
+                        .elements
+                        .iter()
+                        .any(|e| matches!(e, ArrayExpressionElement::SpreadElement(_)));
+                    if has_spread {
+                        return Some("JsArray".to_string());
+                    }
                     let mut elem_types = Vec::new();
                     for el in &arr.elements {
                         if let Some(expr) = el.as_expression() {
@@ -1797,6 +1896,18 @@ impl<'a> CppTranslator<'a> {
         if f.body.is_none() {
             return None;
         }
+        // Generators not supported - reject with clear error
+        if f.generator {
+            return Some(format!("/* error: generators not supported (function {}) */", name));
+        }
+        // Nested functions lower to capturing lambdas: C++ forbids
+        // function definitions inside function bodies, while a lambda
+        // keeps the definition local and captures outer locals by reference.
+        // Arrows and function expressions count as nesting for this purpose,
+        // but their own capture rules are untouched.
+        let is_nested =
+            self.ctx.fn_body_depth > 0 || self.ctx.arrow_depth > 0 || self.ctx.fn_expr_depth > 0;
+        // ... rest of function
         let is_async = f.r#async;
         if is_async {
             self.ctx.async_fns.insert(name.clone());
@@ -1849,6 +1960,15 @@ impl<'a> CppTranslator<'a> {
         if !is_async {
             if let Some(unique_ret) = self.unique_return_class(f, &final_ret) {
                 final_ret = unique_ret;
+            }
+        }
+        // A lambda has no conversion to JsValue, so a function returning
+        // only lambdas cannot honor an `any` annotation: deduce instead.
+        if !is_async && final_ret == "JsValue" {
+            if let Some(body_ref) = f.body.as_ref() {
+                if Self::returns_only_lambdas(body_ref) {
+                    final_ret = "auto".to_string();
+                }
             }
         }
         self.ctx.fn_return_types.insert(name.clone(), final_ret.clone());
@@ -1907,7 +2027,11 @@ impl<'a> CppTranslator<'a> {
         } else {
             format!("{} {}({})", final_ret, name, params)
         };
-        let result = format!("{}{}\n{}", tp, header, body);
+        let result = if is_nested {
+            format!("{}auto {} = [&]({}) -> {} {};", self.indent(), name, params, final_ret, body)
+        } else {
+            format!("{}{}\n{}", tp, header, body)
+        };
         self.ctx.has_infinite_loop = old_has_loop || self.ctx.has_infinite_loop;
         self.ctx.current_fn = outer_fn;
         self.ctx.js_object_params = old_handlers;
@@ -2067,6 +2191,22 @@ impl<'a> CppTranslator<'a> {
         args.iter().all(|a| Self::return_arg_is_plain(a))
     }
 
+    /// True when every returned value is a lambda. A lambda has no
+    /// conversion to JsValue, so callers must deduce the return type.
+    fn returns_only_lambdas(body: &FunctionBody<'a>) -> bool {
+        let mut args = Vec::new();
+        Self::collect_returns(&body.statements, &mut args);
+        if args.is_empty() {
+            return false;
+        }
+        args.iter().all(|a| {
+            matches!(
+                Self::unwrap_expr(a),
+                Expression::ArrowFunctionExpression(_) | Expression::FunctionExpression(_)
+            )
+        })
+    }
+
     fn emit_async_main(&mut self, f: &Function<'a>, _ret: &str, _params: &str) -> String {
         self.ctx.needed.insert("\"../../runtime/cpp/reactivity/task.h\"".to_string());
         self.ctx.is_async_fn += 1;
@@ -2111,28 +2251,27 @@ impl<'a> CppTranslator<'a> {
     fn format_params(&mut self, params: &FormalParameters<'a>) -> String {
         let mut parts = Vec::new();
         for p in &params.items {
+            let destructured = self.expand_destructured_param(p, &p.pattern);
+            if !destructured.is_empty() {
+                parts.extend(destructured);
+                continue;
+            }
             let (name, _) = self.binding_to_identifier(&p.pattern);
             if name.starts_with("/*") {
                 continue;
             }
-            let cpp_type = match self.type_mode {
-                TypeMode::Strict => {
-                    if let Some(ta) = &p.type_annotation {
-                        resolve_type_annotation(
-                            Some(ta),
-                            "auto",
-                            &self.ctx.template_params,
-                            false,
-                            &self.ctx.class_names,
-                        )
-                    } else {
-                        "auto".to_string()
-                    }
-                }
-                TypeMode::Infer => "auto".to_string(),
+            // Respect explicit type annotations regardless of mode
+            let cpp_type = if let Some(ta) = &p.type_annotation {
+                resolve_type_annotation(
+                    Some(ta),
+                    "auto",
+                    &self.ctx.template_params,
+                    false,
+                    &self.ctx.class_names,
+                )
+            } else {
+                "auto".to_string()
             };
-            // initializer via p.initializer? FormalParameter has no initializer, but pattern AssignmentPattern handles default?
-            // Actually FormalParameter has no initializer field in oxc? Check earlier: FormalParameter has no initializer, but we can handle AssignmentPattern in pattern
             let cpp_type = self.wrap_type(&cpp_type);
             self.ctx.need(&cpp_type);
             self.ctx.var_types.insert(name.clone(), cpp_type.clone());
@@ -2141,14 +2280,15 @@ impl<'a> CppTranslator<'a> {
                 self.ctx.need("std::string_view");
             }
             let mut decl = format!("{} {}", param_cpp, name);
-            if let BindingPattern::AssignmentPattern(a) = &p.pattern {
-                decl.push_str(&format!(" = {}", self.emit_expression(&a.right)));
+            // Default value is in FormalParameter.initializer, not in pattern
+            if let Some(init) = &p.initializer {
+                decl.push_str(&format!(" = {}", self.emit_expression(init)));
             }
             parts.push(decl);
         }
         if let Some(rest) = &params.rest {
             let (name, _) = self.binding_to_identifier(&rest.rest.argument);
-            let cpp_type = "auto".to_string();
+            let cpp_type = "JsArray".to_string();
             let cpp_type = self.wrap_type(&cpp_type);
             self.ctx.need(&cpp_type);
             self.ctx.var_types.insert(name.clone(), cpp_type.clone());
@@ -2156,6 +2296,68 @@ impl<'a> CppTranslator<'a> {
             parts.push(format!("{} {}", param_cpp, name));
         }
         parts.join(", ")
+    }
+
+    fn expand_destructured_param(
+        &mut self,
+        param: &FormalParameter<'a>,
+        pattern: &BindingPattern<'a>,
+    ) -> Vec<String> {
+        let mut out = Vec::new();
+        match pattern {
+            BindingPattern::ObjectPattern(obj) => {
+                for prop in &obj.properties {
+                    if prop.computed {
+                        continue;
+                    }
+                    let Some(key) = EscapeAnalyzer::pattern_key_name(&prop.key) else {
+                        continue;
+                    };
+                    if let Some(bound_name) = self.binding_name_from_pattern(&prop.value) {
+                        let cpp_type = if let Some(ta) = &param.type_annotation {
+                            "auto".to_string()
+                        } else {
+                            "auto".to_string()
+                        };
+                        let cpp_type = self.wrap_type(&cpp_type);
+                        self.ctx.need(&cpp_type);
+                        self.ctx.var_types.insert(bound_name.clone(), cpp_type.clone());
+                        let param_cpp = param_type(&cpp_type);
+                        let mut decl = format!("{} {}", param_cpp, bound_name);
+                        if let BindingPattern::AssignmentPattern(a) = &prop.value {
+                            decl.push_str(&format!(" = {}", self.emit_expression(&a.right)));
+                        }
+                        out.push(decl);
+                    }
+                }
+            }
+            BindingPattern::ArrayPattern(arr) => {
+                for element in arr.elements.iter().flatten() {
+                    if let Some(bound_name) = self.binding_name_from_pattern(element) {
+                        let cpp_type = "auto".to_string();
+                        let cpp_type = self.wrap_type(&cpp_type);
+                        self.ctx.need(&cpp_type);
+                        self.ctx.var_types.insert(bound_name.clone(), cpp_type.clone());
+                        let param_cpp = param_type(&cpp_type);
+                        let mut decl = format!("{} {}", param_cpp, bound_name);
+                        if let BindingPattern::AssignmentPattern(a) = element {
+                            decl.push_str(&format!(" = {}", self.emit_expression(&a.right)));
+                        }
+                        out.push(decl);
+                    }
+                }
+            }
+            _ => {}
+        }
+        out
+    }
+
+    fn binding_name_from_pattern(&self, pattern: &BindingPattern<'a>) -> Option<String> {
+        match pattern {
+            BindingPattern::BindingIdentifier(id) => Some(id.name.to_string()),
+            BindingPattern::AssignmentPattern(a) => self.binding_name_from_pattern(&a.left),
+            _ => None,
+        }
     }
 
     fn wrap_type(&mut self, cpp_type: &str) -> String {
@@ -2196,20 +2398,45 @@ impl<'a> CppTranslator<'a> {
             lines.push(format!("template <{}>", decls.join(", ")));
         }
         let mut bases = Vec::new();
+        let mut unknown_bases = Vec::new();
         if let Some(heritage) = &class.heritage {
             let expr = &heritage.expression;
             if let Expression::Identifier(id) = expr {
-                bases.push(format!("public {}", id.name));
+                if self.ctx.class_names.contains(id.name.as_str()) {
+                    bases.push(format!("public {}", id.name));
+                } else {
+                    unknown_bases.push(id.name.to_string());
+                }
             } else {
                 bases.push(format!("public {}", self.emit_expression(expr)));
             }
         }
         for imp in &class.implements {
-            bases.push(format!("public {}", ts_type_name_to_string(&imp.expression)));
+            let base = ts_type_name_to_string(&imp.expression);
+            if self.ctx.class_names.contains(base.as_str()) {
+                bases.push(format!("public {}", base));
+            } else {
+                unknown_bases.push(base);
+            }
         }
         let heritage_str =
             if bases.is_empty() { String::new() } else { format!(" : {}", bases.join(", ")) };
         lines.push(format!("class {}{} {{", name, heritage_str));
+        for unknown in &unknown_bases {
+            lines.push(format!("{}// unsupported: unknown base {}", INDENT, unknown));
+        }
+        // Collect private field names for this class
+        let mut private_fields = HashSet::new();
+        for el in &class.body.body {
+            if let ClassElement::PropertyDefinition(p) = el {
+                if let PropertyKey::PrivateIdentifier(priv_id) = &p.key {
+                    private_fields.insert(priv_id.name.to_string());
+                }
+            }
+        }
+        if !private_fields.is_empty() {
+            self.ctx.private_fields.insert(name.clone(), private_fields.clone());
+        }
         // Increase indent for class body (like Python's sub)
         let old_indent = self.ctx.indent_level;
         self.ctx.indent_level = 1;
@@ -2250,6 +2477,16 @@ impl<'a> CppTranslator<'a> {
             lines.push(format!("{}:", acc));
             for m in members {
                 lines.push(format!("{}{}", INDENT, m));
+            }
+        }
+        // Emit private fields (mangled names)
+        if let Some(fields) = self.ctx.private_fields.get(&name) {
+            if !fields.is_empty() {
+                lines.push("private:".to_string());
+                for field in fields {
+                    let mangled = format!("__private_{}_{}", name, field);
+                    lines.push(format!("{}JsValue {};", INDENT, mangled));
+                }
             }
         }
         let all_bases: Vec<String> = {
@@ -2353,6 +2590,13 @@ impl<'a> CppTranslator<'a> {
                                     if let Expression::CallExpression(call) = &es.expression {
                                         if let Expression::Super(_) = &call.callee {
                                             super_seen = true;
+                                            let super_is_known =
+                                                self.ctx.super_class_name.as_ref().is_some_and(
+                                                    |b| self.ctx.class_names.contains(b.as_str()),
+                                                );
+                                            if !super_is_known {
+                                                continue;
+                                            }
                                             let base = self
                                                 .ctx
                                                 .super_class_name
@@ -2433,11 +2677,13 @@ impl<'a> CppTranslator<'a> {
                         let mut lines = vec!["{".to_string()];
                         let old_indent = self.ctx.indent_level;
                         self.ctx.indent_level = old_indent + 1;
+                        self.ctx.fn_body_depth += 1;
                         for stmt in remaining {
                             if let Some(code) = self.emit_statement(stmt) {
                                 lines.push(code);
                             }
                         }
+                        self.ctx.fn_body_depth -= 1;
                         self.ctx.indent_level = old_indent;
                         lines.push(format!("{}}}", self.indent()));
                         lines.join("\n")
@@ -2471,6 +2717,15 @@ impl<'a> CppTranslator<'a> {
                         final_ret = self.ctx.async_result_type(&final_ret);
                     }
                     final_ret = self.wrap_type(&final_ret);
+                    // A lambda has no conversion to JsValue, so a method
+                    // returning only lambdas cannot honor `any`: deduce.
+                    if !m.value.r#async && final_ret == "JsValue" {
+                        if let Some(b) = m.value.body.as_ref() {
+                            if Self::returns_only_lambdas(b) {
+                                final_ret = "auto".to_string();
+                            }
+                        }
+                    }
                     self.ctx.need(&final_ret);
                     if m.value.r#async {
                         self.ctx.is_async_fn += 1;
@@ -2482,7 +2737,12 @@ impl<'a> CppTranslator<'a> {
                         .map(|b| {
                             let saved_drop = self.ctx.drop_return_value;
                             self.ctx.drop_return_value = false;
+                            // Method bodies count as function scope: nested
+                            // arrows capture `this` via `[&]`, and nested
+                            // declarations lower to lambdas.
+                            self.ctx.fn_body_depth += 1;
                             let body = self.emit_function_body(b);
+                            self.ctx.fn_body_depth -= 1;
                             self.ctx.drop_return_value = saved_drop;
                             body
                         })
@@ -2546,6 +2806,47 @@ impl<'a> CppTranslator<'a> {
                 ("public".to_string(), "/* index signature */".to_string())
             }
         }
+    }
+
+    /// One statement inside a namespace body. Export wrappers unwrap to
+    /// their declaration; bare re-exports have nothing to lower.
+    fn emit_namespace_stmt(&mut self, stmt: &Statement<'a>) -> Option<String> {
+        let code = match stmt {
+            Statement::ExportDeclaration(e) => self.emit_declaration(&e.declaration),
+            Statement::ExportDefaultDeclaration(e) => self.emit_export_default(&e.declaration),
+            _ => self.emit_statement(stmt),
+        };
+        code.filter(|c| !c.trim().is_empty())
+    }
+
+    /// A TypeScript namespace lowers to a C++ namespace of the same name.
+    /// Exported members emit as ordinary (non-static) declarations; a
+    /// nested namespace recurses.
+    fn emit_namespace(&mut self, decl: &TSNamespaceDeclaration<'a>) -> Option<String> {
+        let name = decl.id.name.to_string();
+        let mut lines = vec![format!("{}namespace {} {{", self.indent(), name)];
+        let old = self.ctx.indent_level;
+        self.ctx.indent_level = old + 1;
+        let mut emitted_any = false;
+        match &decl.body {
+            TSNamespaceDeclarationBody::TSModuleBlock(block) => {
+                for stmt in &block.body {
+                    if let Some(code) = self.emit_namespace_stmt(stmt) {
+                        lines.push(code);
+                        emitted_any = true;
+                    }
+                }
+            }
+            TSNamespaceDeclarationBody::TSNamespaceDeclaration(nested) => {
+                if let Some(code) = self.emit_namespace(nested) {
+                    lines.push(code);
+                    emitted_any = true;
+                }
+            }
+        }
+        self.ctx.indent_level = old;
+        lines.push(format!("{}}}  // namespace {}", self.indent(), name));
+        if emitted_any { Some(lines.join("\n")) } else { None }
     }
 
     fn emit_interface(&mut self, iface: &TSInterfaceDeclaration<'a>) -> String {
@@ -2691,7 +2992,14 @@ impl<'a> CppTranslator<'a> {
                     }
                     return format!("!{}", argument);
                 }
-                format!("{}{}", u.operator.as_str(), self.emit_expression(&u.argument))
+                let op = u.operator.as_str();
+                let argument = self.emit_expression(&u.argument);
+                let needs_space = matches!(op, "delete" | "typeof" | "void" | "await");
+                if needs_space {
+                    format!("{} {}", op, argument)
+                } else {
+                    format!("{}{}", op, argument)
+                }
             }
             Expression::UpdateExpression(u) => {
                 let arg = self.emit_simple_target(&u.argument);
@@ -2735,7 +3043,24 @@ impl<'a> CppTranslator<'a> {
             ),
             Expression::StaticMemberExpression(m) => self.emit_static_member(m),
             Expression::PrivateFieldExpression(p) => {
-                format!("{}#{}", self.emit_expression(&p.object), p.field.name)
+                let obj = self.emit_expression(&p.object);
+                let field_name = p.field.name.to_string();
+                // Look up class name to mangle private field: __private_ClassName_fieldName
+                let mangled = if let Some(class_name) = &self.ctx.class_name {
+                    format!("__private_{}_{}", class_name, field_name)
+                } else if obj == "this" {
+                    // Fallback: use the current class if available
+                    if let Some(class_name) = &self.ctx.class_name {
+                        format!("__private_{}_{}", class_name, field_name)
+                    } else {
+                        format!("__private_{}", field_name)
+                    }
+                } else {
+                    format!("__private_{}", field_name)
+                };
+                // Use -> for this pointer, . for other objects
+                let accessor = if obj == "this" { "->" } else { "." };
+                format!("{}{}{}", obj, accessor, mangled)
             }
             Expression::ChainExpression(chain) => self.emit_chain(chain),
             Expression::TaggedTemplateExpression(t) => format!(
@@ -2761,15 +3086,21 @@ impl<'a> CppTranslator<'a> {
             Expression::TSNonNullExpression(n) => self.emit_expression(&n.expression),
             Expression::TSInstantiationExpression(e) => self.emit_expression(&e.expression),
             Expression::V8IntrinsicExpression(_) => "/* v8 intrinsic */".to_string(),
+            Expression::NewTarget(_) => {
+                // new.target is only valid in constructors; emit null as placeholder
+                "JsNull{}".to_string()
+            }
+            Expression::ImportMeta(_) => "/* import.meta */".to_string(),
             Expression::RegExpLiteral(r) => self.span_text(r.span).to_string(),
             Expression::BigIntLiteral(b) => {
                 if let Some(raw) = &b.raw {
-                    format!("{}n", raw.as_str())
+                    let s = raw.as_str();
+                    s.strip_suffix('n').unwrap_or(s).to_string()
                 } else {
                     self.span_text(b.span).to_string()
                 }
             }
-            _ => format!("/* unhandled expr {:?} */", expr.span()),
+            _ => "/* unhandled expression */".to_string(),
         }
     }
 
@@ -2827,6 +3158,7 @@ impl<'a> CppTranslator<'a> {
 
     fn emit_array(&mut self, arr: &ArrayExpression<'a>) -> String {
         if arr.elements.is_empty() {
+            self.ctx.need("JsArray");
             return "JsArray{}".to_string();
         }
         let has_spread =
@@ -2843,13 +3175,25 @@ impl<'a> CppTranslator<'a> {
                     _ => e.as_expression().map(|ex| self.emit_expression(ex)),
                 })
                 .collect();
+            self.ctx.need("JsArray");
             return format!("JsArray{{{}}}", elems.join(", "));
         }
+        self.ctx.need("JsArray");
+        self.ctx.need("int64_t");
         let mut lines = vec!["[&]() {".to_string(), "    JsArray __a{};".to_string()];
         for (idx, el) in arr.elements.iter().enumerate() {
             match el {
                 ArrayExpressionElement::SpreadElement(s) => {
-                    let arg = self.emit_expression(&s.argument);
+                    let mut arg = self.emit_expression(&s.argument);
+                    if let Expression::Identifier(id) = &s.argument {
+                        if let Some(t) = self.ctx.var_types.get(id.name.as_str()) {
+                            if t.starts_with("std::shared_ptr<")
+                                || t.starts_with("std::unique_ptr<")
+                            {
+                                arg = format!("(*{})", arg);
+                            }
+                        }
+                    }
                     lines.push(format!("    JsArray __sp_{} = {};", idx, arg));
                     lines.push(format!("    for (int64_t __i_{} = 0; __i_{} < (int64_t)__sp_{}.length(); ++__i_{})", idx, idx, idx, idx));
                     lines.push(format!("        __a.push(__sp_{}[__i_{}]);", idx, idx));
@@ -2869,8 +3213,10 @@ impl<'a> CppTranslator<'a> {
 
     fn emit_object(&mut self, obj: &ObjectExpression<'a>) -> String {
         if obj.properties.is_empty() {
+            self.ctx.need("JsObject");
             return "JsObject{}".to_string();
         }
+        self.ctx.need("JsObject");
         let mut pairs = Vec::new();
         for prop in &obj.properties {
             match prop {
@@ -3377,6 +3723,20 @@ impl<'a> CppTranslator<'a> {
     fn emit_binary(&mut self, b: &BinaryExpression<'a>) -> String {
         let op = b.operator.as_str();
 
+        // Handle special operators that don't want conversion
+        if op == "instanceof" {
+            let left = self.emit_expression(&b.left);
+            let right = self.emit_expression(&b.right);
+            self.ctx.need("JsValue");
+            return format!("morph::js_instanceof({}, {})", left, right);
+        }
+        if op == "in" {
+            let left = self.emit_expression(&b.left);
+            let right = self.emit_expression(&b.right);
+            self.ctx.need("JsObject");
+            return format!("morph::js_has_property({}, {})", right, left);
+        }
+
         if let Some(comparison_kind) = ComparisonKind::from_binary_operator(op) {
             let left_class = self.operand_class_of(&b.left);
             let right_class = self.operand_class_of(&b.right);
@@ -3755,7 +4115,14 @@ impl<'a> CppTranslator<'a> {
                 format!("{}.{}", obj_str, prop)
             }
             AssignmentTarget::PrivateFieldExpression(p) => {
-                format!("{}#{}", self.emit_expression(&p.object), p.field.name)
+                let obj = self.emit_expression(&p.object);
+                let field_name = p.field.name.to_string();
+                let mangled = if let Some(class_name) = &self.ctx.class_name {
+                    format!("__private_{}_{}", class_name, field_name)
+                } else {
+                    format!("__private_{}", field_name)
+                };
+                format!("{}.{}", obj, mangled)
             }
             AssignmentTarget::ArrayAssignmentTarget(a) => self.span_text(a.span).to_string(),
             AssignmentTarget::ObjectAssignmentTarget(o) => self.span_text(o.span).to_string(),
@@ -3791,7 +4158,14 @@ impl<'a> CppTranslator<'a> {
                 format!("{}.{}", obj_str, prop)
             }
             SimpleAssignmentTarget::PrivateFieldExpression(p) => {
-                format!("{}#{}", self.emit_expression(&p.object), p.field.name)
+                let obj = self.emit_expression(&p.object);
+                let field_name = p.field.name.to_string();
+                let mangled = if let Some(class_name) = &self.ctx.class_name {
+                    format!("__private_{}_{}", class_name, field_name)
+                } else {
+                    format!("__private_{}", field_name)
+                };
+                format!("{}.{}", obj, mangled)
             }
             _ => self.span_text(target.span()).to_string(),
         }
@@ -3828,6 +4202,10 @@ impl<'a> CppTranslator<'a> {
                 }
                 let arg = self.emit_argument(&call.arguments[0]);
                 return format!("__morph_use_window({arg})");
+            }
+            if id.name.as_str() == "require" {
+                self.ctx.need("JsUndefined");
+                return "[] { static_assert(sizeof(\"morph require\") == 0, \"morph: require calls are not supported (use ES module imports)\"); return JsUndefined{}; }()".to_string();
             }
             if id.name.as_str() == "fetch" {
                 self.ctx.needed.insert("\"../../runtime/cpp/net/net.h\"".to_string());
@@ -3991,6 +4369,12 @@ impl<'a> CppTranslator<'a> {
                     }
                 }
             }
+            if let Some(obj) = self.window_placeholder_expr(&m.object) {
+                if let Some(lowered) = self.emit_window_method(&obj, m.property.name.as_str(), call)
+                {
+                    return lowered;
+                }
+            }
         }
         if let Expression::StaticMemberExpression(m) = &call.callee {
             if m.property.name.as_str() == "push" && call.arguments.len() == 1 {
@@ -4139,6 +4523,15 @@ impl<'a> CppTranslator<'a> {
         self.emit_argument(arg)
     }
 
+    /// True for array literals containing a spread element (`[...a, x]`).
+    fn is_spread_array(init: &Expression<'_>) -> bool {
+        if let Expression::ArrayExpression(arr) = init {
+            arr.elements.iter().any(|e| matches!(e, ArrayExpressionElement::SpreadElement(_)))
+        } else {
+            false
+        }
+    }
+
     fn vector_inner_type(vec_type: &str) -> Option<&str> {
         let t = vec_type.trim();
         let prefix = "std::vector<";
@@ -4234,6 +4627,13 @@ impl<'a> CppTranslator<'a> {
                     "title" => return format!("__morph_win_title({obj})"),
                     _ => {}
                 }
+            }
+        }
+        if let Some(obj) = self.window_placeholder_expr(&m.object) {
+            match prop.as_str() {
+                "closed" => return format!("__morph_win_closed({obj})"),
+                "title" => return format!("__morph_win_title({obj})"),
+                _ => {}
             }
         }
         // Response.ok is a method, not a field: r.ok -> r.ok()
@@ -4335,10 +4735,36 @@ impl<'a> CppTranslator<'a> {
                 self.emit_expression(&m.expression)
             ),
             ChainElement::PrivateFieldExpression(p) => {
-                format!("{}#{}", self.emit_expression(&p.object), p.field.name)
+                let obj = self.emit_expression(&p.object);
+                let field_name = p.field.name.to_string();
+                let mangled = if let Some(class_name) = &self.ctx.class_name {
+                    format!("__private_{}_{}", class_name, field_name)
+                } else {
+                    format!("__private_{}", field_name)
+                };
+                format!("{}.{}", obj, mangled)
             }
             _ => "/* chain */".to_string(),
         }
+    }
+
+    /// Window-handle placeholder already substituted by the caller
+    /// (`const win = useWindow()` bound lazily, so each use site keeps
+    /// its own window). Emits the object only for the syntactic
+    /// placeholder calls, never for arbitrary expressions.
+    fn window_placeholder_expr(&mut self, obj: &Expression<'a>) -> Option<String> {
+        let Expression::CallExpression(call) = obj else {
+            return None;
+        };
+        let Expression::Identifier(callee) = &call.callee else {
+            return None;
+        };
+        if callee.name.as_str() != "__morph_current_window"
+            && callee.name.as_str() != "__morph_use_window"
+        {
+            return None;
+        }
+        Some(self.emit_expression(obj))
     }
 
     /// Lower a method call on a tracked Window handle (WID int) to a
@@ -4627,7 +5053,6 @@ impl<'a> CppTranslator<'a> {
         self.ctx.fn_expr_depth += 1;
         let is_async = f.r#async;
         let params = self.format_params(&f.params);
-        let _ = params;
         let ret = if is_async {
             let base = f
                 .return_type
@@ -4643,6 +5068,14 @@ impl<'a> CppTranslator<'a> {
                 })
                 .unwrap_or_else(|| "JsValue".to_string());
             self.ctx.async_result_type(&base)
+        } else if let Some(rt) = &f.return_type {
+            resolve_type_annotation(
+                Some(rt),
+                "auto",
+                &self.ctx.template_params,
+                false,
+                &self.ctx.class_names,
+            )
         } else {
             "JsValue".to_string()
         };
@@ -4665,10 +5098,15 @@ impl<'a> CppTranslator<'a> {
         self.ctx.drop_return_value = saved_drop;
         self.ctx.fn_expr_depth -= 1;
         self.ctx.need("JsValue");
-        if is_async {
-            format!("+[](JsValue _jsThis) -> {} {}", ret, body)
+        let lambda_params = if params.is_empty() {
+            "JsValue _jsThis".to_string()
         } else {
-            format!("+[](JsValue _jsThis) -> JsValue {}", body)
+            format!("{}, JsValue _jsThis", params)
+        };
+        if is_async {
+            format!("+[]({}) -> {} {}", lambda_params, ret, body)
+        } else {
+            format!("+[]({}) -> {} {}", lambda_params, ret, body)
         }
     }
 
@@ -4845,10 +5283,7 @@ mod tests {
         // `morph::clear_timer`: emitting `-> auto { return <void>; }`
         // would not compile (docs/dev/bugs#4).
         let out = translate_stmts("const cleanup = () => clearInterval(id);\n");
-        assert!(
-            out.contains("[]() -> void { morph::clear_timer(id); }"),
-            "{out}"
-        );
+        assert!(out.contains("[]() -> void { morph::clear_timer(id); }"), "{out}");
         assert!(!out.contains("return morph::clear_timer"), "{out}");
     }
 }
