@@ -1,6 +1,8 @@
 # morphEvent
 
-Creates a typed event channel for fire-and-forget messaging between components. Unlike state, events don't hold a value — they trigger callbacks synchronously on the emitter's thread.
+Creates a typed event channel for fire-and-forget messaging between components — **within a window and across windows**. Unlike state, events don't hold a value — they trigger callbacks synchronously on the emitter's thread.
+
+> **Scope:** `morphEvent` channels are **app-global**. They are the cross-window bus: an `emit` in one window reaches subscribers in every open window. (Companion rule: [`morphShared`](morphShared.md) is per-window isolated.)
 
 ## Basic Usage
 
@@ -195,9 +197,41 @@ cartUpdated.on((payload) => {
 | `mx-event-scope` | `morphEvent` called inside a component body | Move to module scope (top level) |
 | `mx-api-removed` | Using old string-channel APIs (`morphOn`, `morphEmit`, `channel.emit`) | Migrate to `morphEvent` |
 
+## Cross-Window Communication
+
+Because `morphShared` is per-window, events are the way windows talk to each other. Pair them: write the window-local value, then broadcast so siblings catch up.
+
+```tsx
+// themeStore.ts
+import { morphShared, morphEvent } from 'morph'
+
+export const [theme, setTheme] = morphShared<'light' | 'dark'>('light')
+export const themeChanged = morphEvent<'light' | 'dark'>()
+
+// Header.mx (any window)
+import { theme, setTheme, themeChanged } from './themeStore'
+import { morphState } from 'morph'
+
+export function Header() {
+  themeChanged.on((next) => setTheme(next)) // keep this window in sync
+  return <button onClick={() => {
+    const next = theme === 'light' ? 'dark' : 'light'
+    setTheme(next)          // what (this window, persists)
+    themeChanged.emit(next) // when (all windows, notifies)
+  }}>Theme: {theme}</button>
+}
+```
+
+Rules of thumb:
+
+- `morphShared` alone → window-local (two windows diverge).
+- `morphEvent` alone → transient nudge, no readable value for late windows.
+- Both together → every window holds its own copy and stays in sync.
+
 ## How It Works
 
 - **Identity**: The event's identity is `modulePath::bindingName` (e.g., `src/events/cartEvents.ts::cartUpdated`). Importing the same binding from the same module always refers to the same channel.
+- **Scope**: One channel per app, shared by all windows. Subscriptions from every window fire on each `emit`.
 - **Synchronous**: Handlers run immediately on the emitter's thread, before `.emit()` returns.
-- **No persistence**: Events don't store values. Late subscribers miss prior emissions — use `morphShared` if you need a "last value" semantic.
+- **No persistence**: Events don't store values. Late subscribers miss prior emissions — pair with `morphShared` if you need a "last value" semantic.
 - **Lifetime**: Subscriptions are registered once at startup and live for the app lifetime (hot reload clears and re-registers them). There is no `.off()` in v1 — if a subscribing component can unmount while emitters still fire, guard inside the handler.

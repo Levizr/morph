@@ -52,7 +52,47 @@ import { theme, setTheme } from './themeStore'
 
 **The inspiration.** This is not a new invention — it follows SolidJS and Svelte, which both moved state out of the component tree: Solid with signals and stores that live outside components and update with fine-grained precision (no VDOM, no provider re-render cascades), Svelte with `writable` stores and module-level state you import and subscribe to directly. `morphShared` takes that same lesson — state as an importable reactive value, not as tree plumbing — and pushes it one step further: instead of a store *contract* (`writable()`, `$subscription`), the TypeScript module system itself is the store contract. Export a binding, import it anywhere. No provider components, no subscription syntax, no context objects.
 
-If you come from React: wherever you would create a context + provider + `useContext` trio, write one `export const [x, setX] = morphShared(...)` line instead. Everything else — reading, writing, re-rendering — behaves like state, because it *is* state, just with app-wide identity.
+If you come from React: wherever you would create a context + provider + `useContext` trio, write one `export const [x, setX] = morphShared(...)` line instead. Everything else — reading, writing, re-rendering — behaves like state, because it *is* state, just with per-window identity. (Unlike a React context mounted at the app root, a second Morph window starts with a fresh copy.)
+
+## Is morphShared global across windows?
+
+No — it is **per-window isolated**. Same declaration, independent values per window.
+
+Picture multitasking: you open `/shop` twice to compare two orders side by side. With global state, adding an item in the left window adds it in the right window too. Typing a search filter on the left rewrites the right. Opening a modal on the left pops it open on the right. It doesn't feel like a feature — it feels like a bug, because you opened two windows precisely to do two different things.
+
+More cases where global sync surprises:
+
+- **Form drafts** — composing a message in window A while referencing window B; keystrokes leak across.
+- **Settings** — editing user 1 in one window and user 2 in another; saves clobber each other.
+- **Wizards / checkout steps** — step 3 on the left, step 1 on the right, one shared `step` store fights itself.
+- **Selection / tabs** — selecting a row or switching a tab in one window moves the other.
+
+And with a global store there is **no escape hatch**. The only way to opt one screen out is to stop using `morphShared` entirely and drop back to `morphState` — which means threading the value through props again, past every intermediate component that doesn't care about it. That is the prop drilling `morphShared` exists to kill. So global gives you all-or-nothing: everything syncs, or you lose sharing altogether.
+
+```tsx
+const a = new Window("/shop") // cart = 0 here
+const b = new Window("/shop") // cart = 0 here, independent
+```
+
+Per-window isolation flips the default: windows diverge unless you say otherwise. When you *do* want agreement (theme, auth session), keep the per-window store as the readable value and sync it explicitly over `morphEvent`:
+
+```tsx
+setTheme(next)          // this window now
+themeChanged.emit(next) // all other windows catch up via .on()
+```
+
+No separate app-global store API exists in v1 — the event + shared pair covers it. One proposal for later: `morphShared.global(...)` as an explicit opt-in global, with the plain form staying isolated — see the [open question](../morphShared.md#open-question--we-want-your-suggestion). Tell us if you'd use it.
+
+## How do other frameworks handle this?
+
+They all default to isolated and make sharing explicit — Morph follows the same rule:
+
+- **Browsers** — each tab gets its own JS heap. Tabs never share variables; cross-tab sync is opt-in via `localStorage` events, `BroadcastChannel`, or `SharedWorker`. `morphShared` is the tab heap; `morphEvent` is the `BroadcastChannel`.
+- **Electron / Tauri** — each window is a separate renderer / WebView with its own JS context. Sharing requires `ipcMain`/`ipcRenderer` (Electron) or the event bridge (Tauri) — always an explicit send, never a shared variable.
+- **Qt (QMainWindow / dialogs)** — state lives as members of each window object. App-wide agreement needs a deliberate singleton, `QSettings`, or a signal/slot broadcast — the equivalent of our emit + on.
+- **Flutter desktop (multi-window)** — each window runs its own widget tree (often its own engine). `InheritedWidget` / `Provider` scope to one tree; reaching the other window needs a platform channel or event bus.
+
+Nobody makes "every variable is magically the same in every window" the default, because multitasking is the normal case for windows. Isolation first, broadcast when you mean it.
 
 ## Why a separate `morphShared` name? Why not just `morphState` at the top of the file?
 
@@ -70,7 +110,7 @@ const [count, setCount] = morphState(0)
 export const [count, setCount] = morphShared<number>(0)
 ```
 
-Rule of thumb: if you can answer "who owns this?" with a component instance, it is `morphState`. If the answer is "the whole app", it is `morphShared`. The different names keep you from confusing the two six months later.
+Rule of thumb: if you can answer "who owns this?" with a component instance, it is `morphState`. If the answer is "the whole window", it is `morphShared`. The different names keep you from confusing the two six months later.
 
 ## Why path-based imports instead of ID-based access like `setShared('cart', 0)`?
 
@@ -206,7 +246,7 @@ import { count as notifCount } from './notifications'
 
 ## Why must it be exported at module scope? Why not inside my component?
 
-Inside a component it would be per-instance state (that is what [`morphState`](../morphState.md) is for). At module scope there is exactly one instance per app, which is what makes it shareable. The linter enforces this (`mx-shared-scope`) because mixing the two up is the most common state bug — and it fails at build time, not at runtime.
+Inside a component it would be per-instance state (that is what [`morphState`](../morphState.md) is for). At module scope there is exactly one instance per window, which is what makes it shareable within that window. The linter enforces this (`mx-shared-scope`) because mixing the two up is the most common state bug — and it fails at build time, not at runtime.
 
 ## Why must the binding be exported? Can I keep a store file-private?
 

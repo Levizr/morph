@@ -21,14 +21,15 @@ error : mx-shared-scope : `morphShared` must be exported to be shared across mod
 
 ## Why Morph raises it
 
-`morphShared` creates **one** store per app, shared by every importer — the
+`morphShared` creates **one** store per window, shared by every importer in that window — the
 opposite of [`morphState`](../api/morphState.md). That contract only holds if
-the binding lives at module scope (exactly one evaluation) and is exported
+the binding lives at module scope (exactly one declaration) and is exported
 (importers bind to it by name). Inside a component it would run per render,
 creating a fresh "shared" store every render — the worst of both worlds. The
 linter enforces placement so the local/shared split is syntactic and
 unmistakable. (Old string-key forms are a separate error:
-[mx-api-removed](mx-api-removed.md).)
+[mx-api-removed](mx-api-removed.md). For cross-window messaging, use
+[`morphEvent`](../api/morphEvent.md#cross-window-communication), which is app-global.)
 
 ## Example that triggers it
 

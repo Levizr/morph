@@ -34,7 +34,7 @@ settings.show()
 | `config.modal` | `boolean` | `true` blocks every other window's close while open (requires a resolvable parent — hard error otherwise). |
 | `config.role` | `string` | Presentation hint only (`"default"`, `"dialog"`, `"popup"`); never gates behavior. Unknown roles fail the build. |
 
-Opening the same route twice creates two fully independent windows — separate state, separate trees. Close one and the other is untouched.
+Opening the same route twice creates two fully independent windows — separate `morphState`, separate `morphShared` copies, separate trees. Close one and the other is untouched. [`morphEvent` channels](morphEvent.md#cross-window-communication) are the deliberate exception: they are app-global, so an `emit` in one window reaches subscribers in all windows.
 
 ```tsx
 const a = new Window("/auth/login", { id: "login-a", data: { userId: 1 } })

@@ -81,9 +81,10 @@ const [open, setOpen] = morphState(true)   // inferred as boolean
 
 ## Shared module state
 
-Use `morphShared` for state shared across components. Export the binding from
+Use `morphShared` for state shared across components **within the same window**. Export the binding from
 a `.mx`/`.ts`/`.tsx` module, then import its getter/setter wherever it is
-used:
+used. Each window gets an isolated copy; use `morphEvent` for cross-window
+communication:
 
 ```tsx
 // cart.ts

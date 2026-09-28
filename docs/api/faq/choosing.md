@@ -7,9 +7,10 @@ A decision guide for the four core APIs. Full references: [`morphState`](../morp
 | Question | Answer |
 |---|---|
 | Does exactly one component instance need it? | `morphState` |
-| Do distant components need the same value? | `morphShared` |
-| Do distant components need to know something *happened*? | `morphEvent` |
+| Do distant components in the **same window** need the same value? | `morphShared` |
+| Do distant components need to know something *happened* (including other windows)? | `morphEvent` |
 | Do I need to touch something outside Morph (DOM, timers, network, storage)? | `morphEffect` |
+| Do two **windows** need the same value? | `morphShared` + `morphEvent` together (store holds it, event syncs it) |
 
 ## Common scenarios
 

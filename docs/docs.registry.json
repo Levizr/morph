@@ -540,7 +540,7 @@
           "morph useState",
           "morph re-render state"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-28",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -657,7 +657,7 @@
           "morphState morphShared morphEvent",
           "morph api overview"
         ],
-        "lastUpdated": "2026-09-16",
+        "lastUpdated": "2026-09-28",
         "publishedAt": "2026-09-16",
         "priority": "0.9",
         "changefreq": "monthly"
@@ -685,13 +685,13 @@
         "file": "api/morphShared",
         "status": "production",
         "author": "PIYUSH",
-        "description": "morphShared API: module-scoped global shared state across components without providers.",
+        "description": "morphShared API: per-window module-scoped shared state across components without providers.",
         "keywords": [
           "morphShared api",
           "morph shared state",
-          "morph global store"
+          "morph window store"
         ],
-        "lastUpdated": "2026-09-16",
+        "lastUpdated": "2026-09-28",
         "publishedAt": "2026-09-16",
         "priority": "0.9",
         "changefreq": "monthly"
@@ -702,13 +702,13 @@
         "file": "api/morphEvent",
         "status": "production",
         "author": "PIYUSH",
-        "description": "morphEvent API: typed fire-and-forget event channels with emit and on.",
+        "description": "morphEvent API: typed app-global fire-and-forget event channels with emit and on, the cross-window bus.",
         "keywords": [
           "morphEvent api",
           "morph events",
           "morph event channels"
         ],
-        "lastUpdated": "2026-09-16",
+        "lastUpdated": "2026-09-28",
         "publishedAt": "2026-09-16",
         "priority": "0.9",
         "changefreq": "monthly"
@@ -769,7 +769,7 @@
           "morph window role",
           "morph window ownership"
         ],
-        "lastUpdated": "2026-09-21",
+        "lastUpdated": "2026-09-28",
         "publishedAt": "2026-09-21",
         "priority": 0.9,
         "changefreq": "monthly"
@@ -786,7 +786,7 @@
           "morphState vs morphShared",
           "morphEvent vs shared state"
         ],
-        "lastUpdated": "2026-09-16",
+        "lastUpdated": "2026-09-28",
         "publishedAt": "2026-09-16",
         "priority": "0.9",
         "changefreq": "monthly"
@@ -820,7 +820,7 @@
           "morph shared state questions",
           "morph ambiguous import"
         ],
-        "lastUpdated": "2026-09-16",
+        "lastUpdated": "2026-09-28",
         "publishedAt": "2026-09-16",
         "priority": "0.9",
         "changefreq": "monthly"
@@ -981,7 +981,7 @@
           "morph modal",
           "morph window parent"
         ],
-        "lastUpdated": "2026-09-21",
+        "lastUpdated": "2026-09-28",
         "publishedAt": "2026-09-21",
         "priority": 0.8,
         "changefreq": "monthly"
@@ -1633,7 +1633,7 @@
           "morph morphState outside component",
           "morph state scope"
         ],
-        "lastUpdated": "2026-09-21",
+        "lastUpdated": "2026-09-28",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -1650,7 +1650,7 @@
           "morph morphShared scope",
           "morph shared state export"
         ],
-        "lastUpdated": "2026-09-21",
+        "lastUpdated": "2026-09-28",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"

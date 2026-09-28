@@ -7,8 +7,8 @@ This section documents all core Morph APIs available from the `'morph'` package.
 | API | Purpose | Scope |
 |-----|---------|-------|
 | [`morphState`](morphState.md) | Local component instance state | Inside component function |
-| [`morphShared`](morphShared.md) | Global shared module-scoped state | Module scope (top level) |
-| [`morphEvent`](morphEvent.md) | Fire-and-forget event channels | Module scope (top level) |
+| [`morphShared`](morphShared.md) | Per-window shared module-scoped state | Module scope (top level) |
+| [`morphEvent`](morphEvent.md) | App-global fire-and-forget event channels (cross-window bus) | Module scope (top level) |
 | [`morphEffect`](morphEffect.md) | Side effects with cleanup | Inside component function |
 | [`Window` / `useWindow`](windows.md) | Runtime windows: open, control, navigate | Component body / event handlers (handles are WID ids) |
 

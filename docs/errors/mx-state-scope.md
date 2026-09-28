@@ -80,8 +80,8 @@ export default function App() {
 Steps:
 
 1. Decide: per-instance state (each `<Counter />` independent) → `morphState`
-   inside the component; single app-wide value → exported `morphShared` at
-   module scope.
+   inside the component; single per-window value → exported `morphShared` at
+   module scope (cross-window needs `morphEvent`).
 2. Move the declaration — keep `morphState` calls unconditional and in the
    same order every render (hook rules apply).
 3. Re-run `morph check`.

@@ -82,7 +82,7 @@ b.close()             // only b dies — a is untouched
 
 When two windows share a route, the route alone can't name one of them — that's what explicit `id`s are for. `useWindow("/route")` returns the most-recently-focused live window on that route (the one the user is looking at); use the `id` form when you need precision.
 
-Shared stores (`morphShared`) and events (`morphEvent`) are deliberately **global** — two windows see the same cart, the same bus. Local state (`morphState`) is per window.
+Scoping is deliberate: local state (`morphState`) is per component instance, shared stores (`morphShared`) are **per window** — two windows see independent carts — and events (`morphEvent`) are **app-global**, the cross-window bus. To sync windows, write the window-local store and broadcast over an event (see [`morphEvent` cross-window](../api/morphEvent.md#cross-window-communication)).
 
 ## Ownership: parents, modals, roles
 
@@ -123,7 +123,7 @@ Nothing pre-initializes. Opening the app mounts exactly one route:
 2. **Clear the window root.**
 3. **Mount the new page** — fresh state seeded from `props`, effects created, tree built and attached.
 
-With the default (`navigation.cache: 0`) that is the whole story: leaving a page destroys it, coming back remounts from scratch. Local state (`morphState`) dies with the page; shared stores (`morphShared`) and events survive because they were never per-page — they're app-global by design.
+With the default (`navigation.cache: 0`) that is the whole story: leaving a page destroys it, coming back remounts from scratch. Local state (`morphState`) dies with the page. `morphShared` stores survive navigation **within the same window** (they are per-window, not per-page) and re-initialize only on fresh mount; `morphEvent` channels survive because they were never per-page — they're app-global by design.
 
 ```tsx
 // Settings tab is "advanced"; user navigates away and back:
