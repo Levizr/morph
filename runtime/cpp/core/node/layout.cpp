@@ -1,5 +1,6 @@
 #include "../node.h"
 #include "../renderer.h"
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
@@ -545,8 +546,16 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 #endif
 
 #ifdef MORPH_FEATURE_FLEX
-    bool isRow = (style.display == CSS::Display::Flex && style.flexDirection == CSS::FlexDirection::Row);
+    bool isRow = (style.display == CSS::Display::Flex
+                  && (style.flexDirection == CSS::FlexDirection::Row
+                      || style.flexDirection == CSS::FlexDirection::RowReverse));
     bool isCol = !isRow;
+    // CSS flexbox §5: row-reverse / column-reverse flow the main axis
+    // opposite (main-start = right / bottom). Line breaking stays in DOM
+    // order; only the order within each line is reversed (see below).
+    bool isReverse = (style.display == CSS::Display::Flex
+                      && (style.flexDirection == CSS::FlexDirection::RowReverse
+                          || style.flexDirection == CSS::FlexDirection::ColumnReverse));
 #else
     bool isRow = false;
     bool isCol = true;
@@ -577,14 +586,18 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
         }
 
         float mainAvail = isCol ? ch : cw;
-        bool flexWrap = style.flexWrap == CSS::FlexWrap::Wrap;
+        // CSS flexbox §8.3: `wrap` and `wrap-reverse` both break lines;
+        // reverse only flips the cross stacking direction (handled below).
+        bool doWrap = (style.flexWrap == CSS::FlexWrap::Wrap
+                       || style.flexWrap == CSS::FlexWrap::WrapReverse);
+        bool wrapReverse = (style.flexWrap == CSS::FlexWrap::WrapReverse);
 
         struct FlexLine { std::vector<FlexItem*> fItems; float crossSize = 0.0f; float totalMain = 0.0f; };
         std::vector<FlexLine> lines;
         FlexLine curLine;
 
         for (auto& item : items) {
-            if (flexWrap && !curLine.fItems.empty()
+            if (doWrap && !curLine.fItems.empty()
                 && curLine.totalMain + style.gap + item.main > mainAvail) {
                 lines.push_back(curLine);
                 curLine = FlexLine();
@@ -595,6 +608,27 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
         }
         if (!curLine.fItems.empty()) lines.push_back(curLine);
         if (lines.empty()) lines.push_back(FlexLine());
+
+        // CSS flexbox §5.3: *-reverse keeps DOM line breaking but lays each
+        // line's items in reverse order. Reversing per-line (not globally)
+        // keeps wrap lines correct: Line1 still holds the first DOM items,
+        // just positioned main-end-first.
+        if (isReverse) {
+            for (auto& line : lines) {
+                std::reverse(line.fItems.begin(), line.fItems.end());
+            }
+        }
+        // In a reversed axis main-start is the opposite end, so pack
+        // flex-start where forward would pack flex-end and vice versa.
+        // Center / space-* are symmetric under mirroring and stay as-is.
+        CSS::JustifyContent effJustify = style.justifyContent;
+        if (isReverse) {
+            if (effJustify == CSS::JustifyContent::FlexStart) {
+                effJustify = CSS::JustifyContent::FlexEnd;
+            } else if (effJustify == CSS::JustifyContent::FlexEnd) {
+                effJustify = CSS::JustifyContent::FlexStart;
+            }
+        }
 
         for (auto& line : lines) {
             float extraGap = line.fItems.size() > 1 ? style.gap * (line.fItems.size() - 1) : 0.0f;
@@ -686,14 +720,50 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
         float crossSize = isCol ? cw : ch;
         float cursorCross = crossStart;
 
-        for (auto& line : lines) {
+        // CSS flexbox §8.3 `wrap-reverse`: lines stack from cross-end to
+        // cross-start (row: bottom-up, column: right-to-left). Precompute
+        // each line's cross origin working back from the cross end so the
+        // first DOM line lands at the end. With a definite cross size the
+        // stack packs to the end (extra space at the start); with auto
+        // cross the stack exactly fills the grown box. Single-line still
+        // applies: it sits at the end when definite, at the start when
+        // auto (identical either way).
+        std::vector<float> revBase;
+        if (wrapReverse && !lines.empty()) {
+            float totalCross = 0.0f;
+            for (auto& ln : lines) {
+                totalCross += ln.crossSize;
+            }
+            if (lines.size() > 1) {
+                totalCross += style.gap * (float)(lines.size() - 1);
+            }
+            float crossExtent = totalCross;
+            if (isCol) {
+                if (cw > crossExtent) {
+                    crossExtent = cw;
+                }
+            } else if (style.explicitHeight >= 0.0f && ch > crossExtent) {
+                crossExtent = ch;
+            }
+            revBase.resize(lines.size());
+            float cc = crossStart + crossExtent;
+            for (size_t li = 0; li < lines.size(); li++) {
+                cc -= lines[li].crossSize;
+                revBase[li] = cc;
+                cc -= style.gap;
+            }
+        }
+
+        for (size_t li = 0; li < lines.size(); li++) {
+            auto& line = lines[li];
+            float lineBaseCross = (wrapReverse && li < revBase.size()) ? revBase[li] : cursorCross;
             float lineCross = line.crossSize;
             // A single-line flex container with a definite cross size
             // stretches its line to fill it (CSS flexbox §9.7): otherwise
             // `align-items: stretch` has nothing to stretch
             // intrinsically-empty items to (e.g. flex-grown cells with no
             // content of their own collapse to zero on the cross axis).
-            if (!flexWrap) {
+            if (!doWrap) {
                 float definiteCross = -1.0f;
                 if (isCol && style.explicitWidth >= 0.0f) definiteCross = cw;
                 if (!isCol && style.explicitHeight >= 0.0f) definiteCross = ch;
@@ -732,14 +802,14 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 
             float offset = 0.0f;
             float itemGap = style.gap;
-            if (style.justifyContent == CSS::JustifyContent::Center) {
+            if (effJustify == CSS::JustifyContent::Center) {
                 offset = free * 0.5f;
-            } else if (style.justifyContent == CSS::JustifyContent::FlexEnd) {
+            } else if (effJustify == CSS::JustifyContent::FlexEnd) {
                 offset = free;
-            } else if (style.justifyContent == CSS::JustifyContent::SpaceBetween) {
+            } else if (effJustify == CSS::JustifyContent::SpaceBetween) {
                 offset = 0.0f;
                 itemGap = (line.fItems.size() > 1) ? style.gap + free / (line.fItems.size() - 1) : 0.0f;
-            } else if (style.justifyContent == CSS::JustifyContent::SpaceAround) {
+            } else if (effJustify == CSS::JustifyContent::SpaceAround) {
                 offset = line.fItems.size() > 0 ? free / (line.fItems.size() * 2) : 0.0f;
                 itemGap = line.fItems.size() > 0 ? style.gap + free / line.fItems.size() : 0.0f;
             }
@@ -752,14 +822,14 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                 float crossDim  = isCol ? ci->node->w : ci->node->h;
 
                 float posMain = cursor + (isCol ? ci->mt : ci->ml);
-                float posCross = cursorCross + (isCol ? ci->ml : ci->mt);
+                float posCross = lineBaseCross + (isCol ? ci->ml : ci->mt);
 
                 if (lineCross > crossDim) {
                     if (style.alignItems == CSS::AlignItems::Center) {
                         float marginCross = isCol ? (ci->ml + ci->mr) : (ci->mt + ci->mb);
-                        posCross = cursorCross + (isCol ? ci->ml : ci->mt) + (lineCross - (crossDim + marginCross)) * 0.5f;
+                        posCross = lineBaseCross + (isCol ? ci->ml : ci->mt) + (lineCross - (crossDim + marginCross)) * 0.5f;
                     } else if (style.alignItems == CSS::AlignItems::FlexEnd) {
-                        posCross = cursorCross + lineCross - crossDim;
+                        posCross = lineBaseCross + lineCross - crossDim;
                         posCross -= (isCol ? ci->mr : ci->mb);
                     }
                 }
@@ -776,9 +846,9 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                         childPW = cwVal;
                         if (lineCross > crossDim) {
                             if (style.alignItems == CSS::AlignItems::Center)
-                                posCross = cursorCross + (lineCross - crossDim) * 0.5f;
+                                posCross = lineBaseCross + (lineCross - crossDim) * 0.5f;
                             else if (style.alignItems == CSS::AlignItems::FlexEnd)
-                                posCross = cursorCross + lineCross - crossDim;
+                                posCross = lineBaseCross + lineCross - crossDim;
                             childX = isCol ? posCross : posMain;
                             childY = isCol ? posMain : posCross;
                         }
