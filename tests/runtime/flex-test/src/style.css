@@ -39,3 +39,46 @@
 .b { background-color: #00ff00; }
 .c { background-color: #0000ff; }
 .d { background-color: #ffff00; }
+.eq {
+  display: flex;
+  justify-content: flex-start;
+  width: 300px;
+  height: 50px;
+  background-color: #111111;
+}
+.grow {
+  flex: 1;
+  height: 40px;
+}
+.fix {
+  width: 50px;
+  height: 40px;
+  flex-shrink: 0;
+  background-color: #ffff00;
+}
+.pxbasis {
+  display: flex;
+  justify-content: flex-start;
+  width: 300px;
+  height: 50px;
+  background-color: #222222;
+}
+.sb {
+  flex-basis: 100px;
+  flex-grow: 0;
+  flex-shrink: 0;
+  height: 40px;
+}
+.pct {
+  display: flex;
+  justify-content: flex-start;
+  width: 300px;
+  height: 50px;
+  background-color: #333333;
+}
+.pb {
+  flex-basis: 50%;
+  flex-grow: 0;
+  flex-shrink: 0;
+  height: 40px;
+}

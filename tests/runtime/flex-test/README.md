@@ -1,4 +1,4 @@
-# flex-test — flex-direction reverse + flex-wrap reverse parity
+# flex-test — flex reverse + wrap-reverse + flex-basis parity
 
 Covers the historically broken flex cases (each was parsed but mis-laid-out):
 
@@ -8,6 +8,9 @@ Covers the historically broken flex cases (each was parsed but mis-laid-out):
 | `colrev` | `flex-direction: column-reverse` | First box (red) is at the **bottom** |
 | `wrap` | `flex-wrap: wrap`, fixed height | First line (red+green) on **top** |
 | `wraprev` | `flex-wrap: wrap-reverse`, fixed height | First line (red+green) at the **bottom** |
+| `eq` | `flex: 1` ×2 + fixed 50px | Red/green **equal** (125px each), yellow 50px |
+| `pxbasis` | `flex-basis: 100px` ×2, no grow/shrink | Red/green **100px** each, rest empty |
+| `pct` | `flex-basis: 50%` ×2, no grow/shrink | Red/green **150px** each |
 
 Boxes use solid colors and fixed `50x40` sizes with `flex-shrink: 0`
 so the comparison is purely about box geometry (no font dependence).
@@ -19,11 +22,11 @@ so the comparison is purely about box geometry (no font dependence).
 ```bash
 # 1. Chrome reference (from this dir):
 google-chrome --headless --disable-gpu --no-sandbox \
-  --window-size=400,500 --screenshot=chrome.png ref.html
+  --window-size=400,650 --screenshot=chrome.png ref.html
 
 # 2. Morph (needs an X server, usually on :0):
 /path/to/morph build --no-upx   # deletes stale binary first if rebuilding
-./.morph/output/flex-test &     # 400x500 window titled "Flex Test"
+./.morph/output/flex-test &     # 400x650 window titled "Flex Test"
 import -window <id> morph.png   # find <id> via: xwininfo -root -tree | grep "Flex Test"
 
 # 3. Compare chrome.png vs morph.png: order, packing side and line

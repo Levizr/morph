@@ -1,6 +1,6 @@
 import "style.css"
 
-export const windowConfig = { title: "Flex Test", width: 400, height: 500 }
+export const windowConfig = { title: "Flex Test", width: 400, height: 650 }
 
 export default function App() {
   return (
@@ -25,6 +25,19 @@ export default function App() {
         <div className="box b" id="k"></div>
         <div className="box c" id="l"></div>
         <div className="box d" id="m"></div>
+      </div>
+      <div className="eq" id="eq">
+        <div className="grow a" id="n"></div>
+        <div className="grow b" id="o"></div>
+        <div className="fix" id="p"></div>
+      </div>
+      <div className="pxbasis" id="pxbasis">
+        <div className="sb a" id="q"></div>
+        <div className="sb b" id="r"></div>
+      </div>
+      <div className="pct" id="pct">
+        <div className="pb a" id="s"></div>
+        <div className="pb b" id="t"></div>
       </div>
     </body>
   )
