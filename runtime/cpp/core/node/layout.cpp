@@ -2,6 +2,7 @@
 #include "../renderer.h"
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 
 static float hBonus(const MorphStyle& s) {
@@ -574,6 +575,38 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
             if (isRow && c->style.explicitWidth < 0.0f) {
                 float cwVal = c->contentWidth(r);
                 if (cwVal > 0.0f) c->w = cwVal;
+            }
+
+            // CSS flexbox §9.2: a non-`auto` flex-basis sets the hypothetical
+            // main size, overriding the main-size property for flexing.
+            // Percentages resolve against the container's inner main size;
+            // against an indefinite size (e.g. auto-height column) they fall
+            // back to the content size above. `flex: 1` relies on this: its
+            // `0%` basis makes items share space equally from zero, not from
+            // content width.
+            if (c->style.flexBasis != "auto") {
+                const std::string& fb = c->style.flexBasis;
+                float basis = 0.0f;
+                bool haveBasis = false;
+                if (!fb.empty() && fb.back() == '%') {
+                    float pct = strtof(fb.c_str(), nullptr);
+                    float avail = isCol ? ch : cw;
+                    if (avail > 0.0f) {
+                        basis = avail * pct / 100.0f;
+                        haveBasis = true;
+                    }
+                } else if (!fb.empty()) {
+                    basis = strtof(fb.c_str(), nullptr);
+                    haveBasis = true;
+                }
+                if (haveBasis) {
+                    if (basis < 0.0f) basis = 0.0f;
+                    if (isRow) {
+                        c->w = basis + hBonus(c->style);
+                    } else {
+                        c->h = basis + vBonus(c->style);
+                    }
+                }
             }
 
             float cmt = c->style.margin[0], cmb = c->style.margin[2];
