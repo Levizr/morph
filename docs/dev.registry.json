@@ -4,6 +4,7 @@
     "items": [
       {
         "title": "Dev Docs: How Morph Works",
+        "sidebarTitle": "How Morph Works",
         "slug": "architecture/overview",
         "file": "dev/architecture/overview",
         "status": "production",
@@ -22,6 +23,7 @@
       },
       {
         "title": "Repo Map",
+        "sidebarTitle": "Repo Map",
         "slug": "architecture/repo-map",
         "file": "dev/architecture/repo-map",
         "status": "production",
@@ -40,6 +42,7 @@
       },
       {
         "title": "GUI Pipeline: Python vs Rust",
+        "sidebarTitle": "GUI Pipeline",
         "slug": "architecture/gui-pipeline",
         "file": "dev/architecture/gui-pipeline",
         "status": "production",
@@ -58,6 +61,7 @@
       },
       {
         "title": "The Compiler Pipeline: Your .mx File's Hero Journey",
+        "sidebarTitle": "Compiler Pipeline",
         "slug": "architecture/compiler-pipeline",
         "file": "dev/architecture/compiler-pipeline",
         "status": "production",
@@ -76,6 +80,7 @@
       },
       {
         "title": "Dev Mode: Hot Reload Without the Heart Attack",
+        "sidebarTitle": "Dev Mode",
         "slug": "architecture/dev-mode",
         "file": "dev/architecture/dev-mode",
         "status": "production",
@@ -94,6 +99,7 @@
       },
       {
         "title": "The Build Machine: Compilers, Fingerprints, and Tiny Binaries",
+        "sidebarTitle": "Build System",
         "slug": "architecture/build-system",
         "file": "dev/architecture/build-system",
         "status": "production",
@@ -117,6 +123,7 @@
     "items": [
       {
         "title": "morph-parser: The Crate That Reads",
+        "sidebarTitle": "morph-parser",
         "slug": "crates/parser",
         "file": "dev/crates/crate-parser",
         "status": "production",
@@ -136,6 +143,7 @@
       },
       {
         "title": "morph-ir: The Crate That Thinks",
+        "sidebarTitle": "morph-ir",
         "slug": "crates/ir",
         "file": "dev/crates/crate-ir",
         "status": "production",
@@ -155,6 +163,7 @@
       },
       {
         "title": "morph-codegen: The Crate That Writes C++",
+        "sidebarTitle": "morph-codegen",
         "slug": "crates/codegen",
         "file": "dev/crates/crate-codegen",
         "status": "production",
@@ -179,6 +188,7 @@
     "items": [
       {
         "title": "Morpher Internals",
+        "sidebarTitle": "Morpher Internals",
         "slug": "morpher/internals",
         "file": "dev/morpher/morpher-internals",
         "status": "production",
@@ -197,6 +207,7 @@
       },
       {
         "title": "Escape Analysis: The Compiler Reads Your Variable's Diary",
+        "sidebarTitle": "Escape Analysis",
         "slug": "morpher/escape-analysis",
         "file": "dev/morpher/escape-analysis",
         "status": "production",
@@ -215,6 +226,7 @@
       },
       {
         "title": "JavaScript Wearing a C++ Costume",
+        "sidebarTitle": "JS Semantics",
         "slug": "morpher/js-semantics",
         "file": "dev/morpher/js-semantics",
         "status": "production",
@@ -238,6 +250,7 @@
     "items": [
       {
         "title": "State & Event Internals",
+        "sidebarTitle": "Events Internals",
         "slug": "state/events-internals",
         "file": "dev/state/state-events-internals",
         "status": "production",
@@ -261,6 +274,7 @@
     "items": [
       {
         "title": "Runtime Layout",
+        "sidebarTitle": "Layout",
         "slug": "runtime/layout",
         "file": "dev/runtime/runtime-layout",
         "status": "production",
@@ -279,6 +293,7 @@
       },
       {
         "title": "The Reactivity Engine: Signals That Actually Signal",
+        "sidebarTitle": "Reactivity Engine",
         "slug": "runtime/reactivity-engine",
         "file": "dev/runtime/reactivity-engine",
         "status": "production",
@@ -297,6 +312,7 @@
       },
       {
         "title": "Pixels on Screen: Flash, Forge, and the Compositor",
+        "sidebarTitle": "Rendering Deep Dive",
         "slug": "runtime/rendering-deep-dive",
         "file": "dev/runtime/rendering-deep-dive",
         "status": "production",
@@ -315,6 +331,7 @@
       },
       {
         "title": "Layout & Style: Flexbox Without a Browser",
+        "sidebarTitle": "Layout & Style Engine",
         "slug": "runtime/layout-style-engine",
         "file": "dev/runtime/layout-style-engine",
         "status": "production",
@@ -333,6 +350,7 @@
       },
       {
         "title": "fetch(): HTTP in a Trench Coat",
+        "sidebarTitle": "Networking",
         "slug": "runtime/networking",
         "file": "dev/runtime/networking",
         "status": "production",
@@ -356,6 +374,7 @@
     "items": [
       {
         "title": "Meet morph: Every Command, No Small Talk",
+        "sidebarTitle": "CLI Tour",
         "slug": "build-cli/cli-tour",
         "file": "dev/build-cli/cli-tour",
         "status": "production",
@@ -374,6 +393,7 @@
       },
       {
         "title": "Config, Cache & Versions: The Boring Bits That Save You",
+        "sidebarTitle": "Config & Cache",
         "slug": "build-cli/config-cache-versions",
         "file": "dev/build-cli/config-cache-versions",
         "status": "production",
@@ -397,6 +417,7 @@
     "items": [
       {
         "title": "Testing: The Fixture Hammer and the Self-Test Gauntlet",
+        "sidebarTitle": "Testing",
         "slug": "testing/overview",
         "file": "dev/testing/testing",
         "status": "production",
@@ -420,6 +441,7 @@
     "items": [
       {
         "title": "Bug Report — 2026-09-28",
+        "sidebarTitle": "2026-09-28",
         "slug": "bugs/2026-09-28",
         "file": "dev/bugs/2026-09-28",
         "status": "production",
@@ -438,6 +460,7 @@
       },
       {
         "title": "Bug Report — 2026-09-19",
+        "sidebarTitle": "2026-09-19",
         "slug": "bugs/2026-09-19",
         "file": "dev/bugs/2026-09-19",
         "status": "production",
@@ -462,6 +485,7 @@
     "items": [
       {
         "title": "Contributing: Setup, Workflow, Conventions",
+        "sidebarTitle": "Contributing",
         "slug": "contributing/overview",
         "file": "dev/contributing/contributing",
         "status": "production",
@@ -480,6 +504,7 @@
       },
       {
         "title": "Docs System",
+        "sidebarTitle": "Docs System",
         "slug": "contributing/docs-system",
         "file": "dev/contributing/docs-system",
         "status": "production",

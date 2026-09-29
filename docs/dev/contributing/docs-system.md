@@ -17,7 +17,18 @@ docs/dev/<category>/*.md ──┐
 docs/dev.registry.json ─┘
 ```
 
-The site fetches from GitHub `main` — there is no build-time copy. Pushing to `main` updates the site (a purge workflow clears the fetch cache per push). Dev pages live one directory per category (`architecture/`, `crates/`, `morpher/`, `state/`, `runtime/`, `build-cli/`, `testing/`, `contributing/`, `bugs/`) mirroring the registry categories. Both tracks share the registry schema: `{ title, slug, file, status, author, description, keywords, lastUpdated, publishedAt, priority, changefreq }`.
+The site fetches from GitHub `main` — there is no build-time copy. Pushing to `main` updates the site (a purge workflow clears the fetch cache per push). Dev pages live one directory per category (`architecture/`, `crates/`, `morpher/`, `state/`, `runtime/`, `build-cli/`, `testing/`, `contributing/`, `bugs/`) mirroring the registry categories. Both tracks share the registry schema: `{ title, sidebarTitle, slug, file, status, author, description, keywords, lastUpdated, publishedAt, priority, changefreq }`.
+
+## Two titles per page
+
+Every entry carries both a `title` and a `sidebarTitle`, and they do different jobs:
+
+| Field | Job | Example |
+|---|---|---|
+| `title` | The page headline and SEO surface — long-tail, what someone types into a search engine | `How to Install Morph on Linux` |
+| `sidebarTitle` | The human label in every navigation surface — sidebar, prev/next, topic lists, search dropdown | `Installation` |
+
+Navigation surfaces render `sidebarTitle` and fall back to `title` when it's missing, so a registry written before this field existed still works. Keep the short label a bare noun (`Installation`, `Event Handling`, `mx-export`) — it sits in a 240px column and gets truncated. A long-tail title there is the thing this field exists to fix, and readers hover the link to see the full headline. Page headlines keep the long form; that is where it belongs.
 
 ## The two tracks
 
@@ -32,7 +43,7 @@ The site fetches from GitHub `main` — there is no build-time copy. Pushing to 
 ## Adding a page
 
 1. Write the `.md` in `docs/` (user) or in the matching `docs/dev/<category>/` directory (internals — every dev page lives in its category dir, never flat in `docs/dev/`).
-2. Register it in the matching registry file: `slug` is the URL path, `file` is the repo path — they don't have to match, but keep them mirrored (`slug: architecture/foo` ↔ `file: dev/architecture/foo`) unless you enjoy confusing the next editor. New category? Add the directory *and* the registry category together — one without the other is a page the site can't find or a nav entry pointing at air. Bump `lastUpdated` on any page you touch.
+2. Register it in the matching registry file: `slug` is the URL path, `file` is the repo path — they don't have to match, but keep them mirrored (`slug: architecture/foo` ↔ `file: dev/architecture/foo`) unless you enjoy confusing the next editor. `title` is the SEO headline, `sidebarTitle` is the one- or two-word nav label (see above) — both, always. New category? Add the directory *and* the registry category together — one without the other is a page the site can't find or a nav entry pointing at air. Bump `lastUpdated` on any page you touch.
 3. Link rules: `page.md` → same category; `../<category>/<page>.md` → another dev category (e.g. `../runtime/networking.md`); `../../guides/x.md` from a dev page → `/docs/guides/x` automatically; `../../../CONTRIBUTING.md` (escaping the docs root) → GitHub blob link automatically. Anchors (`#section`) survive all of these — use them.
 4. Validate before pushing:
    ```bash

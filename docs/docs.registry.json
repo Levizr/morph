@@ -4,6 +4,7 @@
     "items": [
       {
         "title": "What Is Morph",
+        "sidebarTitle": "Overview",
         "slug": "introduction",
         "file": "index",
         "status": "production",
@@ -23,6 +24,7 @@
       },
       {
         "title": "How to Install Morph on Linux",
+        "sidebarTitle": "Installation",
         "slug": "getting-started/installation",
         "file": "getting-started/installation",
         "status": "production",
@@ -44,6 +46,7 @@
       },
       {
         "title": "How to Create Your First Morph App",
+        "sidebarTitle": "Quick Start",
         "slug": "getting-started/quick-start",
         "file": "getting-started/quick-start",
         "status": "production",
@@ -63,6 +66,7 @@
       },
       {
         "title": "How to Configure a Morph Project",
+        "sidebarTitle": "Configuration",
         "slug": "getting-started/configuration",
         "file": "getting-started/configuration",
         "status": "production",
@@ -82,6 +86,7 @@
       },
       {
         "title": "How a Morph Project Is Structured",
+        "sidebarTitle": "Project Structure",
         "slug": "getting-started/project-structure",
         "file": "getting-started/project-structure",
         "status": "production",
@@ -101,6 +106,7 @@
       },
       {
         "title": "How to Deploy and Package Morph Apps",
+        "sidebarTitle": "Deployment & Packaging",
         "slug": "guides/deployment",
         "file": "guides/deployment",
         "status": "production",
@@ -122,6 +128,7 @@
       },
       {
         "title": "How to Debug and Profile Morph Apps",
+        "sidebarTitle": "Debugging & Profiling",
         "slug": "guides/debugging",
         "file": "guides/debugging",
         "status": "production",
@@ -143,6 +150,7 @@
       },
       {
         "title": "Migration Guide: Python Morph to morph",
+        "sidebarTitle": "Migration Guide",
         "slug": "guides/migration",
         "file": "guides/migration",
         "status": "production",
@@ -161,6 +169,7 @@
       },
       {
         "title": "Morph Runtime Internals Deep Dive",
+        "sidebarTitle": "Runtime Internals",
         "slug": "guides/runtime-internals",
         "file": "guides/runtime-internals",
         "status": "production",
@@ -181,6 +190,7 @@
       },
       {
         "title": "How to Test Morph Apps",
+        "sidebarTitle": "Testing",
         "slug": "guides/testing",
         "file": "guides/testing",
         "status": "production",
@@ -205,6 +215,7 @@
     "items": [
       {
         "title": "How Morph Compiles Your Code",
+        "sidebarTitle": "How It Works",
         "slug": "concepts/how-it-works",
         "file": "concepts/how-it-works",
         "status": "production",
@@ -224,6 +235,7 @@
       },
       {
         "title": "How Morph Dev Mode Hot Reloads",
+        "sidebarTitle": "Dev Mode",
         "slug": "concepts/dev-mode",
         "file": "concepts/dev-mode",
         "status": "production",
@@ -243,6 +255,7 @@
       },
       {
         "title": "How to Build a Standalone Morph Binary",
+        "sidebarTitle": "Build Mode",
         "slug": "concepts/build-mode",
         "file": "concepts/build-mode",
         "status": "production",
@@ -265,6 +278,7 @@
       },
       {
         "title": "Morph Architecture Overview",
+        "sidebarTitle": "Architecture",
         "slug": "concepts/architecture",
         "file": "concepts/architecture",
         "status": "production",
@@ -289,6 +303,7 @@
     "items": [
       {
         "title": "Which HTML Elements Morph Supports",
+        "sidebarTitle": "Supported Elements",
         "slug": "elements/overview",
         "file": "elements/overview",
         "status": "production",
@@ -308,6 +323,7 @@
       },
       {
         "title": "How to Conditionally Render in Morph",
+        "sidebarTitle": "Conditional Rendering",
         "slug": "elements/conditional",
         "file": "elements/conditional",
         "status": "production",
@@ -327,6 +343,7 @@
       },
       {
         "title": "How to Render Lists in Morph",
+        "sidebarTitle": "Lists",
         "slug": "elements/lists",
         "file": "elements/lists",
         "status": "beta",
@@ -346,6 +363,7 @@
       },
       {
         "title": "How to Handle Events in Morph",
+        "sidebarTitle": "Events",
         "slug": "elements/events",
         "file": "elements/events",
         "status": "production",
@@ -365,6 +383,7 @@
       },
       {
         "title": "How to Build Reusable Components in Morph",
+        "sidebarTitle": "Components",
         "slug": "elements/components",
         "file": "elements/components",
         "status": "production",
@@ -390,6 +409,7 @@
     "items": [
       {
         "title": "Which CSS Properties Morph Supports",
+        "sidebarTitle": "Supported Properties",
         "slug": "css/properties",
         "file": "css/properties",
         "status": "production",
@@ -409,6 +429,7 @@
       },
       {
         "title": "How to Animate with CSS in Morph",
+        "sidebarTitle": "Animations",
         "slug": "css/animations",
         "file": "css/animations",
         "status": "production",
@@ -428,6 +449,7 @@
       },
       {
         "title": "How to Transition Styles in Morph",
+        "sidebarTitle": "Transitions",
         "slug": "css/transitions",
         "file": "css/transitions",
         "status": "production",
@@ -447,6 +469,7 @@
       },
       {
         "title": "How to Transform Elements in Morph",
+        "sidebarTitle": "Transforms",
         "slug": "css/transforms",
         "file": "css/transforms",
         "status": "production",
@@ -466,6 +489,7 @@
       },
       {
         "title": "How to Use Flexbox Layout in Morph",
+        "sidebarTitle": "Flexbox",
         "slug": "css/flexbox",
         "file": "css/flexbox",
         "status": "production",
@@ -485,6 +509,7 @@
       },
       {
         "title": "How to Use Tailwind Classes in Morph",
+        "sidebarTitle": "Tailwind",
         "slug": "css/tailwind",
         "file": "css/tailwind",
         "status": "production",
@@ -509,6 +534,7 @@
     "items": [
       {
         "title": "How Morph Compiles JavaScript to Native",
+        "sidebarTitle": "JS Compilation",
         "slug": "javascript/overview",
         "file": "javascript/overview",
         "status": "production",
@@ -528,6 +554,7 @@
       },
       {
         "title": "How State Works in Morph",
+        "sidebarTitle": "State",
         "slug": "javascript/state",
         "file": "javascript/state",
         "status": "production",
@@ -547,6 +574,7 @@
       },
       {
         "title": "How Effects Work in Morph",
+        "sidebarTitle": "Effects",
         "slug": "javascript/effects",
         "file": "javascript/effects",
         "status": "production",
@@ -566,6 +594,7 @@
       },
       {
         "title": "How to Use Async and Fetch in Morph",
+        "sidebarTitle": "Async & Fetch",
         "slug": "javascript/async",
         "file": "javascript/async",
         "status": "production",
@@ -585,6 +614,7 @@
       },
       {
         "title": "How JavaScript Runtime Types Work in Morph",
+        "sidebarTitle": "Runtime Types",
         "slug": "javascript/types",
         "file": "javascript/types",
         "status": "production",
@@ -604,6 +634,7 @@
       },
       {
         "title": "How to Use Native C++ Types in Morph",
+        "sidebarTitle": "Native C++ Types",
         "slug": "javascript/native-types",
         "file": "javascript/native-types",
         "status": "production",
@@ -623,6 +654,7 @@
       },
       {
         "title": "How JavaScript Comparisons Work in Morph",
+        "sidebarTitle": "Comparisons",
         "slug": "javascript/js-comparisons",
         "file": "javascript/js-comparisons",
         "status": "production",
@@ -647,6 +679,7 @@
     "items": [
       {
         "title": "Morph API Reference Overview",
+        "sidebarTitle": "API Overview",
         "slug": "api/overview",
         "file": "api/overview",
         "status": "production",
@@ -664,6 +697,7 @@
       },
       {
         "title": "morphState API Reference",
+        "sidebarTitle": "morphState()",
         "slug": "api/morph-state",
         "file": "api/morphState",
         "status": "production",
@@ -681,6 +715,7 @@
       },
       {
         "title": "morphShared API Reference",
+        "sidebarTitle": "morphShared()",
         "slug": "api/morph-shared",
         "file": "api/morphShared",
         "status": "production",
@@ -698,6 +733,7 @@
       },
       {
         "title": "morphEvent API Reference",
+        "sidebarTitle": "morphEvent()",
         "slug": "api/morph-event",
         "file": "api/morphEvent",
         "status": "production",
@@ -715,6 +751,7 @@
       },
       {
         "title": "morphEffect API Reference",
+        "sidebarTitle": "morphEffect()",
         "slug": "api/morph-effect",
         "file": "api/morphEffect",
         "status": "production",
@@ -732,6 +769,7 @@
       },
       {
         "title": "DOM Events Reference",
+        "sidebarTitle": "DOM Events",
         "slug": "api/events",
         "file": "api/events",
         "status": "production",
@@ -751,6 +789,7 @@
       },
       {
         "title": "Window and useWindow API Reference",
+        "sidebarTitle": "Window & useWindow",
         "slug": "api/windows",
         "file": "api/windows",
         "status": "production",
@@ -776,6 +815,7 @@
       },
       {
         "title": "Which Morph API Do I Need",
+        "sidebarTitle": "Which API?",
         "slug": "api/faq/choosing",
         "file": "api/faq/choosing",
         "status": "production",
@@ -793,6 +833,7 @@
       },
       {
         "title": "morphState FAQ",
+        "sidebarTitle": "morphState FAQ",
         "slug": "api/faq/morph-state",
         "file": "api/faq/morphState",
         "status": "production",
@@ -810,6 +851,7 @@
       },
       {
         "title": "morphShared FAQ",
+        "sidebarTitle": "morphShared FAQ",
         "slug": "api/faq/morph-shared",
         "file": "api/faq/morphShared",
         "status": "production",
@@ -827,6 +869,7 @@
       },
       {
         "title": "morphEvent FAQ",
+        "sidebarTitle": "morphEvent FAQ",
         "slug": "api/faq/morph-event",
         "file": "api/faq/morphEvent",
         "status": "production",
@@ -844,6 +887,7 @@
       },
       {
         "title": "morphEffect FAQ",
+        "sidebarTitle": "morphEffect FAQ",
         "slug": "api/faq/morph-effect",
         "file": "api/faq/morphEffect",
         "status": "production",
@@ -866,6 +910,7 @@
     "items": [
       {
         "title": "How to Call C++ from Morph JSX",
+        "sidebarTitle": "Calling C++",
         "slug": "guides/native-cpp",
         "file": "guides/native-cpp",
         "status": "production",
@@ -885,6 +930,7 @@
       },
       {
         "title": "How to Create Custom C++ Nodes in Morph",
+        "sidebarTitle": "Custom C++ Nodes",
         "slug": "guides/custom-cpp-nodes",
         "file": "guides/custom-cpp-nodes",
         "status": "production",
@@ -904,6 +950,7 @@
       },
       {
         "title": "How to Change Styles at Runtime in Morph",
+        "sidebarTitle": "Runtime Styles",
         "slug": "guides/dynamic-styles",
         "file": "guides/dynamic-styles",
         "status": "production",
@@ -923,6 +970,7 @@
       },
       {
         "title": "Intent-Based Codegen & Memory Management",
+        "sidebarTitle": "Intent-Based Codegen",
         "slug": "guides/intent-based-codegen",
         "file": "guides/intent-based-codegen",
         "status": "production",
@@ -942,6 +990,7 @@
       },
       {
         "title": "App Disk Size Benchmarks",
+        "sidebarTitle": "App Size Benchmarks",
         "slug": "guides/app-size",
         "file": "guides/app-size",
         "status": "production",
@@ -964,6 +1013,7 @@
       },
       {
         "title": "Windows and Routing Guide",
+        "sidebarTitle": "Windows & Routing",
         "slug": "guides/windows-and-routing",
         "file": "guides/windows-and-routing",
         "status": "production",
@@ -993,6 +1043,7 @@
     "items": [
       {
         "title": "How to Open Morph DevTools",
+        "sidebarTitle": "Opening DevTools",
         "slug": "devtools/overview",
         "file": "devtools/index",
         "status": "production",
@@ -1012,6 +1063,7 @@
       },
       {
         "title": "How to Inspect Elements with Morph DevTools",
+        "sidebarTitle": "Elements",
         "slug": "devtools/elements",
         "file": "devtools/elements",
         "status": "production",
@@ -1031,6 +1083,7 @@
       },
       {
         "title": "How to Profile Rendering with Morph DevTools",
+        "sidebarTitle": "Rendering",
         "slug": "devtools/rendering",
         "file": "devtools/rendering",
         "status": "production",
@@ -1050,6 +1103,7 @@
       },
       {
         "title": "How to Debug Network with Morph DevTools",
+        "sidebarTitle": "Network",
         "slug": "devtools/network",
         "file": "devtools/network",
         "status": "production",
@@ -1069,6 +1123,7 @@
       },
       {
         "title": "How to View Console Logs in Morph DevTools",
+        "sidebarTitle": "Console Logs",
         "slug": "devtools/logs",
         "file": "devtools/logs",
         "status": "production",
@@ -1093,6 +1148,7 @@
     "items": [
       {
         "title": "Which Morph Renderer Should You Use",
+        "sidebarTitle": "Choosing a Renderer",
         "slug": "rendering/overview",
         "file": "rendering/index",
         "status": "production",
@@ -1112,6 +1168,7 @@
       },
       {
         "title": "How the Flash Renderer Works in Morph",
+        "sidebarTitle": "Flash Renderer",
         "slug": "rendering/flash",
         "file": "rendering/flash",
         "status": "production",
@@ -1131,6 +1188,7 @@
       },
       {
         "title": "How the Forge Renderer Works in Morph",
+        "sidebarTitle": "Forge Renderer",
         "slug": "rendering/forge",
         "file": "rendering/forge",
         "status": "production",
@@ -1155,6 +1213,7 @@
     "items": [
       {
         "title": "All Morph CLI Commands",
+        "sidebarTitle": "CLI Commands",
         "slug": "cli/commands",
         "file": "cli/commands",
         "status": "production",
@@ -1179,6 +1238,7 @@
     "items": [
       {
         "title": "Morph Error Reference",
+        "sidebarTitle": "overview",
         "slug": "errors/overview",
         "file": "errors/index",
         "status": "production",
@@ -1198,6 +1258,7 @@
       },
       {
         "title": "mx-export — Missing or Duplicate Default Export",
+        "sidebarTitle": "mx-export",
         "slug": "errors/mx-export",
         "file": "errors/mx-export",
         "status": "production",
@@ -1215,6 +1276,7 @@
       },
       {
         "title": "mx-component-unknown — Unknown Component",
+        "sidebarTitle": "mx-component-unknown",
         "slug": "errors/mx-component-unknown",
         "file": "errors/mx-component-unknown",
         "status": "production",
@@ -1232,6 +1294,7 @@
       },
       {
         "title": "mx-component-prop — Unknown Prop on a Component",
+        "sidebarTitle": "mx-component-prop",
         "slug": "errors/mx-component-prop",
         "file": "errors/mx-component-prop",
         "status": "production",
@@ -1249,6 +1312,7 @@
       },
       {
         "title": "mx-component-required — Missing Required Prop",
+        "sidebarTitle": "mx-component-required",
         "slug": "errors/mx-component-required",
         "file": "errors/mx-component-required",
         "status": "production",
@@ -1266,6 +1330,7 @@
       },
       {
         "title": "mx-window-missing — No Window Created",
+        "sidebarTitle": "mx-window-missing",
         "slug": "errors/mx-window-missing",
         "file": "errors/mx-window-missing",
         "status": "production",
@@ -1283,6 +1348,7 @@
       },
       {
         "title": "mx-windowconfig-key — Invalid windowConfig Key",
+        "sidebarTitle": "mx-windowconfig-key",
         "slug": "errors/mx-windowconfig-key",
         "file": "errors/mx-windowconfig-key",
         "status": "production",
@@ -1300,6 +1366,7 @@
       },
       {
         "title": "mx-windowconfig-type — Invalid windowConfig Value Type",
+        "sidebarTitle": "mx-windowconfig-type",
         "slug": "errors/mx-windowconfig-type",
         "file": "errors/mx-windowconfig-type",
         "status": "production",
@@ -1317,6 +1384,7 @@
       },
       {
         "title": "mx-tag — Unknown Element Tag",
+        "sidebarTitle": "mx-tag",
         "slug": "errors/mx-tag",
         "file": "errors/mx-tag",
         "status": "production",
@@ -1334,6 +1402,7 @@
       },
       {
         "title": "mx-tag-stub — Unimplemented Element",
+        "sidebarTitle": "mx-tag-stub",
         "slug": "errors/mx-tag-stub",
         "file": "errors/mx-tag-stub",
         "status": "production",
@@ -1351,6 +1420,7 @@
       },
       {
         "title": "mx-prop — Invalid or Misspelled Prop",
+        "sidebarTitle": "mx-prop",
         "slug": "errors/mx-prop",
         "file": "errors/mx-prop",
         "status": "production",
@@ -1368,6 +1438,7 @@
       },
       {
         "title": "mx-img-src — img Without src",
+        "sidebarTitle": "mx-img-src",
         "slug": "errors/mx-img-src",
         "file": "errors/mx-img-src",
         "status": "production",
@@ -1385,6 +1456,7 @@
       },
       {
         "title": "mx-event-value — Event Handler Is Not a Function",
+        "sidebarTitle": "mx-event-value",
         "slug": "errors/mx-event-value",
         "file": "errors/mx-event-value",
         "status": "production",
@@ -1402,6 +1474,7 @@
       },
       {
         "title": "mx-key-misuse — key Used Outside a List",
+        "sidebarTitle": "mx-key-misuse",
         "slug": "errors/mx-key-misuse",
         "file": "errors/mx-key-misuse",
         "status": "production",
@@ -1419,6 +1492,7 @@
       },
       {
         "title": "mx-dup-class — class and className Used Together",
+        "sidebarTitle": "mx-dup-class",
         "slug": "errors/mx-dup-class",
         "file": "errors/mx-dup-class",
         "status": "production",
@@ -1436,6 +1510,7 @@
       },
       {
         "title": "mx-style-prop — Unsupported Inline Style Property",
+        "sidebarTitle": "mx-style-prop",
         "slug": "errors/mx-style-prop",
         "file": "errors/mx-style-prop",
         "status": "production",
@@ -1453,6 +1528,7 @@
       },
       {
         "title": "mx-style-value — Invalid Inline Style Value",
+        "sidebarTitle": "mx-style-value",
         "slug": "errors/mx-style-value",
         "file": "errors/mx-style-value",
         "status": "production",
@@ -1470,6 +1546,7 @@
       },
       {
         "title": "mx-tailwind-class — Unresolvable Tailwind Class",
+        "sidebarTitle": "mx-tailwind-class",
         "slug": "errors/mx-tailwind-class",
         "file": "errors/mx-tailwind-class",
         "status": "production",
@@ -1487,6 +1564,7 @@
       },
       {
         "title": "mx-css-prop — Unsupported CSS File Property",
+        "sidebarTitle": "mx-css-prop",
         "slug": "errors/mx-css-prop",
         "file": "errors/mx-css-prop",
         "status": "production",
@@ -1504,6 +1582,7 @@
       },
       {
         "title": "mx-css-file-missing — Imported CSS File Not Found",
+        "sidebarTitle": "mx-css-file-missing",
         "slug": "errors/mx-css-file-missing",
         "file": "errors/mx-css-file-missing",
         "status": "production",
@@ -1521,6 +1600,7 @@
       },
       {
         "title": "mx-css-load-deprecated — CSS.load() Is Deprecated",
+        "sidebarTitle": "mx-css-load-deprecated",
         "slug": "errors/mx-css-load-deprecated",
         "file": "errors/mx-css-load-deprecated",
         "status": "production",
@@ -1538,6 +1618,7 @@
       },
       {
         "title": "mx-import-morph — Invalid Import from morph",
+        "sidebarTitle": "mx-import-morph",
         "slug": "errors/mx-import-morph",
         "file": "errors/mx-import-morph",
         "status": "production",
@@ -1555,6 +1636,7 @@
       },
       {
         "title": "mx-no-morph-import — Morph API Used Without Import",
+        "sidebarTitle": "mx-no-morph-import",
         "slug": "errors/mx-no-morph-import",
         "file": "errors/mx-no-morph-import",
         "status": "production",
@@ -1572,6 +1654,7 @@
       },
       {
         "title": "mx-undefined — Undefined Name",
+        "sidebarTitle": "mx-undefined",
         "slug": "errors/mx-undefined",
         "file": "errors/mx-undefined",
         "status": "production",
@@ -1589,6 +1672,7 @@
       },
       {
         "title": "mx-import-type — Unsupported Import Type",
+        "sidebarTitle": "mx-import-type",
         "slug": "errors/mx-import-type",
         "file": "errors/mx-import-type",
         "status": "production",
@@ -1606,6 +1690,7 @@
       },
       {
         "title": "mx-naming — Invalid Module File or Directory Name",
+        "sidebarTitle": "mx-naming",
         "slug": "errors/mx-naming",
         "file": "errors/mx-naming",
         "status": "production",
@@ -1623,6 +1708,7 @@
       },
       {
         "title": "mx-state-scope — morphState Outside a Component",
+        "sidebarTitle": "mx-state-scope",
         "slug": "errors/mx-state-scope",
         "file": "errors/mx-state-scope",
         "status": "production",
@@ -1640,6 +1726,7 @@
       },
       {
         "title": "mx-shared-scope — morphShared Not at Exported Module Scope",
+        "sidebarTitle": "mx-shared-scope",
         "slug": "errors/mx-shared-scope",
         "file": "errors/mx-shared-scope",
         "status": "production",
@@ -1657,6 +1744,7 @@
       },
       {
         "title": "mx-event-scope — morphEvent Not at Exported Module Scope",
+        "sidebarTitle": "mx-event-scope",
         "slug": "errors/mx-event-scope",
         "file": "errors/mx-event-scope",
         "status": "production",
@@ -1674,6 +1762,7 @@
       },
       {
         "title": "mx-api-removed — Removed String-Key API",
+        "sidebarTitle": "mx-api-removed",
         "slug": "errors/mx-api-removed",
         "file": "errors/mx-api-removed",
         "status": "production",
@@ -1691,6 +1780,7 @@
       },
       {
         "title": "mx-state-pattern — morphState Destructuring Pattern",
+        "sidebarTitle": "mx-state-pattern",
         "slug": "errors/mx-state-pattern",
         "file": "errors/mx-state-pattern",
         "status": "production",
@@ -1708,6 +1798,7 @@
       },
       {
         "title": "mx-effect-cb — morphEffect First Argument Must Be a Function",
+        "sidebarTitle": "mx-effect-cb",
         "slug": "errors/mx-effect-cb",
         "file": "errors/mx-effect-cb",
         "status": "production",
@@ -1725,6 +1816,7 @@
       },
       {
         "title": "mx-effect-deps — Effect Dependencies Should Be State",
+        "sidebarTitle": "mx-effect-deps",
         "slug": "errors/mx-effect-deps",
         "file": "errors/mx-effect-deps",
         "status": "production",
@@ -1742,6 +1834,7 @@
       },
       {
         "title": "mx-transpile — JavaScript That Cannot Compile to C++",
+        "sidebarTitle": "mx-transpile",
         "slug": "errors/mx-transpile",
         "file": "errors/mx-transpile",
         "status": "production",
@@ -1759,6 +1852,7 @@
       },
       {
         "title": "mx-js-global — Browser Global With No Native Counterpart",
+        "sidebarTitle": "mx-js-global",
         "slug": "errors/mx-js-global",
         "file": "errors/mx-js-global",
         "status": "production",
@@ -1776,6 +1870,7 @@
       },
       {
         "title": "mx-js-member — Unsupported Builtin Member Access",
+        "sidebarTitle": "mx-js-member",
         "slug": "errors/mx-js-member",
         "file": "errors/mx-js-member",
         "status": "production",
@@ -1793,6 +1888,7 @@
       },
       {
         "title": "mx-js-method — Unimplemented Method",
+        "sidebarTitle": "mx-js-method",
         "slug": "errors/mx-js-method",
         "file": "errors/mx-js-method",
         "status": "production",
@@ -1810,6 +1906,7 @@
       },
       {
         "title": "mx-js-op — Unemittable Operator",
+        "sidebarTitle": "mx-js-op",
         "slug": "errors/mx-js-op",
         "file": "errors/mx-js-op",
         "status": "production",
@@ -1827,6 +1924,7 @@
       },
       {
         "title": "mx-js-syntax — Unhandleable Syntax Construct",
+        "sidebarTitle": "mx-js-syntax",
         "slug": "errors/mx-js-syntax",
         "file": "errors/mx-js-syntax",
         "status": "production",
@@ -1844,6 +1942,7 @@
       },
       {
         "title": "mx-list-key — List Item Without key",
+        "sidebarTitle": "mx-list-key",
         "slug": "errors/mx-list-key",
         "file": "errors/mx-list-key",
         "status": "production",
@@ -1861,6 +1960,7 @@
       },
       {
         "title": "mx-route-unknown — Unknown Route ID",
+        "sidebarTitle": "mx-route-unknown",
         "slug": "errors/mx-route-unknown",
         "file": "errors/mx-route-unknown",
         "status": "production",
@@ -1878,6 +1978,7 @@
       },
       {
         "title": "mx-route-no-export — Route File Without Default Export",
+        "sidebarTitle": "mx-route-no-export",
         "slug": "errors/mx-route-no-export",
         "file": "errors/mx-route-no-export",
         "status": "production",
@@ -1895,6 +1996,7 @@
       },
       {
         "title": "mx-route-state — Route Helper Reads Mount State From Module Scope",
+        "sidebarTitle": "mx-route-state",
         "slug": "errors/mx-route-state",
         "file": "errors/mx-route-state",
         "status": "production",
@@ -1917,6 +2019,7 @@
     "items": [
       {
         "title": "Morph Calculator Example",
+        "sidebarTitle": "Calculator",
         "slug": "examples/calculator",
         "file": "examples/calculator",
         "status": "production",
@@ -1935,6 +2038,7 @@
       },
       {
         "title": "Morph Dynamic State Example",
+        "sidebarTitle": "Dynamic State",
         "slug": "examples/dynamic",
         "file": "examples/dynamic",
         "status": "production",
@@ -1953,6 +2057,7 @@
       },
       {
         "title": "Morph IP Checker Example",
+        "sidebarTitle": "IP Checker",
         "slug": "examples/ipchecker",
         "file": "examples/ipchecker",
         "status": "production",
@@ -1971,6 +2076,7 @@
       },
       {
         "title": "Morph Login Form Example",
+        "sidebarTitle": "Login Form",
         "slug": "examples/login",
         "file": "examples/login",
         "status": "production",
@@ -1995,6 +2101,7 @@
     "items": [
       {
         "title": "What Morph Is Building Right Now",
+        "sidebarTitle": "Under Construction",
         "slug": "roadmap/under-construction",
         "file": "roadmap/under-construction",
         "status": "development",
@@ -2014,6 +2121,7 @@
       },
       {
         "title": "Morph's Future Roadmap",
+        "sidebarTitle": "Roadmap",
         "slug": "future/overview",
         "file": "future/index",
         "status": "future",
@@ -2038,6 +2146,7 @@
     "items": [
       {
         "title": "Morph Viewport - Embedded OpenGL Canvas",
+        "sidebarTitle": "Embedded OpenGL Viewport",
         "slug": "future/viewport",
         "file": "future/viewport",
         "status": "future",
@@ -2056,6 +2165,7 @@
       },
       {
         "title": "Morph Window and App API (Planned)",
+        "sidebarTitle": "Window & App API",
         "slug": "future/window-api",
         "file": "future/window-api",
         "status": "future",
@@ -2075,6 +2185,7 @@
       },
       {
         "title": "Morph Window Ownership: Parent, Modal & Role (Shipped)",
+        "sidebarTitle": "Window Ownership",
         "slug": "future/window-ownership",
         "file": "future/shipped/window-ownership",
         "status": "production",
@@ -2095,6 +2206,7 @@
       },
       {
         "title": "Morph Lean Binaries: 150KB Budget (Active)",
+        "sidebarTitle": "Lean Binaries (150KB)",
         "slug": "future/lean-binary",
         "file": "future/lean-binary",
         "status": "future",
@@ -2115,6 +2227,7 @@
       },
       {
         "title": "Morph File-Based Windows and Pages (Planned)",
+        "sidebarTitle": "File-Based Routing",
         "slug": "future/file-routing",
         "file": "future/file-routing",
         "status": "future",
@@ -2134,6 +2247,7 @@
       },
       {
         "title": "Morph Route Mounts & Per-Instance State (Design Record)",
+        "sidebarTitle": "Route Mounts",
         "slug": "future/route-mounts",
         "file": "future/route-mounts",
         "status": "future",
@@ -2153,6 +2267,7 @@
       },
       {
         "title": "Morph Menu, Tray, Dialog & Notification (Planned)",
+        "sidebarTitle": "Native Modules",
         "slug": "future/native-modules",
         "file": "future/native-modules",
         "status": "future",
@@ -2171,6 +2286,7 @@
       },
       {
         "title": "Morph Multi-Window Navigation (Planned)",
+        "sidebarTitle": "Multi-Window",
         "slug": "future/multi-window",
         "file": "future/multi-window",
         "status": "future",
@@ -2190,6 +2306,7 @@
       },
       {
         "title": "Morph Forge Renderer Tile Pool (Planned)",
+        "sidebarTitle": "Forge Tile Pool",
         "slug": "future/forge-renderer",
         "file": "future/forge-renderer",
         "status": "future",
@@ -2208,6 +2325,7 @@
       },
       {
         "title": "Morph Full CSS Cascade (Planned)",
+        "sidebarTitle": "Full CSS Cascade",
         "slug": "future/css-cascade",
         "file": "future/css-cascade",
         "status": "future",
@@ -2226,6 +2344,7 @@
       },
       {
         "title": "Morph TS-to-C++ Translator Coverage (Planned)",
+        "sidebarTitle": "Translator Coverage",
         "slug": "future/js-coverage",
         "file": "future/js-coverage",
         "status": "future",
@@ -2244,6 +2363,7 @@
       },
       {
         "title": "Morph Text Input - Caret & Focus (Planned)",
+        "sidebarTitle": "Text Input",
         "slug": "future/text-input",
         "file": "future/text-input",
         "status": "future",
@@ -2263,6 +2383,7 @@
       },
       {
         "title": "Morph box-shadow, outline & Margin Collapse (Planned)",
+        "sidebarTitle": "Shadow & Outline",
         "slug": "future/more-css",
         "file": "future/more-css",
         "status": "future",
@@ -2280,7 +2401,29 @@
         "changefreq": "monthly"
       },
       {
+        "title": "Morph Magical CSS — Trick-Free Effects & Morph-Only Ideas (Planned)",
+        "sidebarTitle": "Magical CSS",
+        "slug": "future/magical-css",
+        "file": "future/magical-css",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "Magical CSS in Morph: trick-free gradients, scoop corners, cursor glow, aurora backgrounds, beam borders and other Morph-only ideas — a possibility showcase; browser-parity basics ship first.",
+        "keywords": [
+          "morph magical css",
+          "morph scoop corners",
+          "morph aurora background",
+          "morph cursor glow",
+          "morph beam border",
+          "morph future css"
+        ],
+        "lastUpdated": "2026-09-29",
+        "publishedAt": "2026-09-29",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
         "title": "Morph Package Build Bridge (Planned)",
+        "sidebarTitle": "Package Build Bridge",
         "slug": "future/packages",
         "file": "future/packages",
         "status": "future",
@@ -2299,6 +2442,7 @@
       },
       {
         "title": "Full Node.js Support in Morph (Planned)",
+        "sidebarTitle": "Node.js Support",
         "slug": "future/nodejs-support",
         "file": "future/nodejs-support",
         "status": "future",
@@ -2318,6 +2462,7 @@
       },
       {
         "title": "Morph Windows & macOS Support (Shipped)",
+        "sidebarTitle": "Windows & macOS",
         "slug": "future/shipped/platform",
         "file": "future/shipped/platform",
         "status": "production",
@@ -2336,6 +2481,7 @@
       },
       {
         "title": "Morph OS Accessibility - Screen Reader & Keyboard (Planned)",
+        "sidebarTitle": "Accessibility",
         "slug": "future/accessibility",
         "file": "future/accessibility",
         "status": "future",
@@ -2355,6 +2501,7 @@
       },
       {
         "title": "Morph WebView - Embed HTML (Planned)",
+        "sidebarTitle": "WebView",
         "slug": "future/webview",
         "file": "future/webview",
         "status": "future",
@@ -2373,6 +2520,7 @@
       },
       {
         "title": "Morph Signing & Secure Distribution (Planned)",
+        "sidebarTitle": "Signing & Distribution",
         "slug": "future/security",
         "file": "future/security",
         "status": "future",
@@ -2392,6 +2540,7 @@
       },
       {
         "title": "Morph VSCode Extension & Ecosystem (Planned)",
+        "sidebarTitle": "VSCode Extension",
         "slug": "future/tooling",
         "file": "future/tooling",
         "status": "future",
@@ -2411,6 +2560,7 @@
       },
       {
         "title": "Morph Performance - Hidden Classes (Planned)",
+        "sidebarTitle": "Hidden Classes",
         "slug": "future/performance",
         "file": "future/performance",
         "status": "future",
@@ -2429,6 +2579,7 @@
       },
       {
         "title": "Morph Rust Support (Planned)",
+        "sidebarTitle": "Rust Support",
         "slug": "future/rust",
         "file": "future/rust",
         "status": "future",
@@ -2447,6 +2598,7 @@
       },
       {
         "title": "Morph Vulkan, Metal & DirectX (Planned)",
+        "sidebarTitle": "Vulkan, Metal, DirectX",
         "slug": "future/graphics-api",
         "file": "future/graphics-api",
         "status": "future",
@@ -2466,6 +2618,7 @@
       },
       {
         "title": "Desktop Integration — Hotkeys, Deep Links & OS Hooks",
+        "sidebarTitle": "Desktop Integration",
         "slug": "future/desktop-integration",
         "file": "future/desktop-integration",
         "status": "future",
@@ -2485,6 +2638,7 @@
       },
       {
         "title": "Time-Travel Debugger — Rewind Your Whole App (Planned)",
+        "sidebarTitle": "Time-Travel Debugger",
         "slug": "future/time-travel",
         "file": "future/time-travel",
         "status": "future",
@@ -2503,6 +2657,7 @@
       },
       {
         "title": "morph test — Headless E2E Runner (Planned)",
+        "sidebarTitle": "morph test",
         "slug": "future/test-runner",
         "file": "future/test-runner",
         "status": "future",
@@ -2521,6 +2676,7 @@
       },
       {
         "title": "Animations — Transitions, Springs & Shared Elements (Planned)",
+        "sidebarTitle": "Animations",
         "slug": "future/animations",
         "file": "future/animations",
         "status": "future",
@@ -2539,6 +2695,7 @@
       },
       {
         "title": "Virtualized Lists — 100k Rows (Planned)",
+        "sidebarTitle": "Virtualized Lists",
         "slug": "future/virtualized-lists",
         "file": "future/virtualized-lists",
         "status": "future",
@@ -2556,6 +2713,7 @@
       },
       {
         "title": "Icons & SVG — morph-icons System (Planned)",
+        "sidebarTitle": "Icons & SVG",
         "slug": "future/icons-svg",
         "file": "future/icons-svg",
         "status": "future",
@@ -2574,6 +2732,7 @@
       },
       {
         "title": "Morph on Mobile — Android & iOS (Planned)",
+        "sidebarTitle": "Mobile",
         "slug": "future/mobile",
         "file": "future/mobile",
         "status": "future",
@@ -2593,6 +2752,7 @@
       },
       {
         "title": "Morph Rust Compiler & Native CLI (Shipped)",
+        "sidebarTitle": "Rust Compiler & CLI",
         "slug": "future/compiler",
         "file": "future/shipped/compiler",
         "status": "production",
@@ -2611,6 +2771,7 @@
       },
       {
         "title": "How to Suggest a Morph Feature",
+        "sidebarTitle": "Suggest a Feature",
         "slug": "future/suggestions",
         "file": "future/suggestions",
         "status": "future",
@@ -2629,6 +2790,7 @@
       },
       {
         "title": "State, Events & Native C++ Interop",
+        "sidebarTitle": "State, Events & C++",
         "slug": "future/state-events-native-interop",
         "file": "future/state-events-native-interop",
         "status": "development",
@@ -2647,6 +2809,7 @@
       },
       {
         "title": "Universal Module Bindings",
+        "sidebarTitle": "Module Bindings",
         "slug": "future/universal-module-bindings",
         "file": "future/universal-module-bindings",
         "status": "development",
@@ -2665,6 +2828,7 @@
       },
       {
         "title": "Kill All Runtime Strings (Shipped)",
+        "sidebarTitle": "Kill Runtime Strings",
         "slug": "future/kill-runtime-strings",
         "file": "future/shipped/kill-runtime-strings",
         "status": "production",
@@ -2683,6 +2847,7 @@
       },
       {
         "title": "Dynamic Styles & Classes (Runtime Path)",
+        "sidebarTitle": "Dynamic Styles",
         "slug": "future/dynamic-styles",
         "file": "future/dynamic-styles",
         "status": "future",
@@ -2698,6 +2863,25 @@
         "publishedAt": "2026-09-19",
         "priority": 0.6,
         "changefreq": "monthly"
+      },
+      {
+        "title": "Morph Window Events - Cross-Window Event Listeners",
+        "sidebarTitle": "Window Events",
+        "slug": "future/window-events",
+        "file": "future/window-events",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "Why Morph needs win.on and win.off for cross-window DOM events, how Electron, Tauri, Wry, Qt and GTK handle it, and the proposed API.",
+        "keywords": [
+          "morph window events",
+          "win.on win.off",
+          "cross-window events",
+          "morph keyboard listener"
+        ],
+        "lastUpdated": "2026-09-29",
+        "publishedAt": "2026-09-29",
+        "priority": 0.5,
+        "changefreq": "monthly"
       }
     ]
   },
@@ -2706,6 +2890,7 @@
     "items": [
       {
         "title": "The Story of Morph",
+        "sidebarTitle": "The Story",
         "slug": "story/the-story-of-morph",
         "file": "story/index",
         "status": "production",
@@ -2725,6 +2910,7 @@
       },
       {
         "title": "Why Morph Is Named Morph",
+        "sidebarTitle": "Why \"Morph\"?",
         "slug": "story/why-morph",
         "file": "story/why-morph",
         "status": "production",
@@ -2743,6 +2929,7 @@
       },
       {
         "title": "Why Morph Lives Under Levizr",
+        "sidebarTitle": "Why Levizr?",
         "slug": "story/why-levizr",
         "file": "story/why-levizr",
         "status": "production",
@@ -2761,6 +2948,7 @@
       },
       {
         "title": "Why Morph's Toolchain Was Python First",
+        "sidebarTitle": "Why Python First",
         "slug": "story/why-python",
         "file": "story/why-python",
         "status": "production",
@@ -2779,6 +2967,7 @@
       },
       {
         "title": "Why Morph's Runtime Is C++ First",
+        "sidebarTitle": "Why C++ First",
         "slug": "story/why-cpp",
         "file": "story/why-cpp",
         "status": "production",
@@ -2797,6 +2986,7 @@
       },
       {
         "title": "Why Morph Renders with OpenGL",
+        "sidebarTitle": "Why OpenGL",
         "slug": "story/why-opengl",
         "file": "story/why-opengl",
         "status": "production",
@@ -2816,6 +3006,7 @@
       },
       {
         "title": "Why Morph Uses .mx Files",
+        "sidebarTitle": "Why .mx",
         "slug": "story/why-mx",
         "file": "story/why-mx",
         "status": "production",
@@ -2834,6 +3025,7 @@
       },
       {
         "title": "Why Morph Uses JSX",
+        "sidebarTitle": "Why JSX",
         "slug": "story/why-jsx",
         "file": "story/why-jsx",
         "status": "production",
@@ -2852,6 +3044,7 @@
       },
       {
         "title": "Why Morph Feels Buggy (Honest)",
+        "sidebarTitle": "Why It Feels Buggy",
         "slug": "story/why-buggy",
         "file": "story/why-buggy",
         "status": "production",
@@ -2871,6 +3064,7 @@
       },
       {
         "title": "Building morphc - The Rust Rewrite",
+        "sidebarTitle": "Building morphc",
         "slug": "story/working-on-morphc",
         "file": "story/working-on-morphc",
         "status": "development",
@@ -2895,6 +3089,7 @@
     "items": [
       {
         "title": "Morph FAQ - Questions & Answers",
+        "sidebarTitle": "All Questions",
         "slug": "faq/question-answers",
         "file": "faq/index",
         "status": "production",
@@ -2913,6 +3108,7 @@
       },
       {
         "title": "Is Morph Like Electron with Extra Steps?",
+        "sidebarTitle": "Like Electron?",
         "slug": "faq/q-electron",
         "file": "faq/q-electron",
         "status": "production",
@@ -2931,6 +3127,7 @@
       },
       {
         "title": "Do I Need to Know C++ to Use Morph?",
+        "sidebarTitle": "Need C++?",
         "slug": "faq/q-cpp",
         "file": "faq/q-cpp",
         "status": "production",
@@ -2949,6 +3146,7 @@
       },
       {
         "title": "Is Morph React? Can I Use React?",
+        "sidebarTitle": "Is It React?",
         "slug": "faq/q-react",
         "file": "faq/q-react",
         "status": "production",
@@ -2968,6 +3166,7 @@
       },
       {
         "title": "Does Morph Use a Virtual DOM like React?",
+        "sidebarTitle": "Virtual DOM?",
         "slug": "faq/q-virtual-dom",
         "file": "faq/q-virtual-dom",
         "status": "production",
@@ -2987,6 +3186,7 @@
       },
       {
         "title": "What Is Reactivity in Morph?",
+        "sidebarTitle": "Reactivity?",
         "slug": "faq/q-reactivity",
         "file": "faq/q-reactivity",
         "status": "production",
@@ -3006,6 +3206,7 @@
       },
       {
         "title": "Is Morph for Games or Apps?",
+        "sidebarTitle": "Games or Apps?",
         "slug": "faq/q-games",
         "file": "faq/q-games",
         "status": "production",
@@ -3024,6 +3225,7 @@
       },
       {
         "title": "Can I Build Websites with Morph?",
+        "sidebarTitle": "Websites?",
         "slug": "faq/q-web",
         "file": "faq/q-web",
         "status": "production",
@@ -3042,6 +3244,7 @@
       },
       {
         "title": "What Happens to My JavaScript at Runtime?",
+        "sidebarTitle": "Where Does My JS Go?",
         "slug": "faq/q-js-runtime",
         "file": "faq/q-js-runtime",
         "status": "production",
@@ -3060,6 +3263,7 @@
       },
       {
         "title": "Can I Use npm Packages in Morph?",
+        "sidebarTitle": "npm Packages?",
         "slug": "faq/q-npm",
         "file": "faq/q-npm",
         "status": "production",
@@ -3078,6 +3282,7 @@
       },
       {
         "title": "How Does Hot Reload Work with a Compiler?",
+        "sidebarTitle": "Hot Reload",
         "slug": "faq/q-hot-reload",
         "file": "faq/q-hot-reload",
         "status": "production",
@@ -3096,6 +3301,7 @@
       },
       {
         "title": "Is Morph Production-Ready?",
+        "sidebarTitle": "Production-Ready?",
         "slug": "faq/q-production",
         "file": "faq/q-production",
         "status": "production",
@@ -3114,6 +3320,7 @@
       },
       {
         "title": "How Do I Install Morph?",
+        "sidebarTitle": "Installing",
         "slug": "faq/q-installation",
         "file": "faq/q-installation",
         "status": "production",
@@ -3134,6 +3341,7 @@
       },
       {
         "title": "What Are the New morph Commands?",
+        "sidebarTitle": "morph Commands",
         "slug": "faq/q-cli-commands",
         "file": "faq/q-cli-commands",
         "status": "production",
@@ -3153,6 +3361,7 @@
       },
       {
         "title": "How Do I Deploy and Distribute My Morph App?",
+        "sidebarTitle": "Deployment",
         "slug": "faq/q-deployment",
         "file": "faq/q-deployment",
         "status": "production",
@@ -3174,6 +3383,7 @@
       },
       {
         "title": "How Do I Debug a Morph App?",
+        "sidebarTitle": "Debugging",
         "slug": "faq/q-debugging",
         "file": "faq/q-debugging",
         "status": "production",
@@ -3195,6 +3405,7 @@
       },
       {
         "title": "Why Two Generated Headers? (_morph_state.h vs morph_api.h)",
+        "sidebarTitle": "Two Generated Headers",
         "slug": "faq/q-headers",
         "file": "faq/q-headers",
         "status": "production",
@@ -3215,6 +3426,7 @@
       },
       {
         "title": "Windows & Navigation — a vs morph-*, GL contexts, WID/RID, same-route windows",
+        "sidebarTitle": "Windows & Navigation",
         "slug": "faq/q-windows",
         "file": "faq/q-windows",
         "status": "beta",
