@@ -8,6 +8,7 @@ struct FlexStyle {
     CSS::FlexDirection flexDirection = CSS::FlexDirection::Row;
     CSS::JustifyContent justifyContent = CSS::JustifyContent::FlexStart;
     CSS::AlignItems alignItems = CSS::AlignItems::Stretch;
+    CSS::AlignSelf alignSelf = CSS::AlignSelf::Auto;
     CSS::FlexWrap flexWrap = CSS::FlexWrap::Nowrap;
     float flexGrow = 0.0f;
     float flexShrink = 1.0f;

@@ -129,6 +129,19 @@ enum class AlignItems : uint8_t
     Stretch
 };
 
+// Per-item cross-axis override (`align-self`). `auto` inherits the
+// container's `align-items`; `baseline` has no baseline metrics to work
+// with yet and lays out as flex-start (documented approximation).
+enum class AlignSelf : uint8_t
+{
+    Auto,
+    FlexStart,
+    Center,
+    FlexEnd,
+    Stretch,
+    Baseline
+};
+
 enum class FlexWrap : uint8_t
 {
     Nowrap,
@@ -223,6 +236,24 @@ inline AlignItems parseAlignItems(std::string_view s)
         return AlignItems::Stretch;
     // flex-start and anything unrecognized share the else-branches.
     return AlignItems::FlexStart;
+}
+
+// Mirrors style_enum_literal("alignSelf", …) in node_emitter.rs: every
+// accepted keyword must map identically on both paths. Unknown values
+// (including "") compute to `auto`, like browsers drop the declaration.
+inline AlignSelf parseAlignSelf(std::string_view s)
+{
+    if (s == "flex-start" || s == "start" || s == "self-start")
+        return AlignSelf::FlexStart;
+    if (s == "flex-end" || s == "end" || s == "self-end")
+        return AlignSelf::FlexEnd;
+    if (s == "center")
+        return AlignSelf::Center;
+    if (s == "stretch")
+        return AlignSelf::Stretch;
+    if (s == "baseline" || s == "first baseline" || s == "last baseline")
+        return AlignSelf::Baseline;
+    return AlignSelf::Auto;
 }
 
 inline FlexWrap parseFlexWrap(std::string_view s)
@@ -332,6 +363,25 @@ inline const char* toString(AlignItems a)
         return "stretch";
     default:
         return "flex-start";
+    }
+}
+
+inline const char* toString(AlignSelf a)
+{
+    switch (a)
+    {
+    case AlignSelf::FlexStart:
+        return "flex-start";
+    case AlignSelf::Center:
+        return "center";
+    case AlignSelf::FlexEnd:
+        return "flex-end";
+    case AlignSelf::Stretch:
+        return "stretch";
+    case AlignSelf::Baseline:
+        return "baseline";
+    default:
+        return "auto";
     }
 }
 

@@ -67,6 +67,7 @@ impl FeatureSet {
         }
         if s.justify_content != "flex-start"
             || s.align_items != "stretch"
+            || s.align_self != "auto"
             || s.flex_wrap != "nowrap"
             || s.flex_grow != 0.0
             || s.flex_shrink != 1.0
@@ -88,12 +89,20 @@ impl FeatureSet {
         if s.transform_ops.is_some() || s.transform_origin.is_some() {
             self.features.insert("transform".into());
         }
+        if s.bg_gradient.is_some() {
+            self.features.insert("gradient".into());
+        }
     }
 
     fn scan_reactive(&mut self, reactive_style: &std::collections::HashMap<String, String>) {
         for prop in reactive_style.keys() {
             for f in Self::reactive_feature(prop) {
                 self.features.insert(f.into());
+            }
+            // Dynamic bindings hide their value from the compiler — a bound
+            // background may resolve to a gradient at runtime.
+            if prop == "background" || prop == "background-image" {
+                self.features.insert("gradient".into());
             }
             // Color-typed props lower through the runtime setColor parser
             // (node_emitter/logic_emitter "color" arms) — static palettes
@@ -116,7 +125,7 @@ impl FeatureSet {
             | "scrollbar-thumb-color"
             | "scrollbar-border-radius" => vec!["scroll"],
             "flex-direction" | "flex-wrap" | "flex-basis" | "flex-grow" | "flex-shrink"
-            | "justify-content" | "align-items" | "gap" => vec!["flex"],
+            | "justify-content" | "align-items" | "align-self" | "gap" => vec!["flex"],
             "overflow" => vec!["scroll"],
             "display" => vec!["flex", "display_none", "inline"],
             "font-weight" => vec!["bold"],
@@ -143,6 +152,10 @@ impl FeatureSet {
             }
             if prop.contains("color") {
                 self.features.insert("reactive_color".into());
+            }
+            // Static rules carry their value: only real gradients need it.
+            if (prop == "background" || prop == "background-image") && val.contains("gradient(") {
+                self.features.insert("gradient".into());
             }
             if prop == "display" && val.trim() == "none" {
                 self.features.insert("display_none".into());
@@ -231,6 +244,9 @@ impl FeatureSet {
                     if kf.raw.keys().any(|p| p == "left" || p == "top") {
                         self.features.insert("position".into());
                     }
+                    if kf.raw.keys().any(|p| p == "background-image") {
+                        self.features.insert("gradient".into());
+                    }
                 }
             }
             for node in Self::walk(&win.nodes) {
@@ -283,6 +299,14 @@ impl FeatureSet {
                         "mousemove" | "mouseenter" | "mouseleave" | "pointermove"
                     ) {
                         self.features.insert("hover".into());
+                        break;
+                    }
+                }
+                // Keyboard handlers need the key callback even with no
+                // <input> present (window-level onKeyDown/onKeyUp).
+                for ev in &node.events {
+                    if matches!(ev.trigger.as_str(), "keydown" | "keyup") {
+                        self.features.insert("input".into());
                         break;
                     }
                 }
@@ -487,6 +511,9 @@ impl FeatureSet {
         }
         if self.features.contains("transform") {
             d.push("MORPH_FEATURE_TRANSFORM".into());
+        }
+        if self.features.contains("gradient") {
+            d.push("MORPH_FEATURE_GRADIENT".into());
         }
         if self.features.contains("animation") {
             d.push("MORPH_FEATURE_ANIMATION".into());
@@ -744,6 +771,25 @@ mod tests {
                 "{target:?} should enable ownership"
             );
         }
+    }
+
+    #[test]
+    fn key_handlers_enable_input_without_text_field() {
+        // Window-level onKeyDown/onKeyUp needs the key callback even
+        // when the app has no <input> node.
+        use morph_ir::IREvent;
+        let mut win = text_window("plain", "__text__");
+        win.nodes[0].events.push(IREvent {
+            trigger: "keydown".to_string(),
+            action: "call".to_string(),
+            target: "keyDown(e)".to_string(),
+        });
+        let mut fs = FeatureSet::new();
+        fs.scan(std::slice::from_ref(&win));
+        assert!(
+            fs.required_defines().contains(&"MORPH_FEATURE_INPUT".to_string()),
+            "keydown should enable input"
+        );
     }
 
     #[test]

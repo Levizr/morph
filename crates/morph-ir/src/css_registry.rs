@@ -49,6 +49,7 @@ pub static KNOWN_PROPERTIES: &[&str] = &[
     "color",
     "background-color",
     "background",
+    "background-image",
     "font-size",
     "font-weight",
     "font-family",
@@ -117,6 +118,7 @@ pub static CSS_TO_IR: &[(&str, &str)] = &[
     ("bottom", "bottom"),
     ("justify-content", "justify_content"),
     ("align-items", "align_items"),
+    ("align-self", "align_self"),
     ("flex-wrap", "flex_wrap"),
     ("cursor", "cursor"),
     ("overflow", "overflow"),
@@ -136,8 +138,8 @@ pub fn is_known_property(prop: &str) -> bool {
 
 pub fn property_feature(prop: &str) -> Option<&'static str> {
     match prop {
-        "display" | "flex-direction" | "justify-content" | "align-items" | "gap" | "flex-wrap"
-        | "flex-grow" | "flex-shrink" => Some("flex"),
+        "display" | "flex-direction" | "justify-content" | "align-items" | "align-self" | "gap"
+        | "flex-wrap" | "flex-grow" | "flex-shrink" => Some("flex"),
         "border-radius" => Some("radius"),
         "opacity" => Some("opacity"),
         "transform" | "transform-origin" => Some("transform"),

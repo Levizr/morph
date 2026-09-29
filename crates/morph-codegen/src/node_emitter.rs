@@ -73,6 +73,16 @@ pub(crate) fn style_enum_literal(prop: &str, value: &str) -> Option<&'static str
         ("alignItems", "flex-end") => Some("CSS::AlignItems::FlexEnd"),
         ("alignItems", "stretch") => Some("CSS::AlignItems::Stretch"),
         ("alignItems", "flex-start") => Some("CSS::AlignItems::FlexStart"),
+        ("alignSelf", "auto") => Some("CSS::AlignSelf::Auto"),
+        ("alignSelf", "flex-start") => Some("CSS::AlignSelf::FlexStart"),
+        ("alignSelf", "flex-end") => Some("CSS::AlignSelf::FlexEnd"),
+        ("alignSelf", "center") => Some("CSS::AlignSelf::Center"),
+        ("alignSelf", "stretch") => Some("CSS::AlignSelf::Stretch"),
+        ("alignSelf", "baseline")
+        | ("alignSelf", "first baseline")
+        | ("alignSelf", "last baseline") => Some("CSS::AlignSelf::Baseline"),
+        ("alignSelf", "start") | ("alignSelf", "self-start") => Some("CSS::AlignSelf::FlexStart"),
+        ("alignSelf", "end") | ("alignSelf", "self-end") => Some("CSS::AlignSelf::FlexEnd"),
         ("flexWrap", "nowrap") => Some("CSS::FlexWrap::Nowrap"),
         ("flexWrap", "wrap") => Some("CSS::FlexWrap::Wrap"),
         ("flexWrap", "wrap-reverse") => Some("CSS::FlexWrap::WrapReverse"),
@@ -107,6 +117,8 @@ fn keyword_literal(field: &str, value: &str) -> Option<&'static str> {
         "justifyContent" => ("justifyContent", "CSS::JustifyContent::FlexStart"),
         // Garbage align-items takes the else-branches, like flex-start.
         "alignItems" => ("alignItems", "CSS::AlignItems::FlexStart"),
+        // Garbage align-self is dropped like a browser (computes to auto).
+        "alignSelf" => ("alignSelf", "CSS::AlignSelf::Auto"),
         "flexWrap" => ("flexWrap", "CSS::FlexWrap::Nowrap"),
         "cursor" => ("cursor", "CSS::Cursor::Default"),
         "borderStyle" => ("borderStyle", "CSS::BorderStyle::None"),
@@ -168,6 +180,54 @@ pub fn fmt(v: f32) -> String {
 
 fn color4(c: &[f32; 4]) -> String {
     format!("{:.4}f, {:.4}f, {:.4}f, {:.4}f", c[0], c[1], c[2], c[3])
+}
+
+/// Emit gradient assignments on `access` — a complete accessor prefix such as
+/// `node_1->style.bgGradient.` or `node_1->hoverStyle->bgGradient.`
+/// (feature: gradient). Field names mirror `BgGradient` in
+/// `runtime/cpp/style/features/gradient.h`.
+fn emit_gradient(access: &str, g: &morph_ir::IRGradient) -> Vec<String> {
+    use morph_ir::{GradientAxis, GradientPosition};
+    let mut o = Vec::new();
+    o.push(format!("{access}gradEnabled = true;"));
+    o.push(format!("{access}gradRepeating = {};", if g.repeating { "true" } else { "false" }));
+    match g.axis {
+        GradientAxis::Bottom => {
+            o.push(format!("{access}gradAngleDeg = 180.0f;"));
+            o.push(format!("{access}gradIsCorner = false;"));
+        }
+        GradientAxis::Angle(d) => {
+            o.push(format!("{access}gradAngleDeg = {};", fmt(d)));
+            o.push(format!("{access}gradIsCorner = false;"));
+        }
+        GradientAxis::Corner(x, y) => {
+            o.push(format!("{access}gradIsCorner = true;"));
+            o.push(format!("{access}gradCornerX = {};", fmt(x)));
+            o.push(format!("{access}gradCornerY = {};", fmt(y)));
+        }
+    }
+    o.push(format!("{access}gradStopCount = {};", g.stops.len()));
+    for (i, s) in g.stops.iter().enumerate() {
+        o.push(format!("{access}gradColors[{i}][0] = {:.4}f;", s.color[0]));
+        o.push(format!("{access}gradColors[{i}][1] = {:.4}f;", s.color[1]));
+        o.push(format!("{access}gradColors[{i}][2] = {:.4}f;", s.color[2]));
+        o.push(format!("{access}gradColors[{i}][3] = {:.4}f;", s.color[3]));
+        match s.position {
+            None => {
+                o.push(format!("{access}gradPosIsAuto[{i}] = true;"));
+            }
+            Some(GradientPosition::Percent(v)) => {
+                o.push(format!("{access}gradPosValue[{i}] = {};", fmt(v)));
+                o.push(format!("{access}gradPosIsPx[{i}] = false;"));
+            }
+            Some(GradientPosition::Px(v)) => {
+                o.push(format!("{access}gradPosValue[{i}] = {};", fmt(v)));
+                o.push(format!("{access}gradPosIsPx[{i}] = true;"));
+            }
+        }
+        o.push(format!("{access}gradHint[{i}] = {};", s.hint.map_or("-1.0f".to_string(), fmt)));
+    }
+    o
 }
 
 pub(crate) fn translate_js<S: std::hash::BuildHasher>(
@@ -979,6 +1039,11 @@ fn conditional_flex_passthrough(node_id: &str, style: &IRStyle) -> Vec<String> {
     if style.flex_basis != "auto" {
         lines.push(format!("{ind}.flexBasis = \"{}\";", style.flex_basis));
     }
+    if style.align_self != "auto" {
+        if let Some(lit) = keyword_literal("alignSelf", &style.align_self) {
+            lines.push(format!("{ind}.alignSelf = {lit};"));
+        }
+    }
     lines
 }
 
@@ -1127,6 +1192,11 @@ fn set_style(
         lines.push(format!("{ind}.bgColor[2] = {:.4}f;", s.bg_color[2]));
         lines.push(format!("{ind}.bgColor[3] = {:.4}f;", s.bg_color[3]));
     }
+    if features.contains("gradient") {
+        if let Some(g) = &s.bg_gradient {
+            lines.extend(emit_gradient(&format!("{ind}.bgGradient."), g));
+        }
+    }
     if s.border_radius > 0.0 {
         lines.push(format!("{ind}.borderRadius = {};", fmt(s.border_radius)));
     }
@@ -1265,6 +1335,10 @@ fn set_style(
         if s.align_items != "stretch" {
             let lit = keyword_literal("alignItems", &s.align_items).unwrap();
             lines.push(format!("{ind}.alignItems = {lit};"));
+        }
+        if s.align_self != "auto" {
+            let lit = keyword_literal("alignSelf", &s.align_self).unwrap();
+            lines.push(format!("{ind}.alignSelf = {lit};"));
         }
         if s.flex_wrap != "nowrap" {
             let lit = keyword_literal("flexWrap", &s.flex_wrap).unwrap();
@@ -1408,6 +1482,12 @@ fn emit_hover_style(
         o.push(format!("{hv}->bgColor[2] = {:.4}f;", s.bg_color[2]));
         o.push(format!("{hv}->bgColor[3] = {:.4}f;", s.bg_color[3]));
     }
+    if features.contains("gradient") && s.bg_gradient != base.bg_gradient {
+        match &s.bg_gradient {
+            Some(g) => o.extend(emit_gradient(&format!("{hv}->bgGradient."), g)),
+            None => o.push(format!("{hv}->bgGradient.gradEnabled = false;")),
+        }
+    }
     if s.color != [0.0, 0.0, 0.0, 1.0] && s.color != base.color {
         o.push(format!("{hv}->color[0] = {:.4}f;", s.color[0]));
         o.push(format!("{hv}->color[1] = {:.4}f;", s.color[1]));
@@ -1482,6 +1562,10 @@ fn emit_hover_style(
         if s.align_items != "stretch" && s.align_items != base.align_items {
             let lit = keyword_literal("alignItems", &s.align_items).unwrap();
             o.push(format!("{hv}->alignItems = {lit};"));
+        }
+        if s.align_self != "auto" && s.align_self != base.align_self {
+            let lit = keyword_literal("alignSelf", &s.align_self).unwrap();
+            o.push(format!("{hv}->alignSelf = {lit};"));
         }
         if s.flex_wrap != "nowrap" && s.flex_wrap != base.flex_wrap {
             let lit = keyword_literal("flexWrap", &s.flex_wrap).unwrap();
@@ -1564,6 +1648,12 @@ fn emit_active_style(
         o.push(format!("{hv}->bgColor[1] = {:.4}f;", s.bg_color[1]));
         o.push(format!("{hv}->bgColor[2] = {:.4}f;", s.bg_color[2]));
         o.push(format!("{hv}->bgColor[3] = {:.4}f;", s.bg_color[3]));
+    }
+    if features.contains("gradient") && s.bg_gradient != base.bg_gradient {
+        match &s.bg_gradient {
+            Some(g) => o.extend(emit_gradient(&format!("{hv}->bgGradient."), g)),
+            None => o.push(format!("{hv}->bgGradient.gradEnabled = false;")),
+        }
     }
     if s.color != [0.0, 0.0, 0.0, 1.0] && s.color != base.color {
         o.push(format!("{hv}->color[0] = {:.4}f;", s.color[0]));
@@ -1754,6 +1844,7 @@ pub(crate) fn css_to_style_field(css_prop: &str) -> Option<(&'static str, &'stat
         "flex-wrap" => ("flexWrap", "string"),
         "justify-content" => ("justifyContent", "string"),
         "align-items" => ("alignItems", "string"),
+        "align-self" => ("alignSelf", "string"),
         "cursor" => ("cursor", "string"),
         "border-style" => ("borderStyle", "string"),
         "box-sizing" => ("boxSizing", "string"),
@@ -1820,6 +1911,7 @@ pub(crate) fn css_field_reset(node_var: &str, field_name: &str, indent: &str) ->
             vec![format!("{indent}        {prefix} = CSS::JustifyContent::FlexStart;")]
         }
         "alignItems" => vec![format!("{indent}        {prefix} = CSS::AlignItems::Stretch;")],
+        "alignSelf" => vec![format!("{indent}        {prefix} = CSS::AlignSelf::Auto;")],
         "cursor" => vec![format!("{indent}        {prefix} = CSS::Cursor::Default;")],
         "borderStyle" => vec![format!("{indent}        {prefix} = CSS::BorderStyle::None;")],
         "boxSizing" => vec![format!("{indent}        {prefix} = CSS::BoxSizing::ContentBox;")],
@@ -2202,6 +2294,11 @@ pub fn keyframe_registration_code(
             }
             for (prop, css) in &kf.raw {
                 if let Some(enum_name) = raw_prop_to_enum(prop.as_str()) {
+                    // Gradient keyframes need the gradient runtime compiled in;
+                    // without it the property stays at its underlying value.
+                    if enum_name == "BgGradient" && !features.contains("gradient") {
+                        continue;
+                    }
                     let escaped = css.replace('\\', "\\\\").replace('"', "\\\"");
                     lines.push(format!(
                         "    {{KeyframeProperty::{enum_name}, {{}}, \"{escaped}\"}},"
@@ -2233,6 +2330,7 @@ fn raw_prop_to_enum(prop: &str) -> Option<&'static str> {
     match prop {
         "opacity" => Some("Opacity"),
         "background-color" => Some("BgColor"),
+        "background-image" => Some("BgGradient"),
         "color" => Some("Color"),
         "border-radius" => Some("BorderRadius"),
         "font-size" => Some("FontSize"),
@@ -2316,6 +2414,14 @@ mod tests {
             Some("CSS::JustifyContent::FlexStart")
         );
         assert_eq!(style_enum_literal("alignItems", "stretch"), Some("CSS::AlignItems::Stretch"));
+        assert_eq!(style_enum_literal("alignSelf", "auto"), Some("CSS::AlignSelf::Auto"));
+        assert_eq!(style_enum_literal("alignSelf", "center"), Some("CSS::AlignSelf::Center"));
+        assert_eq!(style_enum_literal("alignSelf", "self-end"), Some("CSS::AlignSelf::FlexEnd"));
+        assert_eq!(
+            style_enum_literal("alignSelf", "first baseline"),
+            Some("CSS::AlignSelf::Baseline")
+        );
+        assert_eq!(style_enum_literal("alignSelf", "garbage"), None);
         assert_eq!(
             style_enum_literal("flexWrap", "wrap-reverse"),
             Some("CSS::FlexWrap::WrapReverse")
@@ -2358,6 +2464,8 @@ mod tests {
         // Behavioral fallbacks for unknown values.
         assert_eq!(keyword_literal("flexDirection", "garbage"), Some("CSS::FlexDirection::Column"));
         assert_eq!(keyword_literal("alignItems", "garbage"), Some("CSS::AlignItems::FlexStart"));
+        assert_eq!(keyword_literal("alignSelf", "center"), Some("CSS::AlignSelf::Center"));
+        assert_eq!(keyword_literal("alignSelf", "garbage"), Some("CSS::AlignSelf::Auto"));
         assert_eq!(keyword_literal("display", "garbage"), Some("CSS::Display::Block"));
         assert_eq!(keyword_literal("flexBasis", "auto"), None);
     }

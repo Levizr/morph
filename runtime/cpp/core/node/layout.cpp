@@ -294,6 +294,30 @@ void MorphNode::updateStickySubtree() {
 }
 #endif
 
+#ifdef MORPH_FEATURE_FLEX
+// CSS flexbox §9.6: `align-self` overrides the container's `align-items`
+// for a single item (`auto` inherits it). `baseline` has no baseline
+// metrics to resolve against yet and behaves as flex-start.
+static CSS::AlignItems effCrossAlign(const MorphStyle& container, const MorphStyle& item)
+{
+    switch (item.alignSelf)
+    {
+    case CSS::AlignSelf::FlexStart:
+        return CSS::AlignItems::FlexStart;
+    case CSS::AlignSelf::Center:
+        return CSS::AlignItems::Center;
+    case CSS::AlignSelf::FlexEnd:
+        return CSS::AlignItems::FlexEnd;
+    case CSS::AlignSelf::Stretch:
+        return CSS::AlignItems::Stretch;
+    case CSS::AlignSelf::Baseline:
+        return CSS::AlignItems::FlexStart;
+    default:
+        return container.alignItems;
+    }
+}
+#endif
+
 void MorphNode::layout(float px, float py, float parentW, float parentH,
                        Renderer* r) {
     float ml = style.margin[3], mr = style.margin[1];
@@ -853,15 +877,16 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                 auto* ci = line.fItems[i];
                 float childMain = isCol ? ci->node->h : ci->node->w;
                 float crossDim  = isCol ? ci->node->w : ci->node->h;
+                CSS::AlignItems effAlign = effCrossAlign(style, ci->node->style);
 
                 float posMain = cursor + (isCol ? ci->mt : ci->ml);
                 float posCross = lineBaseCross + (isCol ? ci->ml : ci->mt);
 
                 if (lineCross > crossDim) {
-                    if (style.alignItems == CSS::AlignItems::Center) {
+                    if (effAlign == CSS::AlignItems::Center) {
                         float marginCross = isCol ? (ci->ml + ci->mr) : (ci->mt + ci->mb);
                         posCross = lineBaseCross + (isCol ? ci->ml : ci->mt) + (lineCross - (crossDim + marginCross)) * 0.5f;
-                    } else if (style.alignItems == CSS::AlignItems::FlexEnd) {
+                    } else if (effAlign == CSS::AlignItems::FlexEnd) {
                         posCross = lineBaseCross + lineCross - crossDim;
                         posCross -= (isCol ? ci->mr : ci->mb);
                     }
@@ -869,18 +894,18 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 
                 float childX = isCol ? posCross : posMain;
                 float childY = isCol ? posMain : posCross;
-                float childPW = isCol ? ((style.alignItems == CSS::AlignItems::Stretch) ? crossSize : crossDim) : childMain;
-                float childPH = isCol ? childMain : ((style.alignItems == CSS::AlignItems::Stretch) ? lineCross : crossDim);
+                float childPW = isCol ? ((effAlign == CSS::AlignItems::Stretch) ? crossSize : crossDim) : childMain;
+                float childPH = isCol ? childMain : ((effAlign == CSS::AlignItems::Stretch) ? lineCross : crossDim);
 
-                if (style.alignItems != CSS::AlignItems::Stretch && ci->node->style.explicitWidth < 0.0f && isCol) {
+                if (effAlign != CSS::AlignItems::Stretch && ci->node->style.explicitWidth < 0.0f && isCol) {
                     float cwVal = ci->node->contentWidth(r);
                     if (cwVal > 0.0f && cwVal < childPW) {
                         crossDim = cwVal;
                         childPW = cwVal;
                         if (lineCross > crossDim) {
-                            if (style.alignItems == CSS::AlignItems::Center)
+                            if (effAlign == CSS::AlignItems::Center)
                                 posCross = lineBaseCross + (lineCross - crossDim) * 0.5f;
-                            else if (style.alignItems == CSS::AlignItems::FlexEnd)
+                            else if (effAlign == CSS::AlignItems::FlexEnd)
                                 posCross = lineBaseCross + lineCross - crossDim;
                             childX = isCol ? posCross : posMain;
                             childY = isCol ? posMain : posCross;
@@ -898,12 +923,12 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                 ci->node->m_computedMargin[2] = savedCM[2];
                 ci->node->m_computedMargin[3] = savedCM[3];
 
-                if (style.alignItems == CSS::AlignItems::Stretch && ci->node->style.explicitWidth < 0.0f && isCol) {
+                if (effAlign == CSS::AlignItems::Stretch && ci->node->style.explicitWidth < 0.0f && isCol) {
                     float availW = lineCross - ci->ml - ci->mr;
                     if (availW < 0.0f) availW = 0.0f;
                     if (availW > ci->node->w) ci->node->w = availW;
                 }
-                if (style.alignItems == CSS::AlignItems::Stretch && ci->node->style.explicitHeight < 0.0f && isRow) {
+                if (effAlign == CSS::AlignItems::Stretch && ci->node->style.explicitHeight < 0.0f && isRow) {
                     float availH = lineCross - ci->mt - ci->mb;
                     if (availH < 0.0f) availH = 0.0f;
                     if (availH > ci->node->h) ci->node->h = availH;

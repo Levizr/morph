@@ -1,8 +1,11 @@
 use serde::{Deserialize, Serialize};
 
+use crate::gradient::IRGradient;
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct IRStyle {
     pub bg_color: [f32; 4],
+    pub bg_gradient: Option<IRGradient>,
     pub color: [f32; 4],
     pub width: Option<f32>,
     pub min_width: Option<f32>,
@@ -30,6 +33,7 @@ pub struct IRStyle {
     pub bottom: Option<f32>,
     pub justify_content: String,
     pub align_items: String,
+    pub align_self: String,
     pub flex_wrap: String,
     pub cursor: String,
     pub overflow: String,
@@ -65,6 +69,7 @@ impl IRStyle {
             flex_dir: "row".to_string(),
             justify_content: "flex-start".to_string(),
             align_items: "stretch".to_string(),
+            align_self: "auto".to_string(),
             overflow: "visible".to_string(),
             opacity: 1.0,
             border_style: "none".to_string(),
@@ -89,6 +94,7 @@ impl IRStyle {
     #[allow(clippy::float_cmp)]
     pub fn is_empty_style(&self) -> bool {
         self.bg_color == [0.0, 0.0, 0.0, 0.0]
+            && self.bg_gradient.is_none()
             && self.color == [0.0, 0.0, 0.0, 1.0]
             && self.border_color == [0.0, 0.0, 0.0, 1.0]
             && self.border_width == 0.0
@@ -111,6 +117,7 @@ impl IRStyle {
             && self.position == "static"
             && self.justify_content == "flex-start"
             && self.align_items == "stretch"
+            && self.align_self == "auto"
             && self.flex_wrap == "nowrap"
             && self.cursor == "default"
             && self.overflow == "visible"
