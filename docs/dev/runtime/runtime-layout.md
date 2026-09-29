@@ -50,7 +50,7 @@ Every optional subsystem is compile-time gated by a `MORPH_FEATURE_*` define (AN
 | Add a string/array helper | New function in the matching helper header → mapping in `crates/morpher/src/codegen/string_methods.rs` (or the array path) → fixture case proving Node-identical output |
 | Add a `Js*` capability | Extend the wrapper header (`types/js_*.h`) → check `js_value.h` dispatch still covers it → `js_value_format.h` if it should print |
 | Add a style feature | New `style/features/*.h` header + `MORPH_FEATURE_*` gate + `FeatureSet` rule in `morph-codegen` (+ reactive entry) + fixture exercising it statically and reactively |
-| Add a new module (e.g. `node:fs` someday) | New directory + entry header → include-needs registration in morpher's `Ctx::need` flow → [Node.js Support](../../future/nodejs-support.md) tracks the plan |
+| Add a new module (e.g. `node:fs` someday) | New directory + entry header → include-needs registration in morpher's `Ctx::need` flow → [Node.js Support](../../future/javascript/nodejs.md) tracks the plan |
 | Add a widget | `ui/` subclass + `widgets/` wrapper + example usage |
 | Touch renderers | Flash first (production); forge is beta with known damage-rect/scroll bugs — read `help/renderer-flash-forge.md` before changing compositor behavior |
 | Touch the threads | Main owns the tree; compositor writes only `anim*` fields; workers never touch UI — see [Reactivity Engine](reactivity-engine.md) threading contract |

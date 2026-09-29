@@ -2,7 +2,7 @@
 
 **Part of:** [Questions & Answers](index.md) · [The Story of Morph](../story/index.md)
 
-Not now — but the plan is **full Node.js-level support**, and when that lands the answer flips to yes: any npm package that works with Node works with Morph, installed the normal way. The full thinking is written up here: [Full Node.js Support](../future/nodejs-support.md). Honestly, this is one of the biggest open questions, and that page is where the current answer lives.
+Not now — but the plan is **full Node.js-level support**, and when that lands the answer flips to yes: any npm package that works with Node works with Morph, installed the normal way. The full thinking is written up here: [Full Node.js Support](../future/javascript/nodejs.md). Honestly, this is one of the biggest open questions, and that page is where the current answer lives.
 
 Morph has its own import model and no Node runtime. Most npm packages won't work as-is, because:
 
@@ -16,7 +16,7 @@ What works today:
 - **Native interop** — call C++ functions you write from component logic ([Native C++ Interop](../guides/native-cpp.md))
 - **Built-in modules** — the `morph` module: `CSS`, `morphState`, `morphEffect`, etc.
 
-The plan is a **build bridge**: [Package Build Bridge](../future/packages.md) — a system that resolves packages at build time and compiles what's compatible, with a curated set of JS libraries that make sense in a compiled native world. It won't be "everything on npm"; it'll be "the useful subset, done properly."
+The plan is a **build bridge**: [Package Build Bridge](../future/tooling/packages.md) — a system that resolves packages at build time and compiles what's compatible, with a curated set of JS libraries that make sense in a compiled native world. It won't be "everything on npm"; it'll be "the useful subset, done properly."
 
 For now, if a library is a thin utility (math, date formatting, string helpers), the answer is usually "write the 20 lines yourself" — it's a nice win to have it native.
 
@@ -56,4 +56,4 @@ The other path — and the one we're thinking hardest about — is going all the
 
 That includes entire servers: `http.createServer(...)` in your source, a native binary out of `morph build`, no Node process shipped.
 
-This is a big project and it's still in the thinking stage — the why, the what-it-looks-like, and the how are all written up in [Full Node.js Support](../future/nodejs-support.md). Until then, everything above (the build bridge, the registry idea, "write the 20 lines yourself") is the interim story. The [Package Build Bridge](../future/packages.md) page tracks how packages get resolved and compiled either way.
+This is a big project and it's still in the thinking stage — the why, the what-it-looks-like, and the how are all written up in [Full Node.js Support](../future/javascript/nodejs.md). Until then, everything above (the build bridge, the registry idea, "write the 20 lines yourself") is the interim story. The [Package Build Bridge](../future/tooling/packages.md) page tracks how packages get resolved and compiled either way.

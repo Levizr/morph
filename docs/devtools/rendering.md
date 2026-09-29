@@ -13,7 +13,7 @@ Shows the active renderer badge — **Flash** or **Forge** — with a segmented 
 
 Production picks the renderer at compile time via the `"renderer"` [config key](../getting-started/configuration.md) (dead code eliminates the other one). Only the dev runtime compiles both, which is what makes the live switch possible.
 
-See [Flash](../rendering/flash.md) and [Forge](../rendering/forge.md) for how each renderer works, and the [Forge roadmap](../future/forge-renderer.md) for what's planned.
+See [Flash](../rendering/flash.md) and [Forge](../rendering/forge.md) for how each renderer works, and the [Forge roadmap](../future/rendering/forge-tile-pool.md) for what's planned.
 
 ### FRAME
 

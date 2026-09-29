@@ -8,10 +8,10 @@ Morph is a young, genuinely original project: a compiler that turns web syntax i
 
 But a commercial app needs more than a working renderer. The [Under Construction](../roadmap/under-construction.md) and [Future](../future/index.md) pages are honest about what's missing:
 
-- **Depth** — text input is at caret/focus basics; the full [CSS cascade](../future/css-cascade.md) isn't done
-- **Platform** — Linux, Windows and macOS all ship today ([Platforms](../future/shipped/platform.md)); phones are the remaining frontier ([Mobile](../future/mobile.md))
-- **Distribution** — no [signing, notarization, or store packaging](../future/security.md) yet
-- **Accessibility** — no [screen reader / OS accessibility](../future/accessibility.md) integration yet
-- **Ecosystem** — the npm story is [still open](../future/packages.md)
+- **Depth** — text input is at caret/focus basics; the full [CSS cascade](../future/css/cascade.md) isn't done
+- **Platform** — Linux, Windows and macOS all ship today ([Platforms](../future/shipped/platform.md)); phones are the remaining frontier ([Mobile](../future/platform/mobile.md))
+- **Distribution** — no [signing, notarization, or store packaging](../future/platform/security.md) yet
+- **Accessibility** — no [screen reader / OS accessibility](../future/platform/accessibility.md) integration yet
+- **Ecosystem** — the npm story is [still open](../future/tooling/packages.md)
 
 That honesty is part of the story. This is a project being built in the open — the roadmap shows exactly where it's going and what's between here and there. If you're evaluating Morph for something commercial, that list is the honest answer to "is it ready?"

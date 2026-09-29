@@ -18,9 +18,9 @@ Morph ships on **Linux** (X11, optionally Wayland), **Windows** (x64, MSVC), and
 
 ## What remains (elsewhere)
 
-- **Modern graphics backends** — Metal (macOS) and DirectX (Windows) still go through [Graphics APIs](../graphics-api.md). OpenGL works on both today; it's deprecated on macOS, not dead.
-- **OS-level modules** — tray icons, native dialogs, and notifications need APIs beyond GLFW — see [Native Modules](../native-modules.md).
-- **Signing & stores** — built on top of these targets in [Security & Commercial Release](../security.md).
+- **Modern graphics backends** — Metal (macOS) and DirectX (Windows) still go through [Graphics APIs](../rendering/graphics-apis.md). OpenGL works on both today; it's deprecated on macOS, not dead.
+- **OS-level modules** — tray icons, native dialogs, and notifications need APIs beyond GLFW — see [Native Modules](../platform/native-modules.md).
+- **Signing & stores** — built on top of these targets in [Security & Commercial Release](../platform/security.md).
 
 ## History
 

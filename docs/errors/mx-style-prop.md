@@ -50,7 +50,7 @@ Strategies when your property is unsupported:
 - **Layout** (`float`, `position: absolute` tricks) → Flexbox
   ([guide](../css/flexbox.md)).
 - **Effects** (`box-shadow`, `outline`) → check the
-  [future CSS plans](../future/more-css.md); restyle with borders/backgrounds.
+  [future CSS plans](../future/css/more-properties.md); restyle with borders/backgrounds.
 - **Typos** (`backgroudColor`) → fix the spelling; property names are
   camelCase in `style={{...}}` (`backgroundColor`, not `background-color`).
 

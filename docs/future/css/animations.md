@@ -1,6 +1,6 @@
 # Animations — Transitions, Springs & Shared Elements
 
-**Status:** future · **Priority:** medium · **Depends on:** [Forge Renderer](forge-renderer.md) (damage-aware animation), [Performance](performance.md) (compositor interpolation)
+**Status:** future · **Priority:** medium · **Depends on:** [Forge Renderer](../rendering/forge-tile-pool.md) (damage-aware animation), [Performance](../rendering/performance.md) (compositor interpolation)
 
 > **Note:** This is a future plan, not a commitment. The syntax and API shown here are proposals — they can be completely different when actually implemented.
 
@@ -33,7 +33,7 @@ const [x, setX] = spring(0, { stiffness: 170, damping: 26 })
 - **Compositor-first** — transforms/opacity run on the compositor thread (already interpolated at vsync); layout-affecting properties fall back to main thread with a `morph check` nudge when you animate `width` and mean `transform`
 - **Interrupted animations compose** — retargeting a running spring keeps velocity (no snap-back), because springs are state, not timelines
 - **`morph check` as choreographer** — animating a non-compositor property warns with the cheaper alternative; shared IDs duplicated on one screen error at build time
-- **`morph-animate` graduates here** — the package idea from [Tooling](tooling.md) lands as this design's imperative escape hatch (`animate(el, {...})`, timelines) for the 5% declarations can't express
+- **`morph-animate` graduates here** — the package idea from [Tooling](../tooling/vscode.md) lands as this design's imperative escape hatch (`animate(el, {...})`, timelines) for the 5% declarations can't express
 
 ## Current state
 
@@ -52,7 +52,7 @@ const [x, setX] = spring(0, { stiffness: 170, damping: 26 })
 - **Exit + unmount** — leaving elements must outlive their unmount (the page cache holds trees; can it hold *leaving* trees?). Who owns the extra frames?
 - **Shared-element mismatch** — detail page missing the `sharedId` (deep link straight in): fade fallback or snap?
 - **Reduced motion** — `prefers-reduced-motion` equivalent as a first-class media query from day one, not a patch later?
-- **Testing** — animations are time; does [Test Runner](test-runner.md) freeze the clock (`--freeze-animations`) for deterministic snapshots?
+- **Testing** — animations are time; does [Test Runner](../tooling/test-runner.md) freeze the clock (`--freeze-animations`) for deterministic snapshots?
 
 ## Build steps (when picked up)
 

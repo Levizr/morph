@@ -27,7 +27,7 @@ ahead of time (see [how JavaScript compiles](../javascript/overview.md) and
 must have a native lowering. When none exists, generating *something* would
 mean generating wrong code — so the compiler stops and tells you exactly which
 expression, and usually the rewrite. Coverage grows over time (see
-[translator coverage plans](../future/js-coverage.md)); the specific
+[translator coverage plans](../future/javascript/coverage.md)); the specific
 unsupported-feature codes below are sub-cases of this general rule.
 
 ## Example that triggers it

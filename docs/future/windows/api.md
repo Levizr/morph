@@ -6,7 +6,7 @@
 
 > **Decisions update (2026-09-20):** ids intern to integers (**WID** for instances, **RID** for routes — MID-style, no runtime string lookup), markup navigation is **`<a href>`**, and C++ gets a first-class window API (`app::windows::*`). See [Decisions — old vs new](#decisions--old-vs-new).
 
-> **Shipped → main docs.** `new Window`, `useWindow` (+methods/properties), and `navigate` are implemented and documented for users in [Windows & Routes](../guides/windows-and-routing.md) and [`Window` / `useWindow`](../api/windows.md). This page keeps the full target surface, open questions, and what remains. Two honest deltas from the original design: handles lowered as **WID ints** (not objects — `useWindow(id)` yields an invalid handle tested via `.closed`, not `null`), and static WID interning gave way to runtime minting + registry lookup (switch dispatch is future work).
+> **Shipped → main docs.** `new Window`, `useWindow` (+methods/properties), and `navigate` are implemented and documented for users in [Windows & Routes](../../guides/windows-and-routing.md) and [`Window` / `useWindow`](../../api/windows.md). This page keeps the full target surface, open questions, and what remains. Two honest deltas from the original design: handles lowered as **WID ints** (not objects — `useWindow(id)` yields an invalid handle tested via `.closed`, not `null`), and static WID interning gave way to runtime minting + registry lookup (switch dispatch is future work).
 
 A programmatic API for creating and managing windows from JavaScript — `new Window(...)`, the `useWindow` hook, `App.quit()`, `App.on(...)` — layered on top of the existing declarative system. Today windows are declared via the `windowConfig` export or `<morph-window>`; this adds runtime control.
 
@@ -19,7 +19,7 @@ A programmatic API for creating and managing windows from JavaScript — `new Wi
 
 ## Planned API surface
 
-The target surface (shipped subset: constructor, `navigate`, `close`, `show`/`hide`, `closed`, `title`, `on('close')`, `useWindow` — see [main docs](../api/windows.md); the rest below is future):
+The target surface (shipped subset: constructor, `navigate`, `close`, `show`/`hide`, `closed`, `title`, `on('close')`, `useWindow` — see [main docs](../../api/windows.md); the rest below is future):
 
 ```ts
 class Window {
@@ -139,7 +139,7 @@ Key rules:
 - **Operations on closed windows never crash** — they return `false` / no-op, because the registry lookup fails instead of dereferencing a dead window
 - **Re-opening** — `new Window("/auth/login")` again gives a fresh handle; old handles stay marked `closed`
 - **C++ safety** — `WindowManager` holds `shared_ptr<MorphWindow>`; JS handles hold weak references resolved by id. A raw pointer to a deleted window is the segfault this design prevents
-- **Typos and bad names never ship** — route ids and window ids are cross-referenced against the manifest at build time, and route segments must follow Next.js naming conventions (`mx-route-*` / `mx-window-*` lint rules + generated typed routes); runtime `null`/`false` behavior is only the last line of defense. See [Typo safety — validated at build time](file-routing.md#typo-safety--validated-at-build-time)
+- **Typos and bad names never ship** — route ids and window ids are cross-referenced against the manifest at build time, and route segments must follow Next.js naming conventions (`mx-route-*` / `mx-window-*` lint rules + generated typed routes); runtime `null`/`false` behavior is only the last line of defense. See [Typo safety — validated at build time](routing.md#typo-safety--validated-at-build-time)
 
 ### Module convention (the rule for all future modules)
 
@@ -156,7 +156,7 @@ Constructors take a config object; `Window` additionally takes a route id for th
 
 ## Compiler story
 
-`new Window(routeId, config)` calls in user JS are translated by `TSToCppTranslator` into `WindowManager` operations. The route id is resolved through the `route.mx` manifest (see [File-Based Windows & Pages](file-routing.md)). `useWindow(...)` is resolved at compile time — the component's containing window id is threaded through the IR.
+`new Window(routeId, config)` calls in user JS are translated by `TSToCppTranslator` into `WindowManager` operations. The route id is resolved through the `route.mx` manifest (see [File-Based Windows & Pages](routing.md)). `useWindow(...)` is resolved at compile time — the component's containing window id is threaded through the IR.
 
 Lowering detail: string literals never reach the runtime. The manifest pass owns the string→int tables and every call site emits the interned integer (`create_RID(app::routes::kSettings, …)`, `useWindow_WID(3)`) — the same interning the MID system uses for state tags. Only non-literal (dynamic) ids keep a runtime string lookup, flagged by `mx-window-dynamic`.
 
@@ -167,7 +167,7 @@ Lowering detail: string literals never reach the runtime. The manifest pass owns
 | CSS import (`import "./x.css"`; `CSS.load()` deprecated) | ✅ Shipped |
 | `windowConfig` export + `<morph-window>` | ✅ Shipped (declarative) |
 | `WindowManager` (register/close/allClosed) | ✅ Shipped |
-| `new Window` / `useWindow` / `navigate` / `close` / `show` / `hide` / `closed` / `title` / `on('close')` | ✅ Shipped ([main docs](../api/windows.md)) |
+| `new Window` / `useWindow` / `navigate` / `close` / `show` / `hide` / `closed` / `title` / `on('close')` | ✅ Shipped ([main docs](../../api/windows.md)) |
 | `Window` / `App` classes (full surface: `ready`, `load`, `id`, `width`/`height` props, `resize`/`focus` events) | ❌ Not built |
 | C++ `app::windows::*` + `app::routes::` in `morph_api.h` | ✅ Shipped (`open`/`navigate` generated per-project; `close`/`show`/`hide`/`title`/`closed`/`on_close` in `core/window_api.h`; proven via `native.cpp` in `route-test`) |
 | `.d.ts` for imperative API | ❌ Not built |
@@ -185,7 +185,7 @@ Lowering detail: string literals never reach the runtime. The manifest pass owns
 | 1 | String window/route ids with per-call registry lookup | **WID/RID integers**, MID-style interning, switch dispatch | Zero-cost calls; kill-strings consistency; build-time typos |
 | 2 | Two id kinds vague ("auto vs explicit") | **RID** = what to show (per `route.mx`, `app::routes::`); **WID** = which instance (per `new Window`, explicit `id:`) | Keeps "same route, two windows" working; `create(RID) → WID` |
 | 3 | Window control JS-only | **C++ API too** (`app::windows::*`, RID in / WID out, `JsObject` data, `on_close`) | Tray/hotkey/C++-driven flows; explicit WID keeps FFI honest |
-| 4 | `morph-*` event actions for windows (claimed "already generated" — never was) | **`<a href>`** for markup (see [file-routing.md](file-routing.md)) | Browser-familiar; nothing to migrate |
+| 4 | `morph-*` event actions for windows (claimed "already generated" — never was) | **`<a href>`** for markup (see [file-routing.md](routing.md)) | Browser-familiar; nothing to migrate |
 
 ## Build steps (remaining)
 

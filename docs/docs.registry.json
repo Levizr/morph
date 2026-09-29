@@ -2145,10 +2145,107 @@
     "category": "Future",
     "items": [
       {
+        "title": "Morph Full CSS Cascade (Planned)",
+        "sidebarTitle": "Cascade",
+        "slug": "future/css/cascade",
+        "file": "future/css/cascade",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "A full CSS cascade planned for Morph: specificity, inheritance, and the complete cascade model rather than the current subset.",
+        "keywords": [
+          "morph css cascade",
+          "morph specificity",
+          "morph css inheritance",
+          "morph css cascade model"
+        ],
+        "lastUpdated": "2026-09-14",
+        "publishedAt": "2026-08-20",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Morph box-shadow, outline & Margin Collapse (Planned)",
+        "sidebarTitle": "More Properties",
+        "slug": "future/css/more-properties",
+        "file": "future/css/more-properties",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "More CSS in Morph: margin collapse shipped behind MORPH_FEATURE_MARGIN_COLLAPSE; box-shadow, outline, and SDF shadow rendering remain future.",
+        "keywords": [
+          "morph box-shadow",
+          "morph outline css",
+          "morph margin collapse",
+          "morph more css properties"
+        ],
+        "lastUpdated": "2026-09-27",
+        "publishedAt": "2026-08-20",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Morph Magical CSS — Trick-Free Effects & Morph-Only Ideas (Planned)",
+        "sidebarTitle": "Magical",
+        "slug": "future/css/magical",
+        "file": "future/css/magical",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "Magical CSS in Morph: trick-free gradients, scoop corners, cursor glow, aurora backgrounds, beam borders and other Morph-only ideas — a possibility showcase; browser-parity basics ship first.",
+        "keywords": [
+          "morph magical css",
+          "morph scoop corners",
+          "morph aurora background",
+          "morph cursor glow",
+          "morph beam border",
+          "morph future css"
+        ],
+        "lastUpdated": "2026-09-29",
+        "publishedAt": "2026-09-29",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Animations — Transitions, Springs & Shared Elements (Planned)",
+        "sidebarTitle": "Animations",
+        "slug": "future/css/animations",
+        "file": "future/css/animations",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "Animation system planned for Morph: enter/exit transitions, spring physics, shared-element morphing, page transitions.",
+        "keywords": [
+          "morph animations",
+          "morph transitions",
+          "morph springs",
+          "morph shared element"
+        ],
+        "lastUpdated": "2026-09-28",
+        "publishedAt": "2026-09-28",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Dynamic Styles & Classes (Runtime Path)",
+        "sidebarTitle": "Dynamic Styles",
+        "slug": "future/css/dynamic-styles",
+        "file": "future/css/dynamic-styles",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "State-driven :style values on keyword fields and fully-dynamic :class bindings: template-literal classes and float/color styles shipped, the enum-field runtime gap, and the scheduled fix plan.",
+        "keywords": [
+          "morph dynamic styles",
+          "reactive style runtime",
+          "dynamic className",
+          "keyword parse wrapper"
+        ],
+        "lastUpdated": "2026-09-27",
+        "publishedAt": "2026-09-19",
+        "priority": 0.6,
+        "changefreq": "monthly"
+      },
+      {
         "title": "Morph Viewport - Embedded OpenGL Canvas",
-        "sidebarTitle": "Embedded OpenGL Viewport",
-        "slug": "future/viewport",
-        "file": "future/viewport",
+        "sidebarTitle": "Viewport",
+        "slug": "future/windows/viewport",
+        "file": "future/windows/viewport",
         "status": "future",
         "author": "PIYUSH",
         "description": "How the future morph-viewport element will give Morph an embedded OpenGL canvas for rendering 2D and 3D content inside a native app.",
@@ -2165,9 +2262,9 @@
       },
       {
         "title": "Morph Window and App API (Planned)",
-        "sidebarTitle": "Window & App API",
-        "slug": "future/window-api",
-        "file": "future/window-api",
+        "sidebarTitle": "API",
+        "slug": "future/windows/api",
+        "file": "future/windows/api",
         "status": "future",
         "author": "PIYUSH",
         "description": "The planned Window and App API for Morph: create imperative windows, Electron-style management, and safe lifecycle handling with the WindowManager.",
@@ -2184,52 +2281,10 @@
         "changefreq": "monthly"
       },
       {
-        "title": "Morph Window Ownership: Parent, Modal & Role (Shipped)",
-        "sidebarTitle": "Window Ownership",
-        "slug": "future/window-ownership",
-        "file": "future/shipped/window-ownership",
-        "status": "production",
-        "author": "PIYUSH",
-        "description": "Window ownership shipped record for Morph: parent/child relationships, modal close-blocking, presentation roles, owner cascade, modal follow, plus invariants and remainders.",
-        "keywords": [
-          "morph window ownership",
-          "morph window parent",
-          "morph modal window",
-          "morph window role",
-          "morph popup",
-          "morph owner cascade"
-        ],
-        "lastUpdated": "2026-09-21",
-        "publishedAt": "2026-09-21",
-        "priority": 0.5,
-        "changefreq": "monthly"
-      },
-      {
-        "title": "Morph Lean Binaries: 150KB Budget (Active)",
-        "sidebarTitle": "Lean Binaries (150KB)",
-        "slug": "future/lean-binary",
-        "file": "future/lean-binary",
-        "status": "future",
-        "author": "PIYUSH",
-        "description": "Lean binary program for Morph: 150KB no-UPX budget for hello-world, per-app -Os/-O2 selection, derived MORPH_FEATURE_* flags for every subsystem, and the measurement log.",
-        "keywords": [
-          "morph lean binary",
-          "morph binary size",
-          "morph 150KB",
-          "morph dead code elimination",
-          "morph feature flags",
-          "morph per-app optimization"
-        ],
-        "lastUpdated": "2026-09-22",
-        "publishedAt": "2026-09-22",
-        "priority": 0.9,
-        "changefreq": "weekly"
-      },
-      {
         "title": "Morph File-Based Windows and Pages (Planned)",
-        "sidebarTitle": "File-Based Routing",
-        "slug": "future/file-routing",
-        "file": "future/file-routing",
+        "sidebarTitle": "Routing",
+        "slug": "future/windows/routing",
+        "file": "future/windows/routing",
         "status": "future",
         "author": "PIYUSH",
         "description": "File-based windows and pages planned for Morph: the route.mx convention, Next.js-style routing rules, and build-time typo safety.",
@@ -2248,8 +2303,8 @@
       {
         "title": "Morph Route Mounts & Per-Instance State (Design Record)",
         "sidebarTitle": "Route Mounts",
-        "slug": "future/route-mounts",
-        "file": "future/route-mounts",
+        "slug": "future/windows/route-mounts",
+        "file": "future/windows/route-mounts",
         "status": "future",
         "author": "PIYUSH",
         "description": "Route mounts design record for Morph: per-mount state contexts, scoped effects, per-mount mid dispatch, JsObject props extraction, and the page-cache model behind independent windows.",
@@ -2266,29 +2321,10 @@
         "changefreq": "monthly"
       },
       {
-        "title": "Morph Menu, Tray, Dialog & Notification (Planned)",
-        "sidebarTitle": "Native Modules",
-        "slug": "future/native-modules",
-        "file": "future/native-modules",
-        "status": "future",
-        "author": "PIYUSH",
-        "description": "Native OS modules planned for Morph: menu, tray, dialog, and notification support for real desktop integration beyond the window.",
-        "keywords": [
-          "morph menu tray dialog notification",
-          "morph native os integration",
-          "morph desktop modules",
-          "morph tray icon"
-        ],
-        "lastUpdated": "2026-09-29",
-        "publishedAt": "2026-08-20",
-        "priority": 0.5,
-        "changefreq": "monthly"
-      },
-      {
         "title": "Morph Multi-Window Navigation (Planned)",
         "sidebarTitle": "Multi-Window",
-        "slug": "future/multi-window",
-        "file": "future/multi-window",
+        "slug": "future/windows/multi-window",
+        "file": "future/windows/multi-window",
         "status": "future",
         "author": "PIYUSH",
         "description": "Multi-window navigation planned for Morph: the useWindow hook and safe window lifecycle with handles that never dangle.",
@@ -2305,48 +2341,49 @@
         "changefreq": "monthly"
       },
       {
-        "title": "Morph Forge Renderer Tile Pool (Planned)",
-        "sidebarTitle": "Forge Tile Pool",
-        "slug": "future/forge-renderer",
-        "file": "future/forge-renderer",
+        "title": "Desktop Integration — Hotkeys, Deep Links & OS Hooks",
+        "sidebarTitle": "Desktop Integration",
+        "slug": "future/windows/desktop-integration",
+        "file": "future/windows/desktop-integration",
         "status": "future",
         "author": "PIYUSH",
-        "description": "Future work for the Morph forge renderer: tile pool and retained layers shipped, scroll-shift and production single-renderer builds remain.",
+        "description": "Desktop integration planned for Morph: global hotkeys, deep links, single-instance, autostart, drag-drop, theme listener, badges.",
         "keywords": [
-          "morph forge tile pool",
-          "morph retained layers",
-          "morph scroll shift",
-          "morph gpu rendering future"
+          "morph global hotkeys",
+          "morph deep links",
+          "morph single instance",
+          "morph drag drop",
+          "morph desktop integration"
         ],
-        "lastUpdated": "2026-09-27",
-        "publishedAt": "2026-08-20",
+        "lastUpdated": "2026-09-29",
+        "publishedAt": "2026-09-28",
         "priority": 0.5,
         "changefreq": "monthly"
       },
       {
-        "title": "Morph Full CSS Cascade (Planned)",
-        "sidebarTitle": "Full CSS Cascade",
-        "slug": "future/css-cascade",
-        "file": "future/css-cascade",
+        "title": "Morph Window Events - Cross-Window Event Listeners",
+        "sidebarTitle": "Events",
+        "slug": "future/windows/events",
+        "file": "future/windows/events",
         "status": "future",
         "author": "PIYUSH",
-        "description": "A full CSS cascade planned for Morph: specificity, inheritance, and the complete cascade model rather than the current subset.",
+        "description": "Why Morph needs win.on and win.off for cross-window DOM events, how Electron, Tauri, Wry, Qt and GTK handle it, and the proposed API.",
         "keywords": [
-          "morph css cascade",
-          "morph specificity",
-          "morph css inheritance",
-          "morph css cascade model"
+          "morph window events",
+          "win.on win.off",
+          "cross-window events",
+          "morph keyboard listener"
         ],
-        "lastUpdated": "2026-09-14",
-        "publishedAt": "2026-08-20",
+        "lastUpdated": "2026-09-29",
+        "publishedAt": "2026-09-29",
         "priority": 0.5,
         "changefreq": "monthly"
       },
       {
         "title": "Morph TS-to-C++ Translator Coverage (Planned)",
-        "sidebarTitle": "Translator Coverage",
-        "slug": "future/js-coverage",
-        "file": "future/js-coverage",
+        "sidebarTitle": "Coverage",
+        "slug": "future/javascript/coverage",
+        "file": "future/javascript/coverage",
         "status": "future",
         "author": "PIYUSH",
         "description": "TypeScript-to-C++ translator coverage in Morph: optional chaining, nullish coalescing, and more string methods shipped; Math, JSON, Map/Set, and array higher-order methods remain.",
@@ -2362,89 +2399,10 @@
         "changefreq": "monthly"
       },
       {
-        "title": "Morph Text Input - Caret & Focus (Planned)",
-        "sidebarTitle": "Text Input",
-        "slug": "future/text-input",
-        "file": "future/text-input",
-        "status": "future",
-        "author": "PIYUSH",
-        "description": "Text input in Morph: caret, focus, selection, undo/redo, and clipboard are shipped in InputNode with user docs; select/textarea and the :focus pseudo-class remain future.",
-        "keywords": [
-          "morph text input",
-          "morph caret focus",
-          "morph text selection",
-          "morph keyboard input",
-          "morph input field"
-        ],
-        "lastUpdated": "2026-09-27",
-        "publishedAt": "2026-08-20",
-        "priority": 0.5,
-        "changefreq": "monthly"
-      },
-      {
-        "title": "Morph box-shadow, outline & Margin Collapse (Planned)",
-        "sidebarTitle": "Shadow & Outline",
-        "slug": "future/more-css",
-        "file": "future/more-css",
-        "status": "future",
-        "author": "PIYUSH",
-        "description": "More CSS in Morph: margin collapse shipped behind MORPH_FEATURE_MARGIN_COLLAPSE; box-shadow, outline, and SDF shadow rendering remain future.",
-        "keywords": [
-          "morph box-shadow",
-          "morph outline css",
-          "morph margin collapse",
-          "morph more css properties"
-        ],
-        "lastUpdated": "2026-09-27",
-        "publishedAt": "2026-08-20",
-        "priority": 0.5,
-        "changefreq": "monthly"
-      },
-      {
-        "title": "Morph Magical CSS — Trick-Free Effects & Morph-Only Ideas (Planned)",
-        "sidebarTitle": "Magical CSS",
-        "slug": "future/magical-css",
-        "file": "future/magical-css",
-        "status": "future",
-        "author": "PIYUSH",
-        "description": "Magical CSS in Morph: trick-free gradients, scoop corners, cursor glow, aurora backgrounds, beam borders and other Morph-only ideas — a possibility showcase; browser-parity basics ship first.",
-        "keywords": [
-          "morph magical css",
-          "morph scoop corners",
-          "morph aurora background",
-          "morph cursor glow",
-          "morph beam border",
-          "morph future css"
-        ],
-        "lastUpdated": "2026-09-29",
-        "publishedAt": "2026-09-29",
-        "priority": 0.5,
-        "changefreq": "monthly"
-      },
-      {
-        "title": "Morph Package Build Bridge (Planned)",
-        "sidebarTitle": "Package Build Bridge",
-        "slug": "future/packages",
-        "file": "future/packages",
-        "status": "future",
-        "author": "PIYUSH",
-        "description": "A package build bridge planned for Morph: resolve and compile npm-style packages at build time so you can reuse libraries.",
-        "keywords": [
-          "morph packages",
-          "morph npm support",
-          "morph package build bridge",
-          "morph library reuse"
-        ],
-        "lastUpdated": "2026-09-05",
-        "publishedAt": "2026-08-20",
-        "priority": 0.5,
-        "changefreq": "monthly"
-      },
-      {
         "title": "Full Node.js Support in Morph (Planned)",
-        "sidebarTitle": "Node.js Support",
-        "slug": "future/nodejs-support",
-        "file": "future/nodejs-support",
+        "sidebarTitle": "Node.js",
+        "slug": "future/javascript/nodejs",
+        "file": "future/javascript/nodejs",
         "status": "future",
         "author": "PIYUSH",
         "description": "Full Node.js-level support planned for Morph: morph/* imports with node:* aliases, npm packages that work with Node, and entire servers compiled to native C++.",
@@ -2461,18 +2419,190 @@
         "changefreq": "monthly"
       },
       {
-        "title": "Morph Windows & macOS Support (Shipped)",
-        "sidebarTitle": "Windows & macOS",
-        "slug": "future/shipped/platform",
-        "file": "future/shipped/platform",
-        "status": "production",
+        "title": "Morph Rust Support (Planned)",
+        "sidebarTitle": "Rust",
+        "slug": "future/javascript/rust",
+        "file": "future/javascript/rust",
+        "status": "future",
         "author": "PIYUSH",
-        "description": "Windows and macOS support shipped for Morph: CI release builds, per-platform toolchains, and what remains.",
+        "description": "Rust support planned for Morph: a second runtime target with cross-language interop beyond the C++ backend.",
         "keywords": [
-          "morph windows support",
-          "morph macos support",
-          "morph cross-platform",
-          "morph platform roadmap"
+          "morph rust runtime",
+          "morph rust support",
+          "morph cross-language interop",
+          "morph second runtime"
+        ],
+        "lastUpdated": "2026-09-14",
+        "publishedAt": "2026-08-20",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "State, Events & Native C++ Interop",
+        "sidebarTitle": "Native Interop",
+        "slug": "future/javascript/native-interop",
+        "file": "future/javascript/native-interop",
+        "status": "development",
+        "author": "PIYUSH",
+        "description": "Complete architecture for Morph's reactive system (state, events, effects) and native C++ interop: module-path identity, namespaced C++ emission, morph_api.h contract, mid addressing, decision tree for native.cpp.",
+        "keywords": [
+          "morph state events native",
+          "app namespace",
+          "morph_api header",
+          "mid instance descriptor"
+        ],
+        "lastUpdated": "2026-09-16",
+        "publishedAt": "2026-09-16",
+        "priority": "0.9",
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Universal Module Bindings",
+        "sidebarTitle": "Module Bindings",
+        "slug": "future/javascript/module-bindings",
+        "file": "future/javascript/module-bindings",
+        "status": "development",
+        "author": "PIYUSH",
+        "description": "Module-path identity for every binding kind (functions, vars, classes, components, shared, events): export inventory, import resolution, re-export aliases, and the native C++ calling convention.",
+        "keywords": [
+          "module bindings import export",
+          "app namespace",
+          "re-export alias",
+          "native function call"
+        ],
+        "lastUpdated": "2026-09-17",
+        "publishedAt": "2026-09-17",
+        "priority": "0.9",
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Morph Forge Renderer Tile Pool (Planned)",
+        "sidebarTitle": "Forge Tile Pool",
+        "slug": "future/rendering/forge-tile-pool",
+        "file": "future/rendering/forge-tile-pool",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "Future work for the Morph forge renderer: tile pool and retained layers shipped, scroll-shift and production single-renderer builds remain.",
+        "keywords": [
+          "morph forge tile pool",
+          "morph retained layers",
+          "morph scroll shift",
+          "morph gpu rendering future"
+        ],
+        "lastUpdated": "2026-09-27",
+        "publishedAt": "2026-08-20",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Morph Performance - Hidden Classes (Planned)",
+        "sidebarTitle": "Performance",
+        "slug": "future/rendering/performance",
+        "file": "future/rendering/performance",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "Performance plans for Morph: hidden classes, compositor-safe properties, and faster rendering speed for bigger apps.",
+        "keywords": [
+          "morph performance",
+          "morph hidden classes",
+          "morph rendering speed",
+          "morph compositor-safe properties"
+        ],
+        "lastUpdated": "2026-09-05",
+        "publishedAt": "2026-08-20",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Morph Vulkan, Metal & DirectX (Planned)",
+        "sidebarTitle": "Graphics APIs",
+        "slug": "future/rendering/graphics-apis",
+        "file": "future/rendering/graphics-apis",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "Vulkan, Metal, and DirectX backends planned for Morph: pluggable graphics APIs beyond the current OpenGL renderer.",
+        "keywords": [
+          "morph vulkan",
+          "morph metal",
+          "morph directx",
+          "morph graphics api backend",
+          "morph opengl alternative"
+        ],
+        "lastUpdated": "2026-09-29",
+        "publishedAt": "2026-08-20",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Virtualized Lists — 100k Rows (Planned)",
+        "sidebarTitle": "Virtualized Lists",
+        "slug": "future/rendering/virtualized-lists",
+        "file": "future/rendering/virtualized-lists",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "Virtualized lists planned for Morph: render only the visible window of huge lists with node recycling.",
+        "keywords": [
+          "morph virtualized list",
+          "morph long lists",
+          "morph list performance"
+        ],
+        "lastUpdated": "2026-09-28",
+        "publishedAt": "2026-09-28",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Morph Text Input - Caret & Focus (Planned)",
+        "sidebarTitle": "Text Input",
+        "slug": "future/elements/text-input",
+        "file": "future/elements/text-input",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "Text input in Morph: caret, focus, selection, undo/redo, and clipboard are shipped in InputNode with user docs; select/textarea and the :focus pseudo-class remain future.",
+        "keywords": [
+          "morph text input",
+          "morph caret focus",
+          "morph text selection",
+          "morph keyboard input",
+          "morph input field"
+        ],
+        "lastUpdated": "2026-09-27",
+        "publishedAt": "2026-08-20",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Icons & SVG — morph-icons System (Planned)",
+        "sidebarTitle": "Icons & SVG",
+        "slug": "future/elements/icons-svg",
+        "file": "future/elements/icons-svg",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "SVG and icon system planned for Morph: svg element subset, tree-shaken morph-icons, custom icon sets.",
+        "keywords": [
+          "morph svg",
+          "morph icons",
+          "morph-icons package",
+          "morph vector icons"
+        ],
+        "lastUpdated": "2026-09-28",
+        "publishedAt": "2026-09-28",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Morph Menu, Tray, Dialog & Notification (Planned)",
+        "sidebarTitle": "Native Modules",
+        "slug": "future/platform/native-modules",
+        "file": "future/platform/native-modules",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "Native OS modules planned for Morph: menu, tray, dialog, and notification support for real desktop integration beyond the window.",
+        "keywords": [
+          "morph menu tray dialog notification",
+          "morph native os integration",
+          "morph desktop modules",
+          "morph tray icon"
         ],
         "lastUpdated": "2026-09-29",
         "publishedAt": "2026-08-20",
@@ -2482,8 +2612,8 @@
       {
         "title": "Morph OS Accessibility - Screen Reader & Keyboard (Planned)",
         "sidebarTitle": "Accessibility",
-        "slug": "future/accessibility",
-        "file": "future/accessibility",
+        "slug": "future/platform/accessibility",
+        "file": "future/platform/accessibility",
         "status": "future",
         "author": "PIYUSH",
         "description": "OS accessibility planned for Morph: screen readers, focus, and keyboard navigation via UIA, NSAccessibility, and AT-SPI.",
@@ -2502,8 +2632,8 @@
       {
         "title": "Morph WebView - Embed HTML (Planned)",
         "sidebarTitle": "WebView",
-        "slug": "future/webview",
-        "file": "future/webview",
+        "slug": "future/platform/webview",
+        "file": "future/platform/webview",
         "status": "future",
         "author": "PIYUSH",
         "description": "WebView support planned for Morph: embed HTML via the OS webview to build Tauri-style hybrid apps when you need web content.",
@@ -2520,9 +2650,9 @@
       },
       {
         "title": "Morph Signing & Secure Distribution (Planned)",
-        "sidebarTitle": "Signing & Distribution",
-        "slug": "future/security",
-        "file": "future/security",
+        "sidebarTitle": "Security",
+        "slug": "future/platform/security",
+        "file": "future/platform/security",
         "status": "future",
         "author": "PIYUSH",
         "description": "Signing and secure distribution planned for Morph: code signing, notarization, secure updates, and store packaging.",
@@ -2539,202 +2669,10 @@
         "changefreq": "monthly"
       },
       {
-        "title": "Morph VSCode Extension & Ecosystem (Planned)",
-        "sidebarTitle": "VSCode Extension",
-        "slug": "future/tooling",
-        "file": "future/tooling",
-        "status": "future",
-        "author": "PIYUSH",
-        "description": "The Morph ecosystem planned next: a VSCode extension, morph-icons, morph-animate, and the surrounding tooling.",
-        "keywords": [
-          "morph vscode extension",
-          "morph tooling",
-          "morph ecosystem",
-          "morph icons",
-          "morph animate"
-        ],
-        "lastUpdated": "2026-09-05",
-        "publishedAt": "2026-08-20",
-        "priority": 0.5,
-        "changefreq": "monthly"
-      },
-      {
-        "title": "Morph Performance - Hidden Classes (Planned)",
-        "sidebarTitle": "Hidden Classes",
-        "slug": "future/performance",
-        "file": "future/performance",
-        "status": "future",
-        "author": "PIYUSH",
-        "description": "Performance plans for Morph: hidden classes, compositor-safe properties, and faster rendering speed for bigger apps.",
-        "keywords": [
-          "morph performance",
-          "morph hidden classes",
-          "morph rendering speed",
-          "morph compositor-safe properties"
-        ],
-        "lastUpdated": "2026-09-05",
-        "publishedAt": "2026-08-20",
-        "priority": 0.5,
-        "changefreq": "monthly"
-      },
-      {
-        "title": "Morph Rust Support (Planned)",
-        "sidebarTitle": "Rust Support",
-        "slug": "future/rust",
-        "file": "future/rust",
-        "status": "future",
-        "author": "PIYUSH",
-        "description": "Rust support planned for Morph: a second runtime target with cross-language interop beyond the C++ backend.",
-        "keywords": [
-          "morph rust runtime",
-          "morph rust support",
-          "morph cross-language interop",
-          "morph second runtime"
-        ],
-        "lastUpdated": "2026-09-14",
-        "publishedAt": "2026-08-20",
-        "priority": 0.5,
-        "changefreq": "monthly"
-      },
-      {
-        "title": "Morph Vulkan, Metal & DirectX (Planned)",
-        "sidebarTitle": "Vulkan, Metal, DirectX",
-        "slug": "future/graphics-api",
-        "file": "future/graphics-api",
-        "status": "future",
-        "author": "PIYUSH",
-        "description": "Vulkan, Metal, and DirectX backends planned for Morph: pluggable graphics APIs beyond the current OpenGL renderer.",
-        "keywords": [
-          "morph vulkan",
-          "morph metal",
-          "morph directx",
-          "morph graphics api backend",
-          "morph opengl alternative"
-        ],
-        "lastUpdated": "2026-09-29",
-        "publishedAt": "2026-08-20",
-        "priority": 0.5,
-        "changefreq": "monthly"
-      },
-      {
-        "title": "Desktop Integration — Hotkeys, Deep Links & OS Hooks",
-        "sidebarTitle": "Desktop Integration",
-        "slug": "future/desktop-integration",
-        "file": "future/desktop-integration",
-        "status": "future",
-        "author": "PIYUSH",
-        "description": "Desktop integration planned for Morph: global hotkeys, deep links, single-instance, autostart, drag-drop, theme listener, badges.",
-        "keywords": [
-          "morph global hotkeys",
-          "morph deep links",
-          "morph single instance",
-          "morph drag drop",
-          "morph desktop integration"
-        ],
-        "lastUpdated": "2026-09-29",
-        "publishedAt": "2026-09-28",
-        "priority": 0.5,
-        "changefreq": "monthly"
-      },
-      {
-        "title": "Time-Travel Debugger — Rewind Your Whole App (Planned)",
-        "sidebarTitle": "Time-Travel Debugger",
-        "slug": "future/time-travel",
-        "file": "future/time-travel",
-        "status": "future",
-        "author": "PIYUSH",
-        "description": "Time-travel debugging planned for Morph: multi-window signal and event record/replay with timeline scrubbing.",
-        "keywords": [
-          "morph time travel debugger",
-          "morph replay",
-          "morph devtools timeline",
-          "morph session recording"
-        ],
-        "lastUpdated": "2026-09-28",
-        "publishedAt": "2026-09-28",
-        "priority": 0.5,
-        "changefreq": "monthly"
-      },
-      {
-        "title": "morph test — Headless E2E Runner (Planned)",
-        "sidebarTitle": "morph test",
-        "slug": "future/test-runner",
-        "file": "future/test-runner",
-        "status": "future",
-        "author": "PIYUSH",
-        "description": "A headless end-to-end test runner planned for Morph: drive windows, assert state, screenshot on failure, replay sessions.",
-        "keywords": [
-          "morph test runner",
-          "morph e2e testing",
-          "morph headless tests",
-          "morph screenshots"
-        ],
-        "lastUpdated": "2026-09-29",
-        "publishedAt": "2026-09-28",
-        "priority": 0.5,
-        "changefreq": "monthly"
-      },
-      {
-        "title": "Animations — Transitions, Springs & Shared Elements (Planned)",
-        "sidebarTitle": "Animations",
-        "slug": "future/animations",
-        "file": "future/animations",
-        "status": "future",
-        "author": "PIYUSH",
-        "description": "Animation system planned for Morph: enter/exit transitions, spring physics, shared-element morphing, page transitions.",
-        "keywords": [
-          "morph animations",
-          "morph transitions",
-          "morph springs",
-          "morph shared element"
-        ],
-        "lastUpdated": "2026-09-28",
-        "publishedAt": "2026-09-28",
-        "priority": 0.5,
-        "changefreq": "monthly"
-      },
-      {
-        "title": "Virtualized Lists — 100k Rows (Planned)",
-        "sidebarTitle": "Virtualized Lists",
-        "slug": "future/virtualized-lists",
-        "file": "future/virtualized-lists",
-        "status": "future",
-        "author": "PIYUSH",
-        "description": "Virtualized lists planned for Morph: render only the visible window of huge lists with node recycling.",
-        "keywords": [
-          "morph virtualized list",
-          "morph long lists",
-          "morph list performance"
-        ],
-        "lastUpdated": "2026-09-28",
-        "publishedAt": "2026-09-28",
-        "priority": 0.5,
-        "changefreq": "monthly"
-      },
-      {
-        "title": "Icons & SVG — morph-icons System (Planned)",
-        "sidebarTitle": "Icons & SVG",
-        "slug": "future/icons-svg",
-        "file": "future/icons-svg",
-        "status": "future",
-        "author": "PIYUSH",
-        "description": "SVG and icon system planned for Morph: svg element subset, tree-shaken morph-icons, custom icon sets.",
-        "keywords": [
-          "morph svg",
-          "morph icons",
-          "morph-icons package",
-          "morph vector icons"
-        ],
-        "lastUpdated": "2026-09-28",
-        "publishedAt": "2026-09-28",
-        "priority": 0.5,
-        "changefreq": "monthly"
-      },
-      {
         "title": "Morph on Mobile — Android & iOS (Planned)",
         "sidebarTitle": "Mobile",
-        "slug": "future/mobile",
-        "file": "future/mobile",
+        "slug": "future/platform/mobile",
+        "file": "future/platform/mobile",
         "status": "future",
         "author": "PIYUSH",
         "description": "Mobile support planned for Morph: same .mx codebase compiling to Android APK and iOS IPA, touch, sensors, and store submission.",
@@ -2751,9 +2689,166 @@
         "changefreq": "monthly"
       },
       {
+        "title": "Morph Lean Binaries: 150KB Budget (Active)",
+        "sidebarTitle": "Lean Binaries",
+        "slug": "future/tooling/lean-binaries",
+        "file": "future/tooling/lean-binaries",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "Lean binary program for Morph: 150KB no-UPX budget for hello-world, per-app -Os/-O2 selection, derived MORPH_FEATURE_* flags for every subsystem, and the measurement log.",
+        "keywords": [
+          "morph lean binary",
+          "morph binary size",
+          "morph 150KB",
+          "morph dead code elimination",
+          "morph feature flags",
+          "morph per-app optimization"
+        ],
+        "lastUpdated": "2026-09-22",
+        "publishedAt": "2026-09-22",
+        "priority": 0.9,
+        "changefreq": "weekly"
+      },
+      {
+        "title": "Morph Package Build Bridge (Planned)",
+        "sidebarTitle": "Packages",
+        "slug": "future/tooling/packages",
+        "file": "future/tooling/packages",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "A package build bridge planned for Morph: resolve and compile npm-style packages at build time so you can reuse libraries.",
+        "keywords": [
+          "morph packages",
+          "morph npm support",
+          "morph package build bridge",
+          "morph library reuse"
+        ],
+        "lastUpdated": "2026-09-05",
+        "publishedAt": "2026-08-20",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Morph VSCode Extension & Ecosystem (Planned)",
+        "sidebarTitle": "VSCode Extension",
+        "slug": "future/tooling/vscode",
+        "file": "future/tooling/vscode",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "The Morph ecosystem planned next: a VSCode extension, morph-icons, morph-animate, and the surrounding tooling.",
+        "keywords": [
+          "morph vscode extension",
+          "morph tooling",
+          "morph ecosystem",
+          "morph icons",
+          "morph animate"
+        ],
+        "lastUpdated": "2026-09-05",
+        "publishedAt": "2026-08-20",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Time-Travel Debugger — Rewind Your Whole App (Planned)",
+        "sidebarTitle": "Time-Travel",
+        "slug": "future/tooling/time-travel",
+        "file": "future/tooling/time-travel",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "Time-travel debugging planned for Morph: multi-window signal and event record/replay with timeline scrubbing.",
+        "keywords": [
+          "morph time travel debugger",
+          "morph replay",
+          "morph devtools timeline",
+          "morph session recording"
+        ],
+        "lastUpdated": "2026-09-28",
+        "publishedAt": "2026-09-28",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "morph test — Headless E2E Runner (Planned)",
+        "sidebarTitle": "Test Runner",
+        "slug": "future/tooling/test-runner",
+        "file": "future/tooling/test-runner",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "A headless end-to-end test runner planned for Morph: drive windows, assert state, screenshot on failure, replay sessions.",
+        "keywords": [
+          "morph test runner",
+          "morph e2e testing",
+          "morph headless tests",
+          "morph screenshots"
+        ],
+        "lastUpdated": "2026-09-29",
+        "publishedAt": "2026-09-28",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "How to Suggest a Morph Feature",
+        "sidebarTitle": "Suggestions",
+        "slug": "future/tooling/suggestions",
+        "file": "future/tooling/suggestions",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "How to suggest a feature for Morph: email your ideas to shape the roadmap and help decide what gets built next.",
+        "keywords": [
+          "morph feature suggestions",
+          "suggest morph feature",
+          "morph feedback",
+          "morph roadmap ideas"
+        ],
+        "lastUpdated": "2026-09-14",
+        "publishedAt": "2026-08-20",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Morph Window Ownership: Parent, Modal & Role (Shipped)",
+        "sidebarTitle": "Window Ownership",
+        "slug": "future/shipped/window-ownership",
+        "file": "future/shipped/window-ownership",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Window ownership shipped record for Morph: parent/child relationships, modal close-blocking, presentation roles, owner cascade, modal follow, plus invariants and remainders.",
+        "keywords": [
+          "morph window ownership",
+          "morph window parent",
+          "morph modal window",
+          "morph window role",
+          "morph popup",
+          "morph owner cascade"
+        ],
+        "lastUpdated": "2026-09-21",
+        "publishedAt": "2026-09-21",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Morph Windows & macOS Support (Shipped)",
+        "sidebarTitle": "Platforms",
+        "slug": "future/shipped/platform",
+        "file": "future/shipped/platform",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Windows and macOS support shipped for Morph: CI release builds, per-platform toolchains, and what remains.",
+        "keywords": [
+          "morph windows support",
+          "morph macos support",
+          "morph cross-platform",
+          "morph platform roadmap"
+        ],
+        "lastUpdated": "2026-09-29",
+        "publishedAt": "2026-08-20",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
         "title": "Morph Rust Compiler & Native CLI (Shipped)",
-        "sidebarTitle": "Rust Compiler & CLI",
-        "slug": "future/compiler",
+        "sidebarTitle": "Rust Compiler",
+        "slug": "future/shipped/compiler",
         "file": "future/shipped/compiler",
         "status": "production",
         "author": "PIYUSH",
@@ -2770,66 +2865,9 @@
         "changefreq": "monthly"
       },
       {
-        "title": "How to Suggest a Morph Feature",
-        "sidebarTitle": "Suggest a Feature",
-        "slug": "future/suggestions",
-        "file": "future/suggestions",
-        "status": "future",
-        "author": "PIYUSH",
-        "description": "How to suggest a feature for Morph: email your ideas to shape the roadmap and help decide what gets built next.",
-        "keywords": [
-          "morph feature suggestions",
-          "suggest morph feature",
-          "morph feedback",
-          "morph roadmap ideas"
-        ],
-        "lastUpdated": "2026-09-14",
-        "publishedAt": "2026-08-20",
-        "priority": 0.5,
-        "changefreq": "monthly"
-      },
-      {
-        "title": "State, Events & Native C++ Interop",
-        "sidebarTitle": "State, Events & C++",
-        "slug": "future/state-events-native-interop",
-        "file": "future/state-events-native-interop",
-        "status": "development",
-        "author": "PIYUSH",
-        "description": "Complete architecture for Morph's reactive system (state, events, effects) and native C++ interop: module-path identity, namespaced C++ emission, morph_api.h contract, mid addressing, decision tree for native.cpp.",
-        "keywords": [
-          "morph state events native",
-          "app namespace",
-          "morph_api header",
-          "mid instance descriptor"
-        ],
-        "lastUpdated": "2026-09-16",
-        "publishedAt": "2026-09-16",
-        "priority": "0.9",
-        "changefreq": "monthly"
-      },
-      {
-        "title": "Universal Module Bindings",
-        "sidebarTitle": "Module Bindings",
-        "slug": "future/universal-module-bindings",
-        "file": "future/universal-module-bindings",
-        "status": "development",
-        "author": "PIYUSH",
-        "description": "Module-path identity for every binding kind (functions, vars, classes, components, shared, events): export inventory, import resolution, re-export aliases, and the native C++ calling convention.",
-        "keywords": [
-          "module bindings import export",
-          "app namespace",
-          "re-export alias",
-          "native function call"
-        ],
-        "lastUpdated": "2026-09-17",
-        "publishedAt": "2026-09-17",
-        "priority": "0.9",
-        "changefreq": "monthly"
-      },
-      {
         "title": "Kill All Runtime Strings (Shipped)",
         "sidebarTitle": "Kill Runtime Strings",
-        "slug": "future/kill-runtime-strings",
+        "slug": "future/shipped/kill-runtime-strings",
         "file": "future/shipped/kill-runtime-strings",
         "status": "production",
         "author": "PIYUSH",
@@ -2843,44 +2881,6 @@
         "lastUpdated": "2026-09-17",
         "publishedAt": "2026-09-17",
         "priority": "0.9",
-        "changefreq": "monthly"
-      },
-      {
-        "title": "Dynamic Styles & Classes (Runtime Path)",
-        "sidebarTitle": "Dynamic Styles",
-        "slug": "future/dynamic-styles",
-        "file": "future/dynamic-styles",
-        "status": "future",
-        "author": "PIYUSH",
-        "description": "State-driven :style values on keyword fields and fully-dynamic :class bindings: template-literal classes and float/color styles shipped, the enum-field runtime gap, and the scheduled fix plan.",
-        "keywords": [
-          "morph dynamic styles",
-          "reactive style runtime",
-          "dynamic className",
-          "keyword parse wrapper"
-        ],
-        "lastUpdated": "2026-09-27",
-        "publishedAt": "2026-09-19",
-        "priority": 0.6,
-        "changefreq": "monthly"
-      },
-      {
-        "title": "Morph Window Events - Cross-Window Event Listeners",
-        "sidebarTitle": "Window Events",
-        "slug": "future/window-events",
-        "file": "future/window-events",
-        "status": "future",
-        "author": "PIYUSH",
-        "description": "Why Morph needs win.on and win.off for cross-window DOM events, how Electron, Tauri, Wry, Qt and GTK handle it, and the proposed API.",
-        "keywords": [
-          "morph window events",
-          "win.on win.off",
-          "cross-window events",
-          "morph keyboard listener"
-        ],
-        "lastUpdated": "2026-09-29",
-        "publishedAt": "2026-09-29",
-        "priority": 0.5,
         "changefreq": "monthly"
       }
     ]

@@ -1,6 +1,6 @@
 # `morph test` — Headless E2E Runner
 
-**Status:** future · **Priority:** medium · **Depends on:** [Time-Travel Debugger](time-travel.md) (replay), [Platforms](shipped/platform.md) (shipped — CI images exist)
+**Status:** future · **Priority:** medium · **Depends on:** [Time-Travel Debugger](time-travel.md) (replay), [Platforms](../shipped/platform.md) (shipped — CI images exist)
 
 > **Note:** This is a future plan, not a commitment. The syntax and API shown here are proposals — they can be completely different when actually implemented.
 

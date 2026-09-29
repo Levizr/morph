@@ -58,7 +58,7 @@ the app uses:
 - Static third-party deps are trimmed at source (gamepad DB, unwind
   tables) and per-requirement (HarfBuzz builds only for shaping content).
 
-Details live in the [lean-binary design record](../future/lean-binary.md)
+Details live in the [lean-binary design record](../future/tooling/lean-binaries.md)
 (the 371KB → 113KB dynamic journey is logged step by step there).
 
 ## Dynamic builds (for completeness)

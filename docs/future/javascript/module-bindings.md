@@ -2,7 +2,7 @@
 
 **Status:** `development` · **Priority:** high · **Shipped parts:** none (design record; implementation follows this page)
 
-> Companion to [State, Events & Native C++ Interop](state-events-native-interop.md), which established module-path identity for `morphShared`/`morphEvent`. This page generalizes the same namespace trick to **every binding kind** (functions, vars, classes, components, shared, events) from **every module kind** (`.mx`/`.ts`/`.tsx`), plus re-exports and the C++ calling convention.
+> Companion to [State, Events & Native C++ Interop](native-interop.md), which established module-path identity for `morphShared`/`morphEvent`. This page generalizes the same namespace trick to **every binding kind** (functions, vars, classes, components, shared, events) from **every module kind** (`.mx`/`.ts`/`.tsx`), plus re-exports and the C++ calling convention.
 
 ---
 
@@ -179,4 +179,4 @@ A local `const loadData` next to `import { loadData }` is an ambiguous-import ha
 
 ---
 
-*Related: [State, Events & Native C++ Interop](state-events-native-interop.md) · [C++ / JSX Interop Guide](../guides/native-cpp.md) · [Dev Internals: State & Events](../dev/state/state-events-internals.md)*
+*Related: [State, Events & Native C++ Interop](native-interop.md) · [C++ / JSX Interop Guide](../../guides/native-cpp.md) · [Dev Internals: State & Events](../../dev/state/state-events-internals.md)*

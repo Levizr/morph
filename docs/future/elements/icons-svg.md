@@ -1,10 +1,10 @@
 # Icons & SVG — Tiny Pictures, Surprisingly Deep Rabbit Hole
 
-**Status:** future · **Priority:** medium · **Depends on:** [Packages](packages.md) (distribution), [Graphics APIs](graphics-api.md) (GPU path choice)
+**Status:** future · **Priority:** medium · **Depends on:** [Packages](../tooling/packages.md) (distribution), [Graphics APIs](../rendering/graphics-apis.md) (GPU path choice)
 
 > **Note:** This is a future plan, not a commitment. The syntax and API shown here are proposals — they can be completely different when actually implemented.
 
-Every app needs icons; nobody wants to hand-roll them. Today a Morph dev's options are "draw it with divs" or "ship PNGs at 6 resolutions and pray." Meanwhile the renderer's SDF shader stack (rounded rects today) is *exactly* the machinery vector icons want. This page turns the `morph-icons` package sketch from [Tooling](tooling.md) into a full design: first SVG, then the icon system on top.
+Every app needs icons; nobody wants to hand-roll them. Today a Morph dev's options are "draw it with divs" or "ship PNGs at 6 resolutions and pray." Meanwhile the renderer's SDF shader stack (rounded rects today) is *exactly* the machinery vector icons want. This page turns the `morph-icons` package sketch from [Tooling](../tooling/vscode.md) into a full design: first SVG, then the icon system on top.
 
 ## Why it matters
 
@@ -51,7 +51,7 @@ Validates paths at build time (`morph check` rejects unsupported SVG features wi
 | SDF shader stack (rounded rects) | ✅ Shipped |
 | FreeType text pipeline (icon-font fallback possible) | ✅ Shipped |
 | `<svg>` element + path tessellation | ❌ Not built |
-| `morph-icons` package | ❌ Not started (sketch in [Tooling](tooling.md)) |
+| `morph-icons` package | ❌ Not started (sketch in [Tooling](../tooling/vscode.md)) |
 | `morph icons:add` custom sets | ❌ Not built |
 
 ## Open questions

@@ -21,7 +21,7 @@ container without full native behavior.
 Morph would rather warn than surprise you. These elements exist in the tag
 registry so existing JSX parses, but their native control behavior (caret,
 focus, selection, dropdown popups) is still under construction (see
-[future text input](../future/text-input.md)). Without the warning you would
+[future text input](../future/elements/text-input.md)). Without the warning you would
 stare at a dropdown that never opens and blame your code.
 
 ## Example that triggers it
@@ -74,7 +74,7 @@ Steps:
    `div`/`button` + `morphState` as above.
 2. If the stub rendering is acceptable (static placeholder), leave it and
    move on; the warning reminds you it is provisional.
-3. Track [text input plans](../future/text-input.md) for full support.
+3. Track [text input plans](../future/elements/text-input.md) for full support.
 
 ## Tuning this rule
 
@@ -92,5 +92,5 @@ Escalate it while stub behavior is unacceptable in your app:
 
 - [mx-tag](mx-tag.md) — tag does not exist at all
 - [Which HTML Elements Morph Supports](../elements/overview.md)
-- [Text input plans](../future/text-input.md)
+- [Text input plans](../future/elements/text-input.md)
 

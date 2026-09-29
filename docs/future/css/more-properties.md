@@ -1,6 +1,6 @@
 # More CSS — `box-shadow`, `outline`, Margin Collapse
 
-**Status:** future · **Priority:** low · **Depends on:** [CSS Cascade](css-cascade.md)
+**Status:** future · **Priority:** low · **Depends on:** [CSS Cascade](cascade.md)
 
 > **Note:** This is a future plan, not a commitment. The syntax and API shown here are proposals — they can be completely different when actually implemented.
 
@@ -33,7 +33,7 @@ struct BoxShadow {
 
 - `outline` / `outline-color` / `outline-width` / `outline-offset`
 - Unlike `border`, outline does **not** affect layout (drawn outside the box)
-- Natural companion to the [Text Input](text-input.md) focus model — a focus ring via `outline` on `:focus`
+- Natural companion to the [Text Input](../elements/text-input.md) focus model — a focus ring via `outline` on `:focus`
 
 ## Margin collapse
 

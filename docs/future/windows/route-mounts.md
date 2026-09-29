@@ -1,10 +1,10 @@
 # Route Mounts & Per-Instance State (3b Design)
 
-**Status:** design · **Priority:** high · **Depends on:** [File-Based Windows & Pages](file-routing.md), manifest (✅ shipped), registry spine (✅ shipped)
+**Status:** design · **Priority:** high · **Depends on:** [File-Based Windows & Pages](routing.md), manifest (✅ shipped), registry spine (✅ shipped)
 
 > **Note:** This is a design record, not a commitment. It exists so `new Window(RID)`, `navigate()`, and internal `<a href>` get built on answered questions instead of silent guesses. Open questions for the owner are at the bottom.
 
-> **Shipped → main docs.** Mounts, per-instance state, props, and independence are implemented and documented for users in [Windows & Routes](../guides/windows-and-routing.md) and [`Window` / `useWindow`](../api/windows.md). This page keeps the internals (contexts, scopes, dispatch, factories) and what remains.
+> **Shipped → main docs.** Mounts, per-instance state, props, and independence are implemented and documented for users in [Windows & Routes](../../guides/windows-and-routing.md) and [`Window` / `useWindow`](../../api/windows.md). This page keeps the internals (contexts, scopes, dispatch, factories) and what remains.
 
 ## Why this needs its own design
 
@@ -85,7 +85,7 @@ Consequence: route module-level functions, classes, and globals **must not refer
 
 ### Known hit: stateful shared helpers in routes (2026-09-27, `mx-route-state`)
 
-The budget example hit this live: `src/add/route.mx` → `NavBar` → `IpBadge.checkIp()`, an `async` helper closing over `setIp`/`setStatus`. Entry build is green (setters are globals); both route mounts fail at codegen with [`mx-route-state`](../errors/mx-route-state.md). The constraint above holds transitively — any helper reachable from a route, however deep the import chain, must be context-free.
+The budget example hit this live: `src/add/route.mx` → `NavBar` → `IpBadge.checkIp()`, an `async` helper closing over `setIp`/`setStatus`. Entry build is green (setters are globals); both route mounts fail at codegen with [`mx-route-state`](../../errors/mx-route-state.md). The constraint above holds transitively — any helper reachable from a route, however deep the import chain, must be context-free.
 
 **Fixed 2026-09-28.** Plain-function helpers rewrite into context-taking templates (`template <typename __MorphCtx>` + `shared_ptr` context parameter, threaded through mount bodies and helper-to-helper calls — one definition serves every mount, and the `shared_ptr` keeps a navigated-away mount alive across `co_await`). Remaining `mx-route-state` cases: classes/lambdas/consts at module scope and mount-state reads inside keyed-list item templates.
 
@@ -93,7 +93,7 @@ Workarounds (in preference order): inline the logic in the effect body; pass set
 
 ### Props: `JsObject` in, plain C++ out (decided 2026-09-20, ✅ shipped)
 
-User-facing rules: [Windows & Routes](../guides/windows-and-routing.md#props). Internals: one extraction per declared prop in the mount prologue (the only `JsValue` touchpoint) via total `as_*` coercions — never throw, unconvertible yields zero values, strings never parsed as numbers. Composite props keep `JsArray`/`JsObject` members. Missing *required* props log loudly at mount. The prologue is the single choke point for all future callers.
+User-facing rules: [Windows & Routes](../../guides/windows-and-routing.md#props). Internals: one extraction per declared prop in the mount prologue (the only `JsValue` touchpoint) via total `as_*` coercions — never throw, unconvertible yields zero values, strings never parsed as numbers. Composite props keep `JsArray`/`JsObject` members. Missing *required* props log loudly at mount. The prologue is the single choke point for all future callers.
 
 ### `useWindow()` lowers to a captured `__wid`
 

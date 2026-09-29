@@ -9,7 +9,7 @@ The roadmap above is a plan, not a wall. Real-world needs get priority; whole pa
 ## How to suggest
 
 - **Email us:** [`suggestions.morph@levizr.com`](mailto:suggestions.morph@levizr.com) — the simplest route. One paragraph is enough: *what you're building, what's missing, and what you tried instead.*
-- **Open an issue / PR:** the repo lives at [github.com/Levizr/morph](https://github.com/Levizr/morph) — see [Contributing](../../CONTRIBUTING.md)
+- **Open an issue / PR:** the repo lives at [github.com/Levizr/morph](https://github.com/Levizr/morph) — see [Contributing](../../../CONTRIBUTING.md)
 - **Contribute** — if you're up for it, code is welcome. Morph is a Rust toolchain generating C++ via Oxc; a working patch on an issue beats a hundred wishlist emails. Start with the `good first issue` label
 - **Just talk about it** — even a half-formed idea is useful. Describe the pain; we'll figure out the shape.
 
@@ -26,12 +26,12 @@ The roadmap above is a plan, not a wall. Real-world needs get priority; whole pa
 
 Tracked suggestions live in the repo's issue tracker under the `suggestion` label. High-signal themes that keep coming up:
 
-- **Accessibility / screen readers** — see [OS Accessibility](accessibility.md)
-- **Signing & commercial distribution** — see [Signing & Secure Distribution](security.md)
-- **Graphics backends** — see [Vulkan / Metal / DirectX](graphics-api.md)
+- **Accessibility / screen readers** — see [OS Accessibility](../platform/accessibility.md)
+- **Signing & commercial distribution** — see [Signing & Secure Distribution](../platform/security.md)
+- **Graphics backends** — see [Vulkan / Metal / DirectX](../rendering/graphics-apis.md)
 
 If one of those is *your* use case, email us and say so — real demand is what moves something up the priority list.
 
 ## Before you suggest
 
-Read the [Story](../story/index.md) and [Future](index.md) pages first — most suggestions are already planned or decided. The best suggestions are things we haven't thought of yet.
+Read the [Story](../../story/index.md) and [Future](../index.md) pages first — most suggestions are already planned or decided. The best suggestions are things we haven't thought of yet.

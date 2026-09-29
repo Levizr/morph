@@ -74,7 +74,7 @@ win.focusNext() / win.focusPrev()
 |---|---|
 | Semantic, HTML-like JSX (the source of roles/names) | ✅ Shipped |
 | OpenGL renderer (custom-drawn — nothing exposed to the OS today) | ✅ Shipped — this is what must change |
-| Keyboard focus plumbing (partial — `TextInput` work covers caret & focus) | 🚧 Scaffold (see [Text Input](text-input.md)) |
+| Keyboard focus plumbing (partial — `TextInput` work covers caret & focus) | 🚧 Scaffold (see [Text Input](../elements/text-input.md)) |
 | OS accessibility bridge (UIA / NSAccessibility / AT-SPI) | ❌ Not built |
 | `aria-*` attribute parsing + accessible-tree IR | ❌ Not built |
 
@@ -89,7 +89,7 @@ win.focusNext() / win.focusPrev()
 1. Accessible-tree IR: `layout node → role/name/value/state` mapping in the compiler
 2. Focus model: Tab order, focus ring, keyboard activation — reusable by Text Input
 3. Windows UIA provider bridge
-4. macOS NSAccessibility bridge (platform ships — see [Platforms](shipped/platform.md); the bridge itself is the work)
+4. macOS NSAccessibility bridge (platform ships — see [Platforms](../shipped/platform.md); the bridge itself is the work)
 5. Linux AT-SPI bridge
 6. `aria-*` attribute parsing + `win.announce()` / live regions
 7. Validation app: a form with headings, buttons, a dialog and a toast — verified against a screen reader

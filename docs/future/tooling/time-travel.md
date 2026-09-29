@@ -1,6 +1,6 @@
 # Time-Travel Debugger — Rewind Your Whole App
 
-**Status:** future · **Priority:** medium · **Depends on:** [State/Events/Native](state-events-native-interop.md)
+**Status:** future · **Priority:** medium · **Depends on:** [State/Events/Native](../javascript/native-interop.md)
 
 > **Note:** This is a future plan, not a commitment. The syntax and API shown here are proposals — they can be completely different when actually implemented.
 

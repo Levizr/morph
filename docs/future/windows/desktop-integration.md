@@ -1,6 +1,6 @@
 # Desktop Integration — Hotkeys, Deep Links & OS Hooks
 
-**Status:** future · **Priority:** high · **Depends on:** [Window API](window-api.md), [Platforms](shipped/platform.md) (shipped)
+**Status:** future · **Priority:** high · **Depends on:** [Window API](api.md), [Platforms](../shipped/platform.md) (shipped)
 
 > **Note:** This is a future plan, not a commitment. The syntax and API shown here are proposals — they can be completely different when actually implemented.
 

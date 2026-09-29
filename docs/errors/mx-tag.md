@@ -56,7 +56,7 @@ If no supported tag matches what you need:
 - For fully custom rendering, create a
   [custom C++ node](../guides/custom-cpp-nodes.md).
 - For drawing canvases, watch the planned `viewport` element
-  ([roadmap](../future/viewport.md)) — do not invent a tag and hope.
+  ([roadmap](../future/windows/viewport.md)) — do not invent a tag and hope.
 
 Steps:
 

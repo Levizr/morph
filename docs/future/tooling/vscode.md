@@ -19,11 +19,11 @@ The developer-experience and ecosystem layer. Nothing here is a prerequisite for
 
 ## `morph-icons` (first-party package)
 
-Full design now lives at [Icons & SVG](icons-svg.md): `<svg>` path subset first, then the tree-shaken `morph-icons` set, then `morph icons:add` for project sets. This section keeps the package-angle summary — the icon set ships via `morph pkg install morph-icons` (see [Packages](packages.md)) once the bridge lands.
+Full design now lives at [Icons & SVG](../elements/icons-svg.md): `<svg>` path subset first, then the tree-shaken `morph-icons` set, then `morph icons:add` for project sets. This section keeps the package-angle summary — the icon set ships via `morph pkg install morph-icons` (see [Packages](packages.md)) once the bridge lands.
 
 ## `morph-animate` (animation library)
 
-Full design now lives at [Animations](animations.md): enter/exit transitions, springs, shared-element morphing, page-transition orchestration. `morph-animate` survives as the imperative escape hatch (`animate(el, { opacity: 0 }, { duration: 300 })`, timelines) for the 5% declarations can't express — same dependency on [Packages](packages.md).
+Full design now lives at [Animations](../css/animations.md): enter/exit transitions, springs, shared-element morphing, page-transition orchestration. `morph-animate` survives as the imperative escape hatch (`animate(el, { opacity: 0 }, { duration: 300 })`, timelines) for the 5% declarations can't express — same dependency on [Packages](packages.md).
 
 ## Why low priority
 

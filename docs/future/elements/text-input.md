@@ -4,7 +4,7 @@
 
 > **Note:** The core below is shipped, not a proposal — `InputNode` is a real text field. `select` / `textarea` and the `:focus` pseudo-class remain future.
 
-> **Shipped → main docs.** `<input>` behavior (caret, selection, undo/redo, clipboard, attributes) is documented for users in [Elements Overview](../elements/overview.md#input-attributes). This page keeps what remains.
+> **Shipped → main docs.** `<input>` behavior (caret, selection, undo/redo, clipboard, attributes) is documented for users in [Elements Overview](../../elements/overview.md#input-attributes). This page keeps what remains.
 
 Making `<input>` a real text field. Shipped: `InputNode` (`runtime/cpp/ui/input.h`, ~1000 lines) renders text via the FreeType pipeline with caret, selection, undo/redo, clipboard, and full keyboard editing — key events route to the focused node (`MorphNode::s_focusedNode`, `runtime/cpp/core/window.cpp`).
 

@@ -19,7 +19,7 @@ error : mx-js-method : Method `.toUpperCase()` is not implemented for this value
 
 String, array, and object operations in Morph lower to `morph::str` helpers
 and container methods on the native types. Coverage is broad but not total
-(see [translator coverage](../future/js-coverage.md)): exotic or highly
+(see [translator coverage](../future/javascript/coverage.md)): exotic or highly
 dynamic methods have no helper to call. Emitting a guessed equivalent would
 change string semantics silently — the worst kind of bug in UI text — so the
 call is rejected with the exact method named.

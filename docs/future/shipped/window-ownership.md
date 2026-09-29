@@ -1,7 +1,7 @@
 # Window ownership: `parent` + `modal` + `role`
 
 **Status:** shipped · **Priority:** high ·
-**Depends on:** [Window API](../window-api.md), [File-Based Windows](../file-routing.md)
+**Depends on:** [Window API](../windows/api.md), [File-Based Windows](../windows/routing.md)
 
 > **Shipped → main docs.** Ownership is implemented and documented for
 > users in [Windows & Routes](../../guides/windows-and-routing.md) (Ownership

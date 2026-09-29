@@ -302,6 +302,35 @@ static std::string keyEventName(int key, int scancode, int mods)
     {
         if (shift && n[0] >= 'a' && n[0] <= 'z' && n[1] == '\0')
             return std::string(1, (char)(n[0] - 'a' + 'A'));
+        // Shifted symbols likewise ("=" + Shift -> "+"). US layout —
+        // GLFW reports physical keys only, so browsers on other layouts
+        // may disagree; letters above are layout-independent.
+        if (shift && n[1] == '\0') {
+            switch (n[0]) {
+                case '1': return "!";
+                case '2': return "@";
+                case '3': return "#";
+                case '4': return "$";
+                case '5': return "%";
+                case '6': return "^";
+                case '7': return "&";
+                case '8': return "*";
+                case '9': return "(";
+                case '0': return ")";
+                case '-': return "_";
+                case '=': return "+";
+                case '[': return "{";
+                case ']': return "}";
+                case '\\': return "|";
+                case ';': return ":";
+                case '\'': return "\"";
+                case ',': return "<";
+                case '.': return ">";
+                case '/': return "?";
+                case '`': return "~";
+                default: break;
+            }
+        }
         return n;
     }
     switch (key) {
@@ -365,6 +394,32 @@ static std::string keyCodeName(int key)
         case GLFW_KEY_RIGHT_ALT: return "AltRight";
         case GLFW_KEY_LEFT_SUPER: return "MetaLeft";
         case GLFW_KEY_RIGHT_SUPER: return "MetaRight";
+        case GLFW_KEY_EQUAL: return "Equal";
+        case GLFW_KEY_MINUS: return "Minus";
+        case GLFW_KEY_SLASH: return "Slash";
+        case GLFW_KEY_PERIOD: return "Period";
+        case GLFW_KEY_COMMA: return "Comma";
+        case GLFW_KEY_LEFT_BRACKET: return "BracketLeft";
+        case GLFW_KEY_RIGHT_BRACKET: return "BracketRight";
+        case GLFW_KEY_SEMICOLON: return "Semicolon";
+        case GLFW_KEY_APOSTROPHE: return "Quote";
+        case GLFW_KEY_BACKSLASH: return "Backslash";
+        case GLFW_KEY_GRAVE_ACCENT: return "Backquote";
+        case GLFW_KEY_KP_0: return "Numpad0";
+        case GLFW_KEY_KP_1: return "Numpad1";
+        case GLFW_KEY_KP_2: return "Numpad2";
+        case GLFW_KEY_KP_3: return "Numpad3";
+        case GLFW_KEY_KP_4: return "Numpad4";
+        case GLFW_KEY_KP_5: return "Numpad5";
+        case GLFW_KEY_KP_6: return "Numpad6";
+        case GLFW_KEY_KP_7: return "Numpad7";
+        case GLFW_KEY_KP_8: return "Numpad8";
+        case GLFW_KEY_KP_9: return "Numpad9";
+        case GLFW_KEY_KP_ADD: return "NumpadAdd";
+        case GLFW_KEY_KP_SUBTRACT: return "NumpadSubtract";
+        case GLFW_KEY_KP_MULTIPLY: return "NumpadMultiply";
+        case GLFW_KEY_KP_DIVIDE: return "NumpadDivide";
+        case GLFW_KEY_KP_DECIMAL: return "NumpadDecimal";
         default: break;
     }
     return "";
@@ -408,7 +463,18 @@ void MorphWindow::KeyCb(GLFWwindow *win, int key, int scancode, int act, int mod
         if (MorphNode::s_focusedNode->onKeyEvent(e))
             return;
     }
-    self->m_root->dispatchEvent(e, (float)mx, (float)my);
+    MorphNode* keyHit = self->m_root->hitTest((float)mx, (float)my);
+    bool keyHandled = self->m_root->dispatchEvent(e, (float)mx, (float)my);
+    // ── Window-level key listeners (no bubbling) ────────────────────
+    // Key events the cursor dispatch did not handle fall through to the
+    // root (the <body> node), so a window-level onKeyDown/onKeyUp works
+    // wherever the pointer is. Skipped when the root already saw the
+    // event (cursor over empty body) to avoid double delivery.
+    if (!keyHandled
+        && (e.type == EventType::KeyDown || e.type == EventType::KeyUp)
+        && keyHit != self->m_root) {
+        self->m_root->onEvent(e);
+    }
 }
 
 void MorphWindow::CharCb(GLFWwindow *win, unsigned int codepoint)

@@ -39,4 +39,4 @@ Retention isn't free: one window's worth of pixels must persist to repaint parti
 
 ## What's Next
 
-The remaining phases turn forge into the production renderer: a content-keyed tile pool with LRU + budget, per-node retained layers for animated leaves, and scroll-shift tile reuse. See [Forge Renderer roadmap](../future/forge-renderer.md).
+The remaining phases turn forge into the production renderer: a content-keyed tile pool with LRU + budget, per-node retained layers for animated leaves, and scroll-shift tile reuse. See [Forge Renderer roadmap](../future/rendering/forge-tile-pool.md).

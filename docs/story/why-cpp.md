@@ -48,7 +48,7 @@ That number stuck with me. A lean utility ballooning to 7 MB felt wrong — and 
 
 **Fun fact: I still use SonicPro every single day.** It's how this PC plays sound — the audio goes over the network to whatever device I'm actually near. It works, it's fast, it's just… 7 MB of binary for what should be a 1 MB pipe. Every time I use it, I remember why Morph's runtime is C++.
 
-So: C++ first. Rust stays on the roadmap as a second runtime target for components that want it — see [Rust Support](../future/rust.md) — but the core runtime earns its keep in C++.
+So: C++ first. Rust stays on the roadmap as a second runtime target for components that want it — see [Rust Support](../future/javascript/rust.md) — but the core runtime earns its keep in C++.
 
 ## What this doesn't change
 
@@ -58,4 +58,4 @@ So: C++ first. Rust stays on the roadmap as a second runtime target for componen
 
 ## The future
 
-Rust remains planned as a second runtime target (`--lang rust`) with cross-language interop between C++ and Rust components — [Rust Support](../future/rust.md) explains how that works without changing how you write Morph.
+Rust remains planned as a second runtime target (`--lang rust`) with cross-language interop between C++ and Rust components — [Rust Support](../future/javascript/rust.md) explains how that works without changing how you write Morph.

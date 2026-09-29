@@ -1,6 +1,6 @@
 # Dynamic Styles & Classes (Runtime Path)
 
-**Status:** `future` · **Priority:** medium · **Shipped parts:** template-literal `className`, state-driven float/color/inline styles ([user docs](../guides/dynamic-styles.md), proven by `examples/dynamic`)
+**Status:** `future` · **Priority:** medium · **Shipped parts:** template-literal `className`, state-driven float/color/inline styles ([user docs](../../guides/dynamic-styles.md), proven by `examples/dynamic`)
 
 > State-driven `:style` values on **keyword (enum) fields** and fully-dynamic `:class` bindings. Everything else dynamic already resolves — this page tracks only the runtime path that remains. No performance emergency: see §3.
 
@@ -8,7 +8,7 @@
 
 ## 1. What Works Today (Shipped)
 
-- **Template-literal classes** (`` className={`header ${theme == "light" ? "bg-white" : "bg-gray-900"}} ``) — each branch becomes a reactive style effect ([user docs](../guides/dynamic-styles.md), `examples/dynamic`).
+- **Template-literal classes** (`` className={`header ${theme == "light" ? "bg-white" : "bg-gray-900"}} ``) — each branch becomes a reactive style effect ([user docs](../../guides/dynamic-styles.md), `examples/dynamic`).
 - **State-driven float/color/inline styles** (`style={{ width: bodyWidth, backgroundColor: accent }}`) — the `float`/`color` emitter arms handle any expression.
 - **Ternary classes** (`:class="cond ? 'a' : 'b'"`) resolve each branch to static styles at build time (`analyze_dynamic_class` in `morph-ir`). No runtime selector matching exists — in either flow.
 - **Static style values** (stylesheet rules, hover/active diffs, conditional-class branches) emit enum literals after Kill-Strings batches 1–2.
@@ -56,4 +56,4 @@ Dynamic classes cost nothing (compile-time resolved; the fully-dynamic form is a
 
 ---
 
-*Related: [Kill All Runtime Strings](shipped/kill-runtime-strings.md) · [C++ / JSX Interop Guide](../guides/native-cpp.md)*
+*Related: [Kill All Runtime Strings](../shipped/kill-runtime-strings.md) · [C++ / JSX Interop Guide](../../guides/native-cpp.md)*

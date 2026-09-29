@@ -2,7 +2,7 @@
 
 **Part of:** [Questions & Answers](index.md) · [The Story of Morph](../story/index.md)
 
-> **Scope note:** the API below is shipped and documented for users in [Windows & Routes](../guides/windows-and-routing.md) and [`Window` / `useWindow`](../api/windows.md). This page keeps the *reasoning* behind the decisions. Design source of truth for what remains: [File-Based Windows & Pages](../future/file-routing.md), [Window API](../future/window-api.md), [Multi-Window](../future/multi-window.md).
+> **Scope note:** the API below is shipped and documented for users in [Windows & Routes](../guides/windows-and-routing.md) and [`Window` / `useWindow`](../api/windows.md). This page keeps the *reasoning* behind the decisions. Design source of truth for what remains: [File-Based Windows & Pages](../future/windows/routing.md), [Window API](../future/windows/api.md), [Multi-Window](../future/windows/multi-window.md).
 
 ## How do I open two windows on the same route and control them independently?
 

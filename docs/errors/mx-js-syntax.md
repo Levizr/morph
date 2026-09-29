@@ -26,7 +26,7 @@ generators need resumable frames; `for...in/of` need iterators with JS
 enumeration semantics; spreads need reflective copies; getters need hidden
 call sites. Supporting any of them approximately would change program meaning
 — so each is rejected with its explicit rewrite. See
-[translator coverage](../future/js-coverage.md) for what is planned.
+[translator coverage](../future/javascript/coverage.md) for what is planned.
 
 ## Examples that trigger it
 

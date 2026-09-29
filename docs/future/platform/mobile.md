@@ -1,6 +1,6 @@
 # Mobile Support — Android & iOS
 
-**Status:** future · **Priority:** medium · **Depends on:** [Platforms](shipped/platform.md) (shipped), [Graphics APIs](graphics-api.md)
+**Status:** future · **Priority:** medium · **Depends on:** [Platforms](../shipped/platform.md) (shipped), [Graphics APIs](../rendering/graphics-apis.md)
 
 > **Note:** This is a future plan, not a commitment. The syntax and API shown here are proposals — they can be completely different when actually implemented.
 
@@ -10,13 +10,13 @@ Morph on phones: the same `.mx` codebase compiling to a real Android APK and iOS
 
 Morph was never made for a platform first. Not Linux, not Windows, not macOS — and not Android or iOS either. Morph was made for **developers**. For the person who wants to write the syntax they love, ship something blisteringly fast, and never think about the runtime in between. Developer experience and peak performance — that order, both non-negotiable. Platforms are just where the apps land.
 
-And look at what that philosophy already produced on desktop: fluid 60 fps apps compiled to **self-contained binaries as small as ~162 KB** — measured on the hello-size fixture, not a slide deck (see [Lean Binaries](lean-binary.md)). You write your favorite syntax — JSX, TypeScript, the event model and CSS you already know from the web — and out comes native code with no interpreter, no virtual machine, no 100-megabyte sidecar. Things other frameworks either can't give you at all, or can only give you with strings attached.
+And look at what that philosophy already produced on desktop: fluid 60 fps apps compiled to **self-contained binaries as small as ~162 KB** — measured on the hello-size fixture, not a slide deck (see [Lean Binaries](../tooling/lean-binaries.md)). You write your favorite syntax — JSX, TypeScript, the event model and CSS you already know from the web — and out comes native code with no interpreter, no virtual machine, no 100-megabyte sidecar. Things other frameworks either can't give you at all, or can only give you with strings attached.
 
 Because look at what the alternatives actually ship. React Native ships a full JavaScript engine *inside every app* — Hermes or JSC booting up, megabytes of runtime warming up, just so your buttons can render. Tauri and Capacitor hand rendering to the OS WebView — which can easily consume 100 MB+ of RAM just to show a hello world, because you're not shipping an app anymore, you're shipping a browser tab with commitment issues. A whole engine, or a whole browser, per app, on every user's device — all of it overhead nobody asked for, all of it justified in the name of developer experience. But here's the thing: if the DX costs every user 100 MB of RAM and every developer a second runtime to debug, *it isn't good DX*. It's a loan with the interest paid by someone else.
 
 Morph refused that loan on desktop. Same code you love writing, compiled straight to native — no engine, no WebView, no middleman taking a cut of your RAM and your startup time. And it worked. So now the honest question: **if the formula works on desktop, why not phones?** A phone is the same problem in a smaller box with a stricter landlord (the OS). The architecture doesn't change — signals are still signals, the layout engine still lays out, AOT still deletes the runtime. What's hard is the last mile: touch input, lifecycles the OS owns, store review gates. Hard, not impossible. Doable — especially with real apps pulling it forward.
 
-That's where you come in. If you're building something that needs phones — if the desktop app is done and the emails asking "Android when?" are piling up — tell us. Open an issue, send a suggestion, show us the app. Roadmap pages describe what *we* think; issues describe what *you* need, and need wins. See [Suggestions](suggestions.md) — one paragraph (what you're building, what's missing, what you tried) is enough to move this page from "planned" to "in progress."
+That's where you come in. If you're building something that needs phones — if the desktop app is done and the emails asking "Android when?" are piling up — tell us. Open an issue, send a suggestion, show us the app. Roadmap pages describe what *we* think; issues describe what *you* need, and need wins. See [Suggestions](../tooling/suggestions.md) — one paragraph (what you're building, what's missing, what you tried) is enough to move this page from "planned" to "in progress."
 
 ## Why phones at all? Isn't Morph a desktop framework?
 
@@ -228,7 +228,7 @@ Same files, a short contract:
 | Piece | State |
 |---|---|
 | Desktop Linux / Windows / macOS | ✅ Shipped |
-| GLES / Metal rendering backends | ❌ Planned ([Graphics APIs](graphics-api.md)) |
+| GLES / Metal rendering backends | ❌ Planned ([Graphics APIs](../rendering/graphics-apis.md)) |
 | Android `NativeActivity` shell | ❌ Not built |
 | iOS `UIViewController` shell | ❌ Not built |
 | Touch/gesture recognizer | ❌ Not built |
@@ -248,7 +248,7 @@ Same files, a short contract:
 
 ## Build steps (when picked up)
 
-1. GLES backend via [Graphics APIs](graphics-api.md) (Android unblocks here)
+1. GLES backend via [Graphics APIs](../rendering/graphics-apis.md) (Android unblocks here)
 2. Android shell: `NativeActivity` + surface lifecycle + NDK toolchain + arm64 CI job
 3. Touch/gesture recognizer + kinetic scroll + safe-area/keyboard layout inputs
 4. Back-stack navigation mapping (`Window` → screen stack, OS back button)

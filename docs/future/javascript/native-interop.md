@@ -374,7 +374,7 @@ Any native code using that `MID_*` constant will fail to compile — the constan
 
 ### Why `mid`? Is this really the best approach?
 
-This is the best design we've found given the constraints (zero runtime strings, no registry, no templates, unmount safety, human-readable identity, build-time resolution). If you have a better idea — a different identity model, a simpler DX, a way to handle per-instance native access without the trade-offs we've documented — **please tell us**. The project lives on GitHub; open an issue or PR at [Suggestions](suggestions.md) or email us at [suggestions.morph@levizr.com](mailto:suggestions.morph@levizr.com). Every design decision in this document is open to challenge — that's how it gets better.
+This is the best design we've found given the constraints (zero runtime strings, no registry, no templates, unmount safety, human-readable identity, build-time resolution). If you have a better idea — a different identity model, a simpler DX, a way to handle per-instance native access without the trade-offs we've documented — **please tell us**. The project lives on GitHub; open an issue or PR at [Suggestions](../tooling/suggestions.md) or email us at [suggestions.morph@levizr.com](mailto:suggestions.morph@levizr.com). Every design decision in this document is open to challenge — that's how it gets better.
 
 ### Can I use `mid` on a component rendered inside a `.map()`?
 
@@ -384,11 +384,11 @@ This is the best design we've found given the constraints (zero runtime strings,
 
 ## 11. Related Pages
 
-- [API Reference: morphState](../api/morphState.md) · [morphShared](../api/morphShared.md) · [morphEvent](../api/morphEvent.md) · [morphEffect](../api/morphEffect.md)
-- [FAQ: choosing API](../api/faq/choosing.md) · [FAQ: morphShared](../api/faq/morphShared.md) · [FAQ: morphEvent](../api/faq/morphEvent.md)
-- [Dev Internals: State & Events](../dev/state/state-events-internals.md) — compiler pipeline details
-- [C++ / JSX Interop Guide](../guides/native-cpp.md) — user-facing native.cpp guide
-- [Compiler & CLI](shipped/compiler.md) — Rust compiler shipped Sept 2026
+- [API Reference: morphState](../../api/morphState.md) · [morphShared](../../api/morphShared.md) · [morphEvent](../../api/morphEvent.md) · [morphEffect](../../api/morphEffect.md)
+- [FAQ: choosing API](../../api/faq/choosing.md) · [FAQ: morphShared](../../api/faq/morphShared.md) · [FAQ: morphEvent](../../api/faq/morphEvent.md)
+- [Dev Internals: State & Events](../../dev/state/state-events-internals.md) — compiler pipeline details
+- [C++ / JSX Interop Guide](../../guides/native-cpp.md) — user-facing native.cpp guide
+- [Compiler & CLI](../shipped/compiler.md) — Rust compiler shipped Sept 2026
 
 ---
 

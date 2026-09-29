@@ -120,7 +120,7 @@ If this split fits your app — or fights it — tell us:
 - Would `morphShared.global(...)` (or a similar scope hint) help, or does event + shared cover you?
 - What are you building that needs cross-window state?
 
-See [Suggestions](../future/suggestions.md) for how to reach us — one paragraph (what you're building, what's missing, what you tried) is enough. Real apps decide this API.
+See [Suggestions](../future/tooling/suggestions.md) for how to reach us — one paragraph (what you're building, what's missing, what you tried) is enough. Real apps decide this API.
 
 ```tsx
 // ✓ Same identity — imports from same module

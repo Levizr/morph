@@ -145,4 +145,4 @@ Supported formats: PNG, JPEG, WebP, GIF, BMP, TGA, PSD, HDR, PNM, PIC. Images ar
 - All elements are implemented as C++ classes in `runtime/cpp/ui/` and `runtime/cpp/widgets/`
 - `<button>` → `ButtonNode`, `<input>` → `InputNode`, `<img>` → `ImageNode`, `<div>`/`<span>`/`<body>` → `RectNode` + `TextNode`
 - Unsupported tags are caught by the linter (`mx-tag` error) with suggestions via string similarity
-- `<select>` and `<textarea>` render as containers but lack full editing behavior — tracked in [future/text-input](../future/text-input.md)
+- `<select>` and `<textarea>` render as containers but lack full editing behavior — tracked in [future/text-input](../future/elements/text-input.md)

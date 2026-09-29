@@ -51,7 +51,7 @@ The compositor currently interpolates a fixed set of properties at vsync: **X/Y 
 **Candidates:**
 
 - **Filter effects** — blur/grayscale/brightness as compositor-interpolated properties (needs the SDF shader stack to grow filter support)
-- **Scroll** — compositor-driven scroll offset (scroll-shift in the [Forge](forge-renderer.md) work is the first step)
+- **Scroll** — compositor-driven scroll offset (scroll-shift in the [Forge](forge-tile-pool.md) work is the first step)
 - **Transforms** — transform matrices are already applied in the vertex shader, so transform interpolation is close to free on the compositor
 
 **Why low priority:** compositor interpolation is a vsync-fidelity win, not a correctness fix — the main thread already animates everything correctly today.
@@ -68,7 +68,7 @@ Optimizations you can't see are optimizations nobody believes in. The full-suppo
 - **Frame-time strip** — per-frame ms with vsync markers; dropped frames glow accusingly
 - **Damage visualization** — Forge already computes damage rects; paint them on screen so over-invalidation is *visible* (the fastest way to find a widget that repaints the world on every keystroke)
 - **Signal ledger** — per-store subscriber counts + set() frequency; the store updated 400 times per second names itself
-- **Effect accounting** — effect run counts per frame; a cached page re-running on global traffic (see the page-cache cost note in [Windows & Routes](../guides/windows-and-routing.md#page-cache)) shows up here, not in a profiler you forgot to open
+- **Effect accounting** — effect run counts per frame; a cached page re-running on global traffic (see the page-cache cost note in [Windows & Routes](../../guides/windows-and-routing.md#page-cache)) shows up here, not in a profiler you forgot to open
 - **Layout heat** — nodes re-laid-out per frame, deep-tree re-layout highlighted; dirty-flag misses become obvious
 
 Toggle with a dev-only hotkey, zero code in release binaries (compiled out, not just hidden — your users' binaries stay lean).

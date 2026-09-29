@@ -1,14 +1,14 @@
 # File-Based Windows & Pages (`route.mx`)
 
-**Status:** future · **Priority:** high · **Depends on:** [Window API](window-api.md)
+**Status:** future · **Priority:** high · **Depends on:** [Window API](api.md)
 
 > **Note:** This is a future plan, not a commitment. The syntax and API shown here are proposals — they can be completely different when actually implemented.
 
-> **Decisions update (2026-09-20):** route ids intern to integers (**RID**, `app::routes::` consts — no runtime string lookup), duplicate-route lookup returns the **most-recently-focused** window, `navigate` is a **direct swap** (no history), and markup navigation uses **`<a href>`** (the `morph-*` actions never existed). C++ controls windows via `app::windows::*`. Mounting design (per-instance state) lives in [Route Mounts & Per-Instance State](route-mounts.md). See [Decisions — old vs new](#decisions--old-vs-new). The reasoning behind these calls is answered in detail in [Q: Windows?](../faq/q-windows.md).
+> **Decisions update (2026-09-20):** route ids intern to integers (**RID**, `app::routes::` consts — no runtime string lookup), duplicate-route lookup returns the **most-recently-focused** window, `navigate` is a **direct swap** (no history), and markup navigation uses **`<a href>`** (the `morph-*` actions never existed). C++ controls windows via `app::windows::*`. Mounting design (per-instance state) lives in [Route Mounts & Per-Instance State](route-mounts.md). See [Decisions — old vs new](#decisions--old-vs-new). The reasoning behind these calls is answered in detail in [Q: Windows?](../../faq/q-windows.md).
 
-> **Shipped → main docs.** The route convention, route files, `new Window`, `useWindow`, `navigate`, RID interning, the memory model, and the `windowConfig` fallback are implemented and documented for users in [Windows & Routes](../guides/windows-and-routing.md) and [`Window` / `useWindow`](../api/windows.md). This page keeps the design history, open questions, and what remains below.
+> **Shipped → main docs.** The route convention, route files, `new Window`, `useWindow`, `navigate`, RID interning, the memory model, and the `windowConfig` fallback are implemented and documented for users in [Windows & Routes](../../guides/windows-and-routing.md) and [`Window` / `useWindow`](../../api/windows.md). This page keeps the design history, open questions, and what remains below.
 
-A route file is **both a page and a window** — navigated to in place (`win.navigate("/auth/login")`) or opened separately (`new Window("/auth/login", …)`). Full user docs: [Windows & Routes](../guides/windows-and-routing.md).
+A route file is **both a page and a window** — navigated to in place (`win.navigate("/auth/login")`) or opened separately (`new Window("/auth/login", …)`). Full user docs: [Windows & Routes](../../guides/windows-and-routing.md).
 
 ## Shipped design (history)
 
@@ -16,7 +16,7 @@ The sections below shipped and moved to main docs — kept here as condensed des
 
 ## How it works (shipped)
 
-Manifest scan → RID lowering at codegen → mount factories → registry windows. User-facing behavior: [Windows & Routes](../guides/windows-and-routing.md). What remains here: the invariants every future change must preserve.
+Manifest scan → RID lowering at codegen → mount factories → registry windows. User-facing behavior: [Windows & Routes](../../guides/windows-and-routing.md). What remains here: the invariants every future change must preserve.
 
 ### Runtime bridge requirements
 

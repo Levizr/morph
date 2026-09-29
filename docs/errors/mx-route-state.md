@@ -76,4 +76,4 @@ Do not disable this rule. A context-free helper cannot reach mount state.
 
 - [mx-route-no-export](mx-route-no-export.md) — route file without default export
 - [mx-state-scope](mx-state-scope.md) — `morphState` outside a component
-- [Route mounts (design)](../future/route-mounts.md) — per-mount contexts and what remains
+- [Route mounts (design)](../future/windows/route-mounts.md) — per-mount contexts and what remains

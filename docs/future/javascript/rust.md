@@ -62,7 +62,7 @@ src/App.mx ──► MorphParser ──► JSXWalker ──► IRBuilder ──�
 | `morph::net::fetch` on a worker thread | HTTP on a worker thread (std `TcpStream` or `reqwest`) |
 | `JsValue` variant + `JsNumber`/`JsString`/`JsArray`/`JsObject` | A `JsValue` enum with the same JS semantics (truthiness, `==`, coercion) |
 | FreeType + HarfBuzz text | `freetype` / `harfbuzz-rs` crates (or FFI to the same system libs) |
-| OpenGL 3.3 renderer | `glow` today — or `wgpu`, which wraps Vulkan/Metal/D3D12/GL in one crate (see [Graphics APIs](graphics-api.md)) |
+| OpenGL 3.3 renderer | `glow` today — or `wgpu`, which wraps Vulkan/Metal/D3D12/GL in one crate (see [Graphics APIs](../rendering/graphics-apis.md)) |
 | Feature gates + linker GC | Rust's dead-code elimination (already excellent) |
 
 Design goal: **pixel-identical output** between the C++ and Rust runtimes — same layout math, same shaders, same event semantics — so apps behave identically regardless of `--lang`.
@@ -126,7 +126,7 @@ The `TSToCppTranslator` gets a sibling translator. Type mapping:
 
 `morph translate file.ts --lang rust` emits `.rs`. The existing `morph check` diagnostics apply unchanged — they audit the JS surface, not the backend.
 
-> **Related:** the toolchain is already in Rust (Oxc parsing, native CLI, Python removed) — see [Rust Compiler](shipped/compiler.md).
+> **Related:** the toolchain is already in Rust (Oxc parsing, native CLI, Python removed) — see [Rust Compiler](../shipped/compiler.md).
 
 ## What stays identical for users
 

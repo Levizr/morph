@@ -2,7 +2,7 @@
 
 **Status:** `complete` · **Priority:** high · **Shipped parts:** batches 1–3 (all)
 
-> Every `std::string` compare, lookup, and allocation on a hot path — layout, paint, text, events, property access — replaced with integers, enums, or hashes. Strings survive only where they belong: build-time parsing, debug printing, and genuinely freeform values (font names, custom text). Companion to [State, Events & Native C++ Interop](../state-events-native-interop.md) and [Universal Module Bindings](../universal-module-bindings.md), which killed string *identity*; this page kills string *comparison*.
+> Every `std::string` compare, lookup, and allocation on a hot path — layout, paint, text, events, property access — replaced with integers, enums, or hashes. Strings survive only where they belong: build-time parsing, debug printing, and genuinely freeform values (font names, custom text). Companion to [State, Events & Native C++ Interop](../javascript/native-interop.md) and [Universal Module Bindings](../javascript/module-bindings.md), which killed string *identity*; this page kills string *comparison*.
 
 ---
 
@@ -177,4 +177,4 @@ Each batch: `cargo test --workspace`, fixture rebuilds, `--morph-self-test`, `ru
 
 ---
 
-*Related: [State, Events & Native C++ Interop](../state-events-native-interop.md) · [Universal Module Bindings](../universal-module-bindings.md) · [C++ / JSX Interop Guide](../../guides/native-cpp.md)*
+*Related: [State, Events & Native C++ Interop](../javascript/native-interop.md) · [Universal Module Bindings](../javascript/module-bindings.md) · [C++ / JSX Interop Guide](../../guides/native-cpp.md)*

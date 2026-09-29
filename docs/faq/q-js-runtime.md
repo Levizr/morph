@@ -20,4 +20,4 @@ for (auto& x : items) { doubled.push_back(x * 2); }
 
 The practical result: your component logic runs at the speed of compiled C++. Property access, loops, arithmetic, function calls — all direct machine instructions, not interpreted dispatch. That's the performance story behind "your logic is native code."
 
-This only works because the compiler covers the TypeScript/JavaScript you actually write. That's why [TS→C++ Translator Coverage](../future/js-coverage.md) is a priority — every language feature the translator covers is one more thing you can use and still get native speed.
+This only works because the compiler covers the TypeScript/JavaScript you actually write. That's why [TS→C++ Translator Coverage](../future/javascript/coverage.md) is a priority — every language feature the translator covers is one more thing you can use and still get native speed.

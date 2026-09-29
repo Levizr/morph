@@ -1,6 +1,6 @@
 # Virtualized Lists — 100k Rows Without Rendering 100k Rows
 
-**Status:** future · **Priority:** medium · **Depends on:** [Forge Renderer](forge-renderer.md) (scroll-shift), [Performance](performance.md) (layout cost)
+**Status:** future · **Priority:** medium · **Depends on:** [Forge Renderer](forge-tile-pool.md) (scroll-shift), [Performance](performance.md) (layout cost)
 
 > **Note:** This is a future plan, not a commitment. The syntax and API shown here are proposals — they can be completely different when actually implemented.
 

@@ -1,6 +1,6 @@
 # Full Node.js Support
 
-**Status:** future · **Priority:** medium · **Depends on:** [JS Coverage](js-coverage.md)
+**Status:** future · **Priority:** medium · **Depends on:** [JS Coverage](coverage.md)
 
 > **Note:** This is a future plan, not a commitment. The syntax and API shown here are proposals — they can be completely different when actually implemented.
 
@@ -8,7 +8,7 @@ The idea in one line: **anything that runs on Node.js should run on Morph** — 
 
 ## Where this idea comes from
 
-The everyday JS surface already compiles well — variables, functions, classes, arrays, strings, `fetch`, timers, promises, `async`/`await` all lower to native code today (see [JS Coverage](js-coverage.md) for the running catalog). That baseline working so well raised an obvious question: if UI logic compiles cleanly, why should server-style code be any different?
+The everyday JS surface already compiles well — variables, functions, classes, arrays, strings, `fetch`, timers, promises, `async`/`await` all lower to native code today (see [JS Coverage](coverage.md) for the running catalog). That baseline working so well raised an obvious question: if UI logic compiles cleanly, why should server-style code be any different?
 
 Reading through the Node.js docs, the answer started looking encouraging rather than crazy. Node's built-in surface (`node:fs`, `node:path`, `node:http`, ...) is a finite, documented API list — and each entry maps to a C++ equivalent the same way `fetch` and `setTimeout` already do. So this stopped looking impossible and started looking like a (large, honest) list of modules to implement, one at a time, behind the morpher we already have.
 
@@ -55,7 +55,7 @@ import { format } from "date-fns";
 format(new Date(), "'Today is a' eeee");
 ```
 
-Packages resolve the normal way and get compiled at build time through morpher — the [Package Build Bridge](packages.md) mechanism, pointed at the npm registry instead of a Morph-only registry. Pure-JS packages just work; packages with native addons (node-gyp, prebuilt `.node` binaries) don't — the same boundary every non-Node runtime draws.
+Packages resolve the normal way and get compiled at build time through morpher — the [Package Build Bridge](../tooling/packages.md) mechanism, pointed at the npm registry instead of a Morph-only registry. Pure-JS packages just work; packages with native addons (node-gyp, prebuilt `.node` binaries) don't — the same boundary every non-Node runtime draws.
 
 ### Entire servers, compiled to native C++
 
@@ -95,10 +95,10 @@ What this means in practice:
 
 | Piece | State |
 |---|---|
-| Everyday JS → C++ (the foundation) | ✅ Shipped and expanding ([JS Coverage](js-coverage.md)) |
+| Everyday JS → C++ (the foundation) | ✅ Shipped and expanding ([JS Coverage](coverage.md)) |
 | Async core (`fetch`, timers, promises → coroutines) | ✅ Shipped |
 | `morph/*` + `node:*` module surface | ❌ Not started |
-| npm resolution at build time | ❌ Not started (the bridge itself is unbuilt — see [Packages](packages.md)) |
+| npm resolution at build time | ❌ Not started (the bridge itself is unbuilt — see [Packages](../tooling/packages.md)) |
 | Server-style loop semantics (sockets, listen/accept, long-lived loop) | ⚠️ Scheduler exists; server I/O unproven |
 
 ## Open questions
