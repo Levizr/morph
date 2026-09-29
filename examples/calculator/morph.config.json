@@ -3,7 +3,7 @@
   "entry": "src/App.mx",
 
   "window": {
-    "width": 340,
+    "width": 360,
     "height": 560,
     "title": "Calculator"
   },

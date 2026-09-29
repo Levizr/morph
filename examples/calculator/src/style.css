@@ -1,64 +1,70 @@
 body {
   background-color: #0d0f14;
+  margin: 0;
 }
 
 .app {
   display: flex;
   flex-direction: column;
-  padding: 18px;
+  height: 100%;
+  padding: 20px;
   box-sizing: border-box;
   background-color: #0d0f14;
 }
 
-/* ── Display ── */
+/* ── Display (fixed height: keypad never moves) ── */
 .display {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   justify-content: flex-end;
-  padding: 10px 6px 22px;
-  flex-grow: 1;
+  padding: 8px 6px 12px;
+  height: 162px;
+  flex-shrink: 0;
+  box-sizing: border-box;
 }
 
 .expr {
-  margin-top: 50px;
-  font-size: 50px;
+  font-size: 19px;
   color: #5f6b85;
-  min-height: 20px;
-  margin-bottom: 8px;
+  height: 26px;
+  overflow: hidden;
+  margin-bottom: 6px;
   letter-spacing: 1px;
 }
 
 .value {
-  margin-top: 50px;
   font-size: 56px;
   font-weight: bold;
   color: #f2f4fa;
   max-width: 100%;
+  line-height: 1.1;
 }
 
-/* ── Keypad ── */
+/* ── Keypad (fixed widths: even columns, no shift) ── */
 .keys {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
 .row {
   display: flex;
   flex-direction: row;
-  gap: 10px;
+  gap: 12px;
 }
 
 .key {
-  flex-grow: 1;
+  width: 71px;
+  flex-shrink: 0;
   height: 62px;
-  border-radius: 18px;
-  font-size: 22px;
+  border-radius: 20px;
+  font-size: 23px;
   font-weight: 600;
   color: #f2e6e6;
   background-color: #1b2130;
   border: 1px solid #232b3d;
+  box-sizing: border-box;
   cursor: pointer;
   transition: all 0.12s ease;
   text-align: center;
@@ -76,14 +82,14 @@ body {
 }
 
 .key.zero {
-  flex-grow: 2;
+  width: 154px;
 }
 
 /* Function keys (AC, +/-, %) */
 .key.fn {
   color: #aab6c9;
   background-color: #141a26;
-  font-size: 18px;
+  font-size: 19px;
 }
 
 .key.fn:hover {
@@ -95,7 +101,7 @@ body {
   color: #ffb45c;
   background-color: #2a210f;
   border-color: #3a2c16;
-  font-size: 26px;
+  font-size: 27px;
 }
 
 .key.op:hover {
@@ -111,7 +117,7 @@ body {
   color: #1d1a4a;
   background-color: #6d7cff;
   border-color: #7b89ff;
-  font-size: 26px;
+  font-size: 27px;
 }
 
 .key.eq:hover {

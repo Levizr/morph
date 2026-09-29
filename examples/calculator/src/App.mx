@@ -4,12 +4,12 @@ import "style.css"
 
 export const windowConfig = {
   title: "Calculator",
-  width: 340,
-  height: 500,
-  minWidth: 340,
-  minHeight: 500,
-  maxWidth: 340,
-  maxHeight: 500,
+  width: 360,
+  height: 560,
+  minWidth: 360,
+  minHeight: 560,
+  maxWidth: 360,
+  maxHeight: 560,
 }
 
 // opcodes: 0 none, 1 +, 2 -, 3 x, 4 /
@@ -29,8 +29,14 @@ export default function App() {
   const [fresh, setFresh] = morphState(1);
   const [dot, setDot] = morphState(0);
   const [dp, setDp] = morphState(0.1);
+  // Last completed expression, shown on top after "=" (e.g. 5 + 3 =).
+  const [histA, setHistA] = morphState(0.0);
+  const [histOp, setHistOp] = morphState("");
+  const [histB, setHistB] = morphState(0.0);
+  const [done, setDone] = morphState(0);
 
   function pressDigit(d:double):void {
+    setDone(0);
     if (fresh === 1) {
       setCur(d);
       setFresh(0);
@@ -45,6 +51,7 @@ export default function App() {
   }
 
   function pressDot():void {
+    setDone(0);
     if (dot === 0) {
       if (fresh === 1) {
         setCur(0.0);
@@ -57,6 +64,7 @@ export default function App() {
 
   function pressOp(k:int):void {
     setAcc(compute(acc, cur, op));
+    setDone(0);
     setOp(k);
     setOpSym(k === 1 ? "+" : (k === 2 ? "-" : (k === 3 ? "x" : "/")));
     setFresh(1);
@@ -65,10 +73,18 @@ export default function App() {
   }
 
   function pressEquals():void {
-    setCur(compute(acc, cur, op));
-    setAcc(0);
-    setOp(0);
-    setOpSym("");
+    if (op !== 0) {
+      setHistA(acc);
+      setHistOp(opSym);
+      setHistB(cur);
+      setCur(compute(acc, cur, op));
+      setAcc(0);
+      setOp(0);
+      setOpSym("");
+      setDone(1);
+    } else {
+      setDone(0);
+    }
     setFresh(1);
     setDot(0);
     setDp(0.1);
@@ -79,6 +95,10 @@ export default function App() {
     setAcc(0.0);
     setOp(0);
     setOpSym("");
+    setHistA(0.0);
+    setHistOp("");
+    setHistB(0.0);
+    setDone(0);
     setFresh(1);
     setDot(0);
     setDp(0.1);
@@ -96,7 +116,7 @@ export default function App() {
     <body>
       <div className="app" id="app">
         <div className="display" id="display">
-          <div className="expr" id="expr">{op !== 0 && <span>{acc} {opSym}</span>}</div>
+          <div className="expr" id="expr">{op !== 0 && <span>{acc}{" "}{opSym}</span>}{done === 1 && <span>{histA}{" "}{histOp}{" "}{histB}{" "}=</span>}</div>
           <div className="value" id="value">{cur}</div>
         </div>
 

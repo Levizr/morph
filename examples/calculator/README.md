@@ -1,5 +1,7 @@
 # Calculator
 
+![Calculator screenshot](screenshot.png)
+
 A fully functional calculator built with Morph. Demonstrates reactive state, conditional JSX rendering, typed functions, and flexbox keypad layout.
 
 ## What it shows

@@ -172,6 +172,8 @@ cd examples/calculator
 morph dev
 ```
 
+<img src="examples/calculator/screenshot.png" alt="Calculator example" width="240">
+
 ---
 
 ## How it works
