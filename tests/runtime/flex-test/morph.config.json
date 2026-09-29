@@ -3,7 +3,7 @@
   "entry": "src/App.mx",
   "window": {
     "width": 400,
-    "height": 650,
+    "height": 930,
     "title": "Flex Test"
   },
   "dependencies": {},

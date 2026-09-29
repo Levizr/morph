@@ -3,8 +3,8 @@
      exactly (same classes, sizes, colors, no margins) so anyone can verify
      Morph's layout against Chrome/Firefox pixel-for-pixel:
        1. google-chrome --headless --disable-gpu --no-sandbox \
-            --window-size=400,650 --screenshot=chrome.png ref.html
-       2. Build + run this fixture, screenshot the 400x650 window
+            --window-size=400,930 --screenshot=chrome.png ref.html
+       2. Build + run this fixture, screenshot the 400x930 window
             (e.g. `import -window <id> morph.png` on :0).
        3. Compare the two images: box order, packing side and line
             stacking must match (ignore text rendering — boxes have no
@@ -16,7 +16,11 @@
        wraprev (wrap-reverse):           line 1 at bottom.
        eq      (flex:1 + fixed):         red/green equal, yellow 50px.
        pxbasis (flex-basis:100px):       red/green 100px each.
-       pct     (flex-basis:50%):         red/green 150px each. -->
+       pct     (flex-basis:50%):         red/green 150px each.
+       selfrow (align-self overrides):    red top, green center, blue
+                                          bottom, yellow stretched.
+       selfcol (column + align-self):     red/blue centered, green
+                                          stretched full width. -->
 <html><head><meta charset="utf-8"><style>
   * { margin: 0; padding: 0; box-sizing: content-box; }
   body { background: #ffffff; }
@@ -55,6 +59,21 @@
     width: 300px; height: 50px; background: #333333;
   }
   .pb { flex-basis: 50%; flex-grow: 0; flex-shrink: 0; height: 40px; }
+  .selfrow {
+    display: flex; align-items: flex-start;
+    width: 300px; height: 120px; background: #111111;
+  }
+  .rbox { width: 50px; height: 40px; flex-shrink: 0; }
+  .rboxs { width: 50px; flex-shrink: 0; align-self: stretch; }
+  .asc { align-self: center; }
+  .ase { align-self: flex-end; }
+  .ass { align-self: stretch; }
+  .selfcol {
+    display: flex; flex-direction: column; align-items: center;
+    width: 200px; height: 160px; background: #222222;
+  }
+  .cbox { width: 60px; height: 30px; flex-shrink: 0; }
+  .cboxs { height: 30px; flex-shrink: 0; align-self: stretch; }
 </style></head><body>
   <div class="rowrev"><div class="box a"></div><div class="box b"></div><div class="box c"></div></div>
   <div class="colrev"><div class="box a"></div><div class="box b"></div></div>
@@ -63,4 +82,6 @@
   <div class="eq"><div class="grow a"></div><div class="grow b"></div><div class="fix"></div></div>
   <div class="pxbasis"><div class="sb a"></div><div class="sb b"></div></div>
   <div class="pct"><div class="pb a"></div><div class="pb b"></div></div>
+  <div class="selfrow"><div class="rbox a"></div><div class="rbox b asc"></div><div class="rbox c2 ase"></div><div class="rboxs d ass"></div></div>
+  <div class="selfcol"><div class="cbox a"></div><div class="cboxs b"></div><div class="cbox c2"></div></div>
 </body></html>
