@@ -1,0 +1,31 @@
+import "style.css"
+
+export const windowConfig = { title: "Flex Test", width: 400, height: 500 }
+
+export default function App() {
+  return (
+    <body>
+      <div className="rowrev" id="rowrev">
+        <div className="box a" id="a"></div>
+        <div className="box b" id="b"></div>
+        <div className="box c" id="c"></div>
+      </div>
+      <div className="colrev" id="colrev">
+        <div className="box a" id="d"></div>
+        <div className="box b" id="e"></div>
+      </div>
+      <div className="wrap" id="wrap">
+        <div className="box a" id="f"></div>
+        <div className="box b" id="g"></div>
+        <div className="box c" id="h"></div>
+        <div className="box d" id="i"></div>
+      </div>
+      <div className="wraprev" id="wraprev">
+        <div className="box a" id="j"></div>
+        <div className="box b" id="k"></div>
+        <div className="box c" id="l"></div>
+        <div className="box d" id="m"></div>
+      </div>
+    </body>
+  )
+}

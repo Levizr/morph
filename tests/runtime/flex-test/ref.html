@@ -1,0 +1,44 @@
+<!doctype html>
+<!-- Browser reference for this fixture. Geometry mirrors src/style.css
+     exactly (same classes, sizes, colors, no margins) so anyone can verify
+     Morph's layout against Chrome/Firefox pixel-for-pixel:
+       1. google-chrome --headless --disable-gpu --no-sandbox \
+            --window-size=400,500 --screenshot=chrome.png ref.html
+       2. Build + run this fixture, screenshot the 400x500 window
+            (e.g. `import -window <id> morph.png` on :0).
+       3. Compare the two images: box order, packing side and line
+            stacking must match (ignore text rendering — boxes have no
+            text on purpose).
+     Expected (see README.md):
+       rowrev  (row-reverse):            red rightmost, packed right.
+       colrev  (column-reverse):         first box at bottom.
+       wrap    (wrap):                   line 1 on top.
+       wraprev (wrap-reverse):           line 1 at bottom. -->
+<html><head><meta charset="utf-8"><style>
+  * { margin: 0; padding: 0; box-sizing: content-box; }
+  body { background: #ffffff; }
+  .rowrev {
+    display: flex; flex-direction: row-reverse; justify-content: flex-start;
+    width: 300px; height: 60px; background: #111111;
+  }
+  .colrev {
+    display: flex; flex-direction: column-reverse; justify-content: flex-start;
+    width: 200px; height: 150px; background: #222222;
+  }
+  .wrap {
+    display: flex; flex-wrap: wrap; justify-content: flex-start;
+    width: 130px; height: 110px; background: #333333;
+  }
+  .wraprev {
+    display: flex; flex-wrap: wrap-reverse; justify-content: flex-start;
+    width: 130px; height: 110px; background: #444444;
+  }
+  .box { width: 50px; height: 40px; flex-shrink: 0; }
+  .a { background: #ff0000; } .b { background: #00ff00; }
+  .c { background: #0000ff; } .d { background: #ffff00; }
+</style></head><body>
+  <div class="rowrev"><div class="box a"></div><div class="box b"></div><div class="box c"></div></div>
+  <div class="colrev"><div class="box a"></div><div class="box b"></div></div>
+  <div class="wrap"><div class="box a"></div><div class="box b"></div><div class="box c"></div><div class="box d"></div></div>
+  <div class="wraprev"><div class="box a"></div><div class="box b"></div><div class="box c"></div><div class="box d"></div></div>
+</body></html>

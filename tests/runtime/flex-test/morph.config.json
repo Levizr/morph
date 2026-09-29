@@ -1,0 +1,24 @@
+{
+  "name": "flex-test",
+  "entry": "src/App.mx",
+  "window": {
+    "width": 400,
+    "height": 500,
+    "title": "Flex Test"
+  },
+  "dependencies": {},
+  "cpp_sources": [],
+  "native": {
+    "include_dirs": [],
+    "library_dirs": [],
+    "libraries": [],
+    "cflags": ["-O3"],
+    "ldflags": []
+  },
+  "build": {
+    "wayland": false,
+    "system_freetype": false,
+    "upx": false,
+    "upx_version": ""
+  }
+}
