@@ -69,7 +69,8 @@ Plans are grouped by area. Each group is a folder under `docs/future/` and a sec
 | Feature | Page | Priority | Depends on |
 |---|---|---|---|
 | VSCode extension, `morph-icons`, `morph-animate` | [Tooling](tooling/vscode.md) | Low | — |
-| Package JS→C++ build bridge | [Packages](tooling/packages.md) | Medium | — |
+| **Package ecosystem** (one dependency: components, native C++, compiler plugins, registry) | [Package Ecosystem](tooling/package-ecosystem.md) | High | Packages |
+| Package JS→C++ build bridge | [Packages](tooling/packages.md) | Medium | Package Ecosystem |
 | Morph lean binaries — 150KB budget | [Lean Binaries](tooling/lean-binaries.md) | Medium | — |
 | Time-travel debugger (multi-window record/replay) | [Time-Travel](tooling/time-travel.md) | Medium | State/Events/Native |
 | `morph test` headless E2E runner | [Test Runner](tooling/test-runner.md) | Medium | Time-Travel |

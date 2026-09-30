@@ -2729,6 +2729,26 @@
         "changefreq": "monthly"
       },
       {
+        "title": "Package Ecosystem — One Dependency, the Whole Machine (Planned)",
+        "sidebarTitle": "Package Ecosystem",
+        "slug": "future/tooling/package-ecosystem",
+        "file": "future/tooling/package-ecosystem",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "Morph's planned package ecosystem: one dependency line for components, native C++, custom nodes, and compiler plugins — registry, versioning, and DCE.",
+        "keywords": [
+          "morph package ecosystem",
+          "morph plugins",
+          "morph compiler plugin",
+          "morph registry",
+          "morph custom nodes"
+        ],
+        "lastUpdated": "2026-09-30",
+        "publishedAt": "2026-09-30",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
         "title": "Morph VSCode Extension & Ecosystem (Planned)",
         "sidebarTitle": "VSCode Extension",
         "slug": "future/tooling/vscode",

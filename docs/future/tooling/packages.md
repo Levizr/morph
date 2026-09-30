@@ -2,6 +2,11 @@
 
 **Status:** future · **Priority:** medium
 
+> **Note:** This page is the build-bridge sub-plan. The overarching
+> architecture — manifest, registry, compiler plugins, versioning,
+> ecosystem comparisons — lives in [Package
+> Ecosystem](package-ecosystem.md). Read that first.
+
 > **Note:** This is a future plan, not a commitment. The syntax and API shown here are proposals — they can be completely different when actually implemented.
 
 Making `morph pkg` packages actually compile into your binary. The package CLI works — `morph pkg add/remove/install/list/search` — but packages are **downloaded, not compiled**. Full spec: `help/package_authoring.md`.
