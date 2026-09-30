@@ -97,10 +97,6 @@ void MorphNode::updateAnimations(float dt) {
 static void applyStyleDelta(MorphStyle& target, const MorphStyle& delta) {
     if (delta.bgColor[0] != 0.0f || delta.bgColor[1] != 0.0f || delta.bgColor[2] != 0.0f || delta.bgColor[3] != 0.0f)
         memcpy(target.bgColor, delta.bgColor, sizeof(float)*4);
-#ifdef MORPH_FEATURE_GRADIENT
-    if (delta.bgGradient.enabled)
-        target.bgGradient = delta.bgGradient;
-#endif
     if (delta.color[0] != 0.0f || delta.color[1] != 0.0f || delta.color[2] != 0.0f || delta.color[3] != 1.0f)
         memcpy(target.color, delta.color, sizeof(float)*4);
     if (delta.borderRadius != 0.0f) target.borderRadius = delta.borderRadius;
@@ -204,10 +200,6 @@ static void buildReleaseStyle(MorphStyle& target, const MorphStyle& current,
     };
     if (arrDiff(pressStyle.bgColor, preState.bgColor) && arrSame(current.bgColor, pressStyle.bgColor))
         memcpy(target.bgColor, preState.bgColor, sizeof(float) * 4);
-#ifdef MORPH_FEATURE_GRADIENT
-    if (!morph::gradientsEqual(pressStyle.bgGradient, preState.bgGradient) && morph::gradientsEqual(current.bgGradient, pressStyle.bgGradient))
-        target.bgGradient = preState.bgGradient;
-#endif
     if (arrDiff(pressStyle.color, preState.color) && arrSame(current.color, pressStyle.color))
         memcpy(target.color, preState.color, sizeof(float) * 4);
     if (arrDiff(pressStyle.padding, preState.padding) && arrSame(current.padding, pressStyle.padding))
@@ -538,10 +530,6 @@ void MorphNode::interpolateStyles(MorphStyle& out, const MorphStyle& a,
     }
     out.borderRadius = a.borderRadius + (b.borderRadius - a.borderRadius) * t;
     out.fontSize = a.fontSize + (b.fontSize - a.fontSize) * t;
-
-#ifdef MORPH_FEATURE_GRADIENT
-    morph::lerpGradient(out.bgGradient, a.bgGradient, b.bgGradient, t);
-#endif
 
     auto lerpIfSet = [t](float av, float bv) {
         return (av >= 0.0f && bv >= 0.0f) ? av + (bv - av) * t : bv;
