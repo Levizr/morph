@@ -1,11 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use crate::gradient::IRGradient;
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct IRStyle {
     pub bg_color: [f32; 4],
-    pub bg_gradient: Option<IRGradient>,
     pub color: [f32; 4],
     pub width: Option<f32>,
     pub min_width: Option<f32>,
@@ -94,7 +91,6 @@ impl IRStyle {
     #[allow(clippy::float_cmp)]
     pub fn is_empty_style(&self) -> bool {
         self.bg_color == [0.0, 0.0, 0.0, 0.0]
-            && self.bg_gradient.is_none()
             && self.color == [0.0, 0.0, 0.0, 1.0]
             && self.border_color == [0.0, 0.0, 0.0, 1.0]
             && self.border_width == 0.0

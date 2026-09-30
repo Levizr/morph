@@ -49,7 +49,6 @@ pub static KNOWN_PROPERTIES: &[&str] = &[
     "color",
     "background-color",
     "background",
-    "background-image",
     "font-size",
     "font-weight",
     "font-family",

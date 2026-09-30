@@ -9,7 +9,6 @@ use std::collections::{HashMap, HashSet};
 
 use serde_json::{Map, Value};
 
-use crate::gradient::{GradientAxis, GradientPosition, IRGradient};
 use crate::transforms::{LengthComp, LengthUnit, TransformOp};
 use crate::{IRAnimation, IRKeyframe, IRNode, IRStyle, IRWindow};
 
@@ -162,10 +161,6 @@ impl IRSerializer {
     fn style(s: &IRStyle) -> Value {
         let mut out = Map::new();
         out.insert("bg_color".to_string(), floats(&s.bg_color));
-        out.insert(
-            "bg_gradient".to_string(),
-            s.bg_gradient.as_ref().map_or(Value::Null, Self::gradient),
-        );
         out.insert("color".to_string(), floats(&s.color));
         out.insert("width".to_string(), opt_num(s.width));
         out.insert("min_width".to_string(), opt_num(s.min_width));
@@ -234,50 +229,6 @@ impl IRSerializer {
                     Value::Array(vec![num(y), Value::from(y_pct)]),
                 ])
             }),
-        );
-        Value::Object(out)
-    }
-
-    /// Serialize a background gradient for the dev socket.
-    fn gradient(g: &IRGradient) -> Value {
-        let mut out = Map::new();
-        out.insert("repeating".to_string(), Value::from(g.repeating));
-        match g.axis {
-            GradientAxis::Bottom => {
-                out.insert("angle".to_string(), num(180.0));
-            }
-            GradientAxis::Angle(d) => {
-                out.insert("angle".to_string(), num(d));
-            }
-            GradientAxis::Corner(x, y) => {
-                out.insert("angle".to_string(), Value::Null);
-                out.insert("corner".to_string(), Value::Array(vec![num(x), num(y)]));
-            }
-        }
-        out.insert(
-            "stops".to_string(),
-            Value::Array(
-                g.stops
-                    .iter()
-                    .map(|s| {
-                        let mut m = Map::new();
-                        m.insert("color".to_string(), floats(&s.color));
-                        m.insert(
-                            "position".to_string(),
-                            s.position.map_or(Value::Null, |p| match p {
-                                GradientPosition::Percent(v) => {
-                                    Value::Array(vec![Value::String("percent".to_string()), num(v)])
-                                }
-                                GradientPosition::Px(v) => {
-                                    Value::Array(vec![Value::String("px".to_string()), num(v)])
-                                }
-                            }),
-                        );
-                        m.insert("hint".to_string(), s.hint.map_or(Value::Null, num));
-                        Value::Object(m)
-                    })
-                    .collect(),
-            ),
         );
         Value::Object(out)
     }

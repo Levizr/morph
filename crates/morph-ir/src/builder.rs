@@ -2900,14 +2900,6 @@ impl IRBuilder {
                     if !is_animatable(prop) {
                         continue;
                     }
-                    // Gradient backgrounds ride the css-string path (like
-                    // transforms): the runtime parses and interpolates them.
-                    if (prop == "background" || prop == "background-image")
-                        && val.contains("gradient(")
-                    {
-                        raw.insert("background-image".to_string(), val.clone());
-                        continue;
-                    }
                     if prop == "transform" || needs_layout(val) {
                         raw.insert(prop.clone(), val.clone());
                         continue;
@@ -4026,8 +4018,6 @@ fn is_animatable(prop: &str) -> bool {
         prop,
         "opacity"
             | "background-color"
-            | "background"
-            | "background-image"
             | "color"
             | "border-radius"
             | "font-size"
@@ -4813,27 +4803,9 @@ fn apply_css_prop(style: &mut IRStyle, prop: &str, val: &str) -> Option<&'static
         return None;
     }
     match prop {
-        "background-color" => {
+        "background-color" | "background" => {
             if let Some(c) = parse_color(val) {
                 style.bg_color = c;
-                style.bg_gradient = None;
-                Some("bg_color")
-            } else {
-                None
-            }
-        }
-        "background" | "background-image" => {
-            if val.contains("gradient(") {
-                if let Some(g) = crate::gradient::parse_gradient(val) {
-                    style.bg_color = g.fallback_color();
-                    style.bg_gradient = Some(g);
-                    Some("bg_gradient")
-                } else {
-                    None
-                }
-            } else if let Some(c) = parse_color(val) {
-                style.bg_color = c;
-                style.bg_gradient = None;
                 Some("bg_color")
             } else {
                 None
@@ -5469,7 +5441,7 @@ fn parse_length(s: &str) -> Option<f32> {
     s.parse().ok()
 }
 
-pub(crate) fn parse_color(s: &str) -> Option<[f32; 4]> {
+fn parse_color(s: &str) -> Option<[f32; 4]> {
     let s = s.trim().to_lowercase();
     if s.starts_with('#') {
         let hex = s.trim_start_matches('#');
