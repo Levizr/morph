@@ -68,6 +68,53 @@ static void setColorFromJson(float* dst, const JsonValue& arr) {
     }
 }
 
+#ifdef MORPH_FEATURE_GRADIENT
+// Shape mirrors the Rust serializer (`serializer.rs::gradient`): angle xor
+// corner, stops with [kind, value] positions and nullable hints.
+static void setGradientFromJson(BgGradient& dst, const JsonValue& val) {
+    if (val.type() != JsonType::Object) {
+        return;
+    }
+    BgGradient g;
+    if (!val["repeating"].isNull()) {
+        g.repeating = val["repeating"].asBool();
+    }
+    if (!val["angle"].isNull()) {
+        g.angleDeg = val["angle"].asFloat();
+    }
+    const JsonValue& corner = val["corner"];
+    if (corner.type() == JsonType::Array && corner.size() >= 2) {
+        g.isCorner = true;
+        g.cornerX = corner[0].asFloat();
+        g.cornerY = corner[1].asFloat();
+    }
+    const JsonValue& stops = val["stops"];
+    if (stops.type() == JsonType::Array) {
+        for (size_t i = 0; i < stops.size() && g.stopCount < MORPH_GRADIENT_MAX_STOPS; i++) {
+            const JsonValue& s = stops[i];
+            GradientStopData sd;
+            setColorFromJson(sd.color, s["color"]);
+            const JsonValue& pos = s["position"];
+            if (pos.isNull()) {
+                sd.posIsAuto = true;
+            } else if (pos.type() == JsonType::Array && pos.size() >= 2) {
+                sd.posIsAuto = false;
+                sd.posIsPx = (pos[0].asString() == "px");
+                sd.posValue = pos[1].asFloat();
+            }
+            if (!s["hint"].isNull()) {
+                sd.hint = s["hint"].asFloat();
+            }
+            g.stops[g.stopCount++] = sd;
+        }
+    }
+    if (g.stopCount >= 2) {
+        dst = g;
+        dst.enabled = true;
+    }
+}
+#endif
+
 #ifdef MORPH_FEATURE_ANIMATION
 // ── @keyframes / animation deserialization (feature: animation) ─
 
@@ -82,6 +129,9 @@ static KeyframeProperty keyframePropFor(const std::string& cssProp) {
     if (cssProp == "left") return KeyframeProperty::Left;
     if (cssProp == "top") return KeyframeProperty::Top;
     if (cssProp == "transform") return KeyframeProperty::Transform;
+#ifdef MORPH_FEATURE_GRADIENT
+    if (cssProp == "background-image") return KeyframeProperty::BgGradient;
+#endif
     return KeyframeProperty::None;
 }
 
@@ -234,6 +284,13 @@ static void applyStyle(MorphStyle& s, const JsonValue& styleVal) {
 
     setColorFromJson(s.bgColor, styleVal["bg_color"]);
     setColorFromJson(s.color, styleVal["color"]);
+#ifdef MORPH_FEATURE_GRADIENT
+    if (styleVal.has("bg_gradient") && !styleVal["bg_gradient"].isNull())
+    {
+        setGradientFromJson(s.bgGradient, styleVal["bg_gradient"]);
+        s.bgGradientSet = true;
+    }
+#endif
 
     setFloatOpt(s.explicitWidth, styleVal["width"]);
     setFloatOpt(s.explicitHeight, styleVal["height"]);

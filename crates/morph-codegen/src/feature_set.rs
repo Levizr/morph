@@ -89,12 +89,20 @@ impl FeatureSet {
         if s.transform_ops.is_some() || s.transform_origin.is_some() {
             self.features.insert("transform".into());
         }
+        if s.bg_gradient.is_some() {
+            self.features.insert("gradient".into());
+        }
     }
 
     fn scan_reactive(&mut self, reactive_style: &std::collections::HashMap<String, String>) {
         for prop in reactive_style.keys() {
             for f in Self::reactive_feature(prop) {
                 self.features.insert(f.into());
+            }
+            // Dynamic bindings hide their value from the compiler — a bound
+            // background may resolve to a gradient at runtime.
+            if prop == "background" || prop == "background-image" {
+                self.features.insert("gradient".into());
             }
             // Color-typed props lower through the runtime setColor parser
             // (node_emitter/logic_emitter "color" arms) — static palettes
@@ -144,6 +152,10 @@ impl FeatureSet {
             }
             if prop.contains("color") {
                 self.features.insert("reactive_color".into());
+            }
+            // Static rules carry their value: only real gradients need it.
+            if (prop == "background" || prop == "background-image") && val.contains("gradient(") {
+                self.features.insert("gradient".into());
             }
             if prop == "display" && val.trim() == "none" {
                 self.features.insert("display_none".into());
@@ -231,6 +243,9 @@ impl FeatureSet {
                     }
                     if kf.raw.keys().any(|p| p == "left" || p == "top") {
                         self.features.insert("position".into());
+                    }
+                    if kf.raw.keys().any(|p| p == "background-image") {
+                        self.features.insert("gradient".into());
                     }
                 }
             }
@@ -488,6 +503,9 @@ impl FeatureSet {
         }
         if self.features.contains("transform") {
             d.push("MORPH_FEATURE_TRANSFORM".into());
+        }
+        if self.features.contains("gradient") {
+            d.push("MORPH_FEATURE_GRADIENT".into());
         }
         if self.features.contains("animation") {
             d.push("MORPH_FEATURE_ANIMATION".into());

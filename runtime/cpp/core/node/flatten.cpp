@@ -182,6 +182,9 @@ int MorphNode::flattenImpl(RenderFrame& frame, int parentId, float scrollOffset,
     memcpy(fn.borderColor, style.borderColor, sizeof(float)*4);
     fn.borderStyle = style.borderStyle;
 #endif
+#ifdef MORPH_FEATURE_GRADIENT
+    fn.grad = style.bgGradient;
+#endif
 
     // ── Opacity: multiply every paint color by the accumulated opacity ──
     // (this node's opacity × each ancestor's). This is the lightweight
@@ -200,6 +203,12 @@ int MorphNode::flattenImpl(RenderFrame& frame, int parentId, float scrollOffset,
         fn.bgColor[3] *= opac;
         fn.color[3] *= opac;
         fn.borderColor[3] *= opac;
+#ifdef MORPH_FEATURE_GRADIENT
+        for (int i = 0; i < fn.grad.stopCount; i++)
+        {
+            fn.grad.stops[i].color[3] *= opac;
+        }
+#endif
     }
 
     fn.overflow = style.overflow;

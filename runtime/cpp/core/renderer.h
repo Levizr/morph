@@ -2,6 +2,9 @@
 #include <string>
 
 #include "../style/css_enums.h"
+#ifdef MORPH_FEATURE_GRADIENT
+#include "../style/features/gradient.h"
+#endif
 
 enum class TextAlign { Left, Center, Right };
 
@@ -39,6 +42,21 @@ public:
     virtual void drawBorderRing(float x, float y, float w, float h,
                                 float radius, float borderWidth,
                                 float borderColor[4]) {}
+#ifdef MORPH_FEATURE_GRADIENT
+    // Gradient fill with optional border ring (single call so fill and
+    // border share one SDF edge). Renderers without gradient support fall
+    // back to the solid fill; the border is dropped in that fallback.
+    virtual void drawGradRect(float x, float y, float w, float h,
+                              float radius, float color[4],
+                              const BgGradient* grad, float borderWidth,
+                              const float borderColor[4])
+    {
+        (void)grad;
+        (void)borderWidth;
+        (void)borderColor;
+        drawRect(x, y, w, h, color);
+    }
+#endif
     virtual unsigned int loadTexture(const std::string& path,
                                      int& outW, int& outH) { return 0; }
     virtual void drawMesh(const float* verts, const unsigned int* idx,

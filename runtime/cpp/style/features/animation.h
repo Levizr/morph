@@ -14,8 +14,8 @@
 // set, so apps that never use animations ship zero animation code.
 
 // Keyframe properties the runtime can interpolate.  Values are baked to
-// pixels/colors at build time; transforms and % lengths stay raw CSS and
-// resolve against the element's box at sample time.
+// pixels/colors at build time; transforms, % lengths and gradients stay raw
+// CSS and resolve against the element's box at sample time.
 enum class KeyframeProperty : uint8_t {
     None = 0,
     Opacity,
@@ -28,6 +28,7 @@ enum class KeyframeProperty : uint8_t {
     Left,
     Top,
     Transform,
+    BgGradient,
 };
 
 // One typed value inside a keyframe.

@@ -844,15 +844,47 @@ void MorphWindow::drawOpsForNode(GLRenderer &r, const RenderFrame *frame, int no
         switch (op.type)
         {
         case DrawOp::Rect:
+#ifdef MORPH_FEATURE_GRADIENT
+            if (node.grad.enabled)
+            {
+                r.drawGradRect(px, py, op.w, op.h, 0.0f, (float *)&op.r,
+                               &node.grad, 0.0f, nullptr);
+                break;
+            }
+#endif
             r.drawRect(px, py, op.w, op.h, (float *)&op.r);
             break;
         case DrawOp::RoundedRect:
+#ifdef MORPH_FEATURE_GRADIENT
+            if (node.grad.enabled)
+            {
+                r.drawGradRect(px, py, op.w, op.h, op.data[0], (float *)&op.r,
+                               &node.grad, 0.0f, nullptr);
+                break;
+            }
+#endif
             r.drawRoundedRect(px, py, op.w, op.h, op.data[0], (float *)&op.r);
             break;
         case DrawOp::BorderedRect:
+#ifdef MORPH_FEATURE_GRADIENT
+            if (node.grad.enabled)
+            {
+                r.drawGradRect(px, py, op.w, op.h, op.data[0], (float *)&op.r,
+                               &node.grad, op.data[1], (float *)&op.br);
+                break;
+            }
+#endif
             r.drawBorderedRect(px, py, op.w, op.h, (float *)&op.r, op.data[1], (float *)&op.br);
             break;
         case DrawOp::BorderedRoundedRect:
+#ifdef MORPH_FEATURE_GRADIENT
+            if (node.grad.enabled)
+            {
+                r.drawGradRect(px, py, op.w, op.h, op.data[0], (float *)&op.r,
+                               &node.grad, op.data[1], (float *)&op.br);
+                break;
+            }
+#endif
             r.drawBorderedRoundedRect(px, py, op.w, op.h, op.data[0], (float *)&op.r,
                                       op.data[1], (float *)&op.br);
             break;

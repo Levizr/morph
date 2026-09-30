@@ -209,12 +209,21 @@ inline void restoreProp(MorphNode* node, KeyframeProperty prop,
                         const MorphStyle& base) {
     switch (prop) {
         case KeyframeProperty::Opacity:
+#ifdef MORPH_FEATURE_OPACITY
             node->style.opacity = base.opacity;
             node->markDirty(PaintDirty);
+#endif
             break;
         case KeyframeProperty::BgColor:
             std::memcpy(node->style.bgColor, base.bgColor, sizeof(float) * 4);
             node->markDirty(PaintDirty);
+            break;
+        case KeyframeProperty::BgGradient:
+#ifdef MORPH_FEATURE_GRADIENT
+            node->style.bgGradient = base.bgGradient;
+            std::memcpy(node->style.bgColor, base.bgColor, sizeof(float) * 4);
+            node->markDirty(PaintDirty);
+#endif
             break;
         case KeyframeProperty::Color:
             std::memcpy(node->style.color, base.color, sizeof(float) * 4);
@@ -266,7 +275,7 @@ inline void restoreProp(MorphNode* node, KeyframeProperty prop,
 // Restore every property in the mask (KeyframeProperty bit indices).
 inline void restoreProps(MorphNode* node, const MorphStyle& base,
                          uint32_t mask) {
-    for (int p = 0; p <= (int)KeyframeProperty::Transform; p++)
+    for (int p = 0; p <= (int)KeyframeProperty::BgGradient; p++)
         if (mask & ((uint32_t)1 << p))
             restoreProp(node, (KeyframeProperty)p, base);
 }
@@ -338,7 +347,8 @@ void MorphNode::updateCssAnimations(float dt) {
                      KeyframeProperty::Color, KeyframeProperty::BorderRadius,
                      KeyframeProperty::FontSize, KeyframeProperty::Width,
                      KeyframeProperty::Height, KeyframeProperty::Left,
-                     KeyframeProperty::Top, KeyframeProperty::Transform}) {
+                     KeyframeProperty::Top, KeyframeProperty::Transform,
+                     KeyframeProperty::BgGradient}) {
                 auto sv = morph_anim_detail::sampleProperty(kfs, prop, te);
                 if (!sv.applies) continue;
 
@@ -370,6 +380,31 @@ void MorphNode::updateCssAnimations(float dt) {
                         std::memcpy(style.matrix, mA, sizeof(float) * 16);
                     }
                     style.transformSet = true;
+                    markDirty(PaintDirty);
+#endif
+                    continue;
+                }
+
+                if (prop == KeyframeProperty::BgGradient) {
+#ifdef MORPH_FEATURE_GRADIENT
+                    BgGradient ga;
+                    if (!morph::parseGradientCss(sv.left->css, ga))
+                        continue;              // invalid → underlying
+                    BgGradient sampled = ga;
+                    if (sv.right) {
+                        BgGradient gb;
+                        if (morph::parseGradientCss(sv.right->css, gb)) {
+                            if (morph::gradientsCompatible(ga, gb)) {
+                                morph::lerpGradient(sampled, ga, gb, sv.f);
+                            } else if (sv.f >= 0.5f) {
+                                sampled = gb;  // discrete flip, like browsers
+                            }
+                        }
+                    }
+                    style.bgGradient = sampled;
+                    if (sampled.enabled && sampled.stopCount > 0)
+                        std::memcpy(style.bgColor, sampled.stops[0].color,
+                                    sizeof(float) * 4);
                     markDirty(PaintDirty);
 #endif
                     continue;

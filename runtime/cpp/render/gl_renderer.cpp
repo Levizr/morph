@@ -741,6 +741,14 @@ void GLRenderer::shutdown()
     if (m_shader)
         glDeleteProgram(m_shader);
     m_shader = 0;
+#ifdef MORPH_FEATURE_GRADIENT
+    if (m_gradVAO)
+        glDeleteVertexArrays(1, &m_gradVAO);
+    m_gradVAO = 0;
+    if (m_gradShader)
+        glDeleteProgram(m_gradShader);
+    m_gradShader = 0;
+#endif
 #ifdef MORPH_FEATURE_TEXT
     if (m_textVAO)
         glDeleteVertexArrays(1, &m_textVAO);
@@ -803,6 +811,22 @@ bool GLRenderer::ensureReady()
     createProgram(kQuadVertSrc, kQuadFragSrc, m_shader, m_uProj);
     m_uStencilMode = glGetUniformLocation(m_shader, "uStencilMode");
     createQuadBuffers();
+
+#ifdef MORPH_FEATURE_GRADIENT
+    createProgram(kGradQuadVertSrc, kGradQuadFragSrc, m_gradShader, m_gradUProj);
+    m_gradUModel = glGetUniformLocation(m_gradShader, "uModel");
+    m_gradURect = glGetUniformLocation(m_gradShader, "uRect");
+    m_gradUDir = glGetUniformLocation(m_gradShader, "uGradDir");
+    m_gradUCount = glGetUniformLocation(m_gradShader, "uGradCount");
+    m_gradUColors = glGetUniformLocation(m_gradShader, "uGradColors");
+    m_gradUOffsets = glGetUniformLocation(m_gradShader, "uGradOffsets");
+    m_gradURepeating = glGetUniformLocation(m_gradShader, "uGradRepeating");
+    m_gradURadius = glGetUniformLocation(m_gradShader, "uRadius");
+    m_gradUBorderWidth = glGetUniformLocation(m_gradShader, "uBorderWidth");
+    m_gradUBorderColor = glGetUniformLocation(m_gradShader, "uBorderColor");
+    m_gradUStencil = glGetUniformLocation(m_gradShader, "uStencilMode");
+    createGradBuffers();
+#endif
 
 #ifdef MORPH_FEATURE_TEXT
     if (FT_Init_FreeType(&m_ft))
@@ -1065,3 +1089,113 @@ void GLRenderer::flush(const float proj[16])
     // previously rasterized glyphs off the GPU on the next grow.
 #endif
 }
+
+#ifdef MORPH_FEATURE_GRADIENT
+void GLRenderer::createGradBuffers()
+{
+    glGenVertexArrays(1, &m_gradVAO);
+    glBindVertexArray(m_gradVAO);
+
+    // Shared unit-quad buffers; this VAO only binds the position attribute.
+    glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, (void *)0);
+    glEnableVertexAttribArray(0);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_ibo);
+
+    glBindVertexArray(0);
+}
+
+void GLRenderer::drawGradRect(float x, float y, float w, float h,
+                              float radius, float color[4],
+                              const BgGradient* grad, float borderWidth,
+                              const float borderColor[4])
+{
+    if (grad == nullptr || !grad->enabled || grad->stopCount < 2 || w <= 0.0f ||
+        h <= 0.0f)
+    {
+        drawRect(x, y, w, h, color);
+        return;
+    }
+    // Ordering with the batched quads matters — flush first like clips do.
+    flush(m_proj);
+    if (!ensureReady())
+    {
+        return;
+    }
+    // Axis in y-down box space (vUV origin is the top-left corner).
+    float dx = 0.0f, dy = 1.0f;
+    if (grad->isCorner)
+    {
+        dx = grad->cornerX * w;
+        dy = grad->cornerY * h;
+    }
+    else
+    {
+        float rad = grad->angleDeg * 3.14159265f / 180.0f;
+        dx = std::sin(rad);
+        dy = -std::cos(rad);
+    }
+    float len = std::sqrt(dx * dx + dy * dy);
+    if (len < 1e-6f)
+    {
+        drawRect(x, y, w, h, color);
+        return;
+    }
+    dx /= len;
+    dy /= len;
+    float projLen = std::fabs(w * dx) + std::fabs(h * dy);
+    float offsets[MORPH_GRADIENT_MAX_STOPS] = {0};
+    morph::resolveGradientOffsets(*grad, projLen, offsets);
+    // CSS fixup: ill-ordered positions clamp to the previous one.
+    for (int i = 1; i < grad->stopCount; i++)
+    {
+        if (offsets[i] < offsets[i - 1])
+        {
+            offsets[i] = offsets[i - 1];
+        }
+    }
+    float colors[MORPH_GRADIENT_MAX_STOPS][4] = {{0}};
+    for (int i = 0; i < grad->stopCount; i++)
+    {
+        std::memcpy(colors[i], grad->stops[i].color, sizeof(float) * 4);
+    }
+
+    float model[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+#ifdef MORPH_FEATURE_TRANSFORM
+    if (m_transformDepth > 0)
+    {
+        // Mirror applyModel(): baked coords already include the scroll
+        // offset, so cancel anchor + scroll exactly like instances do.
+        float t[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+        t[12] = -(m_anchorX + m_scrollX);
+        t[13] = -(m_anchorY + m_scrollY);
+        morph::mat4Multiply(model, m_model, t);
+    }
+#endif
+
+    glUseProgram(m_gradShader);
+    glUniformMatrix4fv(m_gradUProj, 1, GL_FALSE, m_proj);
+    glUniformMatrix4fv(m_gradUModel, 1, GL_FALSE, model);
+    float rect[4] = {x + m_scrollX, y + m_scrollY, w, h};
+    glUniform4fv(m_gradURect, 1, rect);
+    float dir[2] = {dx, dy};
+    glUniform2fv(m_gradUDir, 1, dir);
+    glUniform1i(m_gradUCount, grad->stopCount);
+    glUniform4fv(m_gradUColors, grad->stopCount, &colors[0][0]);
+    glUniform1fv(m_gradUOffsets, grad->stopCount, offsets);
+    glUniform1i(m_gradURepeating, grad->repeating ? 1 : 0);
+    glUniform1f(m_gradURadius, radius);
+    glUniform1f(m_gradUBorderWidth, borderWidth);
+    float bc[4] = {0, 0, 0, 0};
+    if (borderColor != nullptr)
+    {
+        std::memcpy(bc, borderColor, sizeof(float) * 4);
+    }
+    glUniform4fv(m_gradUBorderColor, 1, bc);
+    glUniform1i(m_gradUStencil, 0);
+    glBindVertexArray(m_gradVAO);
+    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, (void *)0);
+    glBindVertexArray(0);
+}
+#endif

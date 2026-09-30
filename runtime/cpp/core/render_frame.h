@@ -8,6 +8,9 @@
 #include "draw_op.h"
 #include "event.h"
 #include "../style/css_enums.h"
+#ifdef MORPH_FEATURE_GRADIENT
+#include "../style/features/gradient.h"
+#endif
 
 enum class Easing : uint8_t {
     Linear,
@@ -52,6 +55,12 @@ struct FlatRenderNode {
     float borderWidth;
     float borderColor[4];
     CSS::BorderStyle borderStyle = CSS::BorderStyle::None;
+
+#ifdef MORPH_FEATURE_GRADIENT
+    // Baked background gradient (resolved against this node's box at
+    // flatten time; stop alphas pre-multiplied by opacity like bgColor).
+    BgGradient grad;
+#endif
 
     CSS::Overflow overflow = CSS::Overflow::Visible;
     CSS::BoxSizing boxSizing = CSS::BoxSizing::ContentBox;

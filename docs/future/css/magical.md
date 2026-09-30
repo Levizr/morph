@@ -259,7 +259,10 @@ Rule: any `hungry` effect must ship with an automatic static fallback (window bl
 
 | Feature | State |
 |---|---|
-| Gradients (all 6) + animation | ❌ Not started (`builder.rs` drops gradients via `parse_color`) |
+| Gradients (linear + `repeating-linear`, static) | ✅ Shipped (IR `gradient.rs`, `MORPH_FEATURE_GRADIENT`, SDF shader) |
+| Gradients (radial / conic) | ❌ Not started (parser + shader N/A yet) |
+| Gradient hover/active/transitions | ✅ Shipped (`lerpGradient`, state revert, `transition` support; removal via explicit `bgGradientSet` flag since deltas can't distinguish unset from cleared) |
+| Gradient `@keyframes` animation | ✅ Shipped (css-string payloads, stop-lerp or discrete flip) |
 | `background-image` on boxes | ❌ Not started (image pipeline is `<img>`-only) |
 | Dotted / dashed / per-side | ❌ Not started (single `borderWidth`, `BorderStyle::{None, Solid}` only) |
 | `border-image` with gradients | ❌ Not started (no custom property — standard syntax reserved) |

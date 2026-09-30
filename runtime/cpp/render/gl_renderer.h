@@ -268,6 +268,18 @@ private:
     void createImageBuffers();
 #endif
 
+#ifdef MORPH_FEATURE_GRADIENT
+    // Immediate-mode gradient quad: rare enough that one draw call per box
+    // beats carrying 8 stops through the 16-slot instanced pipeline.
+    GLuint m_gradVAO = 0;
+    GLuint m_gradShader = 0;
+    GLint m_gradUProj = -1, m_gradUModel = -1, m_gradURect = -1;
+    GLint m_gradUDir = -1, m_gradUCount = -1, m_gradUColors = -1;
+    GLint m_gradUOffsets = -1, m_gradURepeating = -1, m_gradURadius = -1;
+    GLint m_gradUBorderWidth = -1, m_gradUBorderColor = -1, m_gradUStencil = -1;
+    void createGradBuffers();
+#endif
+
     void createQuadBuffers();
 #ifdef MORPH_FEATURE_TEXT
     void createTextBuffers();
@@ -438,6 +450,12 @@ public:
         applyModel(m_borderBatch.back());
 #endif
     }
+
+#ifdef MORPH_FEATURE_GRADIENT
+    void drawGradRect(float x, float y, float w, float h, float radius,
+                      float color[4], const BgGradient* grad,
+                      float borderWidth, const float borderColor[4]) override;
+#endif
 
 #ifdef MORPH_FEATURE_TEXT
     float measureTextWidth(const std::string &text, float fontSize,

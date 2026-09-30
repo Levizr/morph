@@ -202,6 +202,114 @@ void main() {
 )glsl";
 #endif
 
+#ifdef MORPH_FEATURE_GRADIENT
+// ── Gradient fill quad (immediate mode) ──────────────────────
+// Same rounded-box SDF as the batched quad shader, but the fill color is
+// evaluated per-pixel from linear-gradient stops passed as uniforms (stop
+// arrays can't ride the 16-slot instanced-attribute budget, and gradient
+// boxes are rare enough that one draw call each is negligible).
+static const char* kGradQuadVertSrc = R"glsl(
+#version 330 core
+layout(location = 0) in vec2 aPos;
+uniform mat4 uProj;
+uniform mat4 uModel;
+uniform vec4 uRect;
+out vec2 vUV;
+out vec2 vSize;
+void main() {
+    vec2 pos = uRect.xy + aPos * uRect.zw;
+    gl_Position = uProj * uModel * vec4(pos, 0.0, 1.0);
+    vUV = aPos;
+    vSize = uRect.zw;
+}
+)glsl";
+
+static const char* kGradQuadFragSrc = R"glsl(
+#version 330 core
+in vec2 vUV;
+in vec2 vSize;
+uniform vec2 uGradDir;
+uniform int uGradCount;
+uniform vec4 uGradColors[8];
+uniform float uGradOffsets[8];
+uniform int uGradRepeating;
+uniform float uRadius;
+uniform float uBorderWidth;
+uniform vec4 uBorderColor;
+uniform bool uStencilMode;
+out vec4 FragColor;
+
+float sdRoundedBox(vec2 p, vec2 b, float r) {
+    vec2 q = abs(p) - b + r;
+    return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
+}
+
+void main() {
+    vec2 halfSize = vSize * 0.5;
+    vec2 p = vUV * vSize - halfSize;
+
+    float rad = min(max(uRadius, 0.0), min(halfSize.x, halfSize.y));
+    float dist_outer = sdRoundedBox(p, halfSize, rad);
+
+    vec2 dDist = vec2(dFdx(dist_outer), dFdy(dist_outer));
+    float edgeSoftness = length(dDist) * 0.70710678118;
+
+    float alpha_outer = 1.0 - smoothstep(-edgeSoftness, edgeSoftness, dist_outer);
+
+    if (uStencilMode) {
+        if (alpha_outer < 0.5) discard;
+        FragColor = vec4(1.0);
+        return;
+    }
+
+    if (alpha_outer < 0.001) discard;
+
+    // Gradient position along the axis, 0..1 across the gradient line.
+    float projLen = abs(vSize.x * uGradDir.x) + abs(vSize.y * uGradDir.y);
+    projLen = max(projLen, 1e-4);
+    float t = dot(p, uGradDir) / projLen + 0.5;
+
+    if (uGradRepeating > 0 && uGradCount >= 2) {
+        float o0 = uGradOffsets[0];
+        float o1 = uGradOffsets[uGradCount - 1];
+        float period = o1 - o0;
+        if (abs(period) > 1e-6) {
+            t = o0 + mod(t - o0, period);
+        } else {
+            t = o0;
+        }
+    }
+
+    vec4 g = uGradColors[0];
+    for (int i = 1; i < 8; i++) {
+        if (i >= uGradCount) break;
+        float span = max(uGradOffsets[i] - uGradOffsets[i - 1], 1e-6);
+        float f = clamp((t - uGradOffsets[i - 1]) / span, 0.0, 1.0);
+        g = mix(g, uGradColors[i], f);
+    }
+
+    vec4 color;
+    if (uBorderWidth > 0.0) {
+        vec2 innerHalfSize = halfSize - uBorderWidth;
+        float innerRad = max(rad - uBorderWidth, 0.0);
+
+        float dist_inner = sdRoundedBox(p, innerHalfSize, innerRad);
+        float alpha_inner = 1.0 - smoothstep(-edgeSoftness, edgeSoftness, dist_inner);
+
+        vec4 interiorFill = vec4(g.rgb, g.a * alpha_inner);
+        vec4 borderLayer = vec4(uBorderColor.rgb, uBorderColor.a);
+
+        color = mix(interiorFill, borderLayer, borderLayer.a * (1.0 - alpha_inner));
+        color.a *= alpha_outer;
+    } else {
+        color = vec4(g.rgb, g.a * alpha_outer);
+    }
+
+    FragColor = color;
+}
+)glsl";
+#endif
+
 // ── Shared unit quad ─────────────────────────────────────────
 
 static const float kQuadVerts[] = {

@@ -27,6 +27,9 @@
 #ifdef MORPH_FEATURE_ANIMATION
 #include "features/animation.h"
 #endif
+#ifdef MORPH_FEATURE_GRADIENT
+#include "features/gradient.h"
+#endif
 
 struct MorphStyle : StyleBase
 #ifdef MORPH_FEATURE_FLEX
@@ -55,6 +58,9 @@ struct MorphStyle : StyleBase
 #endif
 #ifdef MORPH_FEATURE_ANIMATION
     , AnimationStyle
+#endif
+#ifdef MORPH_FEATURE_GRADIENT
+    , GradientStyle
 #endif
 {};
 

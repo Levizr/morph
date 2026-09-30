@@ -42,10 +42,38 @@ public:
         // 1. Render self (background)
         for (auto& op : m_displayList) {
             switch (op.type) {
-                case DrawOp::Rect: r.drawRect(op.x,op.y,op.w,op.h,&op.r); break;
-                case DrawOp::RoundedRect: r.drawRoundedRect(op.x,op.y,op.w,op.h,op.data[0],&op.r); break;
-                case DrawOp::BorderedRect: r.drawBorderedRect(op.x,op.y,op.w,op.h,&op.r,op.data[1],&op.br); break;
-                case DrawOp::BorderedRoundedRect: r.drawBorderedRoundedRect(op.x,op.y,op.w,op.h,op.data[0],&op.r,op.data[1],&op.br); break;
+                case DrawOp::Rect:
+#ifdef MORPH_FEATURE_GRADIENT
+                    if (style.bgGradient.enabled) {
+                        r.drawGradRect(op.x,op.y,op.w,op.h,0.0f,&op.r,&style.bgGradient,0.0f,nullptr);
+                        break;
+                    }
+#endif
+                    r.drawRect(op.x,op.y,op.w,op.h,&op.r); break;
+                case DrawOp::RoundedRect:
+#ifdef MORPH_FEATURE_GRADIENT
+                    if (style.bgGradient.enabled) {
+                        r.drawGradRect(op.x,op.y,op.w,op.h,op.data[0],&op.r,&style.bgGradient,0.0f,nullptr);
+                        break;
+                    }
+#endif
+                    r.drawRoundedRect(op.x,op.y,op.w,op.h,op.data[0],&op.r); break;
+                case DrawOp::BorderedRect:
+#ifdef MORPH_FEATURE_GRADIENT
+                    if (style.bgGradient.enabled) {
+                        r.drawGradRect(op.x,op.y,op.w,op.h,0.0f,&op.r,&style.bgGradient,op.data[1],&op.br);
+                        break;
+                    }
+#endif
+                    r.drawBorderedRect(op.x,op.y,op.w,op.h,&op.r,op.data[1],&op.br); break;
+                case DrawOp::BorderedRoundedRect:
+#ifdef MORPH_FEATURE_GRADIENT
+                    if (style.bgGradient.enabled) {
+                        r.drawGradRect(op.x,op.y,op.w,op.h,op.data[0],&op.r,&style.bgGradient,op.data[1],&op.br);
+                        break;
+                    }
+#endif
+                    r.drawBorderedRoundedRect(op.x,op.y,op.w,op.h,op.data[0],&op.r,op.data[1],&op.br); break;
                 default: break;
             }
         }
@@ -103,6 +131,24 @@ public:
 #ifdef MORPH_FEATURE_TRANSFORM
         bool pushedSelf = pushSelfTransform(r, sx, sy);
 #endif
+#ifdef MORPH_FEATURE_GRADIENT
+        if (style.bgGradient.enabled) {
+            float bw = 0.0f;
+            const float* bc = nullptr;
+            float gx = sx, gy = sy, gw = sw, gh = sh;
+#ifdef MORPH_FEATURE_BORDER
+            if (style.borderWidth > 0.0f && style.borderStyle == CSS::BorderStyle::Solid) {
+                bw = m_isTransitioning ? style.borderWidth : snapBorderWidth(style.borderWidth);
+                bc = style.borderColor;
+                if (style.boxSizing != CSS::BoxSizing::BorderBox) {
+                    gx -= bw; gy -= bw; gw += 2.0f * bw; gh += 2.0f * bw;
+                }
+            }
+#endif
+            r.drawGradRect(gx, gy, gw, gh, rad,
+                           style.bgColor, &style.bgGradient, bw, bc);
+        } else {
+#endif
 #ifdef MORPH_FEATURE_BORDER
         if (style.borderWidth > 0.0f && style.borderStyle == CSS::BorderStyle::Solid) {
             float bw = m_isTransitioning ? style.borderWidth : snapBorderWidth(style.borderWidth);
@@ -118,6 +164,9 @@ public:
         } else
 #endif
             r.drawRoundedRect(sx, sy, sw, sh, rad, style.bgColor);
+#ifdef MORPH_FEATURE_GRADIENT
+        }
+#endif
 #ifdef MORPH_FEATURE_SCROLL
         if (scrollEnabled && contentH > sh) {
 #ifdef MORPH_FEATURE_TRANSFORM

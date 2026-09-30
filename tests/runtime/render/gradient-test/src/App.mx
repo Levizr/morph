@@ -1,0 +1,18 @@
+import "./style.css"
+
+export const windowConfig = { title: "GradientTest", width: 800, height: 600 }
+
+export default function App() {
+  return (
+    <body>
+      <div className="screen">
+        <div className="hero">linear default</div>
+        <div className="toright">to right + radius + border</div>
+        <button className="cta">hover me</button>
+        <div className="cta-static">hover colors, static (no mouse needed)</div>
+        <div className="stripes">repeating</div>
+        <div className="animated">keyframes</div>
+      </div>
+    </body>
+  )
+}

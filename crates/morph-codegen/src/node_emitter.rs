@@ -182,6 +182,54 @@ fn color4(c: &[f32; 4]) -> String {
     format!("{:.4}f, {:.4}f, {:.4}f, {:.4}f", c[0], c[1], c[2], c[3])
 }
 
+/// Emit gradient assignments on `access` — a complete accessor prefix such as
+/// `node_1->style.bgGradient.` or `node_1->hoverStyle->bgGradient.`
+/// (feature: gradient). Field names mirror `BgGradient` in
+/// `runtime/cpp/style/features/gradient.h`.
+fn emit_gradient(access: &str, g: &morph_ir::IRGradient) -> Vec<String> {
+    use morph_ir::{GradientAxis, GradientPosition};
+    let mut o = Vec::new();
+    o.push(format!("{access}enabled = true;"));
+    o.push(format!("{access}repeating = {};", if g.repeating { "true" } else { "false" }));
+    match g.axis {
+        GradientAxis::Bottom => {
+            o.push(format!("{access}angleDeg = 180.0f;"));
+            o.push(format!("{access}isCorner = false;"));
+        }
+        GradientAxis::Angle(d) => {
+            o.push(format!("{access}angleDeg = {};", fmt(d)));
+            o.push(format!("{access}isCorner = false;"));
+        }
+        GradientAxis::Corner(x, y) => {
+            o.push(format!("{access}isCorner = true;"));
+            o.push(format!("{access}cornerX = {};", fmt(x)));
+            o.push(format!("{access}cornerY = {};", fmt(y)));
+        }
+    }
+    o.push(format!("{access}stopCount = {};", g.stops.len()));
+    for (i, s) in g.stops.iter().enumerate() {
+        o.push(format!("{access}stops[{i}].color[0] = {:.4}f;", s.color[0]));
+        o.push(format!("{access}stops[{i}].color[1] = {:.4}f;", s.color[1]));
+        o.push(format!("{access}stops[{i}].color[2] = {:.4}f;", s.color[2]));
+        o.push(format!("{access}stops[{i}].color[3] = {:.4}f;", s.color[3]));
+        match s.position {
+            None => {
+                o.push(format!("{access}stops[{i}].posIsAuto = true;"));
+            }
+            Some(GradientPosition::Percent(v)) => {
+                o.push(format!("{access}stops[{i}].posValue = {};", fmt(v)));
+                o.push(format!("{access}stops[{i}].posIsPx = false;"));
+            }
+            Some(GradientPosition::Px(v)) => {
+                o.push(format!("{access}stops[{i}].posValue = {};", fmt(v)));
+                o.push(format!("{access}stops[{i}].posIsPx = true;"));
+            }
+        }
+        o.push(format!("{access}stops[{i}].hint = {};", s.hint.map_or("-1.0f".to_string(), fmt)));
+    }
+    o
+}
+
 pub(crate) fn translate_js<S: std::hash::BuildHasher>(
     js: &str,
     state_map: &std::collections::HashMap<String, String, S>,
@@ -1144,6 +1192,12 @@ fn set_style(
         lines.push(format!("{ind}.bgColor[2] = {:.4}f;", s.bg_color[2]));
         lines.push(format!("{ind}.bgColor[3] = {:.4}f;", s.bg_color[3]));
     }
+    if features.contains("gradient") {
+        if let Some(g) = &s.bg_gradient {
+            lines.push(format!("{ind}.bgGradientSet = true;"));
+            lines.extend(emit_gradient(&format!("{ind}.bgGradient."), g));
+        }
+    }
     if s.border_radius > 0.0 {
         lines.push(format!("{ind}.borderRadius = {};", fmt(s.border_radius)));
     }
@@ -1429,6 +1483,13 @@ fn emit_hover_style(
         o.push(format!("{hv}->bgColor[2] = {:.4}f;", s.bg_color[2]));
         o.push(format!("{hv}->bgColor[3] = {:.4}f;", s.bg_color[3]));
     }
+    if features.contains("gradient") && s.bg_gradient != base.bg_gradient {
+        o.push(format!("{hv}->bgGradientSet = true;"));
+        match &s.bg_gradient {
+            Some(g) => o.extend(emit_gradient(&format!("{hv}->bgGradient."), g)),
+            None => o.push(format!("{hv}->bgGradient.enabled = false;")),
+        }
+    }
     if s.color != [0.0, 0.0, 0.0, 1.0] && s.color != base.color {
         o.push(format!("{hv}->color[0] = {:.4}f;", s.color[0]));
         o.push(format!("{hv}->color[1] = {:.4}f;", s.color[1]));
@@ -1589,6 +1650,13 @@ fn emit_active_style(
         o.push(format!("{hv}->bgColor[1] = {:.4}f;", s.bg_color[1]));
         o.push(format!("{hv}->bgColor[2] = {:.4}f;", s.bg_color[2]));
         o.push(format!("{hv}->bgColor[3] = {:.4}f;", s.bg_color[3]));
+    }
+    if features.contains("gradient") && s.bg_gradient != base.bg_gradient {
+        o.push(format!("{hv}->bgGradientSet = true;"));
+        match &s.bg_gradient {
+            Some(g) => o.extend(emit_gradient(&format!("{hv}->bgGradient."), g)),
+            None => o.push(format!("{hv}->bgGradient.enabled = false;")),
+        }
     }
     if s.color != [0.0, 0.0, 0.0, 1.0] && s.color != base.color {
         o.push(format!("{hv}->color[0] = {:.4}f;", s.color[0]));
@@ -2229,6 +2297,11 @@ pub fn keyframe_registration_code(
             }
             for (prop, css) in &kf.raw {
                 if let Some(enum_name) = raw_prop_to_enum(prop.as_str()) {
+                    // Gradient keyframes need the gradient runtime compiled in;
+                    // without it the property stays at its underlying value.
+                    if enum_name == "BgGradient" && !features.contains("gradient") {
+                        continue;
+                    }
                     let escaped = css.replace('\\', "\\\\").replace('"', "\\\"");
                     lines.push(format!(
                         "    {{KeyframeProperty::{enum_name}, {{}}, \"{escaped}\"}},"
@@ -2260,6 +2333,7 @@ fn raw_prop_to_enum(prop: &str) -> Option<&'static str> {
     match prop {
         "opacity" => Some("Opacity"),
         "background-color" => Some("BgColor"),
+        "background-image" => Some("BgGradient"),
         "color" => Some("Color"),
         "border-radius" => Some("BorderRadius"),
         "font-size" => Some("FontSize"),

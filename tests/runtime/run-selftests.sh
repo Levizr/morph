@@ -14,7 +14,7 @@ fi
 
 pass=0
 fail=0
-for fixture in tests/runtime/app/component-test tests/runtime/app/native-interop tests/runtime/app/window-test tests/runtime/app/route-test; do
+for fixture in tests/runtime/app/component-test tests/runtime/app/native-interop tests/runtime/app/window-test tests/runtime/app/route-test tests/runtime/render/gradient-test; do
   name="$(basename "$fixture")"
   echo "=== $name ==="
   (cd "$ROOT/$fixture" && rm -f .morph/output/"$name"* && "$MORPH" build --no-upx --self-test > /dev/null)
