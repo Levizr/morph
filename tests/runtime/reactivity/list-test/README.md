@@ -14,7 +14,7 @@ Keyed list rendering with runtime reconciliation.
 ## Run
 
 ```bash
-cd tests/runtime/list-test
+cd tests/runtime/reactivity/list-test
 morph dev
 # or
 morph run

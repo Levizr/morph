@@ -22,7 +22,7 @@ selection, clipboard, and browser-parity length attributes.
 ## Run
 
 ```bash
-cd tests/runtime/input-test
+cd tests/runtime/widgets/input-test
 morph dev
 # or
 morph run

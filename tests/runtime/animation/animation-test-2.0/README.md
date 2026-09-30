@@ -15,7 +15,7 @@ Advanced CSS animation tests — multi-stop keyframes, multiple simultaneous ani
 ## Run
 
 ```bash
-cd tests/runtime/animation-test-2.0
+cd tests/runtime/animation/animation-test-2.0
 morph dev
 # or
 morph run

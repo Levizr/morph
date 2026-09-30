@@ -1,7 +1,7 @@
 #[test]
 fn dump_total_lines() {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../tests/runtime/component-test");
+        .join("../../tests/runtime/app/component-test");
     let entry = root.join("src/App.mx");
     let graph = morph_parser::resolve_graph(&entry, &root).unwrap();
     let windows = morph_ir::IRBuilder::new()

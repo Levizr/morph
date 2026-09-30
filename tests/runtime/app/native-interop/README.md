@@ -22,7 +22,7 @@ Demonstrates bidirectional C++/JSX interop via `import { fn } from './file.cpp'`
 ## Run
 
 ```bash
-cd tests/runtime/native-interop
+cd tests/runtime/app/native-interop
 morph dev
 # or
 morph run

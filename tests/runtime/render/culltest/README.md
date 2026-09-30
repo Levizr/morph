@@ -12,7 +12,7 @@ Viewport culling stress test with 870+ nodes — 600 scrollable rows, a 120-item
 ## Run
 
 ```bash
-cd tests/runtime/culltest
+cd tests/runtime/render/culltest
 morph dev
 # or
 morph run

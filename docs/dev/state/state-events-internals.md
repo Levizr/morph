@@ -92,7 +92,7 @@ cargo test -p morph-ir -p morph-parser -p morph-codegen   # unit + IR-shape regr
 cargo test --workspace                                     # full suite
 ```
 
-The IR-shape tests are the review: `shared_store_is_namespaced_per_file`-style tests assert the exact `shared_vars` entries and qualified accessor strings. If your change alters any expected `app::…` string, inspect the diff — a changed namespace or accessor means every existing store/event relinks. Also run `morph check` + `morph build` on `tests/runtime/component-test` and `examples/components`, which exercise cross-file shared state and event subscribe/emit end to end.
+The IR-shape tests are the review: `shared_store_is_namespaced_per_file`-style tests assert the exact `shared_vars` entries and qualified accessor strings. If your change alters any expected `app::…` string, inspect the diff — a changed namespace or accessor means every existing store/event relinks. Also run `morph check` + `morph build` on `tests/runtime/app/component-test` and `examples/components`, which exercise cross-file shared state and event subscribe/emit end to end.
 
 ## FAQ (why it is built this way)
 

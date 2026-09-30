@@ -34,7 +34,7 @@ You do **not** need to know Rust, C++ or OpenGL for this.
      `CONTRIBUTING.md` + `docs/dev/contributing/contributing.md`.
      Check for inbound links first: `rg "help/development" --glob '!target'`.
 
-2. **`docs/future/multi-window.md` says `Status: future`, but it shipped**
+2. **`docs/future/windows/multi-window.md` says `Status: future`, but it shipped**
    - Page body already admits: "Window control from JSX is implemented
      and documented for users in [Windows & Routes](../guides/windows-and-routing.md)
      and [`Window` / `useWindow`](../api/windows.md)."
@@ -46,7 +46,7 @@ You do **not** need to know Rust, C++ or OpenGL for this.
      struck-through bullet, keep a one-line "Shipped → main docs" pointer,
      keep the runtime design + open questions.
 
-3. **`docs/future/state-events-native-interop.md` says `Status: development`**
+3. **`docs/future/javascript/native-interop.md` says `Status: development`**
    - `README.md` (§ Current Status) and the API reference (`docs/api/*`)
      list `morphState`, `morphShared`, `morphEvent`, effects and native
      C++ interop as working.
@@ -64,7 +64,7 @@ You do **not** need to know Rust, C++ or OpenGL for this.
 
 In-bounds:
 
-- `docs/future/*.md` status headers (`production` / `beta` / `development` / `future` — see `docs/future/index.md:36`)
+- `docs/future/*/*.md` status headers (`production` / `beta` / `development` / `future` — see `docs/future/index.md:36`)
 - `docs/future/index.md` table rows
 - `help/*.md` Python-era leftovers
 - `docs/docs.registry.json` + `docs/dev.registry.json` **only if** you move/delete a page (keep slugs/keywords in sync per `AGENTS.md` §4)

@@ -713,7 +713,7 @@ public:
     }
 
     // Page navigation lands with the route manifest + factories
-    // (docs/future/file-routing.md) — until then the signature reserves
+    // (docs/future/windows/routing.md) — until then the signature reserves
     // the WID/RID shape so call sites don't churn.
     void navigate(WID windowId, int routeId)
     {

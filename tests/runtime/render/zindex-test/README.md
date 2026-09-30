@@ -13,7 +13,7 @@ Validates CSS 2.1 `z-index` paint-order stacking with overlapping absolutely pos
 ## Run
 
 ```bash
-cd tests/runtime/zindex-test
+cd tests/runtime/render/zindex-test
 morph dev
 # or
 morph run

@@ -12,7 +12,7 @@ Minimal test for CSS `:hover` and `:active` pseudo-classes with transitions.
 ## Run
 
 ```bash
-cd tests/runtime/test-hover
+cd tests/runtime/render/test-hover
 morph dev
 # or
 morph run

@@ -299,7 +299,7 @@ impl Compiler {
             "-Wl,--gc-sections".to_string()
         });
         // Size debugging: MORPH_LINK_MAP=<path> emits a GNU ld link map
-        // for per-object attribution (see docs/future/lean-binary.md).
+        // for per-object attribution (see docs/future/tooling/lean-binaries.md).
         // Never on by default — the map itself costs link time.
         if let Ok(map_path) = std::env::var("MORPH_LINK_MAP") {
             if !map_path.is_empty() && !is_macos() {

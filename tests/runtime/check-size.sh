@@ -6,8 +6,8 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 MORPH="$ROOT/target/debug/morph"
 BUDGET=153600
 (cd "$ROOT" && cargo build -q -p morphc)
-(cd "$ROOT/tests/runtime/hello-size" && rm -f .morph/output/hello-size* && "$MORPH" build --no-upx > /dev/null)
-BIN="$ROOT/tests/runtime/hello-size/.morph/output/hello-size"
+(cd "$ROOT/tests/runtime/size/hello-size" && rm -f .morph/output/hello-size* && "$MORPH" build --no-upx > /dev/null)
+BIN="$ROOT/tests/runtime/size/hello-size/.morph/output/hello-size"
 SIZE=$(stat -c%s "$BIN")
 echo "hello-size: $SIZE bytes (budget $BUDGET)"
 if [ "$SIZE" -gt "$BUDGET" ]; then

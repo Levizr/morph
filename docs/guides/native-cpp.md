@@ -316,4 +316,4 @@ export default function App() {
 }
 ```
 
-See the [native-interop fixture](../../tests/runtime/native-interop/src/App.mx) for a complete working example.
+See the [native-interop fixture](../../tests/runtime/app/native-interop/src/App.mx) for a complete working example.

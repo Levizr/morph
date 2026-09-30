@@ -13,7 +13,7 @@ Validates the `opacity` CSS property across various scenarios — individual ele
 ## Run
 
 ```bash
-cd tests/runtime/opacity-test
+cd tests/runtime/render/opacity-test
 morph dev
 # or
 morph run

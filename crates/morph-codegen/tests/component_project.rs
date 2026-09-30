@@ -1,4 +1,4 @@
-//! End-to-end component pipeline over `tests/runtime/component-test`:
+//! End-to-end component pipeline over `tests/runtime/app/component-test`:
 //! resolve the transitive `.mx` graph, lint it, build IR with per-instance
 //! expansion, and emit C++ — everything short of invoking the C++ compiler.
 
@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 fn project_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/runtime/component-test")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/runtime/app/component-test")
 }
 
 fn state_getters(windows: &[morph_ir::IRWindow]) -> Vec<String> {

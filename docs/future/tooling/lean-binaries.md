@@ -10,7 +10,7 @@
 
 ## Budget enforcement
 
-- `tests/runtime/hello-size/` — single-`h1` fixture, the measuring stick.
+- `tests/runtime/size/hello-size/` — single-`h1` fixture, the measuring stick.
 - `tests/runtime/check-size.sh` — builds it *without* `--self-test`,
   asserts ≤153600 bytes, prints file bytes + UPX size. Last gate before
   every lean commit.

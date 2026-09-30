@@ -15,7 +15,7 @@ Full-featured landing page UI demonstrating the breadth of Morph's layout and st
 ## Run
 
 ```bash
-cd tests/runtime/ui-test
+cd tests/runtime/layout/ui-test
 morph dev
 # or
 morph run

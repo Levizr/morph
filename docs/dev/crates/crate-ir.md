@@ -72,4 +72,4 @@ cargo test -p morph-parser -p morph-ir -p morph-codegen
 cargo test --workspace
 ```
 
-The IR-shape tests are the review: any changed `app::…` accessor string means a relink of every store/event. Confirm the diff is the one you intended, then run `morph check` + `morph build` on `tests/runtime/component-test` and `examples/components`.
+The IR-shape tests are the review: any changed `app::…` accessor string means a relink of every store/event. Confirm the diff is the one you intended, then run `morph check` + `morph build` on `tests/runtime/app/component-test` and `examples/components`.

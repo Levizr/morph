@@ -15,7 +15,7 @@ Validates CSS `@keyframes` animations with various shorthand/longhand properties
 ## Run
 
 ```bash
-cd tests/runtime/animation-test
+cd tests/runtime/animation/animation-test
 morph dev
 # or
 morph run

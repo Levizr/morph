@@ -12,7 +12,7 @@ Validates CSS `transform` property parsing and runtime application.
 ## Run
 
 ```bash
-cd tests/runtime/transform-test
+cd tests/runtime/render/transform-test
 morph dev
 # or
 morph run

@@ -43,19 +43,20 @@ Debugging table for the usual suspects: whitespace diffs (check trailing newline
 
 ## Layer 3 — The self-test gauntlet (`tests/runtime/`)
 
-Full-app smoke projects (`.mx` apps with configs), each a visual/contract test for a subsystem:
+Full-app smoke projects (`.mx` apps with configs), each a visual/contract test for a subsystem. Fixtures are grouped by the subsystem they hold accountable, so a new regression test lands next to its siblings instead of in an alphabet soup of twenty near-identical directories:
 
-| Fixture | Exercises |
-|---|---|
-| `component-test` | Reusable components, per-instance state, shared store + events across files (in self-tests) |
-| `native-interop` | Bidirectional C++/JSX, `native` config block, `MID_*` constants, cross-thread state (in self-tests) |
-| `animation-test`, `animation-test-2.0` | Keyframes, multi-animation, iteration counts, fill modes, hover swaps |
-| `culltest` | Viewport culling stress: 870+ nodes (flash renderer) |
-| `input-test` | Controlled inputs, validation, password, focus/blur, selection |
-| `list-test` | Keyed reconciliation + effects |
-| `opacity-test`, `test-hover`, `transform-test`, `ui-test`, `zindex-test` | The visual contract for their respective subsystems |
+| Group | Fixtures | Exercises |
+|---|---|---|
+| `app/` | `component-test`, `native-interop`, `window-test`, `route-test` | The app spine: reusable components with cross-file shared store + events, bidirectional C++/JSX (`native` config block, `MID_*` constants, cross-thread state), window management + navigation, file-based routing |
+| `render/` | `culltest`, `opacity-test`, `transform-test`, `zindex-test`, `test-hover` | Paint order and visual-property contracts: viewport culling stress (870+ nodes, flash renderer), opacity, `transform`, CSS 2.1 `z-index` stacking, `:hover`/`:active` with transitions |
+| `layout/` | `flex-test`, `ui-test` | The historically mis-laid-out flex cases (reverse/wrap-reverse/flex-basis/align-self) and a full landing-page UI breadth check |
+| `reactivity/` | `list-test` | Keyed reconciliation + effects |
+| `widgets/` | `input-test`, `event-test` | `<input>` behavior (caret, focus, selection, validation, password) and the DOM event surface (click/dblclick/wheel/key/modifier + relatedTarget) |
+| `animation/` | `animation-test`, `animation-test-2.0` | Keyframes, multi-animation, iteration counts, fill modes, hover swaps |
+| `size/` | `hello-size` | Lean-binary budget gate (`check-size.sh`), must stay ≤ 150KB un-UPX'd |
+| `scratch/` | `repro-scratch` | Throwaway repros. Not gated, not reviewed — if it survives a week, promote it into a real group |
 
-`run-selftests.sh` builds the CLI if missing, then for `component-test` and `native-interop`: deletes stale outputs, `morph build --no-upx`, runs the binary with `--morph-self-test`, and greps for `0 failures`. Headless check for any binary, no display needed:
+Only `app/component-test` and `app/native-interop` are gated by `run-selftests.sh`: it builds the CLI if missing, deletes stale outputs, `morph build --no-upx`, runs the binary with `--morph-self-test`, and greps for `0 failures`. Headless check for any binary, no display needed:
 
 ```bash
 <binary> --morph-self-test     # must report 0 failures
@@ -68,8 +69,8 @@ Full-app smoke projects (`.mx` apps with configs), each a visual/contract test f
 
 ## The quirks shelf (known, documented, not hidden)
 
-- `transform-test`'s config says `"trnasform-test"` — a typo, preserved here so the next person to `grep` doesn't think they're hallucinating.
-- `ui-test`'s config name is `test` — non-descriptive, same deal.
+- `render/transform-test`'s config says `"trnasform-test"` — a typo, preserved here so the next person to `grep` doesn't think they're hallucinating.
+- `layout/ui-test`'s config name is `test` — non-descriptive, same deal.
 - `my-app/` mixes the old `CSS.load` API with the forge renderer and mismatched window sizes — it's a playground with history, not a reference.
 - `tests/translate/fixtures/main` (a stray ELF) and `my-app/src/` leftovers (`app.cpp`, `test.cpp`, `problem.md`, …) are cleanup candidates, not fixtures.
 
