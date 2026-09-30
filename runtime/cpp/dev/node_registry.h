@@ -17,6 +17,7 @@ struct NodeRegistry {
     }
 
     void clear() {
+        for (auto& [id, node] : nodes) delete node;
         nodes.clear();
     }
 

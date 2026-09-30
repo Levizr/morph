@@ -93,21 +93,21 @@ void DamageSet::clipTo(int vw, int vh)
                 rects.end());
 }
 
-// Conservative per-node damage: the node's own bounds expanded by its
-// descendant paint-dirty union, plus the bounds of any clip/scroll ancestors
-// (their clip region can reveal or hide changed content).
+// Conservative per-node damage: the node's own screen bounds expanded by
+// its descendant paint-dirty union, plus the screen bounds of any
+// clip/scroll ancestors (their clip region can reveal or hide content).
 void DamageSet::add(MorphNode* node)
 {
     if (!node)
         return;
-    add({(int)node->x, (int)node->y, (int)node->w, (int)node->h});
+    add(screenBox(node));
 
     // Walk up ancp to include clip/scroll containers so our repaint covers
     // everything that can change because of this node.
     for (MorphNode* a = node->parent; a; a = a->parent)
     {
         if (a->scrollEnabled)
-            add({(int)a->x, (int)a->y, (int)a->w, (int)a->h});
+            add(screenBox(a));
     }
 }
 

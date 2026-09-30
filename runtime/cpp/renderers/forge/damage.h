@@ -19,6 +19,21 @@ struct DamageRect {
     DamageRect intersection(const DamageRect& o) const;
 };
 
+// Screen-space box of a node: layout coords exclude scroll, but damage
+// rects are consumed as screen regions (scissor clears, cull tests), so
+// subtract every actively-scrolling ancestor's offset — mirroring
+// renderNode's accumulated scrollOffset (help/bug-report#1.4).
+inline DamageRect screenBox(const MorphNode* n)
+{
+    float sy = n->y;
+    for (const MorphNode* a = n->parent; a; a = a->parent)
+    {
+        if (a->scrollEnabled && a->contentH > a->h)
+            sy -= a->scrollY;
+    }
+    return {(int)n->x, (int)sy, (int)n->w, (int)n->h};
+};
+
 // Unioned damage set. Fullscreen flag forces everything (untrackable changes).
 struct DamageSet {
     std::vector<DamageRect> rects;

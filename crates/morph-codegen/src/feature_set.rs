@@ -302,6 +302,14 @@ impl FeatureSet {
                         break;
                     }
                 }
+                // Keyboard handlers need the key callback even with no
+                // <input> present (window-level onKeyDown/onKeyUp).
+                for ev in &node.events {
+                    if matches!(ev.trigger.as_str(), "keydown" | "keyup") {
+                        self.features.insert("input".into());
+                        break;
+                    }
+                }
                 // Ownership keys inside handler lambdas (`new Window`
                 // opts and desugared `<a parent/modal/role>` links).
                 // Both pre-lowering (`parent:`) and lowered
@@ -763,6 +771,25 @@ mod tests {
                 "{target:?} should enable ownership"
             );
         }
+    }
+
+    #[test]
+    fn key_handlers_enable_input_without_text_field() {
+        // Window-level onKeyDown/onKeyUp needs the key callback even
+        // when the app has no <input> node.
+        use morph_ir::IREvent;
+        let mut win = text_window("plain", "__text__");
+        win.nodes[0].events.push(IREvent {
+            trigger: "keydown".to_string(),
+            action: "call".to_string(),
+            target: "keyDown(e)".to_string(),
+        });
+        let mut fs = FeatureSet::new();
+        fs.scan(std::slice::from_ref(&win));
+        assert!(
+            fs.required_defines().contains(&"MORPH_FEATURE_INPUT".to_string()),
+            "keydown should enable input"
+        );
     }
 
     #[test]

@@ -1,0 +1,7 @@
+body { margin: 0; background: #0b1220; color: #e2e8f0; }
+.app-body { flex: 1; min-height: 0; overflow: hidden; display: flex; }
+.screen { flex: 1; display: flex; flex-direction: column; gap: 18px; padding: 20px; }
+.form-card { display: flex; flex-direction: column; gap: 14px; padding: 18px; background: #101826; border: 1px solid #23324f; border-radius: 12px; max-width: 520px; }
+.lbl { font-size: 11px; color: #64748b; }
+.fld { padding: 10px 12px; background: #0c1322; border: 1px solid #23324f; border-radius: 10px; color: #e2e8f0; font-size: 14px; }
+.btn { padding: 11px 16px; background: #2563eb; color: #fff; border-radius: 10px; font-size: 14px; }

@@ -1038,9 +1038,10 @@ void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx,
 
     // Damage-limited re-raster: skip anything whose own box can't touch the
     // repaint region — its pixels are already correct in the retained surface.
+    // The test box is screen-space (damage rects are screen regions).
     if (damageClip)
     {
-        DamageRect box{(int)sx, (int)sy, (int)sw, (int)sh};
+        DamageRect box{(int)sx, (int)screenY, (int)sw, (int)sh};
 #ifdef MORPH_FEATURE_TRANSFORM
         if (transformed)
         {

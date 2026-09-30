@@ -171,6 +171,12 @@ static void keyCb(GLFWwindow* win, int key, int scancode, int action, int mods) 
         if (key == GLFW_KEY_F12) {
             g_devtools->toggle();
             auto* mwin = (MorphWindow*)glfwGetWindowUserPointer(win);
+            if (g_devtools->open && mwin) {
+                // Never open wider than the window itself (help/bug-report#1.3).
+                int w = 0;
+                glfwGetWindowSize(win, &w, nullptr);
+                if (g_devtools->m_panelW > (float)w) g_devtools->m_panelW = (float)w;
+            }
             if (mwin)
                 mwin->setDevtoolsWidth(g_devtools->open ? g_devtools->m_panelW : 0.0f);
             return;
@@ -241,8 +247,15 @@ static void cursorCb(GLFWwindow* win, double mx, double my) {
             glfwGetWindowSize(win, &w, &h);
             float pw = (float)w - (float)mx;
             float maxPw = (float)w - 360.0f; // keep the app at least ~360px wide
-            if (pw < DevTools::kMinPanelW) pw = DevTools::kMinPanelW;
-            if (pw > maxPw) pw = maxPw;
+            if (pw < 0.0f) pw = 0.0f;
+            if (pw > (float)w) pw = (float)w;
+            if (maxPw >= DevTools::kMinPanelW) {
+                if (pw < DevTools::kMinPanelW) pw = DevTools::kMinPanelW;
+                if (pw > maxPw) pw = maxPw;
+            }
+            // Narrow window (w < min + 360): the clamps above would invert
+            // (min > max), so the dragged 0..w width stands as-is instead
+            // of collapsing to <= 0 (help/bug-report#1.3).
             if (pw != g_devtools->m_panelW) {
                 g_devtools->m_panelW = pw;
                 auto* mwin = (MorphWindow*)glfwGetWindowUserPointer(win);
@@ -503,6 +516,8 @@ int main() {
                 // Replace node tree
                 window.addChild(newNode);
                 deleteNodeTree(rootNode);
+                // Invalidate forge prev-rect map: old tree's pointers are now invalid
+                g_prevRects.clear();
                 rootNode = newNode;
                 registry = std::move(newRegistry);
                 devtools.hoveredNode = nullptr; // tree changed, clear stale ref
@@ -572,7 +587,7 @@ int main() {
                 glfwGetCursorPos(window.handle(), &mx, &my);
                 devtools.mouseX = (float)mx;
                 devtools.mouseY = (float)my;
-                devtools.updateHover(rootNode);
+                devtools.updateHover(rootNode, w);
             }
             // Skip idle frames entirely (no layout, paint, flatten, or GL
             // work) unless something changed or the devtools panel is open.

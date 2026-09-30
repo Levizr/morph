@@ -126,8 +126,17 @@ public:
         MorphNode::layout(px, py, parentW, parentH, r);
 
         if (r && w > 0.0f) {
-            // Constrain wrap width by maxWidth
-            float wrapW = w;
+            // Constrain wrap width by maxWidth and padding/borders
+            // Text wraps within the padding box, not the border box
+            float pl = style.padding[3];
+            float pr = style.padding[1];
+#ifdef MORPH_FEATURE_BORDER
+            float bw = style.borderWidth;
+#else
+            float bw = 0.0f;
+#endif
+            float wrapW = w - pl - pr - bw * 2.0f;
+            if (wrapW < 0.0f) wrapW = 0.0f;
             if (style.maxWidth > 0.0f && wrapW > style.maxWidth)
                 wrapW = style.maxWidth;
 
@@ -240,20 +249,31 @@ public:
         return count;
     }
 
-    void draw(Renderer& r) override {
-#ifdef MORPH_FEATURE_TRANSFORM
+void draw(Renderer& r) override {
+        #ifdef MORPH_FEATURE_TRANSFORM
         bool pushedSelf = pushSelfTransform(r, x, y);
+        #endif
+        // Text renders within padding box: inset by padding + border
+        float pl = style.padding[3];
+        float pr = style.padding[1];
+#ifdef MORPH_FEATURE_BORDER
+        float bw = style.borderWidth;
+#else
+        float bw = 0.0f;
 #endif
+        float contentX = x + pl + bw;
+        float contentW = w - pl - pr - bw * 2.0f;
+        if (contentW < 0.0f) contentW = 0.0f;
         float lh = _effFontSize() * 1.4f;
         float py = y;
         for (auto& line : lines) {
-            float lx = x;
+            float lx = contentX;
             if (_effTextAlign() == CSS::TextAlign::Center) {
                 float tw = r.measureTextWidth(line, _effFontSize(), _effFontWeight());
-                if (tw < w) lx = x + (w - tw) * 0.5f;
+                if (tw < contentW) lx = contentX + (contentW - tw) * 0.5f;
             } else if (_effTextAlign() == CSS::TextAlign::Right) {
                 float tw = r.measureTextWidth(line, _effFontSize(), _effFontWeight());
-                lx = x + w - tw;
+                lx = contentX + contentW - tw;
             }
             float* effectiveColor = style.color;
             if (parent && !m_colorOverridden) {

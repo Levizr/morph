@@ -127,8 +127,9 @@ struct DevTools {
         float top = logViewTop();
         float viewH = winH - 8.0f - top;
         float thumbH = std::max(24.0f, (viewH / ss.contentH) * viewH);
+        if (thumbH > viewH) thumbH = viewH;  // help/bug-report#1.12: avoid NaN/negative on tiny windows
         float maxScroll = ss.contentH - viewH;
-        float thumbY = top + (ss.scroll / maxScroll) * (viewH - thumbH);
+        float thumbY = top + (maxScroll > 0.0f ? (ss.scroll / maxScroll) * (viewH - thumbH) : 0.0f);
         if (mx < trackX || mx > trackX + 6.0f || my < top || my > top + viewH) return;
         if (my >= thumbY && my <= thumbY + thumbH)
             ss.dragGrabY = my - thumbY;
@@ -143,11 +144,12 @@ struct DevTools {
         float top = logViewTop();
         float viewH = winH - 8.0f - top;
         float thumbH = std::max(24.0f, (viewH / ss.contentH) * viewH);
+        if (thumbH > viewH) thumbH = viewH;  // help/bug-report#1.12
         float maxScroll = ss.contentH - viewH;
         float thumbY = my - ss.dragGrabY;
         if (thumbY < top) thumbY = top;
-        if (thumbY > top + viewH - thumbH) thumbY = top + viewH - thumbH;
-        ss.scroll = (thumbY - top) / (viewH - thumbH) * maxScroll;
+        if (maxScroll > 0.0f && thumbY > top + viewH - thumbH) thumbY = top + viewH - thumbH;
+        ss.scroll = (maxScroll > 0.0f) ? (thumbY - top) / (viewH - thumbH) * maxScroll : 0.0f;
         if (ss.scroll < 0.0f) ss.scroll = 0.0f;
         if (ss.scroll > maxScroll) ss.scroll = maxScroll;
     }
@@ -164,8 +166,14 @@ struct DevTools {
             dragScroll(my, winH, m_logScroll);
     }
 
-    void updateHover(MorphNode* root) {
+    void updateHover(MorphNode* root, float winW) {
         if (!inspecting || !root) {
+            hoveredNode = nullptr;
+            return;
+        }
+        // Exclude the DevTools panel area: hit-testing should not reach
+        // elements behind the docked panel (help/bug-report#1.11).
+        if (mouseX >= winW - m_panelW) {
             hoveredNode = nullptr;
             return;
         }

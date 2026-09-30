@@ -1,0 +1,7 @@
+{
+  "name": "repro-scratch",
+  "entry": "src/App.mx",
+  "window": { "width": 600, "height": 700, "title": "Repro" },
+  "dependencies": {},
+  "cpp_sources": []
+}

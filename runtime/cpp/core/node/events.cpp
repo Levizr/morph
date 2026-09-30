@@ -130,22 +130,68 @@ bool MorphNode::dispatchEvent(MorphEvent& e, float ex, float ey) {
     bool inBounds = (ex >= x && ex <= x + w && ey >= y && ey <= y + h);
 
 #ifdef MORPH_FEATURE_SCROLL
+#ifdef MORPH_FEATURE_SCROLL
+
     if (scrollEnabled && e.type == EventType::Scroll) {
+
         if (inBounds) {
-            float oldScrollY = scrollY;
-            scrollY -= e.scroll * 40.0f;
-            if (scrollY < 0) scrollY = 0;
-            if (scrollY > contentH - h) scrollY = contentH - h;
-            if (scrollY != oldScrollY) {
-                markDirty(PaintDirty);
-                for (auto* c : children) c->markDirty(PaintDirty);
-#ifdef MORPH_FEATURE_POSITION
-                updateStickySubtree();
-#endif
+
+            // Scroll chaining: try to route to the deepest scrollable
+
+            // descendant that contains the cursor. If none handle it,
+
+            // fall back to this node (help/bug-report#1.8).
+
+            bool handled = false;
+
+            for (auto* c : children) {
+
+                if (c->dispatchEvent(e, ex, ey)) {
+
+                    handled = true;
+
+                    break;
+
+                }
+
             }
+
+            if (!handled) {
+
+                float oldScrollY = scrollY;
+
+                scrollY -= e.scroll * 40.0f;
+
+                if (scrollY < 0) scrollY = 0;
+
+                if (scrollY > contentH - h) scrollY = contentH - h;
+
+                if (scrollY != oldScrollY) {
+
+                    markDirty(PaintDirty);
+
+                    for (auto* c : children) c->markDirty(PaintDirty);
+
+#ifdef MORPH_FEATURE_POSITION
+
+                updateStickySubtree();
+
+#endif
+
+                }
+
+                return true;
+
+            }
+
             return true;
+
         }
+
     }
+
+#endif
+
 
     if (scrollEnabled && inBounds) {
         float sw = style.scrollbarWidth;

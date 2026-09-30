@@ -39,7 +39,9 @@ static int g_fboW = 0, g_fboH = 0;
 static bool g_surfaceReady = false;
 
 // Live-node geometry from the last commit (old-position damage recovery).
-// Tracks scroll too so a changed scrollport is detected as a box move.
+// The box is stored in screen space (see screenBox) so old-position damage
+// lands on screen pixels; scroll/content extents are tracked alongside so
+// a changed scrollport still reads as a box move.
 struct PrevRect {
     DamageRect box;
     float scrollY = 0;
@@ -157,7 +159,7 @@ void forgeCommit(MorphWindow& win)
         {
             if (a.running && !a.finished &&
                 a.property != AnimProperty::X && a.property != AnimProperty::Y)
-                damage.add({(int)n->x, (int)n->y, (int)n->w, (int)n->h});
+                damage.add(screenBox(n));
         }
     });
 
@@ -176,24 +178,25 @@ void forgeCommit(MorphWindow& win)
         walkTree(win.root(), [&](MorphNode* n) {
             auto it = g_prevRects.find(n);
             bool boxChanged = it == g_prevRects.end();
+            DamageRect now = screenBox(n);
             if (!boxChanged)
             {
                 const PrevRect& prev = it->second;
-                boxChanged = ((int)n->x != prev.box.x || (int)n->y != prev.box.y ||
-                              (int)n->w != prev.box.w || (int)n->h != prev.box.h ||
+                boxChanged = (now.x != prev.box.x || now.y != prev.box.y ||
+                              now.w != prev.box.w || now.h != prev.box.h ||
                               (int)n->scrollY != (int)prev.scrollY ||
                               (int)n->contentH != (int)prev.contentH);
             }
             if (boxChanged)
             {
                 if (it != g_prevRects.end())
-                    damage.add(it->second.box); // old position
-                damage.add({(int)n->x, (int)n->y, (int)n->w, (int)n->h});
+                    damage.add(it->second.box); // old position (screen space)
+                damage.add(now);
                 n->markDirty(PaintDirty);       // force display-list re-record
             }
             else if (paintBefore.count(n))
             {
-                damage.add({(int)n->x, (int)n->y, (int)n->w, (int)n->h});
+                damage.add(now);
             }
             else
             {
@@ -217,8 +220,7 @@ void forgeCommit(MorphWindow& win)
     g_firstFrame = false;
     g_prevNodeCount = nodeCount;
     walkTree(win.root(), [&](MorphNode* n) {
-        g_prevRects[n] = {{(int)n->x, (int)n->y, (int)n->w, (int)n->h},
-                          n->scrollY, n->contentH};
+        g_prevRects[n] = {screenBox(n), n->scrollY, n->contentH};
     });
 
     stats.damageArea = damage.totalArea();

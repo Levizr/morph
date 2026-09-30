@@ -743,6 +743,12 @@ inline bool operator<=(const JsValue& a, const JsNumber& b) { return a.is_number
 inline bool operator>=(const JsNumber& a, const JsValue& b) { return b.is_number() && a >= std::get<JsNumber>(b.inner); }
 inline bool operator>=(const JsValue& a, const JsNumber& b) { return a.is_number() && std::get<JsNumber>(a.inner) >= b; }
 
+// ── JsString <-> JsValue interop (for e.key === "Enter" style compares) ──
+inline bool operator==(const JsString& a, const JsValue& b) { return b.is_string() && a == std::get<JsString>(b.inner); }
+inline bool operator==(const JsValue& a, const JsString& b) { return b == a; }
+inline bool operator!=(const JsString& a, const JsValue& b) { return !(a == b); }
+inline bool operator!=(const JsValue& a, const JsString& b) { return !(a == b); }
+
 // std::formatter specializations for Js* types live in
 // "types/js_value_format.h" and are included by default via "js_types.h".
 // Define MORPH_NO_FORMAT before including js_types.h to opt-out of the

@@ -41,12 +41,16 @@ inline std::deque<DevLogEntry>& devLogEntries() {
     return entries;
 }
 
+inline std::mutex& devLogMutex() {
+    static std::mutex mtx;
+    return mtx;
+}
+
 inline void devLogAdd(int level, const std::string& msg) {
     static const size_t kMaxEntries = 300;
     auto& entries = devLogEntries();
     {
-        static std::mutex mtx;
-        std::lock_guard<std::mutex> lock(mtx);
+        std::lock_guard<std::mutex> lock(devLogMutex());
         if (entries.size() >= kMaxEntries)
             entries.pop_front();
         entries.push_back({devLogNow(), level, msg});
@@ -55,8 +59,7 @@ inline void devLogAdd(int level, const std::string& msg) {
 
 inline void devLogClear() {
     auto& entries = devLogEntries();
-    static std::mutex mtx;
-    std::lock_guard<std::mutex> lock(mtx);
+    std::lock_guard<std::mutex> lock(devLogMutex());
     entries.clear();
 }
 
@@ -64,7 +67,6 @@ inline void devLogClear() {
 // a worker thread may still be appending to the real deque.
 inline std::vector<DevLogEntry> devLogSnapshot() {
     auto& entries = devLogEntries();
-    static std::mutex mtx;
-    std::lock_guard<std::mutex> lock(mtx);
+    std::lock_guard<std::mutex> lock(devLogMutex());
     return std::vector<DevLogEntry>(entries.begin(), entries.end());
 }

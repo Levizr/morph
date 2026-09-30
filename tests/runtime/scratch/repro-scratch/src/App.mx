@@ -1,0 +1,24 @@
+import "./style.css"
+
+export const windowConfig = { title: "Repro", width: 600, height: 700 }
+
+export default function App() {
+  return (
+    <body>
+      <div className="app">
+        <div className="app-body">
+          <div className="screen">
+            <div className="form-card">
+              <text className="lbl">First</text>
+              <input className="fld" placeholder="first ph" />
+              <text className="lbl">Second</text>
+              <input className="fld" placeholder="second ph" />
+              <text className="lbl">Third</text>
+              <button className="btn">Submit</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </body>
+  )
+}

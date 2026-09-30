@@ -139,6 +139,16 @@ bool DevSocket::readMessage(std::string& out, int timeoutMs) {
         return false;
     }
 
+    // Drain a complete message left buffered by a previous coalesced
+    // segment before polling: otherwise select() reports no new data and
+    // the stranded message waits for the next one (help/bug-report#1.1).
+    size_t pos;
+    if ((pos = m_recvBuf.find('\0')) != std::string::npos) {
+        out = m_recvBuf.substr(0, pos);
+        m_recvBuf.erase(0, pos + 1);
+        return true;
+    }
+
     // select() is available on both POSIX and Winsock, so polling stays
     // portable while the socket itself remains non-blocking.
     fd_set rfds;
@@ -167,7 +177,6 @@ bool DevSocket::readMessage(std::string& out, int timeoutMs) {
         m_recvBuf.append(buf, n);
 
         // Extract null-terminated messages
-        size_t pos;
         while ((pos = m_recvBuf.find('\0')) != std::string::npos) {
             out = m_recvBuf.substr(0, pos);
             m_recvBuf.erase(0, pos + 1);
