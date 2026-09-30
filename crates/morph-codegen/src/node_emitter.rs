@@ -189,43 +189,43 @@ fn color4(c: &[f32; 4]) -> String {
 fn emit_gradient(access: &str, g: &morph_ir::IRGradient) -> Vec<String> {
     use morph_ir::{GradientAxis, GradientPosition};
     let mut o = Vec::new();
-    o.push(format!("{access}gradEnabled = true;"));
-    o.push(format!("{access}gradRepeating = {};", if g.repeating { "true" } else { "false" }));
+    o.push(format!("{access}enabled = true;"));
+    o.push(format!("{access}repeating = {};", if g.repeating { "true" } else { "false" }));
     match g.axis {
         GradientAxis::Bottom => {
-            o.push(format!("{access}gradAngleDeg = 180.0f;"));
-            o.push(format!("{access}gradIsCorner = false;"));
+            o.push(format!("{access}angleDeg = 180.0f;"));
+            o.push(format!("{access}isCorner = false;"));
         }
         GradientAxis::Angle(d) => {
-            o.push(format!("{access}gradAngleDeg = {};", fmt(d)));
-            o.push(format!("{access}gradIsCorner = false;"));
+            o.push(format!("{access}angleDeg = {};", fmt(d)));
+            o.push(format!("{access}isCorner = false;"));
         }
         GradientAxis::Corner(x, y) => {
-            o.push(format!("{access}gradIsCorner = true;"));
-            o.push(format!("{access}gradCornerX = {};", fmt(x)));
-            o.push(format!("{access}gradCornerY = {};", fmt(y)));
+            o.push(format!("{access}isCorner = true;"));
+            o.push(format!("{access}cornerX = {};", fmt(x)));
+            o.push(format!("{access}cornerY = {};", fmt(y)));
         }
     }
-    o.push(format!("{access}gradStopCount = {};", g.stops.len()));
+    o.push(format!("{access}stopCount = {};", g.stops.len()));
     for (i, s) in g.stops.iter().enumerate() {
-        o.push(format!("{access}gradColors[{i}][0] = {:.4}f;", s.color[0]));
-        o.push(format!("{access}gradColors[{i}][1] = {:.4}f;", s.color[1]));
-        o.push(format!("{access}gradColors[{i}][2] = {:.4}f;", s.color[2]));
-        o.push(format!("{access}gradColors[{i}][3] = {:.4}f;", s.color[3]));
+        o.push(format!("{access}stops[{i}].color[0] = {:.4}f;", s.color[0]));
+        o.push(format!("{access}stops[{i}].color[1] = {:.4}f;", s.color[1]));
+        o.push(format!("{access}stops[{i}].color[2] = {:.4}f;", s.color[2]));
+        o.push(format!("{access}stops[{i}].color[3] = {:.4}f;", s.color[3]));
         match s.position {
             None => {
-                o.push(format!("{access}gradPosIsAuto[{i}] = true;"));
+                o.push(format!("{access}stops[{i}].posIsAuto = true;"));
             }
             Some(GradientPosition::Percent(v)) => {
-                o.push(format!("{access}gradPosValue[{i}] = {};", fmt(v)));
-                o.push(format!("{access}gradPosIsPx[{i}] = false;"));
+                o.push(format!("{access}stops[{i}].posValue = {};", fmt(v)));
+                o.push(format!("{access}stops[{i}].posIsPx = false;"));
             }
             Some(GradientPosition::Px(v)) => {
-                o.push(format!("{access}gradPosValue[{i}] = {};", fmt(v)));
-                o.push(format!("{access}gradPosIsPx[{i}] = true;"));
+                o.push(format!("{access}stops[{i}].posValue = {};", fmt(v)));
+                o.push(format!("{access}stops[{i}].posIsPx = true;"));
             }
         }
-        o.push(format!("{access}gradHint[{i}] = {};", s.hint.map_or("-1.0f".to_string(), fmt)));
+        o.push(format!("{access}stops[{i}].hint = {};", s.hint.map_or("-1.0f".to_string(), fmt)));
     }
     o
 }
@@ -1485,7 +1485,7 @@ fn emit_hover_style(
     if features.contains("gradient") && s.bg_gradient != base.bg_gradient {
         match &s.bg_gradient {
             Some(g) => o.extend(emit_gradient(&format!("{hv}->bgGradient."), g)),
-            None => o.push(format!("{hv}->bgGradient.gradEnabled = false;")),
+            None => o.push(format!("{hv}->bgGradient.enabled = false;")),
         }
     }
     if s.color != [0.0, 0.0, 0.0, 1.0] && s.color != base.color {
@@ -1652,7 +1652,7 @@ fn emit_active_style(
     if features.contains("gradient") && s.bg_gradient != base.bg_gradient {
         match &s.bg_gradient {
             Some(g) => o.extend(emit_gradient(&format!("{hv}->bgGradient."), g)),
-            None => o.push(format!("{hv}->bgGradient.gradEnabled = false;")),
+            None => o.push(format!("{hv}->bgGradient.enabled = false;")),
         }
     }
     if s.color != [0.0, 0.0, 0.0, 1.0] && s.color != base.color {
