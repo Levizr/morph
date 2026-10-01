@@ -219,10 +219,12 @@ fn emit_gradient(access: &str, g: &morph_ir::IRGradient) -> Vec<String> {
             Some(GradientPosition::Percent(v)) => {
                 o.push(format!("{access}stops[{i}].posValue = {};", fmt(v)));
                 o.push(format!("{access}stops[{i}].posIsPx = false;"));
+                o.push(format!("{access}stops[{i}].posIsAuto = false;"));
             }
             Some(GradientPosition::Px(v)) => {
                 o.push(format!("{access}stops[{i}].posValue = {};", fmt(v)));
                 o.push(format!("{access}stops[{i}].posIsPx = true;"));
+                o.push(format!("{access}stops[{i}].posIsAuto = false;"));
             }
         }
         o.push(format!("{access}stops[{i}].hint = {};", s.hint.map_or("-1.0f".to_string(), fmt)));

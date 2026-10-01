@@ -821,6 +821,7 @@ bool GLRenderer::ensureReady()
     m_gradUColors = glGetUniformLocation(m_gradShader, "uGradColors");
     m_gradUOffsets = glGetUniformLocation(m_gradShader, "uGradOffsets");
     m_gradURepeating = glGetUniformLocation(m_gradShader, "uGradRepeating");
+    m_gradUPeriod = glGetUniformLocation(m_gradShader, "uGradPeriod");
     m_gradURadius = glGetUniformLocation(m_gradShader, "uRadius");
     m_gradUBorderWidth = glGetUniformLocation(m_gradShader, "uBorderWidth");
     m_gradUBorderColor = glGetUniformLocation(m_gradShader, "uBorderColor");
@@ -1146,8 +1147,7 @@ void GLRenderer::drawGradRect(float x, float y, float w, float h,
     dy /= len;
     float projLen = std::fabs(w * dx) + std::fabs(h * dy);
     float offsets[MORPH_GRADIENT_MAX_STOPS] = {0};
-    morph::resolveGradientOffsets(*grad, projLen, offsets);
-    // CSS fixup: ill-ordered positions clamp to the previous one.
+    morph::resolveGradientOffsets(*grad, projLen, offsets);    // CSS fixup: ill-ordered positions clamp to the previous one.
     for (int i = 1; i < grad->stopCount; i++)
     {
         if (offsets[i] < offsets[i - 1])
@@ -1185,6 +1185,15 @@ void GLRenderer::drawGradRect(float x, float y, float w, float h,
     glUniform4fv(m_gradUColors, grad->stopCount, &colors[0][0]);
     glUniform1fv(m_gradUOffsets, grad->stopCount, offsets);
     glUniform1i(m_gradURepeating, grad->repeating ? 1 : 0);
+    // Precompute the wrap period on the CPU: the shader must not index
+    // uGradOffsets by a variable (dynamic uniform indexing miscompiles on
+    // some drivers), so the last offset never crosses the wire.
+    float period = 0.0f;
+    if (grad->stopCount >= 2)
+    {
+        period = offsets[grad->stopCount - 1] - offsets[0];
+    }
+    glUniform1f(m_gradUPeriod, period);
     glUniform1f(m_gradURadius, radius);
     glUniform1f(m_gradUBorderWidth, borderWidth);
     float bc[4] = {0, 0, 0, 0};

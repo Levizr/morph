@@ -433,6 +433,13 @@ int main() {
         fprintf(stderr, "[morph] GLFW error %d: %s\n", code, msg);
     });
 
+    // Testing on Wayland sessions: GLFW 3.4 auto-prefers Wayland with no
+    // fallback, hiding windows from X tooling. Opt into X11 explicitly.
+    if (std::getenv("MORPH_GLFW_X11") != nullptr) {
+#ifdef GLFW_PLATFORM_X11
+        glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
+#endif
+    }
     if (!glfwInit()) {
         fprintf(stderr, "[morph] glfwInit() failed\n");
         return 1;

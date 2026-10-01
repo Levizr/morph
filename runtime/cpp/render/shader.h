@@ -233,6 +233,7 @@ uniform int uGradCount;
 uniform vec4 uGradColors[8];
 uniform float uGradOffsets[8];
 uniform int uGradRepeating;
+uniform float uGradPeriod;
 uniform float uRadius;
 uniform float uBorderWidth;
 uniform vec4 uBorderColor;
@@ -242,6 +243,15 @@ out vec4 FragColor;
 float sdRoundedBox(vec2 p, vec2 b, float r) {
     vec2 q = abs(p) - b + r;
     return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
+}
+
+// Stop weight with explicit hard-stop stepping. Double positions share an
+// offset, so lerping across the degenerate span would divide by ~0 and
+// amplify rounding noise into speckle — step instead.
+float gradStopF(float t, float prevO, float curO) {
+    float span = curO - prevO;
+    return (span <= 1e-6) ? ((t < curO) ? 0.0 : 1.0)
+                          : clamp((t - prevO) / span, 0.0, 1.0);
 }
 
 void main() {
@@ -271,22 +281,32 @@ void main() {
 
     if (uGradRepeating > 0 && uGradCount >= 2) {
         float o0 = uGradOffsets[0];
-        float o1 = uGradOffsets[uGradCount - 1];
-        float period = o1 - o0;
-        if (abs(period) > 1e-6) {
-            t = o0 + mod(t - o0, period);
+        if (uGradPeriod > 1e-6) {
+            float rel = (t - o0) / uGradPeriod;
+            t = o0 + (rel - floor(rel)) * uGradPeriod;
         } else {
             t = o0;
         }
     }
 
+    // Unrolled with constant indices and uniform guards: dynamic indexing
+    // of uniform arrays miscompiles on some drivers (checkerboard
+    // speckle), so never index uGradColors/uGradOffsets by a variable.
     vec4 g = uGradColors[0];
-    for (int i = 1; i < 8; i++) {
-        if (i >= uGradCount) break;
-        float span = max(uGradOffsets[i] - uGradOffsets[i - 1], 1e-6);
-        float f = clamp((t - uGradOffsets[i - 1]) / span, 0.0, 1.0);
-        g = mix(g, uGradColors[i], f);
-    }
+    if (uGradCount > 1)
+        g = mix(g, uGradColors[1], gradStopF(t, uGradOffsets[0], uGradOffsets[1]));
+    if (uGradCount > 2)
+        g = mix(g, uGradColors[2], gradStopF(t, uGradOffsets[1], uGradOffsets[2]));
+    if (uGradCount > 3)
+        g = mix(g, uGradColors[3], gradStopF(t, uGradOffsets[2], uGradOffsets[3]));
+    if (uGradCount > 4)
+        g = mix(g, uGradColors[4], gradStopF(t, uGradOffsets[3], uGradOffsets[4]));
+    if (uGradCount > 5)
+        g = mix(g, uGradColors[5], gradStopF(t, uGradOffsets[4], uGradOffsets[5]));
+    if (uGradCount > 6)
+        g = mix(g, uGradColors[6], gradStopF(t, uGradOffsets[5], uGradOffsets[6]));
+    if (uGradCount > 7)
+        g = mix(g, uGradColors[7], gradStopF(t, uGradOffsets[6], uGradOffsets[7]));
 
     vec4 color;
     if (uBorderWidth > 0.0) {

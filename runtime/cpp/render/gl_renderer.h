@@ -276,6 +276,7 @@ private:
     GLint m_gradUProj = -1, m_gradUModel = -1, m_gradURect = -1;
     GLint m_gradUDir = -1, m_gradUCount = -1, m_gradUColors = -1;
     GLint m_gradUOffsets = -1, m_gradURepeating = -1, m_gradURadius = -1;
+    GLint m_gradUPeriod = -1;
     GLint m_gradUBorderWidth = -1, m_gradUBorderColor = -1, m_gradUStencil = -1;
     void createGradBuffers();
 #endif

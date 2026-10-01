@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>GradientTest parity</title>
+<style>
+  body { margin: 0; padding: 8px; background: #0b1220; color: #e2e8f0; font-family: "DejaVu Sans", sans-serif; font-size: 16px; }
+  .screen { display: flex; flex-direction: column; gap: 16px; padding: 20px; }
+  .hero { padding: 20px; background: linear-gradient(red, blue); border-radius: 12px; color: #fff; }
+  .toright { padding: 20px; background: linear-gradient(to right, #ff0000 0%, #0000ff 100%); border: 3px solid #ffffff; border-radius: 12px; color: #fff; }
+  .cta { all: unset; display: block; padding: 12px 20px; background: linear-gradient(45deg, #6d7cff, #a855f7); border-radius: 10px; color: #fff; cursor: pointer; font-family: inherit; font-size: inherit; text-align: center; }
+  .cta-static { padding: 12px 20px; background: linear-gradient(45deg, #a855f7, #22d3ee); border-radius: 10px; color: #fff; }
+  .stripes { padding: 20px; background: repeating-linear-gradient(45deg, black 0 10px, white 10px 20px); border-radius: 8px; }
+  .animated { padding: 20px; border-radius: 8px; background: linear-gradient(0deg, red, blue); }
+</style>
+</head>
+<body>
+  <div class="screen">
+    <div class="hero">linear default</div>
+    <div class="toright">to right + radius + border</div>
+    <button class="cta">hover me</button>
+    <div class="cta-static">hover colors, static (no mouse needed)</div>
+    <div class="stripes">repeating</div>
+    <div class="animated">keyframes</div>
+  </div>
+</body>
+</html>
