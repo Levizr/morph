@@ -18,15 +18,21 @@ export XAUTHORITY=$(ls /run/user/1000/.mutter-Xwaylandauth.* 2>/dev/null | head 
 export MORPH_GLFW_X11=1
 # Launch from the fixture dir: relative asset paths (images, fonts) and
 # morph's own run semantics resolve against the project directory.
-(cd "$ABS_D" && "$BIN" > /tmp/parity_app.log 2>&1) &
+# setsid(1) puts the app in its own process group so the cleanup kill
+# below reaps the app itself and not just the subshell (plain `kill $PID`
+# would orphan it and poison later screenshots with stale windows).
+(cd "$ABS_D" && setsid "$BIN" > /tmp/parity_app.log 2>&1) &
 PID=$!
 sleep 9
 WID=$(timeout 20 xwininfo -root -tree 2>/dev/null | grep -F "\"$TITLE\"" | tail -1 | awk '{print $1}')
-if [ -z "$WID" ]; then echo "NOWINDOW: $D ($TITLE)"; kill -9 $PID 2>/dev/null; exit 1; fi
+if [ -z "$WID" ]; then echo "NOWINDOW: $D ($TITLE)"; pkill -9 -x "$(basename "$BIN")" 2>/dev/null; exit 1; fi
 if timeout 30 xwd -id $WID -silent -out /tmp/parity_shot.xwd && timeout 30 convert /tmp/parity_shot.xwd "$OUT"; then
   echo "OK: $OUT"
 else
   echo "SHOTFAIL: $D"
 fi
-kill -9 $PID 2>/dev/null
+# Exact-name kill: reaps the app even though it was orphaned past the
+# setsid subshell (plain `kill $PID` only hits the subshell). Stale
+# instances would otherwise poison later screenshots.
+pkill -9 -x "$(basename "$BIN")" 2>/dev/null
 sleep 1
