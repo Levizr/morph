@@ -1389,33 +1389,14 @@ void MorphWindow::bodyClearColor(float out[4]) const
     auto *frame = m_frameChannel.frontFrame.load(std::memory_order_acquire);
     if (frame)
     {
-        // Flat frames root at the body itself (parentId -1): the body's
-        // own background paints the canvas, so an opaque body wins over
-        // any child. (Checking children first misfires on the first
+        // The body's own background paints the canvas, so an opaque body
+        // wins outright. (Scanning children first misfires on the first
         // opaque child — e.g. an absolute group — painting the clear
-        // color below short content.)
+        // color below short content. A transparent body must NOT inherit
+        // a child color either: Chrome shows the default canvas there.)
         for (const auto &n : frame->nodes)
         {
             if (n.parentId == -1 && n.bgColor[3] > 0.0f)
-            {
-                out[0] = n.bgColor[0]; out[1] = n.bgColor[1];
-                out[2] = n.bgColor[2]; out[3] = n.bgColor[3];
-                return;
-            }
-        }
-        int rootIdx = -1;
-        for (size_t i = 0; i < frame->nodes.size(); i++)
-        {
-            if (frame->nodes[i].parentId == -1)
-            {
-                rootIdx = (int)i;
-                break;
-            }
-        }
-        for (const auto &n : frame->nodes)
-        {
-            bool isBody = (rootIdx >= 0) ? (n.parentId == rootIdx) : (n.parentId == -1);
-            if (isBody && n.bgColor[3] > 0.0f)
             {
                 out[0] = n.bgColor[0]; out[1] = n.bgColor[1];
                 out[2] = n.bgColor[2]; out[3] = n.bgColor[3];
