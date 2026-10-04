@@ -28,6 +28,9 @@ Put a new fixture in the group matching what broke. A one-off repro goes in
 ```bash
 ./tests/runtime/run-selftests.sh   # build + run --morph-self-test on app/ fixtures
 ./tests/runtime/check-size.sh      # assert size/hello-size stays under the byte budget
+./tests/runtime/check-forge-math.sh  # forge DamageSet/TilePool/scroll-shift unit tests (g++-14, headless)
+./tests/runtime/bench-forge.sh     # forge damage-model benchmarks + TU-exclusion nm checks
+./tests/runtime/check-forge-pixels.sh  # headless EGL raster verification: real renderNode culling, scroll-shift, exclusion (skips green without EGL)
 ```
 
 Run both from the repo root. `run-selftests.sh` greps for `0 failures`; any

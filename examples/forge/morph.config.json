@@ -1,0 +1,19 @@
+{
+  "name": "forge",
+  "entry": "src/App.mx",
+
+  "window": {
+    "width": 600,
+    "height": 520,
+    "title": "Forge Example"
+  },
+  "dependencies": {},
+  "cpp_sources": [],
+  "renderer": "forge",
+  "build": {
+    "wayland": false,
+    "system_freetype": false,
+    "upx": false,
+    "upx_version": ""
+  }
+}

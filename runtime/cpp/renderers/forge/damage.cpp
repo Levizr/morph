@@ -92,34 +92,3 @@ void DamageSet::clipTo(int vw, int vh)
                                [](const DamageRect& r) { return r.w <= 0 || r.h <= 0; }),
                 rects.end());
 }
-
-// Conservative per-node damage: the node's own bounds expanded by its
-// descendant paint-dirty union, plus the bounds of any clip/scroll ancestors
-// (their clip region can reveal or hide changed content).
-void DamageSet::add(MorphNode* node)
-{
-    if (!node)
-        return;
-    add({(int)node->x, (int)node->y, (int)node->w, (int)node->h});
-
-    // Walk up ancp to include clip/scroll containers so our repaint covers
-    // everything that can change because of this node.
-    for (MorphNode* a = node->parent; a; a = a->parent)
-    {
-        if (a->scrollEnabled)
-            add({(int)a->x, (int)a->y, (int)a->w, (int)a->h});
-    }
-}
-
-// Walk the tree, adding damage for every node that needs a repaint this frame
-// (paint, style, or scroll dirty). Only nodes with actual display-list work
-// are included, so an untouched frame yields an empty set.
-void DamageSet::addAll(MorphNode* root)
-{
-    if (!root)
-        return;
-    if (root->isDirty(PaintDirty) || root->isDirty(StyleDirty) || root->isDirty(ScrollDirty))
-        add(root);
-    for (auto* c : root->children)
-        addAll(c);
-}

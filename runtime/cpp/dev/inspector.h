@@ -6,6 +6,9 @@
 #include <chrono>
 #include <vector>
 #include <unordered_map>
+#if defined(__linux__)
+#include <sys/resource.h>
+#endif
 #include "../core/node.h"
 #include "../render/gl_renderer.h"
 #include "../renderers/renderer.h"
@@ -38,6 +41,9 @@ struct DevTools {
     // ── Repaint highlighting ──
     bool m_highlightRepaints = false;
     std::unordered_map<MorphNode*, float> m_repaintTimers;
+
+    // ── Damage overlay (forge damage rects, drawn under the panel) ──
+    bool m_showDamage = false;
 
     // ── Scroll state (Network + Logs tabs) ──
     struct ScrollState {
@@ -216,6 +222,12 @@ struct DevTools {
                 return true;
             }
 #endif
+            // Show damage toggle switch
+            float dy = winH - 78.0f;
+            if (mx >= px + 10 && mx <= px + pw - 10 && my >= dy && my <= dy + 30.0f) {
+                m_showDamage = !m_showDamage;
+                return true;
+            }
             // Highlight repaints toggle switch
             float ty = winH - 46.0f;
             if (mx >= px + 10 && mx <= px + pw - 10 && my >= ty && my <= ty + 30.0f) {
@@ -445,6 +457,17 @@ private:
         drawTextAt(r, val, x + 90.0f, y, valCol, 11.0f, CSS::FontWeight::Normal);
     }
 
+    // Peak RSS in MB (Linux getrusage; ru_maxrss is KiB). -1 when unknown.
+    static float residentMB() {
+#if defined(__linux__)
+        struct rusage usage;
+        if (getrusage(RUSAGE_SELF, &usage) == 0) {
+            return (float)usage.ru_maxrss / 1024.0f;
+        }
+#endif
+        return -1.0f;
+    }
+
     static void formatColor(char* buf, size_t n, float c[4]) {
         int r = (int)(c[0] * 255.0f + 0.5f);
         int g = (int)(c[1] * 255.0f + 0.5f);
@@ -607,7 +630,7 @@ private:
         y += 96.0f + 8.0f;
 
         // ── FRAME card ──
-        float cardH = 34.0f + 4 * 17.0f;
+        float cardH = 34.0f + 5 * 17.0f;
         drawCard(r, cardX, y, cardW, cardH);
         drawSectionLabel(r, px + 22, y + 6, "FRAME");
         float ry = y + 26.0f;
@@ -618,7 +641,14 @@ private:
         snprintf(buf, sizeof(buf), "%d", m_frameCount);
         drawRow(r, px + 22, ry, "Frame #", buf, valCol); ry += 17.0f;
         snprintf(buf, sizeof(buf), "%d", ds.fullTreeCount);
-        drawRow(r, px + 22, ry, "Total nodes", buf, valCol);
+        drawRow(r, px + 22, ry, "Total nodes", buf, valCol); ry += 17.0f;
+        float rss = residentMB();
+        if (rss >= 0.0f) {
+            snprintf(buf, sizeof(buf), "%.1f MB", rss);
+        } else {
+            snprintf(buf, sizeof(buf), "n/a");
+        }
+        drawRow(r, px + 22, ry, "RSS (peak)", buf, valCol);
         y += cardH + 8.0f;
 
         // ── LAYOUT card ──
@@ -650,6 +680,27 @@ private:
         drawRow(r, px + 22, ry, "Culled", buf, ds.culledCount > 0 ? green : valCol);
         y += cardH + 8.0f;
 
+        // ── FORGE card (retained-renderer counters; zero under flash) ──
+        cardH = 34.0f + 4 * 17.0f;
+        drawCard(r, cardX, y, cardW, cardH);
+        drawSectionLabel(r, px + 22, y + 6, "FORGE");
+        ry = y + 26.0f;
+        float winArea = (px + pw) * winH;
+        float dmgPct = winArea > 0.0f ? (ds.damageArea * 100.0f / winArea) : 0.0f;
+        snprintf(buf, sizeof(buf), "%d px (%.1f%%)", ds.damageArea, dmgPct);
+        drawRow(r, px + 22, ry, "Damage", buf, ds.damageArea > 0 ? red : green); ry += 17.0f;
+        if (ds.presentBytes > 0) {
+            snprintf(buf, sizeof(buf), "%.1f MB", ds.presentBytes / 1048576.0f);
+        } else {
+            snprintf(buf, sizeof(buf), "skipped");
+        }
+        drawRow(r, px + 22, ry, "Present", buf, valCol); ry += 17.0f;
+        snprintf(buf, sizeof(buf), "%d (%d KB)", ds.tileCount, ds.tileBytes / 1024);
+        drawRow(r, px + 22, ry, "Tiles", buf, valCol); ry += 17.0f;
+        snprintf(buf, sizeof(buf), "%d (%d KB)", ds.layerCount, ds.layerBytes / 1024);
+        drawRow(r, px + 22, ry, "Layers", buf, valCol);
+        y += cardH + 8.0f;
+
         // ── SAVINGS card ──
         cardH = 34.0f + 2 * 17.0f;
         drawCard(r, cardX, y, cardW, cardH);
@@ -664,12 +715,14 @@ private:
         snprintf(buf, sizeof(buf), "%.0f%%", paintSavings);
         drawRow(r, px + 22, ry, "Paint saved", buf, paintSavings > 50 ? green : red);
 
-        // ── Highlight repaints toggle (footer) ──
-        float ty = winH - 46.0f;
-        drawCard(r, cardX, ty, cardW, 30);
+        // ── Footer toggles ──
+        float ty = winH - 78.0f;
+        drawCard(r, cardX, ty, cardW, 62);
         float lbl[4] = {0.80f, 0.82f, 0.89f, 1.0f};
-        drawTextAt(r, "Highlight repaints", px + 22, ty + 8.0f, lbl, 11.0f, CSS::FontWeight::Normal);
-        drawSwitch(r, px + pw - 58.0f, ty + 6.0f, m_highlightRepaints);
+        drawTextAt(r, "Show damage", px + 22, ty + 8.0f, lbl, 11.0f, CSS::FontWeight::Normal);
+        drawSwitch(r, px + pw - 58.0f, ty + 6.0f, m_showDamage);
+        drawTextAt(r, "Highlight repaints", px + 22, ty + 36.0f, lbl, 11.0f, CSS::FontWeight::Normal);
+        drawSwitch(r, px + pw - 58.0f, ty + 34.0f, m_highlightRepaints);
     }
 
     void drawRendererCard(GLRenderer& r, float px, float y0, float pw) {

@@ -1,0 +1,28 @@
+import "style.css"
+
+export const windowConfig = {
+  title: "Flash Example",
+  width: 480,
+  height: 360,
+  minWidth: 480,
+  minHeight: 360,
+  maxWidth: 480,
+  maxHeight: 360,
+}
+
+export default function App() {
+  return (
+    <body>
+      <div className="app" id="app">
+        <div className="title" id="title">Flash renderer</div>
+        <div className="sub" id="sub">Full-frame direct rasterizer</div>
+        <div className="row" id="row">
+          <div className="card" id="card1">Static UI</div>
+          <div className="card" id="card2">Low RAM</div>
+          <div className="card" id="card3">Simple</div>
+        </div>
+        <button className="btn" id="ok">Hover me</button>
+      </div>
+    </body>
+  )
+}

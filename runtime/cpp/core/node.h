@@ -31,8 +31,13 @@ struct DirtyStats {
     int culledCount = 0;       // nodes skipped by off-screen flatten culling
     int damageArea = 0;        // forge: pixels repainted this frame (0 = no damage)
     int presentBytes = 0;      // forge: bytes blitted to the backbuffer this frame
+    int tileCount = 0;         // forge: resident tiles in the tile pool
+    int tileBytes = 0;         // forge: VRAM held by the tile pool
+    int layerCount = 0;        // forge: retained mover layers alive
+    int layerBytes = 0;        // forge: VRAM held by mover layers
     void reset() { layoutCount = 0; paintCount = 0; fullTreeCount = 0; skippedCount = 0;
-                   culledCount = 0; damageArea = 0; presentBytes = 0; }
+                   culledCount = 0; damageArea = 0; presentBytes = 0; tileCount = 0;
+                   tileBytes = 0; layerCount = 0; layerBytes = 0; }
 };
 
 enum class AnimProperty : uint8_t {

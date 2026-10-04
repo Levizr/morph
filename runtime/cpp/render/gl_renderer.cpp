@@ -921,7 +921,7 @@ void GLRenderer::beginRoundedClip(float x, float y, float w, float h, float radi
     // Because discard in the shader prevents INCR for fragments outside the shape,
     // only the intersection of all ancestor masks plus this shape passes.
     glEnable(GL_STENCIL_TEST);
-    glStencilFunc(GL_EQUAL, m_stencilClipDepth, 0xFF);
+    glStencilFunc(GL_EQUAL, m_stencilClipDepth | (m_damageStencil ? 0x80 : 0), 0xFF);
     glStencilOp(GL_KEEP, GL_KEEP, GL_INCR);
     glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
     glDepthMask(GL_FALSE);
@@ -947,6 +947,10 @@ void GLRenderer::beginRoundedClip(float x, float y, float w, float h, float radi
     glDepthMask(GL_TRUE);
 
     int newRef = m_stencilClipDepth + 1;
+    if (m_damageStencil)
+    {
+        newRef |= 0x80;
+    }
     glStencilFunc(GL_EQUAL, newRef, 0xFF);
     glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
 
@@ -959,7 +963,12 @@ void GLRenderer::endRoundedClip()
     m_stencilClipDepth--;
     if (m_stencilClipDepth > 0)
     {
-        glStencilFunc(GL_EQUAL, m_stencilClipDepth, 0xFF);
+        int ref = m_stencilClipDepth;
+        if (m_damageStencil)
+        {
+            ref |= 0x80;
+        }
+        glStencilFunc(GL_EQUAL, ref, 0xFF);
     }
     else
     {
@@ -968,12 +977,87 @@ void GLRenderer::endRoundedClip()
     }
 }
 
+void GLRenderer::stencilDamageMask(const int* rects, int count, const float proj[16])
+{
+    if (!ensureReady())
+    {
+        return;
+    }
+    flush(proj);
+
+    glEnable(GL_STENCIL_TEST);
+    glStencilFunc(GL_ALWAYS, 0x80, 0x80);
+    glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+    glStencilMask(0xFF);
+    glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+    glDepthMask(GL_FALSE);
+
+    glUseProgram(m_shader);
+    glUniformMatrix4fv(m_uProj, 1, GL_FALSE, proj);
+    glUniform1i(m_uStencilMode, 0);
+
+    std::vector<Instance> quads;
+    if (count > 0)
+    {
+        quads.reserve((size_t)count);
+    }
+    for (int i = 0; i < count; i++)
+    {
+        int x = rects[i * 4];
+        int y = rects[i * 4 + 1];
+        int w = rects[i * 4 + 2];
+        int h = rects[i * 4 + 3];
+        if (w <= 0 || h <= 0)
+        {
+            continue;
+        }
+        // Screen-space coords straight through the pipeline (the ortho
+        // projection already maps y-down); only raw glScissor needs the
+        // manual Y flip used in beginClip.
+        Instance inst = {(float)x, (float)y, (float)w, (float)h,
+                         1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                         0.0f, 0.0f};
+#ifdef MORPH_FEATURE_TRANSFORM
+        applyModel(inst);
+#endif
+        quads.push_back(inst);
+    }
+    if (!quads.empty())
+    {
+        glBindVertexArray(m_vao);
+        glBindBuffer(GL_ARRAY_BUFFER, m_instVBO);
+        glBufferData(GL_ARRAY_BUFFER, quads.size() * sizeof(Instance), quads.data(),
+                     GL_DYNAMIC_DRAW);
+        glDrawElementsInstanced(GL_TRIANGLES, 6, GL_UNSIGNED_INT, (void*)0,
+                                (GLsizei)quads.size());
+    }
+
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glDepthMask(GL_TRUE);
+    m_damageStencil = true;
+    glStencilFunc(GL_EQUAL, m_stencilClipDepth | 0x80, 0xFF);
+    glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+}
+
+void GLRenderer::endDamageStencil()
+{
+    m_damageStencil = false;
+    glDisable(GL_STENCIL_TEST);
+}
+
 void GLRenderer::flush(const float proj[16])
 {
     if (!ensureReady())
         return;
 
     memcpy(m_proj, proj, sizeof(m_proj));
+
+    // Damage-stencil re-arm (forge partial raster): clip edges above set
+    // their own func, so every batch retests the mask before drawing.
+    if (m_damageStencil)
+    {
+        glStencilFunc(GL_EQUAL, m_stencilClipDepth | 0x80, 0xFF);
+    }
 
     if (!m_batch.empty())
     {

@@ -1,7 +1,14 @@
 cmake_minimum_required(VERSION 3.10)
+# Prefer g++-14 on Linux (C++23 required for generated code). Env CXX still wins.
+if(UNIX AND NOT APPLE AND NOT DEFINED CMAKE_CXX_COMPILER)
+    find_program(MORPH_GPP14 g++-14)
+    if(MORPH_GPP14)
+        set(CMAKE_CXX_COMPILER ${MORPH_GPP14})
+    endif()
+endif()
 project(morph_devrt LANGUAGES CXX C)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 cmake_policy(SET CMP0072 NEW)
@@ -15,11 +22,17 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${MORPH_BIN_DIR})
 find_package(OpenGL REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(FREETYPE REQUIRED freetype2)
-pkg_check_modules(HARFBUZZ REQUIRED harfbuzz)
+
+# HarfBuzz: try pkg-config first, if not available we'll link directly
+pkg_search_module(HARFBUZZ harfbuzz)
+
+# Wayland
+pkg_check_modules(WAYLAND REQUIRED wayland-client wayland-server)
 
 # Runtime directory (for relative includes like "core/node.h")
 set(RUNTIME_DIR ${CMAKE_CURRENT_SOURCE_DIR}/..)
 set(VENDOR_DIR ${RUNTIME_DIR}/vendor)
+set(HARFBUZZ_INCLUDE_DIR ${RUNTIME_DIR}/harfbuzz)
 
 # Source files
 set(DEV_SOURCES
@@ -55,6 +68,12 @@ set(RENDERER_SOURCES
     ${RUNTIME_DIR}/renderers/forge/forge.cpp
     ${RUNTIME_DIR}/renderers/forge/damage.h
     ${RUNTIME_DIR}/renderers/forge/damage.cpp
+    ${RUNTIME_DIR}/renderers/forge/tile.h
+    ${RUNTIME_DIR}/renderers/forge/tile_pool.h
+    ${RUNTIME_DIR}/renderers/forge/tile_pool.cpp
+    ${RUNTIME_DIR}/renderers/forge/layer.h
+    ${RUNTIME_DIR}/renderers/forge/scroll_shift.h
+    ${RUNTIME_DIR}/renderers/forge/scroll_shift.cpp
 )
 
 add_executable(morph_devrt ${DEV_SOURCES} ${RUNTIME_SOURCES} ${RENDERER_SOURCES})
@@ -63,7 +82,7 @@ target_include_directories(morph_devrt PRIVATE
     ${RUNTIME_DIR}        # for "core/node.h", "render/gl_renderer.h"
     ${VENDOR_DIR}         # for "vendor/glad/glad.h"
     ${FREETYPE_INCLUDE_DIRS}
-    ${HARFBUZZ_INCLUDE_DIRS}
+    ${HARFBUZZ_INCLUDE_DIR}
     ${RUNTIME_DIR}/renderers  # for flash.h, forge.h, damage.h, tile.h, etc.
 )
 
@@ -120,16 +139,20 @@ elseif(APPLE)
         glfw
         OpenGL::GL
         ${FREETYPE_LIBRARIES}
-        ${HARFBUZZ_LIBRARIES}
+        HarfBuzz::harfbuzz
     )
 else()
+    # Link against Wayland via pkg-config
+    find_library(X11_LIB X11)
+    set(HARFBUZZ_LIB ${RUNTIME_DIR}/libs/libharfbuzz.so)
     target_link_libraries(morph_devrt PRIVATE
         glfw
         OpenGL::GL
-        X11
+        ${WAYLAND_LIBRARIES}
+        ${X11_LIB}
+        ${HARFBUZZ_LIB}
+        ${FREETYPE_LIBRARIES}
         pthread
         dl
-        ${FREETYPE_LIBRARIES}
-        ${HARFBUZZ_LIBRARIES}
     )
 endif()

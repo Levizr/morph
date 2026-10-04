@@ -1,0 +1,47 @@
+import "style.css"
+
+export const windowConfig = {
+  title: "Forge Example",
+  width: 600,
+  height: 520,
+  minWidth: 400,
+  minHeight: 360,
+}
+
+export default function App() {
+  return (
+    <body>
+      <div className="app" id="app">
+        <div className="head" id="head">Forge renderer</div>
+        <div className="sub" id="sub">Retained tiles + scroll-shift</div>
+        <div className="list" id="list">
+          <div className="row" id="row-1">Row 1 — scroll me</div>
+          <div className="row" id="row-2">Row 2</div>
+          <div className="row" id="row-3">Row 3</div>
+          <div className="row" id="row-4">Row 4</div>
+          <div className="row" id="row-5">Row 5</div>
+          <div className="row" id="row-6">Row 6</div>
+          <div className="row" id="row-7">Row 7</div>
+          <div className="row" id="row-8">Row 8</div>
+          <div className="row" id="row-9">Row 9</div>
+          <div className="row" id="row-10">Row 10</div>
+          <div className="row" id="row-11">Row 11</div>
+          <div className="row" id="row-12">Row 12</div>
+          <div className="row" id="row-13">Row 13</div>
+          <div className="row" id="row-14">Row 14</div>
+          <div className="row" id="row-15">Row 15</div>
+          <div className="row" id="row-16">Row 16</div>
+          <div className="row" id="row-17">Row 17</div>
+          <div className="row" id="row-18">Row 18</div>
+          <div className="row" id="row-19">Row 19</div>
+          <div className="row" id="row-20">Row 20</div>
+          <div className="row" id="row-21">Row 21</div>
+          <div className="row" id="row-22">Row 22</div>
+          <div className="row" id="row-23">Row 23</div>
+          <div className="row" id="row-24">Row 24</div>
+        </div>
+        <button className="btn" id="ok">Hover me</button>
+      </div>
+    </body>
+  )
+}

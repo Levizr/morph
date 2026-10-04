@@ -147,6 +147,9 @@ impl Compiler {
             runtime_dir.join("renderers/flash/flash.cpp"),
             runtime_dir.join("renderers/forge/forge.cpp"),
             runtime_dir.join("renderers/forge/damage.cpp"),
+            runtime_dir.join("renderers/forge/tile_pool.cpp"),
+            runtime_dir.join("renderers/forge/scroll_shift.cpp"),
+            runtime_dir.join("renderers/forge/mover_layer.cpp"),
         ];
         // Unused renderer backend: the dispatch in window.cpp is
         // compile-time (activeRenderMode), so forge.cpp is dead weight
@@ -155,7 +158,12 @@ impl Compiler {
         if has("MORPH_RENDERER_FORGE") {
             srcs.retain(|p| !p.ends_with("flash/flash.cpp"));
         } else {
-            srcs.retain(|p| !p.ends_with("forge/forge.cpp"));
+            srcs.retain(|p| {
+                !p.ends_with("forge/forge.cpp")
+                    && !p.ends_with("forge/tile_pool.cpp")
+                    && !p.ends_with("forge/scroll_shift.cpp")
+                    && !p.ends_with("forge/mover_layer.cpp")
+            });
         }
         // Reactive machinery only when something is reactive: the
         // template omits the pump calls, so these TUs would link

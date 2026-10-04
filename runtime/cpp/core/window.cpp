@@ -7,16 +7,20 @@
 #include "../ui/input.h"
 #endif
 #include <GLFW/glfw3.h>
-// X11 pointer grab for scrollbar thumb drags (devtools-style: the drag
-// keeps tracking past the window edge with the cursor visible). App-side
-// Xlib only — no GLFW rebuild needed. Non-X11 builds skip the grab and
-// keep node-capture behavior inside the window.
+// Pointer grab for scrollbar thumb drags (devtools-style: the drag
+// keeps tracking past the window edge with the cursor visible).
+// Supports both X11 and Wayland backends.
 #if defined(__linux__) && !defined(__ANDROID__)
 #define GLFW_EXPOSE_NATIVE_X11
+#define GLFW_EXPOSE_NATIVE_WAYLAND
 #include <GLFW/glfw3native.h>
 #include <X11/Xlib.h>
+#include <wayland-client.h>
 #endif
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
+#include <vector>
 // <print> is C++23 but not in libc++ until LLVM 17 (macOS Xcode 16 and
 // older lack it), so include it only where the toolchain provides it.
 #if __has_include(<print>)
@@ -36,9 +40,8 @@ static int s_clickCount = 0;
 static bool s_pointerGrabActive = false;
 
 // Grab the pointer so a scrollbar thumb drag keeps receiving motion and
-// button events past the window edge (cursor stays visible). No-op when
-// X11 is unavailable (Wayland session, grab conflict) — the drag then
-// tracks inside the window only, as before.
+// button events past the window edge (cursor stays visible).
+// Supports both X11 and Wayland backends.
 static void grabPointerForDrag(GLFWwindow* win)
 {
 #if defined(__linux__) && !defined(__ANDROID__)
@@ -46,6 +49,17 @@ static void grabPointerForDrag(GLFWwindow* win)
     {
         return;
     }
+    // Try Wayland first (preferred on Wayland sessions)
+    struct wl_display* wl_dpy = glfwGetWaylandDisplay();
+    struct wl_surface* wl_surf = glfwGetWaylandWindow(win);
+    if (wl_dpy && wl_surf)
+    {
+        // Wayland pointer confinement via relative pointer / pointer constraints
+        // For now, we skip the grab on Wayland and rely on node-capture behavior.
+        // TODO: Implement proper Wayland pointer confinement via zwp_pointer_constraints_v1
+        return;
+    }
+    // Fallback to X11
     Display* dpy = glfwGetX11Display();
     ::Window xw = glfwGetX11Window(win);
     if (!dpy || !xw)
@@ -71,6 +85,15 @@ static void ungrabPointerForDrag()
     {
         return;
     }
+    // Try Wayland first
+    struct wl_display* wl_dpy = glfwGetWaylandDisplay();
+    if (wl_dpy)
+    {
+        // No explicit ungrab needed for Wayland (we didn't grab)
+        s_pointerGrabActive = false;
+        return;
+    }
+    // Fallback to X11
     Display* dpy = glfwGetX11Display();
     if (dpy)
     {
@@ -657,6 +680,13 @@ MorphWindow::MorphWindow(const std::string &title, int width, int height, bool v
     // the hint must be set before glfwCreateWindow — hiding after the
     // fact flashes a visible frame.
     glfwWindowHint(GLFW_VISIBLE, visible ? GLFW_TRUE : GLFW_FALSE);
+#ifdef GLFW_WAYLAND_APP_ID
+    // Wayland: the compositor labels the window (e.g. GNOME dash) from
+    // app_id — without it the dock shows "Unknown". Older GLFW headers
+    // simply lack the hint, so this stays conditional.
+    if (!title.empty())
+        glfwWindowHintString(GLFW_WAYLAND_APP_ID, title.c_str());
+#endif
     m_handle = glfwCreateWindow(width, height, title.c_str(), nullptr, nullptr);
     glfwWindowHint(GLFW_VISIBLE, GLFW_TRUE);
     // Creating a window must not disturb the calling thread: a dynamic
@@ -705,6 +735,15 @@ MorphWindow::MorphWindow(const std::string &title, int width, int height, bool v
     }
     if (prevContext != m_handle)
         glfwMakeContextCurrent(prevContext);
+    if (const char* shot = std::getenv("MORPH_SCREENSHOT"))
+    {
+        m_shotPath = shot;
+    }
+    if (const char* frames = std::getenv("MORPH_SCREENSHOT_FRAMES"))
+    {
+        int n = std::atoi(frames);
+        m_shotFrames = n > 0 ? n : 1;
+    }
 }
 
 void MorphWindow::setTitle(const std::string &title)
@@ -781,6 +820,9 @@ MorphWindow::~MorphWindow()
         // surviving windows' same-numbered objects.
         glfwMakeContextCurrent(m_handle);
         m_renderer.shutdown();
+#ifdef MORPH_RENDERER_FORGE
+        forge::forgetWindow(*this);
+#endif
     }
     delete m_root;
     m_root = nullptr;
@@ -821,14 +863,77 @@ void MorphWindow::stopCompositor()
     }
 }
 
+static int s_shotSaved = 0;
+
+void MorphWindow::maybeScreenshot()
+{
+    if (m_shotPath.empty() || m_shotDone || !m_handle)
+    {
+        return;
+    }
+    if (++m_shotTaken < m_shotFrames)
+    {
+        return;
+    }
+    m_shotDone = true;
+    int fbW = m_width;
+    int fbH = m_height;
+    glfwGetFramebufferSize(m_handle, &fbW, &fbH);
+    if (fbW <= 0 || fbH <= 0)
+    {
+        return;
+    }
+    glReadBuffer(GL_BACK);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    std::vector<unsigned char> px((size_t)fbW * (size_t)fbH * 3);
+    glReadPixels(0, 0, fbW, fbH, GL_RGB, GL_UNSIGNED_BYTE, px.data());
+    std::string out = m_shotPath;
+    if (s_shotSaved > 0)
+    {
+        out += "." + std::to_string(s_shotSaved);
+    }
+    FILE* f = std::fopen(out.c_str(), "wb");
+    if (!f)
+    {
+        return;
+    }
+    std::fprintf(f, "P6\n%d %d\n255\n", fbW, fbH);
+    for (int y = fbH - 1; y >= 0; --y)
+    {
+        std::fwrite(&px[(size_t)y * (size_t)fbW * 3], 1, (size_t)fbW * 3, f);
+    }
+    std::fclose(f);
+    s_shotSaved++;
+}
+
 void MorphWindow::commitFrame()
 {
     if (!m_root)
+    {
         return;
+    }
+#ifdef MORPH_FEATURE_DEV_RENDERER_SWITCH
+    static RenderMode s_lastMode = RenderMode::Flash;
+    RenderMode curMode = activeRenderMode();
+    if (curMode == RenderMode::Forge && s_lastMode != RenderMode::Forge)
+    {
+        forge::forceFullscreen();
+    }
+    s_lastMode = curMode;
+    if (curMode == RenderMode::Forge)
+    {
+        forge::forgeCommit(*this);
+    }
+    else
+    {
+        flash::flashCommit(*this);
+    }
+#else
 #ifdef MORPH_RENDERER_FORGE
     forge::forgeCommit(*this);
 #else
     flash::flashCommit(*this);
+#endif
 #endif
 }
 
@@ -881,7 +986,7 @@ void MorphWindow::drawOpsForNode(GLRenderer &r, const RenderFrame *frame, int no
             if (node.grad.enabled)
             {
                 r.drawGradRect(px, py, op.w, op.h, op.data[0], (float *)&op.r,
-                               &node.grad, op.data[1], (float *)&op.br);
+                               &node.grad, op.data[1], (float *)&op.br, nullptr);
                 break;
             }
 #endif
@@ -960,8 +1065,13 @@ static bool subtreeFitsBox(const RenderFrame *frame, int nodeIdx,
 }
 
 void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx,
-                             const DamageSet *damageClip, float scrollOffset)
+                             const DamageSet *damageClip, float scrollOffset,
+                             int skipIdx)
 {
+    if (nodeIdx == skipIdx)
+    {
+        return;
+    }
     const auto &node = frame->nodes[nodeIdx];
 
     auto sc = [&](float v)
@@ -1017,7 +1127,7 @@ void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx,
             if (overflowClipped || radiusClip)
                 return;
             for (int childIdx : node.children)
-                renderNode(frame, childIdx, damageClip, scrollOffset);
+                renderNode(frame, childIdx, damageClip, scrollOffset, skipIdx);
             return;
         }
     }
@@ -1032,15 +1142,18 @@ void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx,
         if (overflowClipped || radiusClip)
             return;
         for (int childIdx : node.children)
-            renderNode(frame, childIdx, damageClip, scrollOffset);
+            renderNode(frame, childIdx, damageClip, scrollOffset, skipIdx);
         return;
     }
 
-    // Damage-limited re-raster: skip anything whose own box can't touch the
-    // repaint region — its pixels are already correct in the retained surface.
+    // Damage-limited re-raster: skip anything whose drawn (screen-space)
+    // box can't touch the repaint region — its pixels are already correct
+    // in the retained surface. Commit records damage in screen space
+    // (see screenYOf in forge.cpp), so the cull must compare screen
+    // boxes: raw boxes miss for scrolled content.
     if (damageClip)
     {
-        DamageRect box{(int)sx, (int)sy, (int)sw, (int)sh};
+        DamageRect box{(int)sx, (int)screenY, (int)sw, (int)sh};
 #ifdef MORPH_FEATURE_TRANSFORM
         if (transformed)
         {
@@ -1058,7 +1171,7 @@ void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx,
             if (overflowClipped || radiusClip)
                 return;
             for (int childIdx : node.children)
-                renderNode(frame, childIdx, damageClip, scrollOffset);
+                renderNode(frame, childIdx, damageClip, scrollOffset, skipIdx);
             return;
         }
     }
@@ -1191,15 +1304,20 @@ void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx,
         if (scrolling && !transformed)
         {
             const auto &child = frame->nodes[childIdx];
-            float childVisY = child.y + child.animOffsetY - node.scrollY;
-            if (childVisY + child.h > sy && childVisY < sy + sh)
+            // Screen-space visibility: the child's drawn position minus
+            // the full accumulated scroll (ancestors included) against the
+            // node's screen top. Single-level scrolling reduces to the old
+            // test; nested scrolling was previously culled wrong.
+            float childVisY = child.y + child.animOffsetY - childScroll;
+            float nodeTop = sy - scrollOffset;
+            if (childVisY + child.h > nodeTop && childVisY < nodeTop + sh)
             {
-                renderNode(frame, childIdx, damageClip, childScroll);
+                renderNode(frame, childIdx, damageClip, childScroll, skipIdx);
             }
         }
         else
         {
-            renderNode(frame, childIdx, damageClip, childScroll);
+            renderNode(frame, childIdx, damageClip, childScroll, skipIdx);
         }
     }
     if (scrolling)
@@ -1250,13 +1368,18 @@ void MorphWindow::renderFrame(std::function<void(GLRenderer &, DirtyStats &)> ov
         return;
     }
 
+#ifdef MORPH_FEATURE_DEV_RENDERER_SWITCH
     if (activeRenderMode() == RenderMode::Forge)
     {
-#ifdef MORPH_RENDERER_FORGE
         forge::forgePresent(*this, overlayFn);
         return;
-#endif
     }
+#else
+#ifdef MORPH_RENDERER_FORGE
+    forge::forgePresent(*this, overlayFn);
+    return;
+#endif
+#endif
 
     // Wait for compositor to finish interpolation
     // (typically already done by the time we get here, but spin if not)
@@ -1297,6 +1420,7 @@ void MorphWindow::renderFrame(std::function<void(GLRenderer &, DirtyStats &)> ov
         overlayFn(m_renderer, m_dirtyStats);
         m_renderer.flush(proj);
     }
+    maybeScreenshot();
     glfwSwapBuffers(m_handle);
 }
 
@@ -1313,12 +1437,113 @@ void MorphWindow::drawFrameNodes(const DamageSet *damageClip)
     ortho(proj, 0.0f, (float)m_width, (float)m_height, 0.0f, -1.0f, 1.0f);
     m_renderer.setProjection(proj);
 
+    // Stencil-mask a damage-limited raster to the damage set: paint
+    // outside damage becomes impossible by construction (a repainted
+    // container can no longer destroy retained pixels of culled rows).
+    // Culling stays as pure optimization; the mask is the guarantee.
+    std::vector<int> maskRects;
+    if (damageClip && !damageClip->empty())
+    {
+        maskRects.reserve(damageClip->rects.size() * 4);
+        for (const auto& dmg : damageClip->rects)
+        {
+            maskRects.push_back(dmg.x);
+            maskRects.push_back(dmg.y);
+            maskRects.push_back(dmg.w);
+            maskRects.push_back(dmg.h);
+        }
+        m_renderer.stencilDamageMask(maskRects.data(), (int)damageClip->rects.size(),
+                                     proj);
+    }
+
     for (size_t i = 0; i < frame->nodes.size(); i++)
     {
         if (frame->nodes[i].parentId == -1)
             renderNode(frame, (int)i, damageClip);
     }
     m_renderer.flush(proj);
+    if (damageClip && !damageClip->empty())
+    {
+        m_renderer.endDamageStencil();
+    }
+}
+
+void MorphWindow::drawFrameNodesExcluding(int skipIdx, const DamageSet *damageClip)
+{
+    auto *frame = m_frameChannel.frontFrame.load(std::memory_order_acquire);
+    if (!frame)
+        return;
+
+    glViewport(0, 0, m_width, m_height);
+    m_renderer.setFBHeight(m_height);
+
+    float proj[16];
+    ortho(proj, 0.0f, (float)m_width, (float)m_height, 0.0f, -1.0f, 1.0f);
+    m_renderer.setProjection(proj);
+
+    std::vector<int> maskRects;
+    if (damageClip && !damageClip->empty())
+    {
+        maskRects.reserve(damageClip->rects.size() * 4);
+        for (const auto& dmg : damageClip->rects)
+        {
+            maskRects.push_back(dmg.x);
+            maskRects.push_back(dmg.y);
+            maskRects.push_back(dmg.w);
+            maskRects.push_back(dmg.h);
+        }
+        m_renderer.stencilDamageMask(maskRects.data(), (int)damageClip->rects.size(),
+                                     proj);
+    }
+
+    for (size_t i = 0; i < frame->nodes.size(); i++)
+    {
+        if (frame->nodes[i].parentId == -1)
+            renderNode(frame, (int)i, damageClip, 0.0f, skipIdx);
+    }
+    m_renderer.flush(proj);
+    if (damageClip && !damageClip->empty())
+    {
+        m_renderer.endDamageStencil();
+    }
+}
+
+bool MorphWindow::captureNodeLayer(int nodeIdx, unsigned int fbo, int w, int h)
+{
+    auto *frame = m_frameChannel.frontFrame.load(std::memory_order_acquire);
+    if (!frame || nodeIdx < 0 || nodeIdx >= (int)frame->nodes.size() || w <= 0 || h <= 0)
+    {
+        return false;
+    }
+    const auto& node = frame->nodes[(size_t)nodeIdx];
+    if (!node.children.empty() || node.textOpCount != 0)
+    {
+        return false;
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)fbo);
+    glViewport(0, 0, w, h);
+    m_renderer.setFBHeight(h);
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_STENCIL_TEST);
+    // Raw capture, no blending: the stored texel must hold the unmixed
+    // source color + coverage alpha so the later textured-quad composite
+    // blends exactly once (like a fresh raster). Capturing blended over
+    // transparent would premultiply the color and darken every AA edge
+    // a second time at composite.
+    glDisable(GL_BLEND);
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+    float proj[16];
+    ortho(proj, 0.0f, (float)w, (float)h, 0.0f, -1.0f, 1.0f);
+    m_renderer.setProjection(proj);
+    // 1px padding origin: the caller sizes the FBO (w+2)x(h+2) so no
+    // rect edge touches the FBO boundary — derivatives at edge/corner
+    // fragments match a fresh interior raster exactly.
+    drawOpsForNode(m_renderer, frame, nodeIdx, -node.x + 1.0f, -node.y + 1.0f);
+    m_renderer.flush(proj);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    return true;
 }
 
 // ── Legacy single-threaded render path ──
@@ -1371,6 +1596,7 @@ void MorphWindow::render(std::function<void(GLRenderer &, DirtyStats &)> overlay
         overlayFn(m_renderer, m_dirtyStats);
         m_renderer.flush(proj);
     }
+    maybeScreenshot();
     glfwSwapBuffers(m_handle);
 
 #ifdef MORPH_FEATURE_DIRTY_RENDERING

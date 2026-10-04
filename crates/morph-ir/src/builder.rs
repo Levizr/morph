@@ -18,6 +18,7 @@ pub struct IRBuilder {
     counter: std::cell::Cell<usize>,
     type_mode: morpher::TypeMode,
     app_window: Option<(String, u32, u32)>,
+    app_renderer: Option<String>,
     project_root: Option<PathBuf>,
 }
 
@@ -28,6 +29,7 @@ impl IRBuilder {
             counter: std::cell::Cell::new(0),
             type_mode: morpher::TypeMode::default(),
             app_window: None,
+            app_renderer: None,
             project_root: None,
         }
     }
@@ -38,6 +40,15 @@ impl IRBuilder {
     #[must_use]
     pub fn with_app_window(mut self, title: String, width: u32, height: u32) -> Self {
         self.app_window = Some((title, width, height));
+        self
+    }
+
+    /// App-wide renderer from the top-level `renderer` config (`"flash"` or
+    /// `"forge"`): every window built without an explicit per-window
+    /// override inherits it. Falls back to `"flash"` when unset.
+    #[must_use]
+    pub fn with_app_renderer(mut self, renderer: String) -> Self {
+        self.app_renderer = Some(renderer);
         self
     }
 
@@ -248,7 +259,10 @@ impl IRBuilder {
             min_height: wc.and_then(|w| w.min_height),
             max_height: wc.and_then(|w| w.max_height),
             modal: wc.is_some_and(|w| w.modal),
-            renderer: "flash".into(),
+            renderer: self
+                .app_renderer
+                .clone()
+                .unwrap_or_else(|| "flash".into()),
             nodes: vec![],
             startup_logs,
             premain_functions: premain,
@@ -522,7 +536,10 @@ impl IRBuilder {
             min_height: wc.and_then(|w| w.min_height),
             max_height: wc.and_then(|w| w.max_height),
             modal: wc.is_some_and(|w| w.modal),
-            renderer: "flash".into(),
+            renderer: self
+                .app_renderer
+                .clone()
+                .unwrap_or_else(|| "flash".into()),
             nodes: vec![root_node],
             startup_logs: ctx.logs.clone(),
             premain_functions: ctx.premain.clone(),
@@ -726,7 +743,10 @@ impl IRBuilder {
             min_height: None,
             max_height: None,
             modal: false,
-            renderer: "flash".into(),
+            renderer: self
+                .app_renderer
+                .clone()
+                .unwrap_or_else(|| "flash".into()),
             nodes: vec![root_node],
             startup_logs: ctx.logs.clone(),
             premain_functions: ctx.premain.clone(),

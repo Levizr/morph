@@ -159,6 +159,17 @@ public:
     // the damage are skipped — their pixels are already correct in the retained
     // surface. Clipping nodes never skip (their clip reveals descendants).
     void drawFrameNodes(const DamageSet *damageClip = nullptr);
+    // Same, but skips one subtree (background restore behind a moved
+    // layer: everything repaints except the leaf, which is blitted).
+    void drawFrameNodesExcluding(int skipIdx, const DamageSet *damageClip = nullptr);
+    // Capture one leaf's raster into a caller-owned FBO (mover-layer
+    // promotion). The caller sizes the FBO 1px larger than the leaf box
+    // on every side; the raster lands at (1,1) so no rect edge touches
+    // the FBO boundary (edge derivatives match a fresh raster exactly).
+    // Captures raw (no blending) and flushes. Returns false for
+    // non-capturable nodes (text, children). Caller binds the main
+    // target afterwards.
+    bool captureNodeLayer(int nodeIdx, unsigned int fbo, int w, int h);
 
     // Start/stop compositor thread
     void startCompositor(bool vsync = true);
@@ -177,7 +188,8 @@ public:
 private:
     void renderNode(const RenderFrame *frame, int nodeIdx,
                     const DamageSet *damageClip = nullptr,
-                    float scrollOffset = 0.0f);
+                    float scrollOffset = 0.0f,
+                    int skipIdx = -1);
     static void drawOpsForNode(GLRenderer &r, const RenderFrame *frame, int nodeIdx,
                                float ox, float oy);
     static void drawScrollbar(GLRenderer &r, const FlatRenderNode &node,
@@ -188,6 +200,10 @@ private:
     bool m_prevHadDirty = true;
     bool m_pendingRender = true;
     float m_devtoolsWidth = 0.0f;
+    std::string m_shotPath;
+    int m_shotFrames = 1;
+    int m_shotTaken = 0;
+    bool m_shotDone = false;
 
 public:
     bool hasPendingRender() const
@@ -200,6 +216,12 @@ public:
     }
     void clearPendingRender() { m_pendingRender = false; }
     void notifyPendingRender() { m_pendingRender = true; }
+
+    // Test hook: when MORPH_SCREENSHOT is set, saves the Nth presented
+    // frame (MORPH_SCREENSHOT_FRAMES, default 1) to that path as binary
+    // PPM and keeps running. Captures only this window's backbuffer —
+    // never the desktop. Empty path (normal runs) costs one branch.
+    void maybeScreenshot();
 };
 
 // Shared dirty-tree helpers used by both the fallback single-threaded path

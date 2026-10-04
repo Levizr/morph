@@ -19,6 +19,7 @@
 
 #include "../core/window.h"
 #include "../core/window_manager.h"
+#include "../renderers/forge/forge.h"
 #include "../core/node.h"
 #include "../core/renderer.h"
 #include "../render/gl_renderer.h"
@@ -434,7 +435,7 @@ int main() {
     });
 
     // Testing on Wayland sessions: GLFW 3.4 auto-prefers Wayland with no
-    // fallback, hiding windows from X tooling. Opt into X11 explicitly.
+    // fallback. X11 can be forced via MORPH_GLFW_X11 env var.
     if (std::getenv("MORPH_GLFW_X11") != nullptr) {
 #ifdef GLFW_PLATFORM_X11
         glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
@@ -591,6 +592,9 @@ int main() {
                 window.renderFrame([&](GLRenderer& r, DirtyStats&) {
                     devtools.render(r, (float)window.width(), (float)window.height(),
                                     window.dirtyStats());
+                    if (devtools.m_showDamage) {
+                        forge::drawDamageOverlay(window, r);
+                    }
                 });
             } else {
                 // Visible but nothing to draw — nap briefly instead of

@@ -203,7 +203,14 @@ pub(crate) fn run(
     let builder = morph_ir::IRBuilder::new()
         .with_type_mode(type_mode)
         .with_project_root(cwd.clone())
+        .with_app_renderer(config.renderer.clone())
         .with_app_window(config.window.title.clone(), config.window.width, config.window.height);
+    if config.renderer != "flash" && config.renderer != "forge" {
+        crate::logger::log_warn(&format!(
+            "unknown renderer \"{}\" — falling back to \"flash\"",
+            config.renderer
+        ));
+    }
     let windows =
         builder.build_with_graph(&graph, &css_rules, &css_keyframes).inspect_err(|_e| {
             pb.finish_and_clear();

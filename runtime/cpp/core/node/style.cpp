@@ -83,6 +83,10 @@ void MorphNode::updateAnimations(float dt) {
     for (auto& a : m_animations) {
         if (!a.running || a.finished) continue;
         a.elapsed += dt;
+        // Per-tick dirt: the compositor interpolates these every vsync,
+        // but only a dirty tree schedules the commit+present that shows
+        // it — without this, time-driven animations freeze in prod.
+        markDirty(PaintDirty);
         float t = a.elapsed / a.duration;
         if (t >= 1.0f) {
             t = 1.0f;

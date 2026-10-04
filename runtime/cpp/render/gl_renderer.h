@@ -185,6 +185,12 @@ private:
     GLint m_uProj = -1;
     GLint m_uStencilMode = -1;
     int m_stencilClipDepth = 0;
+    // Damage mask for retained compositing (forge partial present): when
+    // set, surviving pixels carry bit 0x80 and every raster pass tests
+    // for it, so paint outside the damage set is impossible no matter
+    // what the damage cull decides. Clip INCRs preserve the bit (they
+    // never reach 0xFF depths). Always false outside forge presents.
+    bool m_damageStencil = false;
     int m_scissorClipDepth = 0;
     // GL keeps a single scissor rect, so nested clips maintain their own
     // stack and re-issue the outer rect on pop. Otherwise the inner rect
@@ -312,6 +318,14 @@ public:
     void endClip() override;
     void beginRoundedClip(float x, float y, float w, float h, float radius) override;
     void endRoundedClip() override;
+
+    // Damage-stencil protocol (forge partial present only):
+    // stencilDamageMask writes bit 0x80 over the given screen-space rects
+    // ({x,y,w,h} top-down origin, may be empty to just arm the test);
+    // every raster pass then keeps pixels outside the mask untouched.
+    // endDamageStencil tears it down. Never active outside forge.
+    void stencilDamageMask(const int* rects, int count, const float proj[16]);
+    void endDamageStencil();
 
 #ifdef MORPH_FEATURE_TRANSFORM
     void pushTransform(const float m[16], float anchorX, float anchorY) override
