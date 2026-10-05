@@ -2,6 +2,7 @@
 #include "../core/node.h"
 #include "../core/event.h"
 #include "radius.h"
+#include "border_paint.h"
 
 class ButtonNode : public MorphNode {
 public:
@@ -11,22 +12,16 @@ public:
         float sx = sc(x), sy = sc(y);
         float sw = sc(w), sh = sc(h);
         float rad = m_isTransitioning ? (style.borderRadius > 0.0f ? style.borderRadius : 6.0f) : snapRadius(style.borderRadius > 0.0f ? style.borderRadius : 6.0f);
-        DrawOp bg;
 #ifdef MORPH_FEATURE_BORDER
-        if (style.borderWidth > 0.0f && style.borderStyle == CSS::BorderStyle::Solid) {
-            float bw = m_isTransitioning ? style.borderWidth : snapBorderWidth(style.borderWidth);
-            bool inner = (style.boxSizing == CSS::BoxSizing::BorderBox);
-            if (inner)
-                bg.setBordered(sx, sy, sw, sh, rad, style.bgColor, bw, style.borderColor);
-            else
-                bg.setBordered(sx - bw, sy - bw, sw + 2.0f * bw, sh + 2.0f * bw,
-                               rad, style.bgColor, bw, style.borderColor);
-        } else
-#endif
+        recordBoxOps(m_displayList, style, sx, sy, sw, sh, rad,
+                     !m_isTransitioning, true);
+#else
+        DrawOp bg;
         {
             bg.setRounded(sx, sy, sw, sh, rad, style.bgColor);
         }
         m_displayList.push_back(bg);
+#endif
     }
 
     void executeDisplayList(Renderer& r) override {
@@ -45,7 +40,7 @@ public:
                 case DrawOp::Rect:
 #ifdef MORPH_FEATURE_GRADIENT
                     if (style.bgGradient.enabled) {
-                        r.drawGradRect(op.x,op.y,op.w,op.h,0.0f,&op.r,&style.bgGradient,0.0f,nullptr);
+                        r.drawGradRect(op.x,op.y,op.w,op.h,0.0f,&op.r,&style.bgGradient,0.0f,nullptr,nullptr);
                         break;
                     }
 #endif
@@ -53,7 +48,7 @@ public:
                 case DrawOp::RoundedRect:
 #ifdef MORPH_FEATURE_GRADIENT
                     if (style.bgGradient.enabled) {
-                        r.drawGradRect(op.x,op.y,op.w,op.h,op.data[0],&op.r,&style.bgGradient,0.0f,nullptr);
+                        r.drawGradRect(op.x,op.y,op.w,op.h,op.data[0],&op.r,&style.bgGradient,0.0f,nullptr,nullptr);
                         break;
                     }
 #endif
@@ -61,7 +56,7 @@ public:
                 case DrawOp::BorderedRect:
 #ifdef MORPH_FEATURE_GRADIENT
                     if (style.bgGradient.enabled) {
-                        r.drawGradRect(op.x,op.y,op.w,op.h,0.0f,&op.r,&style.bgGradient,op.data[1],&op.br);
+                        r.drawGradRect(op.x,op.y,op.w,op.h,0.0f,&op.r,&style.bgGradient,op.data[1],&op.br,nullptr);
                         break;
                     }
 #endif
@@ -69,11 +64,17 @@ public:
                 case DrawOp::BorderedRoundedRect:
 #ifdef MORPH_FEATURE_GRADIENT
                     if (style.bgGradient.enabled) {
-                        r.drawGradRect(op.x,op.y,op.w,op.h,op.data[0],&op.r,&style.bgGradient,op.data[1],&op.br);
+                        r.drawGradRect(op.x,op.y,op.w,op.h,op.data[0],&op.r,&style.bgGradient,op.data[1],&op.br,nullptr);
                         break;
                     }
 #endif
                     r.drawBorderedRoundedRect(op.x,op.y,op.w,op.h,op.data[0],&op.r,op.data[1],&op.br); break;
+                case DrawOp::BorderRing:
+#ifdef MORPH_FEATURE_BORDER
+                    execBorderRingOp(r, op, style); break;
+#else
+                    break;
+#endif
                 default: break;
             }
         }
@@ -131,41 +132,21 @@ public:
 #ifdef MORPH_FEATURE_TRANSFORM
         bool pushedSelf = pushSelfTransform(r, sx, sy);
 #endif
+#ifdef MORPH_FEATURE_BORDER
+        paintBoxDirect(r, style, sx, sy, sw, sh, rad, !m_isTransitioning,
+                       true);
+#else
 #ifdef MORPH_FEATURE_GRADIENT
         if (style.bgGradient.enabled) {
-            float bw = 0.0f;
-            const float* bc = nullptr;
-            float gx = sx, gy = sy, gw = sw, gh = sh;
-#ifdef MORPH_FEATURE_BORDER
-            if (style.borderWidth > 0.0f && style.borderStyle == CSS::BorderStyle::Solid) {
-                bw = m_isTransitioning ? style.borderWidth : snapBorderWidth(style.borderWidth);
-                bc = style.borderColor;
-                if (style.boxSizing != CSS::BoxSizing::BorderBox) {
-                    gx -= bw; gy -= bw; gw += 2.0f * bw; gh += 2.0f * bw;
-                }
-            }
-#endif
-            r.drawGradRect(gx, gy, gw, gh, rad,
-                           style.bgColor, &style.bgGradient, bw, bc);
+            r.drawGradRect(sx, sy, sw, sh, rad,
+                           style.bgColor, &style.bgGradient, 0.0f, nullptr,
+                           nullptr);
         } else {
-#endif
-#ifdef MORPH_FEATURE_BORDER
-        if (style.borderWidth > 0.0f && style.borderStyle == CSS::BorderStyle::Solid) {
-            float bw = m_isTransitioning ? style.borderWidth : snapBorderWidth(style.borderWidth);
-            bool inner = (style.boxSizing == CSS::BoxSizing::BorderBox);
-            if (inner)
-                r.drawBorderedRoundedRect(sx, sy, sw, sh, rad, style.bgColor,
-                                          bw, style.borderColor);
-            else
-                r.drawBorderedRoundedRect(sx - bw, sy - bw,
-                                          sw + 2.0f * bw, sh + 2.0f * bw,
-                                          rad, style.bgColor,
-                                          bw, style.borderColor);
-        } else
 #endif
             r.drawRoundedRect(sx, sy, sw, sh, rad, style.bgColor);
 #ifdef MORPH_FEATURE_GRADIENT
         }
+#endif
 #endif
 #ifdef MORPH_FEATURE_SCROLL
         if (scrollEnabled && contentH > sh) {

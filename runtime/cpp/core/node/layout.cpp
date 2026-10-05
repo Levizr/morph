@@ -11,7 +11,7 @@ static float hBonus(const MorphStyle& s) {
 #endif
     float pl = s.padding[3], pr = s.padding[1];
 #ifdef MORPH_FEATURE_BORDER
-    return pl + pr + s.borderWidth * 2.0f;
+    return pl + pr + borderOuterH(s);
 #else
     return pl + pr;
 #endif
@@ -23,7 +23,7 @@ static float vBonus(const MorphStyle& s) {
 #endif
     float pt = s.padding[0], pb = s.padding[2];
 #ifdef MORPH_FEATURE_BORDER
-    return pt + pb + s.borderWidth * 2.0f;
+    return pt + pb + borderOuterV(s);
 #else
     return pt + pb;
 #endif
@@ -330,8 +330,16 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 
 #ifdef MORPH_FEATURE_BORDER
     float bw = style.borderWidth;
+    float bwT = getBorderWidth(style, 0);
+    float bwR = getBorderWidth(style, 1);
+    float bwB = getBorderWidth(style, 2);
+    float bwL = getBorderWidth(style, 3);
 #else
     float bw = 0.0f;
+    float bwT = 0.0f;
+    float bwR = 0.0f;
+    float bwB = 0.0f;
+    float bwL = 0.0f;
 #endif
 
 #ifdef MORPH_FEATURE_POSITION
@@ -368,7 +376,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 #ifdef MORPH_FEATURE_BORDER_BOX
             if (style.boxSizing != CSS::BoxSizing::BorderBox)
 #endif
-                w += pl + pr + bw * 2.0f;
+                w += pl + pr + bwL + bwR;
         } else {
             w = -1.0f;
         }
@@ -392,7 +400,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 #ifdef MORPH_FEATURE_BORDER_BOX
             if (style.boxSizing != CSS::BoxSizing::BorderBox)
 #endif
-                h += pt + pb + bw * 2.0f;
+                h += pt + pb + bwT + bwB;
         } else {
             h = 0.0f;
         }
@@ -422,7 +430,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
         } else
 #endif
         {
-            w = style.explicitWidth + pl + pr + bw * 2.0f;
+            w = style.explicitWidth + pl + pr + bwL + bwR;
         }
     } else {
         w = parentW - mlForWidth - mrForWidth;
@@ -456,7 +464,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
         } else
 #endif
         {
-            h = style.explicitHeight + pt + pb + bw * 2.0f;
+            h = style.explicitHeight + pt + pb + bwT + bwB;
         }
     } else {
         h = 0.0f;
@@ -492,20 +500,20 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
     if (style.maxHeight > 0.0f && h > style.maxHeight) h = style.maxHeight;
 #endif
 
-    float cw = w - pl - pr - bw * 2.0f;
+    float cw = w - pl - pr - bwL - bwR;
     if (cw < 0.0f) cw = 0.0f;
-    float ch = h - pt - pb - bw * 2.0f;
+    float ch = h - pt - pb - bwT - bwB;
     if (ch < 0.0f) ch = 0.0f;
-    float cx = x + bw + pl;
-    float cy = y + bw + pt;
+    float cx = x + bwL + pl;
+    float cy = y + bwT + pt;
 
 #ifdef MORPH_FEATURE_POSITION
     // Containing block for absolute descendants = padding box of the nearest
     // positioned ancestor (this node if positioned, otherwise inherited).
     float cbX, cbY, cbW, cbH;
     if (isPositioned()) {
-        cbX = x + bw; cbY = y + bw;
-        cbW = w - 2.0f * bw; cbH = h - 2.0f * bw;
+        cbX = x + bwL; cbY = y + bwT;
+        cbW = w - bwL - bwR; cbH = h - bwT - bwB;
         if (cbW < 0.0f) cbW = 0.0f;
         if (cbH < 0.0f) cbH = 0.0f;
     } else {
@@ -1248,7 +1256,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                 // and relayout only if the position changed.  This keeps the
                 // very first layout pass correct (no stale-margin pass 1).
                 float provY = (!firstBlockChild && !inlineBeforeFirstBlock
-                               && pt == 0.0f && bw == 0.0f)
+                               && pt == 0.0f && bwT == 0.0f)
                                   ? curY - ownMt
                                   : curY;
                 c->layout(cx, provY, cw, ch, r);
@@ -1266,7 +1274,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                 // the margin is passed up to our own parent instead.
                 float py;
                 if (!firstBlockChild && !inlineBeforeFirstBlock
-                    && pt == 0.0f && bw == 0.0f)
+                    && pt == 0.0f && bwT == 0.0f)
                     py = curY - ownMt;
                 else
                     py = (curY - prevMb) + collapsedMt - ownMt;
@@ -1361,12 +1369,12 @@ after_children:
 #endif
 
     if (style.explicitHeight < 0.0f) {
-        float autoH = (maxBottom - cy) + pt + pb + bw * 2.0f;
+        float autoH = (maxBottom - cy) + pt + pb + bwT + bwB;
 #ifdef MORPH_FEATURE_MARGIN_COLLAPSE
         // Parent–child margin collapse: the last block child's bottom margin
         // collapses through a boundary-less parent, so it must not inflate
         // our height — our parent applies it as the gap after us instead.
-        if (pb == 0.0f && bw == 0.0f && lastBlockChildMbSet && !inlineAfterLastBlock)
+        if (pb == 0.0f && bwB == 0.0f && lastBlockChildMbSet && !inlineAfterLastBlock)
             autoH -= lastChildMbEff;
 #endif
         if (autoH < 0.0f) autoH = 0.0f;
@@ -1376,7 +1384,7 @@ after_children:
 #ifdef MORPH_FEATURE_FLEX
     if (style.display == CSS::Display::Flex && style.explicitWidth < 0.0f && isRow
         && maxRight > cx + cw) {
-        float autoW = maxRight - x + pr + bw;
+        float autoW = maxRight - x + pr + bwR;
         if (autoW > w) w = autoW;
     }
 #endif

@@ -18,7 +18,7 @@ Set the `renderer` key in `morph.config.json` (see [Configuration](../getting-st
 ```
 
 - `"flash"` is the default and the recommended production renderer today
-- `"forge"` is beta — try it from the DevTools Rendering tab before committing
+- `"forge"` is shipped but opt-in — try it from the DevTools Rendering tab before committing
 
 ## How Selection Works
 

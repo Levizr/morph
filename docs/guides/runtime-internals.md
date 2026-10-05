@@ -19,7 +19,7 @@ runtime/cpp/
 ├── renderers/              # Paint backends
 │   ├── renderer.h          # RenderMode {Flash, Forge}, activeRenderMode()
 │   ├── flash/flash.h       # Full clear + replay (default, ~22 MB @1080p)
-│   └── forge/              # Retained FBO + DamageSet (beta)
+│   └── forge/              # Retained FBO + DamageSet (opt-in)
 ├── style/                  # CSS → GPU pipeline
 │   ├── style.h             # MorphStyle + feature-gated mixins
 │   └── features/           # flex, position, scroll, border, cursor, zindex,
@@ -132,13 +132,16 @@ void flashPresent();                          // glClear + draw all ops
 - ~22 MB @ 1080p, pixel-correct
 - Simple, predictable
 
-### Forge (Beta)
+### Forge (Opt-in)
 
 ```cpp
 // runtime/cpp/renderers/forge/forge.h
-void forgeCommit(const RenderFrame& frame);   // Build damage + retained layers
-void forgePresent();                          // Scissored clears + glBlit
-void forgeSetOverlayFn(std::function<void()>); // DevTools overlay
+void forgeCommit(MorphWindow& win);            // Build damage + retained layers
+void forgePresent(MorphWindow& win,            // Scissored clears + glBlit
+                  std::function<void(GLRenderer&, DirtyStats&)> overlayFn = {});
+void forceFullscreen();                         // Next commit repaints fullscreen (dev toggle)
+void forgetWindow(MorphWindow& win);            // Release the retained surface (window teardown)
+void drawDamageOverlay(MorphWindow& win, GLRenderer& r); // DevTools damage overlay
 ```
 
 - Persistent FBO (retained surface)
@@ -149,7 +152,7 @@ void forgeSetOverlayFn(std::function<void()>); // DevTools overlay
   - Scroll content height changes
 - Scissored clears per damage rect
 - `glBlitFramebuffer` for present
-- Idle = blit only (~0 cost)
+- Idle = present skipped entirely (~0 bytes)
 - ~30 MB floor, targets 5k-20k nodes @ 60Hz
 
 ### Selection
@@ -529,8 +532,8 @@ Feature::Custom("MyWidgetNode") => {
 -DMORPH_FEATURE_BUTTON
 -DMORPH_RENDERER_FLASH    # or FORGE
 
-# Compiler flags
--std=c++20 -O2 -ffunction-sections -fdata-sections
+# Compiler flags (always g++-14 + C++23 on Linux)
+-std=c++23 -O2 -ffunction-sections -fdata-sections
 -Wl,--gc-sections
 
 # Linker

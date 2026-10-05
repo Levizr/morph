@@ -36,7 +36,7 @@
 - **`JsNumber` display** — `fmt_double()` strips trailing zeros and prints `"Error"` for non-finite values instead of leaking `nan`/`inf` into the UI
 
 ### Known Issues
-- **Forge renderer (in progress)** — the `forge` retained-FBO renderer is still **beta/buggy**: known issues around damage-rect edges, scroll-shift, and some compositor-animation paths. **Flash remains the recommended/default production renderer.** Forge can be toggled live in dev from the DevTools Rendering tab for testing.
+- **Forge renderer (in progress at 0.0.6)** — the `forge` retained-FBO renderer shipped beta with known issues around damage-rect edges, scroll-shift, and some compositor-animation paths; those have since been fixed (see `docs/future/rendering/forge-tile-pool.md`). **Flash remains the recommended/default renderer; forge is opt-in.** Forge can be toggled live in dev from the DevTools Rendering tab for testing.
 
 ### Changed
 - **Code structure refactor** — `runtime/core/node.cpp` split into `node/node.cpp`, `layout.cpp`, `style.cpp`, `events.cpp`, `flatten.cpp`, `paint_order.cpp`; widget classes extracted to `runtime/ui/` (`rect.h`, `text.h`, `button.h`, `image.h`, `input.h`, `radius.h`, `viewport_node.h`, `viewport_driver.h`); `glad.c` moved under `runtime/vendor/glad/`; shared shader sources relocated to `runtime/shaders/`

@@ -6,6 +6,7 @@
     "height": 600,
     "title": "Morph list test"
   },
+  "renderer": "flash",
   "dependencies": {},
   "cpp_sources": []
 }

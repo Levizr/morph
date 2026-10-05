@@ -5,6 +5,7 @@
 // benchmarks can never catch.
 #include <EGL/egl.h>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -18,6 +19,7 @@
 #include "forge/forge.h"
 #include "forge/layer.h"
 #include "forge/scroll_shift.h"
+#include "style/features/border.h"
 
 namespace
 {
@@ -502,6 +504,101 @@ int buildMoverScene(RenderFrame& frame, float dx, float dy, bool colorAnim = fal
     return mover;
 }
 
+// Border scene: body root + one box with per-side solid colors through
+// BorderRing ops (mirrors recordBoxOps for content-box sizing: the ring
+// box expands outward by each side's own width). Returns the box node
+// index; ring* receives the ring-box origin for assertions.
+int buildBorderScene(RenderFrame& frame, int& ringX, int& ringY, int& ring2X,
+                     int& ring2Y)
+{
+    frame.nodes.clear();
+    frame.drawOps.clear();
+    frame.animations.clear();
+    frame.textOps.clear();
+    frame.viewW = (float)WIN_W;
+    frame.viewH = (float)WIN_H;
+    frame.culledCount = 0;
+
+    const float body[4] = {0.063f, 0.078f, 0.094f, 1.0f};
+    int root = addNode(frame, -1, 0.0f, 0.0f, (float)WIN_W, (float)WIN_H);
+    frame.nodes[(size_t)root].bgColor[0] = body[0];
+    frame.nodes[(size_t)root].bgColor[1] = body[1];
+    frame.nodes[(size_t)root].bgColor[2] = body[2];
+    frame.nodes[(size_t)root].bgColor[3] = body[3];
+    paintRect(frame, root, 0.0f, 0.0f, (float)WIN_W, (float)WIN_H, body);
+
+    const float fill[4] = {0.086f, 0.129f, 0.227f, 1.0f};
+    const float red[4] = {1.0f, 0.0f, 0.0f, 1.0f};
+    const float green[4] = {0.0f, 1.0f, 0.0f, 1.0f};
+    const float blue[4] = {0.0f, 0.0f, 1.0f, 1.0f};
+    const float yellow[4] = {1.0f, 1.0f, 0.0f, 1.0f};
+    int box = addNode(frame, root, 30.0f, 30.0f, 120.0f, 70.0f);
+    FlatRenderNode& node = frame.nodes[(size_t)box];
+    node.dlOffset = (int)frame.drawOps.size();
+    DrawOp fillOp;
+    float fc[4] = {fill[0], fill[1], fill[2], fill[3]};
+    fillOp.setRect(30.0f, 30.0f, 120.0f, 70.0f, fc);
+    frame.drawOps.push_back(fillOp);
+    // Content-box ring: 6px bands outside the node box on every side.
+    ringX = 24;
+    ringY = 24;
+    const float sides[4][4] = {{red[0], red[1], red[2], red[3]},
+                               {green[0], green[1], green[2], green[3]},
+                               {blue[0], blue[1], blue[2], blue[3]},
+                               {yellow[0], yellow[1], yellow[2], yellow[3]}};
+    for (int side = 0; side < 4; side++)
+    {
+        DrawOp ring;
+        float bc[4] = {sides[side][0], sides[side][1], sides[side][2],
+                       sides[side][3]};
+        // Modes pack (side + 1) * 16 + style (solid = 1), adjacents 6.
+        ring.setBorderRing(24.0f, 24.0f, 132.0f, 82.0f, 0.0f, 6.0f, bc,
+                           (float)((side + 1) * 16 + 1), 6.0f, 6.0f);
+        frame.drawOps.push_back(ring);
+    }
+    node.dlCount = (int)frame.drawOps.size() - node.dlOffset;
+
+    // Second box: identical white solid on all four sides but uneven
+    // widths (4/6/4/6), forcing the per-side loop with butt joints.
+    // 4px bands leave interior joint pixels outside any edge fringe.
+    int box2 = addNode(frame, root, 30.0f, 120.0f, 120.0f, 70.0f);
+    FlatRenderNode& node2 = frame.nodes[(size_t)box2];
+    node2.dlOffset = (int)frame.drawOps.size();
+    DrawOp fill2;
+    float fc2[4] = {fill[0], fill[1], fill[2], fill[3]};
+    fill2.setRect(30.0f, 120.0f, 120.0f, 70.0f, fc2);
+    frame.drawOps.push_back(fill2);
+    ring2X = 24;
+    ring2Y = 116;
+    const int widths2[4] = {4, 6, 4, 6};
+    const float wall[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+    const float* bcolors[4] = {wall, wall, wall, wall};
+    float bmodes[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    for (int side = 0; side < 4; side++)
+    {
+        bmodes[side] = (float)((side + 1) * 16 + 1);
+    }
+    for (int side = 0; side < 4; side++)
+    {
+        DrawOp ring;
+        float bc[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+        float adjS = (float)(side == 0 || side == 2 ? 6 : 4);
+        float adjE = adjS;
+        // Same protocol as recordBoxOps: joint codes packed in the mode
+        // fraction (butt for identical solids, hard miter for same
+        // colors, AA miter otherwise).
+        float mode = (float)((side + 1) * 16 + 1);
+        int nStart, nEnd;
+        sideNeighbors(side, nStart, nEnd);
+        mode += borderJointFrac(bcolors, bmodes, side, nStart, nEnd);
+        ring.setBorderRing(24.0f, 116.0f, 132.0f, 78.0f, 0.0f,
+                           (float)widths2[side], bc, mode, adjS, adjE);
+        frame.drawOps.push_back(ring);
+    }
+    node2.dlCount = (int)frame.drawOps.size() - node2.dlOffset;
+    return box;
+}
+
 } // namespace
 
 int main()
@@ -983,6 +1080,92 @@ int main()
         paintRect(frameOverlap, sib, 90.0f, 20.0f, 60.0f, 40.0f, sibColor);
         check(!forge::tryMoverLayer(&frameOverlap, noIdx, noGates, noBase, noNew),
               "mover-layer-declines-overlap");
+    }
+
+    // T7: per-side border joints — the four miter diagonals land on the
+    // true inner corners with no gap and no wrong-side paint (regression
+    // for inverted top/bottom keep flags, proven against Chrome).
+    {
+        RenderFrame frame;
+        int ringX = 0;
+        int ringY = 0;
+        int ring2X = 0;
+        int ring2Y = 0;
+        buildBorderScene(frame, ringX, ringY, ring2X, ring2Y);
+        check(ringX == 24 && ringY == 24, "border-ring-origin");
+        check(ring2X == 24 && ring2Y == 116, "border-ring2-origin");
+        win->frameChannel().frontFrame.store(&frame, std::memory_order_release);
+        FBO border;
+        check(makeFBO(border), "fbo-border-complete");
+        glBindFramebuffer(GL_FRAMEBUFFER, border.m_fbo);
+        glViewport(0, 0, WIN_W, WIN_H);
+        glClearColor(body[0], body[1], body[2], body[3]);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+        win->drawFrameNodes();
+        std::vector<unsigned char> px = readFBO(border);
+        auto at = [&](int x, int y, unsigned char out[4]) {
+            size_t i = ((size_t)(WIN_H - 1 - y) * (size_t)WIN_W + (size_t)x) * 4;
+            out[0] = px[i];
+            out[1] = px[i + 1];
+            out[2] = px[i + 2];
+            out[3] = px[i + 3];
+        };
+        auto near = [&](unsigned char p[4], int r, int g, int b, int tol) {
+            return abs((int)p[0] - r) <= tol && abs((int)p[1] - g) <= tol &&
+                   abs((int)p[2] - b) <= tol;
+        };
+        unsigned char p[4];
+        // Straight-edge midpoints carry their own side's color (SDF AA
+        // fringe-aware gate: ring edges legitimately blend toward the
+        // background, like every other raster edge in this suite).
+        at(84, 24, p);
+        check(near(p, 255, 0, 0, 32), "border-top-mid");
+        at(24, 59, p);
+        check(near(p, 255, 255, 0, 32), "border-left-mid");
+        at(155, 65, p);
+        check(near(p, 0, 255, 0, 32), "border-right-mid");
+        at(84, 105, p);
+        check(near(p, 0, 0, 255, 32), "border-bottom-mid");
+        // Joint pixels just inside each diagonal carry the owning side.
+        at(28, 24, p);
+        check(near(p, 255, 0, 0, 32), "border-joint-tl-top");
+        at(24, 28, p);
+        check(near(p, 255, 255, 0, 32), "border-joint-tl-left");
+        at(151, 24, p);
+        check(near(p, 255, 0, 0, 32), "border-joint-tr-top");
+        at(155, 28, p);
+        check(near(p, 0, 255, 0, 32), "border-joint-tr-right");
+        at(24, 101, p);
+        check(near(p, 255, 255, 0, 32), "border-joint-bl-left");
+        at(28, 105, p);
+        check(near(p, 0, 0, 255, 32), "border-joint-bl-bottom");
+        at(151, 105, p);
+        check(near(p, 0, 0, 255, 32), "border-joint-br-bottom");
+        at(155, 101, p);
+        check(near(p, 0, 255, 0, 32), "border-joint-br-right");
+        // No background-colored gap anywhere inside the corner squares.
+        int gaps = 0;
+        const int corners[4][2] = {{24, 24}, {150, 24}, {24, 100}, {150, 100}};
+        for (auto& c : corners)
+        {
+            for (int y = c[1]; y < c[1] + 6; y++)
+            {
+                for (int x = c[0]; x < c[0] + 6; x++)
+                {
+                    at(x, y, p);
+                    if (near(p, 16, 20, 24, 16))
+                    {
+                        gaps++;
+                    }
+                }
+            }
+        }
+        check(gaps == 0, "border-joint-no-gap");
+
+        // Same-color joints butt instead of mitering: an interior joint
+        // pixel is fully white (a mitered blend there stalls near 75%).
+        at(27, 118, p);
+        check(near(p, 255, 255, 255, 16), "border-butt-tl");
     }
 
     printf("[forge-pixel-test] %d checks, %d failures\n", g_checks, g_failures);

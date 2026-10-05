@@ -48,14 +48,31 @@ struct DrawOp
         texId = 0;
     }
     void setBordered(float _x, float _y, float _w, float _h, float rad,
-                     float cr[4], float bw, float bc[4])
+                     float cr[4], float bw, float bc[4], float mode = 0.0f)
     {
         type = rad > 0 ? BorderedRoundedRect : BorderedRect;
         x = _x; y = _y; w = _w; h = _h;
         r = cr[0]; g = cr[1]; b = cr[2]; a = cr[3];
         data[0] = rad;
         data[1] = bw;
-        for (int i = 2; i < 6; i++) data[i] = 0;
+        data[2] = mode;
+        for (int i = 3; i < 6; i++) data[i] = 0;
+        br = bc[0]; bg = bc[1]; bb = bc[2]; ba = bc[3];
+        texId = 0;
+    }
+    void setBorderRing(float _x, float _y, float _w, float _h, float rad,
+                       float bw, float bc[4], float mode = 0.0f,
+                       float adjStart = -1.0f, float adjEnd = -1.0f)
+    {
+        type = BorderRing;
+        x = _x; y = _y; w = _w; h = _h;
+        r = g = b = a = 0;
+        data[0] = rad;
+        data[1] = bw;
+        data[2] = mode;
+        data[3] = adjStart;
+        data[4] = adjEnd;
+        data[5] = 0;
         br = bc[0]; bg = bc[1]; bb = bc[2]; ba = bc[3];
         texId = 0;
     }

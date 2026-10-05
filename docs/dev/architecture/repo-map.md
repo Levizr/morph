@@ -41,7 +41,7 @@ Header-heavy, linked into every binary, and split by concern so you never have t
 - `reactivity/` — signals, effects, coroutines, channels (see [Reactivity Engine](../runtime/reactivity-engine.md))
 - `net/` — the `fetch()` HTTP stack (see [`fetch()`](../runtime/networking.md))
 - `core/` + `ui/` + `widgets/` + `style/` — nodes, window, layout, paint, computed style (see [Layout & Style](../runtime/layout-style-engine.md))
-- `render/` + `renderers/` — GL backend plus flash (production) and forge (beta) (see [Rendering](../runtime/rendering-deep-dive.md))
+- `render/` + `renderers/` — GL backend plus flash (production default) and forge (opt-in) (see [Rendering](../runtime/rendering-deep-dive.md))
 - `dev/` — hot-reload + DevTools support, compiled out of production (see [Dev Mode](dev-mode.md))
 - `viewport/` — embedded-canvas scaffolding (planned work, parser wiring still missing)
 - `vendor/` — third-party code. Untouched, unformatted, unjudged.

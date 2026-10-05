@@ -105,9 +105,9 @@ void MorphNode::syncPaintDirtyAfterLayout() {
 float MorphNode::contentWidth(Renderer* r) {
     float pl = style.padding[3], pr = style.padding[1];
 #ifdef MORPH_FEATURE_BORDER
-    float bw = style.borderWidth;
+    float bwH = borderOuterH(style);
 #else
-    float bw = 0.0f;
+    float bwH = 0.0f;
 #endif
 
     if (style.explicitWidth >= 0.0f) {
@@ -116,7 +116,7 @@ float MorphNode::contentWidth(Renderer* r) {
             return style.explicitWidth;
         }
 #endif
-        return style.explicitWidth + pl + pr + bw * 2.0f;
+        return style.explicitWidth + pl + pr + bwH;
     }
 
 #ifdef MORPH_FEATURE_FLEX
@@ -131,7 +131,7 @@ float MorphNode::contentWidth(Renderer* r) {
             count++;
         }
         if (count > 1) total += (count - 1) * style.gap;
-        return total + pl + pr + bw * 2.0f;
+        return total + pl + pr + bwH;
     }
 #endif
 
@@ -147,7 +147,7 @@ float MorphNode::contentWidth(Renderer* r) {
             }
         }
         if (totalInline > 0.0f) {
-            return totalInline + pl + pr + bw * 2.0f;
+            return totalInline + pl + pr + bwH;
         }
     }
 #endif
@@ -161,7 +161,7 @@ float MorphNode::contentWidth(Renderer* r) {
         if (cw > maxCW) maxCW = cw;
     }
     if (maxCW > -0.5f) {
-        return maxCW + pl + pr + bw * 2.0f;
+        return maxCW + pl + pr + bwH;
     }
     return -1.0f;
 }

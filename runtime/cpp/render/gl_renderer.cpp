@@ -91,6 +91,14 @@ void GLRenderer::createQuadBuffers()
     glVertexAttribPointer(6, 1, GL_FLOAT, GL_FALSE, sizeof(Instance), (void *)offsetof(Instance, borderOnly));
     glVertexAttribDivisor(6, 1);
 
+    glEnableVertexAttribArray(11);
+    glVertexAttribPointer(11, 1, GL_FLOAT, GL_FALSE, sizeof(Instance), (void *)offsetof(Instance, borderMode));
+    glVertexAttribDivisor(11, 1);
+
+    glEnableVertexAttribArray(12);
+    glVertexAttribPointer(12, 2, GL_FLOAT, GL_FALSE, sizeof(Instance), (void *)offsetof(Instance, borderAdjS));
+    glVertexAttribDivisor(12, 1);
+
 #ifdef MORPH_FEATURE_TRANSFORM
     glEnableVertexAttribArray(7);
     glVertexAttribPointer(7, 4, GL_FLOAT, GL_FALSE, sizeof(Instance), (void *)(offsetof(Instance, model) + 0));
@@ -826,6 +834,11 @@ bool GLRenderer::ensureReady()
     m_gradUBorderWidth = glGetUniformLocation(m_gradShader, "uBorderWidth");
     m_gradUBorderColor = glGetUniformLocation(m_gradShader, "uBorderColor");
     m_gradUStencil = glGetUniformLocation(m_gradShader, "uStencilMode");
+    m_gradUBorderCount = glGetUniformLocation(m_gradShader, "uBorderCount");
+    m_gradUBorderColors = glGetUniformLocation(m_gradShader, "uBorderColors");
+    m_gradUBorderOffsets = glGetUniformLocation(m_gradShader, "uBorderOffsets");
+    m_gradUBorderRepeating = glGetUniformLocation(m_gradShader, "uBorderRepeating");
+    m_gradUBorderPeriod = glGetUniformLocation(m_gradShader, "uBorderPeriod");
     createGradBuffers();
 #endif
 
@@ -1016,7 +1029,7 @@ void GLRenderer::stencilDamageMask(const int* rects, int count, const float proj
         // manual Y flip used in beginClip.
         Instance inst = {(float)x, (float)y, (float)w, (float)h,
                          1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                         0.0f, 0.0f};
+                         0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
 #ifdef MORPH_FEATURE_TRANSFORM
         applyModel(inst);
 #endif
@@ -1194,13 +1207,29 @@ void GLRenderer::createGradBuffers()
 void GLRenderer::drawGradRect(float x, float y, float w, float h,
                               float radius, float color[4],
                               const BgGradient* grad, float borderWidth,
-                              const float borderColor[4])
+                              const float borderColor[4],
+                              const BgGradient* borderGrad)
 {
-    if (grad == nullptr || !grad->enabled || grad->stopCount < 2 || w <= 0.0f ||
-        h <= 0.0f)
+    bool haveFill = (grad != nullptr && grad->enabled && grad->stopCount >= 2);
+    bool haveBorderGrad = (borderGrad != nullptr && borderGrad->enabled &&
+        borderGrad->stopCount >= 2);
+    if ((!haveFill && !haveBorderGrad) || w <= 0.0f || h <= 0.0f)
     {
         drawRect(x, y, w, h, color);
         return;
+    }
+    // Border-image gradient without a background gradient: synthesize a
+    // solid fill from the flat color so the ring still resolves.
+    BgGradient solidFill;
+    if (!haveFill)
+    {
+        solidFill.enabled = true;
+        solidFill.stopCount = 2;
+        for (int i = 0; i < 2; i++)
+        {
+            std::memcpy(solidFill.stops[i].color, color, sizeof(float) * 4);
+        }
+        grad = &solidFill;
     }
     // Ordering with the batched quads matters — flush first like clips do.
     flush(m_proj);
@@ -1208,16 +1237,19 @@ void GLRenderer::drawGradRect(float x, float y, float w, float h,
     {
         return;
     }
-    // Axis in y-down box space (vUV origin is the top-left corner).
+    // Axis in y-down box space (vUV origin is the top-left corner). A
+    // border-only gradient resolves along its own axis, not the
+    // synthesized solid fill's.
+    const BgGradient* axisGrad = (haveFill || !haveBorderGrad) ? grad : borderGrad;
     float dx = 0.0f, dy = 1.0f;
-    if (grad->isCorner)
+    if (axisGrad->isCorner)
     {
-        dx = grad->cornerX * w;
-        dy = grad->cornerY * h;
+        dx = axisGrad->cornerX * w;
+        dy = axisGrad->cornerY * h;
     }
     else
     {
-        float rad = grad->angleDeg * 3.14159265f / 180.0f;
+        float rad = axisGrad->angleDeg * 3.14159265f / 180.0f;
         dx = std::sin(rad);
         dy = -std::cos(rad);
     }
@@ -1286,6 +1318,40 @@ void GLRenderer::drawGradRect(float x, float y, float w, float h,
         std::memcpy(bc, borderColor, sizeof(float) * 4);
     }
     glUniform4fv(m_gradUBorderColor, 1, bc);
+
+    // Border gradient
+    if (borderGrad != nullptr && borderGrad->enabled && borderGrad->stopCount >= 2)
+    {
+        float bcolors[MORPH_GRADIENT_MAX_STOPS][4] = {{0}};
+        for (int i = 0; i < borderGrad->stopCount; i++)
+        {
+            std::memcpy(bcolors[i], borderGrad->stops[i].color, sizeof(float) * 4);
+        }
+        float boffsets[MORPH_GRADIENT_MAX_STOPS] = {0};
+        morph::resolveGradientOffsets(*borderGrad, projLen, boffsets);
+        for (int i = 1; i < borderGrad->stopCount; i++)
+        {
+            if (boffsets[i] < boffsets[i - 1])
+            {
+                boffsets[i] = boffsets[i - 1];
+            }
+        }
+        float bperiod = 0.0f;
+        if (borderGrad->stopCount >= 2)
+        {
+            bperiod = boffsets[borderGrad->stopCount - 1] - boffsets[0];
+        }
+        glUniform1i(m_gradUBorderCount, borderGrad->stopCount);
+        glUniform4fv(m_gradUBorderColors, borderGrad->stopCount, &bcolors[0][0]);
+        glUniform1fv(m_gradUBorderOffsets, borderGrad->stopCount, boffsets);
+        glUniform1i(m_gradUBorderRepeating, borderGrad->repeating ? 1 : 0);
+        glUniform1f(m_gradUBorderPeriod, bperiod);
+    }
+    else
+    {
+        glUniform1i(m_gradUBorderCount, 0);
+    }
+
     glUniform1i(m_gradUStencil, 0);
     glBindVertexArray(m_gradVAO);
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, (void *)0);

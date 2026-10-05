@@ -92,6 +92,13 @@ pub(crate) fn style_enum_literal(prop: &str, value: &str) -> Option<&'static str
         ("cursor", "text") => Some("CSS::Cursor::Text"),
         ("borderStyle", "none") => Some("CSS::BorderStyle::None"),
         ("borderStyle", "solid") => Some("CSS::BorderStyle::Solid"),
+        ("borderStyle", "dotted") => Some("CSS::BorderStyle::Dotted"),
+        ("borderStyle", "dashed") => Some("CSS::BorderStyle::Dashed"),
+        ("borderStyle", "double") => Some("CSS::BorderStyle::Double"),
+        ("borderStyle", "groove") => Some("CSS::BorderStyle::Groove"),
+        ("borderStyle", "ridge") => Some("CSS::BorderStyle::Ridge"),
+        ("borderStyle", "inset") => Some("CSS::BorderStyle::Inset"),
+        ("borderStyle", "outset") => Some("CSS::BorderStyle::Outset"),
         ("overflow", "visible") => Some("CSS::Overflow::Visible"),
         ("overflow", "hidden") => Some("CSS::Overflow::Hidden"),
         ("overflow", "scroll") => Some("CSS::Overflow::Scroll"),
@@ -122,6 +129,10 @@ fn keyword_literal(field: &str, value: &str) -> Option<&'static str> {
         "flexWrap" => ("flexWrap", "CSS::FlexWrap::Nowrap"),
         "cursor" => ("cursor", "CSS::Cursor::Default"),
         "borderStyle" => ("borderStyle", "CSS::BorderStyle::None"),
+        "borderTopStyle" => ("borderStyle", "CSS::BorderStyle::None"),
+        "borderRightStyle" => ("borderStyle", "CSS::BorderStyle::None"),
+        "borderBottomStyle" => ("borderStyle", "CSS::BorderStyle::None"),
+        "borderLeftStyle" => ("borderStyle", "CSS::BorderStyle::None"),
         "overflow" => ("overflow", "CSS::Overflow::Visible"),
         "boxSizing" => ("boxSizing", "CSS::BoxSizing::ContentBox"),
         _ => return None,
@@ -1199,6 +1210,10 @@ fn set_style(
             lines.push(format!("{ind}.bgGradientSet = true;"));
             lines.extend(emit_gradient(&format!("{ind}.bgGradient."), g));
         }
+        if let Some(g) = &s.border_gradient {
+            lines.push(format!("{ind}.borderGradientSet = true;"));
+            lines.extend(emit_gradient(&format!("{ind}.borderGradient."), g));
+        }
     }
     if s.border_radius > 0.0 {
         lines.push(format!("{ind}.borderRadius = {};", fmt(s.border_radius)));
@@ -1395,6 +1410,7 @@ fn set_style(
 
     // ── BORDER ──
     if features.contains("border") {
+        // Shorthand
         if s.border_width > 0.0 {
             lines.push(format!("{ind}.borderWidth = {};", fmt(s.border_width)));
         }
@@ -1407,6 +1423,89 @@ fn set_style(
         if s.border_style != "none" && !s.border_style.is_empty() {
             let lit = keyword_literal("borderStyle", &s.border_style).unwrap();
             lines.push(format!("{ind}.borderStyle = {lit};"));
+        }
+        // Per-side widths
+        if let Some(v) = s.border_top_width {
+            lines.push(format!("{ind}.borderTopWidth = {};", fmt(v)));
+        }
+        if let Some(v) = s.border_right_width {
+            lines.push(format!("{ind}.borderRightWidth = {};", fmt(v)));
+        }
+        if let Some(v) = s.border_bottom_width {
+            lines.push(format!("{ind}.borderBottomWidth = {};", fmt(v)));
+        }
+        if let Some(v) = s.border_left_width {
+            lines.push(format!("{ind}.borderLeftWidth = {};", fmt(v)));
+        }
+        // Per-side colors
+        if let Some(c) = s.border_top_color {
+            lines.push(format!("{ind}.borderTopColor[0] = {:.4}f;", c[0]));
+            lines.push(format!("{ind}.borderTopColor[1] = {:.4}f;", c[1]));
+            lines.push(format!("{ind}.borderTopColor[2] = {:.4}f;", c[2]));
+            lines.push(format!("{ind}.borderTopColor[3] = {:.4}f;", c[3]));
+        }
+        if let Some(c) = s.border_right_color {
+            lines.push(format!("{ind}.borderRightColor[0] = {:.4}f;", c[0]));
+            lines.push(format!("{ind}.borderRightColor[1] = {:.4}f;", c[1]));
+            lines.push(format!("{ind}.borderRightColor[2] = {:.4}f;", c[2]));
+            lines.push(format!("{ind}.borderRightColor[3] = {:.4}f;", c[3]));
+        }
+        if let Some(c) = s.border_bottom_color {
+            lines.push(format!("{ind}.borderBottomColor[0] = {:.4}f;", c[0]));
+            lines.push(format!("{ind}.borderBottomColor[1] = {:.4}f;", c[1]));
+            lines.push(format!("{ind}.borderBottomColor[2] = {:.4}f;", c[2]));
+            lines.push(format!("{ind}.borderBottomColor[3] = {:.4}f;", c[3]));
+        }
+        if let Some(c) = s.border_left_color {
+            lines.push(format!("{ind}.borderLeftColor[0] = {:.4}f;", c[0]));
+            lines.push(format!("{ind}.borderLeftColor[1] = {:.4}f;", c[1]));
+            lines.push(format!("{ind}.borderLeftColor[2] = {:.4}f;", c[2]));
+            lines.push(format!("{ind}.borderLeftColor[3] = {:.4}f;", c[3]));
+        }
+        // Per-side styles
+        if let Some(ref st) = s.border_top_style {
+            if let Some(lit) = keyword_literal("borderTopStyle", st) {
+                lines.push(format!("{ind}.borderTopStyle = {lit};"));
+            }
+        }
+        if let Some(ref st) = s.border_right_style {
+            if let Some(lit) = keyword_literal("borderRightStyle", st) {
+                lines.push(format!("{ind}.borderRightStyle = {lit};"));
+            }
+        }
+        if let Some(ref st) = s.border_bottom_style {
+            if let Some(lit) = keyword_literal("borderBottomStyle", st) {
+                lines.push(format!("{ind}.borderBottomStyle = {lit};"));
+            }
+        }
+        if let Some(ref st) = s.border_left_style {
+            if let Some(lit) = keyword_literal("borderLeftStyle", st) {
+                lines.push(format!("{ind}.borderLeftStyle = {lit};"));
+            }
+        }
+        // border-image
+        if let Some(ref img) = s.border_image {
+            if !img.is_empty() {
+                lines.push(format!("{ind}.borderImageEnabled = true;"));
+                // Check if it's a gradient
+                if img.contains("linear-gradient")
+                    || img.contains("radial-gradient")
+                    || img.contains("conic-gradient")
+                {
+                    lines.push(format!("{ind}.borderImageIsGradient = true;"));
+                    // Try to extract slice
+                    if let Some(slice_pos) = img.rfind(' ') {
+                        if let Ok(slice) = img[slice_pos + 1..].parse::<f32>() {
+                            lines.push(format!("{ind}.borderImageSlice = {};", fmt(slice)));
+                        } else {
+                            lines.push(format!("{ind}.borderImageSlice = 1.0f;"));
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(slice) = s.border_image_slice {
+            lines.push(format!("{ind}.borderImageSlice = {};", fmt(slice)));
         }
     }
 
@@ -1508,6 +1607,125 @@ fn emit_hover_style(
     }
     if s.border_width > 0.0 && s.border_width != base.border_width {
         o.push(format!("{hv}->borderWidth = {};", fmt(s.border_width)));
+    }
+    // Per-side border widths
+    if s.border_top_width != base.border_top_width {
+        if let Some(v) = s.border_top_width {
+            o.push(format!("{hv}->borderTopWidth = {};", fmt(v)));
+        } else {
+            o.push(format!("{hv}->borderTopWidth = -1.0f;"));
+        }
+    }
+    if s.border_right_width != base.border_right_width {
+        if let Some(v) = s.border_right_width {
+            o.push(format!("{hv}->borderRightWidth = {};", fmt(v)));
+        } else {
+            o.push(format!("{hv}->borderRightWidth = -1.0f;"));
+        }
+    }
+    if s.border_bottom_width != base.border_bottom_width {
+        if let Some(v) = s.border_bottom_width {
+            o.push(format!("{hv}->borderBottomWidth = {};", fmt(v)));
+        } else {
+            o.push(format!("{hv}->borderBottomWidth = -1.0f;"));
+        }
+    }
+    if s.border_left_width != base.border_left_width {
+        if let Some(v) = s.border_left_width {
+            o.push(format!("{hv}->borderLeftWidth = {};", fmt(v)));
+        } else {
+            o.push(format!("{hv}->borderLeftWidth = -1.0f;"));
+        }
+    }
+    // Per-side border colors
+    if s.border_top_color != base.border_top_color {
+        if let Some(c) = s.border_top_color {
+            o.push(format!("{hv}->borderTopColor[0] = {:.4}f;", c[0]));
+            o.push(format!("{hv}->borderTopColor[1] = {:.4}f;", c[1]));
+            o.push(format!("{hv}->borderTopColor[2] = {:.4}f;", c[2]));
+            o.push(format!("{hv}->borderTopColor[3] = {:.4}f;", c[3]));
+        } else {
+            o.push(format!("{hv}->borderTopColor[0] = -1.0f;"));
+            o.push(format!("{hv}->borderTopColor[1] = -1.0f;"));
+            o.push(format!("{hv}->borderTopColor[2] = -1.0f;"));
+            o.push(format!("{hv}->borderTopColor[3] = -1.0f;"));
+        }
+    }
+    if s.border_right_color != base.border_right_color {
+        if let Some(c) = s.border_right_color {
+            o.push(format!("{hv}->borderRightColor[0] = {:.4}f;", c[0]));
+            o.push(format!("{hv}->borderRightColor[1] = {:.4}f;", c[1]));
+            o.push(format!("{hv}->borderRightColor[2] = {:.4}f;", c[2]));
+            o.push(format!("{hv}->borderRightColor[3] = {:.4}f;", c[3]));
+        } else {
+            o.push(format!("{hv}->borderRightColor[0] = -1.0f;"));
+            o.push(format!("{hv}->borderRightColor[1] = -1.0f;"));
+            o.push(format!("{hv}->borderRightColor[2] = -1.0f;"));
+            o.push(format!("{hv}->borderRightColor[3] = -1.0f;"));
+        }
+    }
+    if s.border_bottom_color != base.border_bottom_color {
+        if let Some(c) = s.border_bottom_color {
+            o.push(format!("{hv}->borderBottomColor[0] = {:.4}f;", c[0]));
+            o.push(format!("{hv}->borderBottomColor[1] = {:.4}f;", c[1]));
+            o.push(format!("{hv}->borderBottomColor[2] = {:.4}f;", c[2]));
+            o.push(format!("{hv}->borderBottomColor[3] = {:.4}f;", c[3]));
+        } else {
+            o.push(format!("{hv}->borderBottomColor[0] = -1.0f;"));
+            o.push(format!("{hv}->borderBottomColor[1] = -1.0f;"));
+            o.push(format!("{hv}->borderBottomColor[2] = -1.0f;"));
+            o.push(format!("{hv}->borderBottomColor[3] = -1.0f;"));
+        }
+    }
+    if s.border_left_color != base.border_left_color {
+        if let Some(c) = s.border_left_color {
+            o.push(format!("{hv}->borderLeftColor[0] = {:.4}f;", c[0]));
+            o.push(format!("{hv}->borderLeftColor[1] = {:.4}f;", c[1]));
+            o.push(format!("{hv}->borderLeftColor[2] = {:.4}f;", c[2]));
+            o.push(format!("{hv}->borderLeftColor[3] = {:.4}f;", c[3]));
+        } else {
+            o.push(format!("{hv}->borderLeftColor[0] = -1.0f;"));
+            o.push(format!("{hv}->borderLeftColor[1] = -1.0f;"));
+            o.push(format!("{hv}->borderLeftColor[2] = -1.0f;"));
+            o.push(format!("{hv}->borderLeftColor[3] = -1.0f;"));
+        }
+    }
+    // Per-side border styles
+    if s.border_top_style != base.border_top_style {
+        if let Some(ref st) = s.border_top_style {
+            if let Some(lit) = keyword_literal("borderTopStyle", st) {
+                o.push(format!("{hv}->borderTopStyle = {lit};"));
+            }
+        } else {
+            o.push(format!("{hv}->borderTopStyle = CSS::BorderStyle::None;"));
+        }
+    }
+    if s.border_right_style != base.border_right_style {
+        if let Some(ref st) = s.border_right_style {
+            if let Some(lit) = keyword_literal("borderRightStyle", st) {
+                o.push(format!("{hv}->borderRightStyle = {lit};"));
+            }
+        } else {
+            o.push(format!("{hv}->borderRightStyle = CSS::BorderStyle::None;"));
+        }
+    }
+    if s.border_bottom_style != base.border_bottom_style {
+        if let Some(ref st) = s.border_bottom_style {
+            if let Some(lit) = keyword_literal("borderBottomStyle", st) {
+                o.push(format!("{hv}->borderBottomStyle = {lit};"));
+            }
+        } else {
+            o.push(format!("{hv}->borderBottomStyle = CSS::BorderStyle::None;"));
+        }
+    }
+    if s.border_left_style != base.border_left_style {
+        if let Some(ref st) = s.border_left_style {
+            if let Some(lit) = keyword_literal("borderLeftStyle", st) {
+                o.push(format!("{hv}->borderLeftStyle = {lit};"));
+            }
+        } else {
+            o.push(format!("{hv}->borderLeftStyle = CSS::BorderStyle::None;"));
+        }
     }
     if s.border_style != "none" && !s.border_style.is_empty() && s.border_style != base.border_style
     {
@@ -1671,7 +1889,90 @@ fn emit_active_style(
     if s.border_width > 0.0 && s.border_width != base.border_width {
         o.push(format!("{hv}->borderWidth = {};", fmt(s.border_width)));
     }
-    if features.contains("zindex") && s.z_index.is_some() && s.z_index != base.z_index {
+    // Per-side border widths
+    if s.border_top_width != base.border_top_width {
+        if let Some(v) = s.border_top_width {
+            o.push(format!("{hv}->borderTopWidth = {};", fmt(v)));
+        } else {
+            o.push(format!("{hv}->borderTopWidth = -1.0f;"));
+        }
+    }
+    if s.border_right_width != base.border_right_width {
+        if let Some(v) = s.border_right_width {
+            o.push(format!("{hv}->borderRightWidth = {};", fmt(v)));
+        } else {
+            o.push(format!("{hv}->borderRightWidth = -1.0f;"));
+        }
+    }
+    if s.border_bottom_width != base.border_bottom_width {
+        if let Some(v) = s.border_bottom_width {
+            o.push(format!("{hv}->borderBottomWidth = {};", fmt(v)));
+        } else {
+            o.push(format!("{hv}->borderBottomWidth = -1.0f;"));
+        }
+    }
+    if s.border_left_width != base.border_left_width {
+        if let Some(v) = s.border_left_width {
+            o.push(format!("{hv}->borderLeftWidth = {};", fmt(v)));
+        } else {
+            o.push(format!("{hv}->borderLeftWidth = -1.0f;"));
+        }
+    }
+    // Per-side border colors
+    if s.border_top_color != base.border_top_color {
+        if let Some(c) = s.border_top_color {
+            o.push(format!("{hv}->borderTopColor[0] = {:.4}f;", c[0]));
+            o.push(format!("{hv}->borderTopColor[1] = {:.4}f;", c[1]));
+            o.push(format!("{hv}->borderTopColor[2] = {:.4}f;", c[2]));
+            o.push(format!("{hv}->borderTopColor[3] = {:.4}f;", c[3]));
+        } else {
+            o.push(format!("{hv}->borderTopColor[0] = -1.0f;"));
+            o.push(format!("{hv}->borderTopColor[1] = -1.0f;"));
+            o.push(format!("{hv}->borderTopColor[2] = -1.0f;"));
+            o.push(format!("{hv}->borderTopColor[3] = -1.0f;"));
+        }
+    }
+    if s.border_right_color != base.border_right_color {
+        if let Some(c) = s.border_right_color {
+            o.push(format!("{hv}->borderRightColor[0] = {:.4}f;", c[0]));
+            o.push(format!("{hv}->borderRightColor[1] = {:.4}f;", c[1]));
+            o.push(format!("{hv}->borderRightColor[2] = {:.4}f;", c[2]));
+            o.push(format!("{hv}->borderRightColor[3] = {:.4}f;", c[3]));
+        } else {
+            o.push(format!("{hv}->borderRightColor[0] = -1.0f;"));
+            o.push(format!("{hv}->borderRightColor[1] = -1.0f;"));
+            o.push(format!("{hv}->borderRightColor[2] = -1.0f;"));
+            o.push(format!("{hv}->borderRightColor[3] = -1.0f;"));
+        }
+    }
+    if s.border_bottom_color != base.border_bottom_color {
+        if let Some(c) = s.border_bottom_color {
+            o.push(format!("{hv}->borderBottomColor[0] = {:.4}f;", c[0]));
+            o.push(format!("{hv}->borderBottomColor[1] = {:.4}f;", c[1]));
+            o.push(format!("{hv}->borderBottomColor[2] = {:.4}f;", c[2]));
+            o.push(format!("{hv}->borderBottomColor[3] = {:.4}f;", c[3]));
+        } else {
+            o.push(format!("{hv}->borderBottomColor[0] = -1.0f;"));
+            o.push(format!("{hv}->borderBottomColor[1] = -1.0f;"));
+            o.push(format!("{hv}->borderBottomColor[2] = -1.0f;"));
+            o.push(format!("{hv}->borderBottomColor[3] = -1.0f;"));
+        }
+    }
+    if s.border_left_color != base.border_left_color {
+        if let Some(c) = s.border_left_color {
+            o.push(format!("{hv}->borderLeftColor[0] = {:.4}f;", c[0]));
+            o.push(format!("{hv}->borderLeftColor[1] = {:.4}f;", c[1]));
+            o.push(format!("{hv}->borderLeftColor[2] = {:.4}f;", c[2]));
+            o.push(format!("{hv}->borderLeftColor[3] = {:.4}f;", c[3]));
+        } else {
+            o.push(format!("{hv}->borderLeftColor[0] = -1.0f;"));
+            o.push(format!("{hv}->borderLeftColor[1] = -1.0f;"));
+            o.push(format!("{hv}->borderLeftColor[2] = -1.0f;"));
+            o.push(format!("{hv}->borderLeftColor[3] = -1.0f;"));
+        }
+    }
+    if s.border_style != "none" && !s.border_style.is_empty() && s.border_style != base.border_style
+    {
         o.push(format!("{hv}->zIndex = {};", s.z_index.unwrap()));
         o.push(format!("{hv}->zIndexSet = true;"));
     }

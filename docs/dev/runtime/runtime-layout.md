@@ -21,7 +21,7 @@ runtime/cpp/
 ├── widgets/      higher-level widget wrappers (morph_button, morph_text, …)
 ├── viewport/     embedded OpenGL canvas scaffolding (planned; parser wiring missing)
 │                 → [Layout & Style](layout-style-engine.md) for ui/widgets/viewport
-├── renderers/    flash (production default) / forge (beta tile compositor)
+├── renderers/    flash (production default) / forge (opt-in tile compositor)
 ├── render/       shared GL backend: shaders, batching, fonts, textures
 │                 → [Rendering(rendering-deep-dive.md) for renderers + render
 ├── style/        computed-style application + feature headers (base, flex, border, …)
@@ -52,7 +52,7 @@ Every optional subsystem is compile-time gated by a `MORPH_FEATURE_*` define (AN
 | Add a style feature | New `style/features/*.h` header + `MORPH_FEATURE_*` gate + `FeatureSet` rule in `morph-codegen` (+ reactive entry) + fixture exercising it statically and reactively |
 | Add a new module (e.g. `node:fs` someday) | New directory + entry header → include-needs registration in morpher's `Ctx::need` flow → [Node.js Support](../../future/javascript/nodejs.md) tracks the plan |
 | Add a widget | `ui/` subclass + `widgets/` wrapper + example usage |
-| Touch renderers | Flash first (production); forge is beta with known damage-rect/scroll bugs — read `help/renderer-flash-forge.md` before changing compositor behavior |
+| Touch renderers | Flash first (production default); forge is shipped but opt-in (correctness falls back to fullscreen damage) — read `help/renderer-flash-forge.md` before changing compositor behavior |
 | Touch the threads | Main owns the tree; compositor writes only `anim*` fields; workers never touch UI — see [Reactivity Engine](reactivity-engine.md) threading contract |
 
 ## Memory rules for runtime code

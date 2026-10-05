@@ -60,6 +60,9 @@ struct FlatRenderNode {
     // Baked background gradient (resolved against this node's box at
     // flatten time; stop alphas pre-multiplied by opacity like bgColor).
     BgGradient grad;
+    // Baked border-image gradient (empty unless the border image is a
+    // gradient; evaluated in the border box like the background one).
+    BgGradient borderGrad;
 #endif
 
     CSS::Overflow overflow = CSS::Overflow::Visible;

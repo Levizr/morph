@@ -1199,7 +1199,7 @@
           "morph damage tracking",
           "morph retained fbo",
           "morph compositor",
-          "morph forge beta"
+          "morph forge opt-in"
         ],
         "lastUpdated": "2026-09-05",
         "publishedAt": "2026-08-22",
@@ -2093,6 +2093,42 @@
         "publishedAt": "2026-08-23",
         "priority": 0.6,
         "changefreq": "monthly"
+      },
+      {
+        "title": "Morph Flash Renderer Example",
+        "sidebarTitle": "Flash Renderer",
+        "slug": "examples/flash",
+        "file": "examples/flash",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "A minimal static app on the Morph flash renderer: direct full-frame raster, smallest binary.",
+        "keywords": [
+          "morph flash example",
+          "morph flash renderer demo",
+          "morph static app example"
+        ],
+        "lastUpdated": "2026-10-03",
+        "publishedAt": "2026-10-03",
+        "priority": 0.6,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Morph Forge Renderer Example",
+        "sidebarTitle": "Forge Renderer",
+        "slug": "examples/forge",
+        "file": "examples/forge",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "A scrollable list on the Morph forge renderer: retained tiles, scroll-shift reuse, animated layers.",
+        "keywords": [
+          "morph forge example",
+          "morph forge renderer demo",
+          "morph scroll shift example"
+        ],
+        "lastUpdated": "2026-10-03",
+        "publishedAt": "2026-10-03",
+        "priority": 0.6,
+        "changefreq": "monthly"
       }
     ]
   },
@@ -2476,20 +2512,20 @@
         "changefreq": "monthly"
       },
       {
-        "title": "Morph Forge Renderer Tile Pool (Planned)",
+        "title": "Morph Forge Renderer (Shipped)",
         "sidebarTitle": "Forge Tile Pool",
         "slug": "future/rendering/forge-tile-pool",
         "file": "future/rendering/forge-tile-pool",
         "status": "future",
         "author": "PIYUSH",
-        "description": "Future work for the Morph forge renderer: tile pool and retained layers shipped, scroll-shift and production single-renderer builds remain.",
+        "description": "The Morph forge renderer, shipped: damage tracking, tile pool, retained layers, scroll-shift, benchmarks, and flash/forge examples.",
         "keywords": [
           "morph forge tile pool",
           "morph retained layers",
           "morph scroll shift",
           "morph gpu rendering future"
         ],
-        "lastUpdated": "2026-09-27",
+        "lastUpdated": "2026-10-03",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"

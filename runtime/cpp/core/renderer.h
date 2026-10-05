@@ -41,7 +41,13 @@ public:
                              const float tint[4] = nullptr) = 0;
     virtual void drawBorderRing(float x, float y, float w, float h,
                                 float radius, float borderWidth,
-                                float borderColor[4]) {}
+                                float borderColor[4], float mode = 0.0f,
+                                float adjStart = -1.0f, float adjEnd = -1.0f)
+    {
+        (void)mode;
+        (void)adjStart;
+        (void)adjEnd;
+    }
 #ifdef MORPH_FEATURE_GRADIENT
     // Gradient fill with optional border ring (single call so fill and
     // border share one SDF edge). Renderers without gradient support fall
@@ -49,11 +55,13 @@ public:
     virtual void drawGradRect(float x, float y, float w, float h,
                               float radius, float color[4],
                               const BgGradient* grad, float borderWidth,
-                              const float borderColor[4])
+                              const float borderColor[4],
+                              const BgGradient* borderGrad)
     {
         (void)grad;
         (void)borderWidth;
         (void)borderColor;
+        (void)borderGrad;
         drawRect(x, y, w, h, color);
     }
 #endif

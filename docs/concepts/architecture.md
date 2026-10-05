@@ -168,7 +168,7 @@ runtime/cpp/
 ├── renderers/              # Paint backends
 │   ├── renderer.h          # RenderMode {Flash, Forge}, activeRenderMode()
 │   ├── flash/flash.h       # Full clear + replay (default, ~22 MB @1080p)
-│   └── forge/              # Retained FBO + DamageSet (beta, ~30 MB floor)
+│   └── forge/              # Retained FBO + DamageSet (opt-in, ~30 MB floor)
 │       ├── forge.h
 │       ├── damage.h
 │       ├── layer.h

@@ -135,7 +135,7 @@ The dev binary (`morph_devrt`) is a CMake project auto-built on missing binary o
 ### Renderers
 
 - **Flash** — lightweight full-clear direct renderer (the pre-v0.0.6 path). **Default and recommended.**
-- **Forge** — retained FBO + `DamageSet` damage tracking. Per-frame damage = box-geometry diff vs the prev-frame rect map ∪ pre-layout paint dirt; only nodes touching damage are re-rastered; the whole surface is presented via `glBlitFramebuffer`; idle frames just blit. **Status: beta/in progress** — known bugs around damage-rect edges, scroll-shift, and some compositor-animation paths; toggleable live in dev for testing.
+- **Forge** — retained FBO + `DamageSet` damage tracking. Per-frame damage = box-geometry diff vs the prev-frame rect map ∪ pre-layout paint dirt; only nodes touching damage are re-rastered; the whole surface is presented via `glBlitFramebuffer`; idle frames skip present entirely. **Status: shipped, opt-in** — flash remains the default; edge cases (transforms, rounded clips, >32 anims) degrade to fullscreen damage rather than risk stale pixels; toggleable live in dev for testing.
 - Production resolves the renderer at compile time (`constexpr`), dev builds both and hot-switches live from the DevTools Rendering tab (`MORPH_FEATURE_DEV_RENDERER_SWITCH`).
 
 ### Flush Order

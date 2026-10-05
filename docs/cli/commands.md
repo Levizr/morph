@@ -96,7 +96,7 @@ morph build [--entry src/App.mx] [--output bin/] [--static] [--upx true|false] [
 
 - Parses `.mx`/`.tsx`/`.ts` → lightningcss → IR → `CppEmitter` (Tera templates) → `app.cpp`
 - Fingerprinting: if `morph.config.json` + entry + runtime hash unchanged → "Up to date — nothing to compile"
-- Compiles with `-std=c++20 -O2 -ffunction-sections -fdata-sections -Wl,--gc-sections`
+- Compiles with `g++-14 -std=c++23 -O2 -ffunction-sections -fdata-sections -Wl,--gc-sections`
 - Links runtime sources: core, render, reactivity, net, renderers (flash/forge)
 - UPX compression applied if available
 

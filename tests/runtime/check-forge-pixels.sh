@@ -39,6 +39,7 @@ export LIBRARY_PATH="$WORK/stublibs"
     -I/usr/include/freetype2 -I/usr/include/libpng16 \
     -DMORPH_FEATURE_SCROLL \
     -DMORPH_FEATURE_IMAGE \
+    -DMORPH_FEATURE_BORDER \
     "$T/forge_pixel_test.cpp" \
     "$R/renderers/forge/damage.cpp" \
     "$R/renderers/forge/tile_pool.cpp" \

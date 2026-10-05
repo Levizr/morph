@@ -401,6 +401,74 @@ static void applyStyle(MorphStyle& s, const JsonValue& styleVal) {
     if (!styleVal["border_width"].isNull())
         s.borderWidth = styleVal["border_width"].asFloat();
     setColorFromJson(s.borderColor, styleVal["border_color"]);
+
+    // Per-side border widths
+    if (!styleVal["border_top_width"].isNull())
+        s.borderTopWidth = styleVal["border_top_width"].asFloat();
+    if (!styleVal["border_right_width"].isNull())
+        s.borderRightWidth = styleVal["border_right_width"].asFloat();
+    if (!styleVal["border_bottom_width"].isNull())
+        s.borderBottomWidth = styleVal["border_bottom_width"].asFloat();
+    if (!styleVal["border_left_width"].isNull())
+        s.borderLeftWidth = styleVal["border_left_width"].asFloat();
+
+    // Per-side border colors
+    setColorFromJson(s.borderTopColor, styleVal["border_top_color"]);
+    setColorFromJson(s.borderRightColor, styleVal["border_right_color"]);
+    setColorFromJson(s.borderBottomColor, styleVal["border_bottom_color"]);
+    setColorFromJson(s.borderLeftColor, styleVal["border_left_color"]);
+
+    // Per-side border styles
+    if (!styleVal["border_top_style"].isNull())
+        s.borderTopStyle = CSS::parseBorderStyle(styleVal["border_top_style"].asString());
+    if (!styleVal["border_right_style"].isNull())
+        s.borderRightStyle = CSS::parseBorderStyle(styleVal["border_right_style"].asString());
+    if (!styleVal["border_bottom_style"].isNull())
+        s.borderBottomStyle = CSS::parseBorderStyle(styleVal["border_bottom_style"].asString());
+    if (!styleVal["border_left_style"].isNull())
+        s.borderLeftStyle = CSS::parseBorderStyle(styleVal["border_left_style"].asString());
+
+    // border-image
+    if (!styleVal["border_image"].isNull())
+    {
+        std::string img = styleVal["border_image"].asString();
+        // Parse gradient from border-image (e.g., "linear-gradient(red, blue) 1")
+        if (!img.empty())
+        {
+            s.borderImageEnabled = true;
+            if (img.find("linear-gradient") != std::string::npos ||
+                img.find("radial-gradient") != std::string::npos ||
+                img.find("conic-gradient") != std::string::npos)
+            {
+                s.borderImageIsGradient = true;
+                // Parse slice value if present (e.g., "linear-gradient(red, blue) 1")
+                size_t slicePos = img.find_last_of(' ');
+                if (slicePos != std::string::npos && slicePos + 1 < img.size())
+                {
+                    try
+                    {
+                        s.borderImageSlice = std::stof(img.substr(slicePos + 1));
+                    }
+                    catch (...)
+                    {
+                        s.borderImageSlice = 1.0f;
+                    }
+                }
+                // The serializer emits the parsed gradient under
+                // `border_gradient`; it must not clobber the background.
+#ifdef MORPH_FEATURE_GRADIENT
+                if (styleVal.has("border_gradient") && !styleVal["border_gradient"].isNull())
+                {
+                    setGradientFromJson(s.borderGradient, styleVal["border_gradient"]);
+                    s.borderGradientSet = true;
+                }
+#endif
+            }
+        }
+    }
+
+    if (!styleVal["border_image_slice"].isNull())
+        s.borderImageSlice = styleVal["border_image_slice"].asFloat();
 }
 
 // ── Node deserialization with inheritance ──────────────────────

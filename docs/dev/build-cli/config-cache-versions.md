@@ -11,7 +11,7 @@ The `morph-config` crate (`crates/morph-config/src/lib.rs`) handles `morph.confi
 - `name` — what the thing is called (please, something more descriptive than `test`; the `ui-test` fixture did not get this memo).
 - `entry` — the root `.mx` file, usually `src/App.mx`.
 - `window` — `width`, `height`, `title`, plus optional min/max constraints (the calculator example uses these to stay pocket-sized at 340×560).
-- `renderer` — `"flash"` (production default, recommended) or `"forge"` (beta tile compositor). Only `my-app` dares to run forge, and `my-app` is a playground, not a promise.
+- `renderer` — `"flash"` (production default, recommended) or `"forge"` (opt-in tile compositor). Only `my-app` dares to run forge, and `my-app` is a playground, not a promise.
 - `build` — `wayland`, `system_freetype`, `upx`, `upx_version` knobs.
 - `native` — optional interop block: `include_dirs`, `library_dirs`, `libraries`, `cflags`, `ldflags` (the `native-interop` fixture exercises all of these).
 - `dependencies`, `cpp_sources` — what else gets compiled in.

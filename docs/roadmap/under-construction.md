@@ -25,13 +25,9 @@ The compile-time TS→C++ translator (`TSToCppTranslator`) is being extended to 
 
 ## Forge Renderer (Retained Tile Compositor)
 
-The `forge` renderer is **beta / buggy**. Damage tracking + retained FBO are shipped and can be toggled live in dev from the DevTools Rendering tab, but there are known bugs around:
+The `forge` renderer is **complete and opt-in**. Damage tracking + retained FBO ship per-window, with scroll-shift reuse (intra-FBO blit, exposed strip + old/new thumb damage), retained-layer promotion (transitions/color anims, 8-layer / 4 MB budget), tile-pool residency (16 MB LRU), idle present-skip, and a >32-anim fullscreen degradation guard. The dev Flash↔Forge toggle forces fullscreen on switch-back so the retained surface never goes stale. Verification is landed: `tests/runtime/check-forge-math.sh` (51 checks), `tests/runtime/bench-forge.sh` + `help/forge-benchmarks.md` (scrub 158.8×, scroll 20.1×), `examples/flash` / `examples/forge`, and the Rendering-tab FORGE card + damage overlay.
 
-- Damage-rect edges
-- Scroll-shift
-- Some compositor-animation paths
-
-**Flash remains the recommended / default production renderer.** Planned follow-ups: per-tile LRU pool and scroll-shift tile remap (Phases 4 and 6 in `help/renderer-flash-forge.md`).
+**`flash` remains the default renderer; `forge` is selected per app via `"renderer": "forge"`.** X/Y animations now flow through damage (old box at commit, new box present-side); only transformed movers escalate to fullscreen.
 
 ## CSS Cascade Resolver
 

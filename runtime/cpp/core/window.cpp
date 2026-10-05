@@ -953,7 +953,7 @@ void MorphWindow::drawOpsForNode(GLRenderer &r, const RenderFrame *frame, int no
             if (node.grad.enabled)
             {
                 r.drawGradRect(px, py, op.w, op.h, 0.0f, (float *)&op.r,
-                               &node.grad, 0.0f, nullptr);
+                               &node.grad, 0.0f, nullptr, nullptr);
                 break;
             }
 #endif
@@ -964,7 +964,7 @@ void MorphWindow::drawOpsForNode(GLRenderer &r, const RenderFrame *frame, int no
             if (node.grad.enabled)
             {
                 r.drawGradRect(px, py, op.w, op.h, op.data[0], (float *)&op.r,
-                               &node.grad, 0.0f, nullptr);
+                               &node.grad, 0.0f, nullptr, nullptr);
                 break;
             }
 #endif
@@ -975,7 +975,7 @@ void MorphWindow::drawOpsForNode(GLRenderer &r, const RenderFrame *frame, int no
             if (node.grad.enabled)
             {
                 r.drawGradRect(px, py, op.w, op.h, op.data[0], (float *)&op.r,
-                               &node.grad, op.data[1], (float *)&op.br);
+                               &node.grad, op.data[1], (float *)&op.br, nullptr);
                 break;
             }
 #endif
@@ -994,7 +994,16 @@ void MorphWindow::drawOpsForNode(GLRenderer &r, const RenderFrame *frame, int no
                                       op.data[1], (float *)&op.br);
             break;
         case DrawOp::BorderRing:
-            r.drawBorderRing(px, py, op.w, op.h, op.data[0], op.data[1], (float *)&op.br);
+#ifdef MORPH_FEATURE_GRADIENT
+            if (node.borderGrad.enabled && node.borderGrad.stopCount >= 2)
+            {
+                float clear[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+                r.drawGradRect(px, py, op.w, op.h, op.data[0], clear, nullptr,
+                               op.data[1], nullptr, &node.borderGrad);
+                break;
+            }
+#endif
+            r.drawBorderRing(px, py, op.w, op.h, op.data[0], op.data[1], (float *)&op.br, op.data[2], op.data[3], op.data[4]);
             break;
         case DrawOp::BeginClip:
             r.beginClip(px, py, op.w, op.h);

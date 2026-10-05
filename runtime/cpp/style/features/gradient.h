@@ -37,6 +37,10 @@ struct GradientStyle
     // rule that never mentions backgrounds can never wipe the base
     // gradient — only an explicit removal clears it.
     bool bgGradientSet = false;
+    // Border-image gradient (`border-image: <gradient> ...`). Separate
+    // from the background gradient so a box can carry both at once.
+    BgGradient borderGradient;
+    bool borderGradientSet = false;
 };
 
 namespace morph

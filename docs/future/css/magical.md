@@ -6,7 +6,7 @@
 
 ## Read this first — basics come first
 
-Morph supports almost none of the basics yet. Today only `border: solid` renders (`CSS::BorderStyle::{None, Solid}` in `runtime/cpp/style/css_enums.h`), there are no gradients, no `background-image` on boxes, no per-side borders, no `border-image`, single-value `border-radius` only.
+Morph's basics now cover solid/dotted/dashed borders, per-side widths/colors, `border-image` gradients, and AA'd per-side miter joints (all pixel-verified against Chrome); still missing: `background-image` on boxes, per-corner radius (single-value only), scoop/concave corners.
 
 An honest question this page must answer first: *why explore magical CSS when Morph doesn't yet support browser basics?*
 
@@ -264,8 +264,8 @@ Rule: any `hungry` effect must ship with an automatic static fallback (window bl
 | Gradient hover/active/transitions | ✅ Shipped (`lerpGradient`, state revert, `transition` support; removal via explicit `bgGradientSet` flag since deltas can't distinguish unset from cleared) |
 | Gradient `@keyframes` animation | ✅ Shipped (css-string payloads, stop-lerp or discrete flip) |
 | `background-image` on boxes | ❌ Not started (image pipeline is `<img>`-only) |
-| Dotted / dashed / per-side | ❌ Not started (single `borderWidth`, `BorderStyle::{None, Solid}` only) |
-| `border-image` with gradients | ❌ Not started (no custom property — standard syntax reserved) |
+| Dotted / dashed / per-side | ✅ Shipped (per-side widths/colors/styles, SDF ring mask + AA'd miter joints; `tests/runtime/render/border-test` parity vs Chrome, joints pixel-matched) |
+| `border-image` with gradients | ✅ Shipped (standard syntax, sampled on the ring band; parity-covered) |
 | Scoop / per-corner radius | ❌ Not started (single `border_radius: f32`, convex `sdRoundedBox` only) |
 | Gradient text, patterns, shadows | ❌ Not started (`shadow.h` / `outline.h` dormant, see [More CSS](more-properties.md)) |
 | B1–B10 Morph-only magic | ❌ Not started (needs A-group plumbing first) |

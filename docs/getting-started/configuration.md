@@ -53,7 +53,7 @@ All project settings live in `morph.config.json` at the project root.
 | `entry` | string | `"src/App.mx"` | Root `.mx` / `.tsx` / `.ts` file to compile. |
 | `output` | string | `".morph/output"` | Directory for build artifacts. |
 | `window` | object | (see below) | Native window settings. |
-| `renderer` | string | `"flash"` | Renderer backend: `"flash"` (default, lightweight) or `"forge"` (retained surfaces, beta). |
+| `renderer` | string | `"flash"` | Renderer backend: `"flash"` (default, lightweight) or `"forge"` (retained surfaces, opt-in). |
 | `types` | string | `"infer"` | Type mode for translated logic, same as `morph --types`: `"infer"` (default, analyze code) or `"strict"` (respect annotations). CLI `--types` overrides it. |
 | `runtime` | object | (see below) | Runtime type and version to download/use. |
 | `dependencies` | object | `{}` | Package dependencies (reserved for future package manager). |

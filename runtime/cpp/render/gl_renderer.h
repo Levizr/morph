@@ -90,6 +90,16 @@ public:
         float borderWidth;
         float br, bg, bb, ba;
         float borderOnly;
+        // Ring side + style packed as side * 16 + style, where side is
+        // 0 = full ring, 1 = top, 2 = right, 3 = bottom, 4 = left and
+        // style is the CSS::BorderStyle value (0 = none, 1 = solid,
+        // 2 = dotted, 3 = dashed, ...). 0.0 keeps today's solid ring.
+        float borderMode;
+        // Adjacent side widths at the ring's start/end corners (pattern
+        // order) for true miter diagonals. Negative resolves to the
+        // ring's own width (uniform ring).
+        float borderAdjS;
+        float borderAdjE;
 #ifdef MORPH_FEATURE_TRANSFORM
         float model[16];
 #endif
@@ -284,6 +294,8 @@ private:
     GLint m_gradUOffsets = -1, m_gradURepeating = -1, m_gradURadius = -1;
     GLint m_gradUPeriod = -1;
     GLint m_gradUBorderWidth = -1, m_gradUBorderColor = -1, m_gradUStencil = -1;
+    GLint m_gradUBorderCount = -1, m_gradUBorderColors = -1, m_gradUBorderOffsets = -1;
+    GLint m_gradUBorderRepeating = -1, m_gradUBorderPeriod = -1;
     void createGradBuffers();
 #endif
 
@@ -389,7 +401,8 @@ public:
     {
         m_batch.push_back({x + m_scrollX, y + m_scrollY, w, h,
                            color[0], color[1], color[2], color[3],
-                           0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f});
+                           0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                           0.0f});
 #ifdef MORPH_FEATURE_TRANSFORM
         applyModel(m_batch.back());
 #endif
@@ -397,11 +410,12 @@ public:
 
 #ifdef MORPH_FEATURE_RADIUS
     void drawRoundedRect(float x, float y, float w, float h,
-                         float radius, float color[4]) override
+                          float radius, float color[4]) override
     {
         m_batch.push_back({x + m_scrollX, y + m_scrollY, w, h,
                            color[0], color[1], color[2], color[3],
-                           radius, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f});
+                           radius, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                           0.0f});
 #ifdef MORPH_FEATURE_TRANSFORM
         applyModel(m_batch.back());
 #endif
@@ -415,14 +429,15 @@ public:
         // Fill
         m_batch.push_back({x + m_scrollX, y + m_scrollY, w, h,
                            color[0], color[1], color[2], color[3],
-                           0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f});
+                           0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                           0.0f});
         // Border ring
         m_borderBatch.push_back({x + m_scrollX, y + m_scrollY, w, h,
                                  0.0f, 0.0f, 0.0f, 0.0f,
                                  0.0f, borderWidth,
                                  borderColor[0], borderColor[1],
                                  borderColor[2], borderColor[3],
-                                 1.0f});
+                                 1.0f, 0.0f, -1.0f, -1.0f});
 #ifdef MORPH_FEATURE_TRANSFORM
         applyModel(m_batch.back());
         applyModel(m_borderBatch.back());
@@ -437,14 +452,15 @@ public:
         // Fill
         m_batch.push_back({x + m_scrollX, y + m_scrollY, w, h,
                            color[0], color[1], color[2], color[3],
-                           radius, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f});
+                           radius, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                           0.0f});
         // Border ring
         m_borderBatch.push_back({x + m_scrollX, y + m_scrollY, w, h,
                                  0.0f, 0.0f, 0.0f, 0.0f,
                                  radius, borderWidth,
                                  borderColor[0], borderColor[1],
                                  borderColor[2], borderColor[3],
-                                 1.0f});
+                                 1.0f, 0.0f, -1.0f, -1.0f});
 #ifdef MORPH_FEATURE_TRANSFORM
         applyModel(m_batch.back());
         applyModel(m_borderBatch.back());
@@ -453,14 +469,17 @@ public:
 
     void drawBorderRing(float x, float y, float w, float h,
                         float radius, float borderWidth,
-                        float borderColor[4]) override
+                        float borderColor[4], float mode = 0.0f,
+                        float adjStart = -1.0f, float adjEnd = -1.0f) override
     {
+        float adjS = (adjStart < 0.0f) ? borderWidth : adjStart;
+        float adjE = (adjEnd < 0.0f) ? borderWidth : adjEnd;
         m_borderBatch.push_back({x + m_scrollX, y + m_scrollY, w, h,
                                  0.0f, 0.0f, 0.0f, 0.0f,
                                  radius, borderWidth,
                                  borderColor[0], borderColor[1],
                                  borderColor[2], borderColor[3],
-                                 1.0f});
+                                 1.0f, mode, adjS, adjE});
 #ifdef MORPH_FEATURE_TRANSFORM
         applyModel(m_borderBatch.back());
 #endif
@@ -469,7 +488,8 @@ public:
 #ifdef MORPH_FEATURE_GRADIENT
     void drawGradRect(float x, float y, float w, float h, float radius,
                       float color[4], const BgGradient* grad,
-                      float borderWidth, const float borderColor[4]) override;
+                      float borderWidth, const float borderColor[4],
+                      const BgGradient* borderGrad = nullptr) override;
 #endif
 
 #ifdef MORPH_FEATURE_TEXT

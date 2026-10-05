@@ -208,6 +208,30 @@ impl IRSerializer {
         out.insert("border_width".to_string(), num(s.border_width));
         out.insert("border_color".to_string(), floats(&s.border_color));
         out.insert("border_style".to_string(), Value::String(s.border_style.clone()));
+        out.insert("border_top_width".to_string(), opt_num(s.border_top_width));
+        out.insert("border_right_width".to_string(), opt_num(s.border_right_width));
+        out.insert("border_bottom_width".to_string(), opt_num(s.border_bottom_width));
+        out.insert("border_left_width".to_string(), opt_num(s.border_left_width));
+        let opt_floats = |v: Option<[f32; 4]>| v.map_or(Value::Null, |c| floats(&c));
+        out.insert("border_top_color".to_string(), opt_floats(s.border_top_color));
+        out.insert("border_right_color".to_string(), opt_floats(s.border_right_color));
+        out.insert("border_bottom_color".to_string(), opt_floats(s.border_bottom_color));
+        out.insert("border_left_color".to_string(), opt_floats(s.border_left_color));
+        let opt_string = |v: &Option<String>| v.clone().map_or(Value::Null, Value::String);
+        out.insert("border_top_style".to_string(), opt_string(&s.border_top_style));
+        out.insert("border_right_style".to_string(), opt_string(&s.border_right_style));
+        out.insert("border_bottom_style".to_string(), opt_string(&s.border_bottom_style));
+        out.insert("border_left_style".to_string(), opt_string(&s.border_left_style));
+        out.insert("border_image".to_string(), opt_string(&s.border_image));
+        out.insert("border_image_slice".to_string(), opt_num(s.border_image_slice));
+        out.insert(
+            "border_gradient".to_string(),
+            s.border_gradient.as_ref().map_or(Value::Null, Self::gradient),
+        );
+        out.insert(
+            "border_gradient_set".to_string(),
+            Value::from(s.border_gradient.is_some()),
+        );
         out.insert("box_sizing".to_string(), Value::String(s.box_sizing.clone()));
         out.insert("z_index".to_string(), s.z_index.map_or(Value::Null, Value::from));
         out.insert("opacity".to_string(), num(s.opacity));
@@ -557,6 +581,41 @@ mod tests {
     #[test]
     fn node_shape_matches_dev_protocol() {
         let value = IRSerializer::to_dict(&[sample_window()], None);
+        let node = &value["windows"][0]["nodes"][0];
+        assert_eq!(node["id"], Value::String("node_0000".to_string()));
+        assert_eq!(node["type"], Value::String("div".to_string()));
+        assert_eq!(node["text"], Value::String("hi".to_string()));
+        assert_eq!(node["x"], Value::from(1.0f32));
+        assert_eq!(node["attrs"]["data-x"], Value::String("1".to_string()));
+        assert_eq!(
+            node["style"]["bg_color"],
+            Value::Array(vec![
+                Value::from(1.0f32),
+                Value::from(0.0f32),
+                Value::from(0.0f32),
+                Value::from(1.0f32),
+            ])
+        );
+        assert!(node.get("reactive_text").is_none());
+        assert!(node.get("hover_style").is_none());
+        assert!(node.get("animations").is_none());
+    }
+
+    #[test]
+    fn unset_optionals_serialize_as_null() {
+        let value = IRSerializer::to_dict(&[sample_window()], None);
+        let style = &value["windows"][0]["nodes"][0]["style"];
+        assert_eq!(style["width"], Value::Null);
+        assert_eq!(style["z_index"], Value::Null);
+        assert_eq!(style["transform_ops"], Value::Null);
+        assert_eq!(style["transform_matrix"], Value::Null);
+        assert_eq!(style["transform_origin"], Value::Null);
+    }
+
+    #[test]
+    fn non_finite_floats_become_null() {
+        let mut window = sample_window();
+        window.nodes[0].style.opacity = f32::INFIr::to_dict(&[sample_window()], None);
         let node = &value["windows"][0]["nodes"][0];
         assert_eq!(node["id"], Value::String("node_0000".to_string()));
         assert_eq!(node["type"], Value::String("div".to_string()));

@@ -4,7 +4,7 @@
 
 Morph renders with OpenGL 3.3 and no browser — but "renders" hides a two-thread architecture, a pointer-free frame snapshot format, two competing renderer personalities, and a font pipeline involving HarfBuzz shaping and dual texture atlases. This page is the full tour: how a frame gets from your node tree to photons, who runs on which thread, and why there are two renderers when one would have been so much simpler.
 
-The user-facing choice ("which renderer should I pick?") lives in the main rendering docs. Short answer: **flash for production, forge is beta.** This page explains what that means mechanically.
+The user-facing choice ("which renderer should I pick?") lives in the main rendering docs. Short answer: **flash for production, forge is opt-in.** This page explains what that means mechanically.
 
 ## The two threads and the sacred snapshot
 
@@ -40,7 +40,7 @@ Full clear, full redraw, every frame. No retained surfaces, no damage tracking, 
 
 ## Forge: the ambitious understudy (`renderers/forge/`)
 
-Forge is the retained-surface compositor, currently beta with known damage-rect and scroll quirks. Phase 3 (shipped) keeps a **persistent FBO + RGBA8 color texture + `DEPTH24_STENCIL8` RBO** and repaints only what changed:
+Forge is the retained-surface compositor, shipped and opt-in (flash stays the default). Its Phase 3 core keeps a **persistent FBO + RGBA8 color texture + `DEPTH24_STENCIL8` RBO** and repaints only what changed:
 
 ```
 forgeCommit: snapshot pre-layout PaintDirty nodes (genuine content changes,

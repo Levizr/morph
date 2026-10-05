@@ -42,7 +42,7 @@ Plans are grouped by area. Each group is a folder under `docs/future/` and a sec
 
 | Feature | Page | Priority | Depends on |
 |---|---|---|---|
-| Forge tile pool, retained layers, scroll-shift | [Forge Renderer](rendering/forge-tile-pool.md) | Medium | Forge (beta) |
+| Forge tile pool, retained layers, scroll-shift | [Forge Renderer](rendering/forge-tile-pool.md) | Medium | Shipped (forge opt-in) |
 | Vulkan / Metal / DirectX backends (pluggable graphics) | [Graphics APIs](rendering/graphics-apis.md) | High | — |
 | Hidden classes, compositor-safe properties | [Performance](rendering/performance.md) | Low | — |
 | Virtualized lists (100k rows) | [Virtualized Lists](rendering/virtualized-lists.md) | Medium | Forge Renderer |

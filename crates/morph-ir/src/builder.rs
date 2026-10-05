@@ -5194,6 +5194,110 @@ fn apply_css_prop(style: &mut IRStyle, prop: &str, val: &str) -> Option<&'static
             style.box_sizing = val.to_string();
             Some("box_sizing")
         }
+        // Per-side border width
+        "border-top-width" => {
+            if let Some(v) = parse_length(val) {
+                style.border_top_width = Some(v);
+                Some("border_top_width")
+            } else {
+                None
+            }
+        }
+        "border-right-width" => {
+            if let Some(v) = parse_length(val) {
+                style.border_right_width = Some(v);
+                Some("border_right_width")
+            } else {
+                None
+            }
+        }
+        "border-bottom-width" => {
+            if let Some(v) = parse_length(val) {
+                style.border_bottom_width = Some(v);
+                Some("border_bottom_width")
+            } else {
+                None
+            }
+        }
+        "border-left-width" => {
+            if let Some(v) = parse_length(val) {
+                style.border_left_width = Some(v);
+                Some("border_left_width")
+            } else {
+                None
+            }
+        }
+        // Per-side border color
+        "border-top-color" => {
+            if let Some(c) = parse_color(val) {
+                style.border_top_color = Some(c);
+                Some("border_top_color")
+            } else {
+                None
+            }
+        }
+        "border-right-color" => {
+            if let Some(c) = parse_color(val) {
+                style.border_right_color = Some(c);
+                Some("border_right_color")
+            } else {
+                None
+            }
+        }
+        "border-bottom-color" => {
+            if let Some(c) = parse_color(val) {
+                style.border_bottom_color = Some(c);
+                Some("border_bottom_color")
+            } else {
+                None
+            }
+        }
+        "border-left-color" => {
+            if let Some(c) = parse_color(val) {
+                style.border_left_color = Some(c);
+                Some("border_left_color")
+            } else {
+                None
+            }
+        }
+        // Per-side border style
+        "border-top-style" => {
+            style.border_top_style = Some(val.to_string());
+            Some("border_top_style")
+        }
+        "border-right-style" => {
+            style.border_right_style = Some(val.to_string());
+            Some("border_right_style")
+        }
+        "border-bottom-style" => {
+            style.border_bottom_style = Some(val.to_string());
+            Some("border_bottom_style")
+        }
+        "border-left-style" => {
+            style.border_left_style = Some(val.to_string());
+            Some("border_left_style")
+        }
+        // border-image
+        "border-image" => {
+            style.border_image = Some(val.to_string());
+            // A trailing slice (`... 1`) is not part of the gradient.
+            let grad_src = val
+                .rsplit_once(')')
+                .map(|(head, _)| format!("{head})"))
+                .unwrap_or_else(|| val.to_string());
+            if let Some(g) = crate::gradient::parse_gradient(&grad_src) {
+                style.border_gradient = Some(g);
+            }
+            Some("border_image")
+        }
+        "border-image-slice" => {
+            if let Ok(v) = val.parse::<f32>() {
+                style.border_image_slice = Some(v);
+                Some("border_image_slice")
+            } else {
+                None
+            }
+        }
         _ => None,
     }
 }

@@ -92,6 +92,9 @@ impl FeatureSet {
         if s.bg_gradient.is_some() {
             self.features.insert("gradient".into());
         }
+        if s.border_gradient.is_some() {
+            self.features.insert("gradient".into());
+        }
     }
 
     fn scan_reactive(&mut self, reactive_style: &std::collections::HashMap<String, String>) {
@@ -119,7 +122,23 @@ impl FeatureSet {
             "opacity" => vec!["opacity"],
             "position" | "left" | "right" | "top" | "bottom" => vec!["position"],
             "cursor" => vec!["cursor"],
-            "border-width" | "border-style" | "border-color" => vec!["border"],
+            "border-width"
+            | "border-style"
+            | "border-color"
+            | "border-top-width"
+            | "border-right-width"
+            | "border-bottom-width"
+            | "border-left-width"
+            | "border-top-color"
+            | "border-right-color"
+            | "border-bottom-color"
+            | "border-left-color"
+            | "border-top-style"
+            | "border-right-style"
+            | "border-bottom-style"
+            | "border-left-style"
+            | "border-image"
+            | "border-image-slice" => vec!["border"],
             "scrollbar-width"
             | "scrollbar-track-color"
             | "scrollbar-thumb-color"
@@ -157,6 +176,9 @@ impl FeatureSet {
             if (prop == "background" || prop == "background-image") && val.contains("gradient(") {
                 self.features.insert("gradient".into());
             }
+            if prop == "border-image" && val.contains("gradient(") {
+                self.features.insert("gradient".into());
+            }
             if prop == "display" && val.trim() == "none" {
                 self.features.insert("display_none".into());
             }
@@ -164,7 +186,25 @@ impl FeatureSet {
                 "flex" | "flex-grow" | "flex-shrink" | "flex-basis" => {
                     self.features.insert("flex".into());
                 }
-                "border" | "border-top" | "border-right" | "border-bottom" | "border-left" => {
+                "border"
+                | "border-top"
+                | "border-right"
+                | "border-bottom"
+                | "border-left"
+                | "border-top-width"
+                | "border-right-width"
+                | "border-bottom-width"
+                | "border-left-width"
+                | "border-top-color"
+                | "border-right-color"
+                | "border-bottom-color"
+                | "border-left-color"
+                | "border-top-style"
+                | "border-right-style"
+                | "border-bottom-style"
+                | "border-left-style"
+                | "border-image"
+                | "border-image-slice" => {
                     self.features.insert("border".into());
                 }
                 "overflow-x" | "overflow-y" => {

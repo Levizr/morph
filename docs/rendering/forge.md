@@ -1,6 +1,6 @@
 # Forge
 
-`forge` is Morph's hybrid retained compositor — a renderer that keeps pixels on the GPU between frames and repaints only what changed. It is **beta**: shipped and toggleable in dev, but flash remains the recommended production renderer until forge matures.
+`forge` is Morph's hybrid retained compositor — a renderer that keeps pixels on the GPU between frames and repaints only what changed. It is **production opt-in**: per-window retained FBO + damage tracking, scroll-shift tile reuse, and retained layers for animated leaves are implemented; select it per app with `"renderer": "forge"`.
 
 ## How It Works
 
@@ -13,7 +13,7 @@ Instead of clearing every frame, forge keeps a persistent FBO surface of the win
    - scroll and content-height changes
 2. **Fullscreen fallback** — damage is forced to fullscreen on the first frame, while X/Y compositor animations run, or when the node count changes
 3. **Damage-limited raster** — scissored color clears + depth/stencil reset per damage rect; only nodes touching damage are re-rastered into the retained surface
-4. **Present** — the whole surface is blitted with `glBlitFramebuffer`; idle frames only blit
+4. **Present** — the whole surface is blitted with `glBlitFramebuffer`; idle frames skip present entirely (0 bytes, no swap)
 
 Conservative 1px expansion past rounded-clip boundaries guarantees no stale edges; stale prev-rects are pruned as nodes disappear.
 
@@ -21,13 +21,19 @@ Conservative 1px expansion past rounded-clip boundaries guarantees no stale edge
 
 | Piece | State |
 |---|---|
-| Flash/Forge seam + dev toggle | Shipped |
-| `DamageSet` + retained FBO + damage-limited present | Shipped (beta) |
-| Content-keyed tile pool | Planned |
-| Per-node retained layers | Planned |
-| Scroll-shift tile remap | Planned |
+| Flash/Forge seam + dev toggle | Shipped (mode switch forces fullscreen) |
+| `DamageSet` + retained FBO + damage-limited present | Shipped (per-window; idle skips present) |
+| Content-keyed tile pool | Shipped (residency-only LRU + 16 MB budget) |
+| Per-node retained layers | Shipped (auto-promotion, 8-layer / 4 MB budget) |
+| Scroll-shift tile remap | Shipped (intra-FBO blit + exposed-strip damage) |
+| Benchmarks (Phase 9) | Shipped (`help/forge-benchmarks.md` — scrub 158.8×, scroll 20.1×, idle present 0 B; +12 KB binary) |
+| Examples (Phase 10) | Shipped (`examples/flash`, `examples/forge`) |
+| DevTools overlay | Shipped (FORGE card: damage/present/tiles; Show-damage rect overlay; peak RSS) |
 
-Known bugs: damage-rect edges, scroll-shift paths, some compositor-animation paths. Test it from DevTools → Rendering → RENDERER (`Flash | Forge` toggle).
+X/Y compositor animations move through the normal damage path now (old box damaged at commit, new box added present-side once offsets are known); only transformed movers escalate to fullscreen. Scrolled, transformed, or rounded-clip containers that fail the scroll-shift safety check fall back to full-container damage. Test it from DevTools → Rendering → RENDERER (`Flash | Forge` toggle).
+
+Known limitations are tracked as fixable engineering work — logic gaps, not
+design flaws — in the [Forge Renderer roadmap](../future/rendering/forge-tile-pool.md#limitations-logic-not-design).
 
 ## Why Retained Rendering
 
@@ -39,4 +45,7 @@ Retention isn't free: one window's worth of pixels must persist to repaint parti
 
 ## What's Next
 
-The remaining phases turn forge into the production renderer: a content-keyed tile pool with LRU + budget, per-node retained layers for animated leaves, and scroll-shift tile reuse. See [Forge Renderer roadmap](../future/rendering/forge-tile-pool.md).
+Nothing structural remains: benchmarks, examples, and the DevTools overlay
+are landed (see [Forge Renderer roadmap](../future/rendering/forge-tile-pool.md)).
+`flash` stays the default; pick `forge` per app when the UI is large and
+mostly stable.

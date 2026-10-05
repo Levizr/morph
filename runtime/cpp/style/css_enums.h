@@ -159,7 +159,14 @@ enum class Cursor : uint8_t
 enum class BorderStyle : uint8_t
 {
     None,
-    Solid
+    Solid,
+    Dotted,
+    Dashed,
+    Double,
+    Groove,
+    Ridge,
+    Inset,
+    Outset
 };
 
 enum class Overflow : uint8_t
@@ -278,6 +285,20 @@ inline BorderStyle parseBorderStyle(std::string_view s)
 {
     if (s == "solid")
         return BorderStyle::Solid;
+    if (s == "dotted")
+        return BorderStyle::Dotted;
+    if (s == "dashed")
+        return BorderStyle::Dashed;
+    if (s == "double")
+        return BorderStyle::Double;
+    if (s == "groove")
+        return BorderStyle::Groove;
+    if (s == "ridge")
+        return BorderStyle::Ridge;
+    if (s == "inset")
+        return BorderStyle::Inset;
+    if (s == "outset")
+        return BorderStyle::Outset;
     return BorderStyle::None;
 }
 
@@ -413,7 +434,27 @@ inline const char* toString(Cursor c)
 
 inline const char* toString(BorderStyle b)
 {
-    return (b == BorderStyle::Solid) ? "solid" : "none";
+    switch (b)
+    {
+    case BorderStyle::Solid:
+        return "solid";
+    case BorderStyle::Dotted:
+        return "dotted";
+    case BorderStyle::Dashed:
+        return "dashed";
+    case BorderStyle::Double:
+        return "double";
+    case BorderStyle::Groove:
+        return "groove";
+    case BorderStyle::Ridge:
+        return "ridge";
+    case BorderStyle::Inset:
+        return "inset";
+    case BorderStyle::Outset:
+        return "outset";
+    default:
+        return "none";
+    }
 }
 
 inline const char* toString(Overflow o)

@@ -419,9 +419,9 @@ public:
     // Center a window over its parent and lock the offset so the two
     // move together (both directions, see noteFollowMoved). No-op
     // without a live parent. The locked position is the *requested*
-    // one — X11 applies moves asynchronously, so reading it back here
-    // would store a stale position and yank the parent on the first
-    // ConfigureNotify.
+    // one — window managers apply moves asynchronously (X11/Wayland),
+    // so reading it back here would store a stale position and yank
+    // the parent on the first ConfigureNotify.
     void centerOnParent(WID wid)
     {
         auto win = get(wid);

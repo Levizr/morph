@@ -184,6 +184,13 @@ int MorphNode::flattenImpl(RenderFrame& frame, int parentId, float scrollOffset,
 #endif
 #ifdef MORPH_FEATURE_GRADIENT
     fn.grad = style.bgGradient;
+#ifdef MORPH_FEATURE_BORDER
+    if (style.borderImageEnabled && style.borderImageIsGradient &&
+        style.borderGradientSet)
+    {
+        fn.borderGrad = style.borderGradient;
+    }
+#endif
 #endif
 
     // ── Opacity: multiply every paint color by the accumulated opacity ──
@@ -207,6 +214,10 @@ int MorphNode::flattenImpl(RenderFrame& frame, int parentId, float scrollOffset,
         for (int i = 0; i < fn.grad.stopCount; i++)
         {
             fn.grad.stops[i].color[3] *= opac;
+        }
+        for (int i = 0; i < fn.borderGrad.stopCount; i++)
+        {
+            fn.borderGrad.stops[i].color[3] *= opac;
         }
 #endif
     }

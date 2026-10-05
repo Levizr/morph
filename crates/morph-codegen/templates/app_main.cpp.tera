@@ -101,8 +101,8 @@ int main(int argc, char** argv) {
         }
     }
     glfwSetErrorCallback(glfw_error_cb);
-    // Testing on Wayland sessions: GLFW 3.4 auto-prefers Wayland with no
-    // fallback, hiding windows from X tooling. Opt into X11 explicitly.
+    // Testing on Wayland sessions: GLFW 3.4 auto-prefers Wayland.
+    // X11 can be forced via MORPH_GLFW_X11 env var.
     if (std::getenv("MORPH_GLFW_X11") != nullptr) {
 #ifdef GLFW_PLATFORM_X11
         glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
