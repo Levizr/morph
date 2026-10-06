@@ -76,7 +76,7 @@ void GLRenderer::createQuadBuffers()
     glVertexAttribDivisor(2, 1);
 
     glEnableVertexAttribArray(3);
-    glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, sizeof(Instance), (void *)offsetof(Instance, radius));
+    glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, sizeof(Instance), (void *)offsetof(Instance, radii));
     glVertexAttribDivisor(3, 1);
 
     glEnableVertexAttribArray(4);
@@ -830,7 +830,7 @@ bool GLRenderer::ensureReady()
     m_gradUOffsets = glGetUniformLocation(m_gradShader, "uGradOffsets");
     m_gradURepeating = glGetUniformLocation(m_gradShader, "uGradRepeating");
     m_gradUPeriod = glGetUniformLocation(m_gradShader, "uGradPeriod");
-    m_gradURadius = glGetUniformLocation(m_gradShader, "uRadius");
+    m_gradURadii = glGetUniformLocation(m_gradShader, "uRadii");
     m_gradUBorderWidth = glGetUniformLocation(m_gradShader, "uBorderWidth");
     m_gradUBorderColor = glGetUniformLocation(m_gradShader, "uBorderColor");
     m_gradUStencil = glGetUniformLocation(m_gradShader, "uStencilMode");
@@ -924,7 +924,7 @@ void GLRenderer::endClip()
     }
 }
 
-void GLRenderer::beginRoundedClip(float x, float y, float w, float h, float radius)
+void GLRenderer::beginRoundedClip(float x, float y, float w, float h, const float radii[4])
 {
     flush(m_proj);
 
@@ -946,7 +946,7 @@ void GLRenderer::beginRoundedClip(float x, float y, float w, float h, float radi
     Instance inst = {x + m_scrollX, y + m_scrollY,
                      w, h,
                      1.0f, 1.0f, 1.0f, 1.0f,
-                     radius, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+                     {radii[0], radii[1], radii[2], radii[3]}, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
 #ifdef MORPH_FEATURE_TRANSFORM
     applyModel(inst);
 #endif
@@ -1205,7 +1205,7 @@ void GLRenderer::createGradBuffers()
 }
 
 void GLRenderer::drawGradRect(float x, float y, float w, float h,
-                              float radius, float color[4],
+                              const float radii[4], float color[4],
                               const BgGradient* grad, float borderWidth,
                               const float borderColor[4],
                               const BgGradient* borderGrad)
@@ -1310,7 +1310,7 @@ void GLRenderer::drawGradRect(float x, float y, float w, float h,
         period = offsets[grad->stopCount - 1] - offsets[0];
     }
     glUniform1f(m_gradUPeriod, period);
-    glUniform1f(m_gradURadius, radius);
+    glUniform4f(m_gradURadii, radii[0], radii[1], radii[2], radii[3]);
     glUniform1f(m_gradUBorderWidth, borderWidth);
     float bc[4] = {0, 0, 0, 0};
     if (borderColor != nullptr)

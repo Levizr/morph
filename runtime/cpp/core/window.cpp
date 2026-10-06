@@ -952,7 +952,7 @@ void MorphWindow::drawOpsForNode(GLRenderer &r, const RenderFrame *frame, int no
 #ifdef MORPH_FEATURE_GRADIENT
             if (node.grad.enabled)
             {
-                r.drawGradRect(px, py, op.w, op.h, 0.0f, (float *)&op.r,
+                r.drawGradRect(px, py, op.w, op.h, kSharpRadii, (float *)&op.r,
                                &node.grad, 0.0f, nullptr, nullptr);
                 break;
             }
@@ -963,18 +963,18 @@ void MorphWindow::drawOpsForNode(GLRenderer &r, const RenderFrame *frame, int no
 #ifdef MORPH_FEATURE_GRADIENT
             if (node.grad.enabled)
             {
-                r.drawGradRect(px, py, op.w, op.h, op.data[0], (float *)&op.r,
+                r.drawGradRect(px, py, op.w, op.h, op.radii, (float *)&op.r,
                                &node.grad, 0.0f, nullptr, nullptr);
                 break;
             }
 #endif
-            r.drawRoundedRect(px, py, op.w, op.h, op.data[0], (float *)&op.r);
+            r.drawRoundedRect(px, py, op.w, op.h, op.radii, (float *)&op.r);
             break;
         case DrawOp::BorderedRect:
 #ifdef MORPH_FEATURE_GRADIENT
             if (node.grad.enabled)
             {
-                r.drawGradRect(px, py, op.w, op.h, op.data[0], (float *)&op.r,
+                r.drawGradRect(px, py, op.w, op.h, op.radii, (float *)&op.r,
                                &node.grad, op.data[1], (float *)&op.br, nullptr);
                 break;
             }
@@ -985,12 +985,12 @@ void MorphWindow::drawOpsForNode(GLRenderer &r, const RenderFrame *frame, int no
 #ifdef MORPH_FEATURE_GRADIENT
             if (node.grad.enabled)
             {
-                r.drawGradRect(px, py, op.w, op.h, op.data[0], (float *)&op.r,
+                r.drawGradRect(px, py, op.w, op.h, op.radii, (float *)&op.r,
                                &node.grad, op.data[1], (float *)&op.br, nullptr);
                 break;
             }
 #endif
-            r.drawBorderedRoundedRect(px, py, op.w, op.h, op.data[0], (float *)&op.r,
+            r.drawBorderedRoundedRect(px, py, op.w, op.h, op.radii, (float *)&op.r,
                                       op.data[1], (float *)&op.br);
             break;
         case DrawOp::BorderRing:
@@ -998,12 +998,12 @@ void MorphWindow::drawOpsForNode(GLRenderer &r, const RenderFrame *frame, int no
             if (node.borderGrad.enabled && node.borderGrad.stopCount >= 2)
             {
                 float clear[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-                r.drawGradRect(px, py, op.w, op.h, op.data[0], clear, nullptr,
+                r.drawGradRect(px, py, op.w, op.h, op.radii, clear, nullptr,
                                op.data[1], nullptr, &node.borderGrad);
                 break;
             }
 #endif
-            r.drawBorderRing(px, py, op.w, op.h, op.data[0], op.data[1], (float *)&op.br, op.data[2], op.data[3], op.data[4]);
+            r.drawBorderRing(px, py, op.w, op.h, op.radii, op.data[1], (float *)&op.br, op.data[2], op.data[3], op.data[4]);
             break;
         case DrawOp::BeginClip:
             r.beginClip(px, py, op.w, op.h);
@@ -1012,7 +1012,7 @@ void MorphWindow::drawOpsForNode(GLRenderer &r, const RenderFrame *frame, int no
             r.endClip();
             break;
         case DrawOp::BeginRoundedClip:
-            r.beginRoundedClip(px, py, op.w, op.h, op.data[0]);
+            r.beginRoundedClip(px, py, op.w, op.h, op.radii);
             break;
         case DrawOp::EndRoundedClip:
             r.endRoundedClip();
@@ -1052,7 +1052,9 @@ void MorphWindow::drawScrollbar(GLRenderer &r, const FlatRenderNode &node,
         radius = thumbH * 0.5f;
     if (radius < 0.5f)
         radius = 0.5f;
-    r.drawRoundedRect(trackX, thumbY, sbw, thumbH, radius, (float *)node.scrollbarThumbColor);
+    float sbRadii[4];
+    fillRadii(sbRadii, radius);
+    r.drawRoundedRect(trackX, thumbY, sbw, thumbH, sbRadii, (float *)node.scrollbarThumbColor);
 }
 
 // True when every descendant box lies inside (x,y,w,h): the clip rect the
@@ -1091,7 +1093,9 @@ void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx,
     float sh = sc(node.h);
 
     bool overflowClipped = (node.overflow != CSS::Overflow::Visible);
-    bool radiusClip = node.borderRadius > 0.0f;
+    float nodeRadii[4];
+    resolveNodeRadii(node, nodeRadii);
+    bool radiusClip = maxRadius4(nodeRadii) > 0.0f;
     // Rounded-only clips (buttons, cards) with fully-fitting content enforce
     // nothing — skip them. Scroll/overflow-hidden clips are untouched.
     if (radiusClip && !overflowClipped
@@ -1296,12 +1300,12 @@ void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx,
         if (overflowClipped)
         {
             if (transformed)
-                m_renderer.beginRoundedClip(sx, sy, sw, sh, 0.0f);
+                m_renderer.beginRoundedClip(sx, sy, sw, sh, kSharpRadii);
             else
                 m_renderer.beginClip(sx, sy, sw, sh);
         }
         if (radiusClip)
-            m_renderer.beginRoundedClip(sx, sy, sw, sh, node.borderRadius);
+            m_renderer.beginRoundedClip(sx, sy, sw, sh, nodeRadii);
     }
 
     // 3. Scroll push + children

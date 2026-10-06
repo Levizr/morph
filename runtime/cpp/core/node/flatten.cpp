@@ -145,7 +145,9 @@ int MorphNode::flattenImpl(RenderFrame& frame, int parentId, float scrollOffset,
     if (offscreen)
     {
         bool clips = style.overflow == CSS::Overflow::Hidden || style.overflow == CSS::Overflow::Scroll ||
-                     style.overflow == CSS::Overflow::Auto || style.borderRadius > 0.0f;
+                     style.overflow == CSS::Overflow::Auto || style.borderRadius > 0.0f ||
+                     style.borderTopLeftRadius > 0.0f || style.borderTopRightRadius > 0.0f ||
+                     style.borderBottomRightRadius > 0.0f || style.borderBottomLeftRadius > 0.0f;
         // Clipping nodes fully contain their descendants. If nothing in the
         // subtree can move (running animation/transition), it can never
         // become visible — drop the whole subtree. Non-clipping nodes still
@@ -174,6 +176,10 @@ int MorphNode::flattenImpl(RenderFrame& frame, int parentId, float scrollOffset,
     memcpy(fn.bgColor, style.bgColor, sizeof(float)*4);
     memcpy(fn.color, style.color, sizeof(float)*4);
     fn.borderRadius = style.borderRadius;
+    fn.cornerRadii[0] = style.borderTopLeftRadius;
+    fn.cornerRadii[1] = style.borderTopRightRadius;
+    fn.cornerRadii[2] = style.borderBottomRightRadius;
+    fn.cornerRadii[3] = style.borderBottomLeftRadius;
     fn.borderWidth = 0.0f;
     fn.borderColor[0] = fn.borderColor[1] = fn.borderColor[2] = 0.0f; fn.borderColor[3] = 1.0f;
     fn.borderStyle = CSS::BorderStyle::None;

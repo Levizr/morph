@@ -609,14 +609,15 @@ public:
         auto sc = [&](float v) { return m_hasLayoutTransition ? v : std::round(v); };
         float sx = sc(x), sy = sc(y);
         float sw = sc(w), sh = sc(h);
-        float rad = m_isTransitioning ? (style.borderRadius > 0.0f ? style.borderRadius : 6.0f) : snapRadius(style.borderRadius > 0.0f ? style.borderRadius : 6.0f);
+        float radii[4];
+        resolveControlRadii(style, !m_isTransitioning, radii);
 #ifdef MORPH_FEATURE_BORDER
-        recordBoxOps(m_displayList, style, sx, sy, sw, sh, rad,
+        recordBoxOps(m_displayList, style, sx, sy, sw, sh,
                      !m_isTransitioning, true);
 #else
         DrawOp bg;
         {
-            bg.setRounded(sx, sy, sw, sh, rad, style.bgColor);
+            bg.setRounded(sx, sy, sw, sh, radii, style.bgColor);
         }
         m_displayList.push_back(bg);
 #endif
@@ -632,7 +633,8 @@ public:
         auto sc = [&](float v) { return m_hasLayoutTransition ? v : std::round(v); };
         float sx = sc(x), sy = sc(y);
         float sw = sc(w), sh = sc(h);
-        float rad = m_isTransitioning ? style.borderRadius : snapRadius(style.borderRadius);
+        float radii[4];
+        resolveBorderRadii(style, !m_isTransitioning, radii);
 
 #ifdef MORPH_FEATURE_TRANSFORM
         bool pushedSelf = pushSelfTransform(r, sx, sy);
@@ -644,7 +646,7 @@ public:
                 case DrawOp::Rect:
 #ifdef MORPH_FEATURE_GRADIENT
                     if (style.bgGradient.enabled) {
-                        r.drawGradRect(op.x,op.y,op.w,op.h,0.0f,&op.r,&style.bgGradient,0.0f,nullptr,nullptr);
+                        r.drawGradRect(op.x,op.y,op.w,op.h,kSharpRadii,&op.r,&style.bgGradient,0.0f,nullptr,nullptr);
                         break;
                     }
 #endif
@@ -652,15 +654,15 @@ public:
                 case DrawOp::RoundedRect:
 #ifdef MORPH_FEATURE_GRADIENT
                     if (style.bgGradient.enabled) {
-                        r.drawGradRect(op.x,op.y,op.w,op.h,op.data[0],&op.r,&style.bgGradient,0.0f,nullptr,nullptr);
+                        r.drawGradRect(op.x,op.y,op.w,op.h,op.radii,&op.r,&style.bgGradient,0.0f,nullptr,nullptr);
                         break;
                     }
 #endif
-                    r.drawRoundedRect(op.x,op.y,op.w,op.h,op.data[0],&op.r); break;
+                    r.drawRoundedRect(op.x,op.y,op.w,op.h,op.radii,&op.r); break;
                 case DrawOp::BorderedRect:
 #ifdef MORPH_FEATURE_GRADIENT
                     if (style.bgGradient.enabled) {
-                        r.drawGradRect(op.x,op.y,op.w,op.h,0.0f,&op.r,&style.bgGradient,op.data[1],&op.br,nullptr);
+                        r.drawGradRect(op.x,op.y,op.w,op.h,kSharpRadii,&op.r,&style.bgGradient,op.data[1],&op.br,nullptr);
                         break;
                     }
 #endif
@@ -668,11 +670,11 @@ public:
                 case DrawOp::BorderedRoundedRect:
 #ifdef MORPH_FEATURE_GRADIENT
                     if (style.bgGradient.enabled) {
-                        r.drawGradRect(op.x,op.y,op.w,op.h,op.data[0],&op.r,&style.bgGradient,op.data[1],&op.br,nullptr);
+                        r.drawGradRect(op.x,op.y,op.w,op.h,op.radii,&op.r,&style.bgGradient,op.data[1],&op.br,nullptr);
                         break;
                     }
 #endif
-                    r.drawBorderedRoundedRect(op.x,op.y,op.w,op.h,op.data[0],&op.r,op.data[1],&op.br); break;
+                    r.drawBorderedRoundedRect(op.x,op.y,op.w,op.h,op.radii,&op.r,op.data[1],&op.br); break;
                 case DrawOp::BorderRing:
 #ifdef MORPH_FEATURE_BORDER
                     execBorderRingOp(r, op, style); break;
@@ -684,7 +686,7 @@ public:
         }
 
         // 2. Clip + text/caret + scroll + children
-        bool needRadiusClip = rad > 0.0f;
+        bool needRadiusClip = maxRadius4(radii) > 0.0f;
 #ifdef MORPH_FEATURE_SCROLL
         bool scrolling = scrollEnabled && contentH > sh;
         bool needRectClip = scrolling || style.overflow == CSS::Overflow::Hidden || style.overflow == CSS::Overflow::Auto;
@@ -696,14 +698,14 @@ public:
 #ifdef MORPH_FEATURE_TRANSFORM
             if (needRectClip) {
                 if (pushedSelf)
-                    r.beginRoundedClip(sx, sy, sw, sh, 0.0f);
+                    r.beginRoundedClip(sx, sy, sw, sh, kSharpRadii);
                 else
                     r.beginClip(sx, sy, sw, sh);
             }
 #else
             if (needRectClip) r.beginClip(sx, sy, sw, sh);
 #endif
-            if (needRadiusClip) r.beginRoundedClip(sx, sy, sw, sh, rad);
+            if (needRadiusClip) r.beginRoundedClip(sx, sy, sw, sh, radii);
 #ifdef MORPH_FEATURE_INPUT
             drawTextAndCaret(r);
 #endif
@@ -738,22 +740,23 @@ public:
         auto sc = [&](float v) { return m_hasLayoutTransition ? v : std::round(v); };
         float sx = sc(x), sy = sc(y);
         float sw = sc(w), sh = sc(h);
-        float rad = m_isTransitioning ? (style.borderRadius > 0.0f ? style.borderRadius : 6.0f) : snapRadius(style.borderRadius > 0.0f ? style.borderRadius : 6.0f);
+        float radii[4];
+        resolveControlRadii(style, !m_isTransitioning, radii);
 #ifdef MORPH_FEATURE_TRANSFORM
         bool pushedSelf = pushSelfTransform(r, sx, sy);
 #endif
 #ifdef MORPH_FEATURE_BORDER
-        paintBoxDirect(r, style, sx, sy, sw, sh, rad, !m_isTransitioning,
+        paintBoxDirect(r, style, sx, sy, sw, sh, !m_isTransitioning,
                        true);
 #else
 #ifdef MORPH_FEATURE_GRADIENT
         if (style.bgGradient.enabled) {
-            r.drawGradRect(sx, sy, sw, sh, rad,
+            r.drawGradRect(sx, sy, sw, sh, radii,
                            style.bgColor, &style.bgGradient, 0.0f, nullptr,
                            nullptr);
         } else {
 #endif
-            r.drawRoundedRect(sx, sy, sw, sh, rad, style.bgColor);
+            r.drawRoundedRect(sx, sy, sw, sh, radii, style.bgColor);
 #ifdef MORPH_FEATURE_GRADIENT
         }
 #endif
@@ -762,7 +765,7 @@ public:
         if (scrollEnabled && contentH > sh) {
 #ifdef MORPH_FEATURE_TRANSFORM
             if (pushedSelf)
-                r.beginRoundedClip(sx, sy, sw, sh, 0.0f);
+                r.beginRoundedClip(sx, sy, sw, sh, kSharpRadii);
             else
                 r.beginClip(sx, sy, sw, sh);
 #else
@@ -810,7 +813,9 @@ public:
         float radius = m_isTransitioning ? style.scrollbarBorderRadius : snapRadius(style.scrollbarBorderRadius);
         if (radius > thumbH * 0.5f) radius = thumbH * 0.5f;
         if (radius < 0.5f) radius = 0.5f;
-        r.drawRoundedRect(trackX, thumbY, sbw, thumbH, radius, style.scrollbarThumbColor);
+        float sbRadii[4];
+        fillRadii(sbRadii, radius);
+        r.drawRoundedRect(trackX, thumbY, sbw, thumbH, sbRadii, style.scrollbarThumbColor);
     }
 #endif
 

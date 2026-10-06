@@ -21,21 +21,22 @@ public:
         auto sc = [&](float v) { return m_hasLayoutTransition ? v : std::round(v); };
         float sx = sc(x), sy = sc(y);
         float sw = sc(w), sh = sc(h);
-        float rad = m_isTransitioning ? (style.borderRadius > 0.0f ? style.borderRadius : 6.0f) : snapRadius(style.borderRadius > 0.0f ? style.borderRadius : 6.0f);
+        float radii[4];
+        resolveControlRadii(style, !m_isTransitioning, radii);
         DrawOp bg;
 #ifdef MORPH_FEATURE_BORDER
         if (style.borderWidth > 0.0f && style.borderStyle == "solid") {
             float bw = m_isTransitioning ? style.borderWidth : snapBorderWidth(style.borderWidth);
             bool inner = (style.boxSizing == "border-box");
             if (inner)
-                bg.setBordered(sx, sy, sw, sh, rad, style.bgColor, bw, style.borderColor);
+                bg.setBordered(sx, sy, sw, sh, radii, style.bgColor, bw, style.borderColor);
             else
                 bg.setBordered(sx - bw, sy - bw, sw + 2.0f * bw, sh + 2.0f * bw,
-                               rad, style.bgColor, bw, style.borderColor);
+                               radii, style.bgColor, bw, style.borderColor);
         } else
 #endif
         {
-            bg.setRounded(sx, sy, sw, sh, rad, style.bgColor);
+            bg.setRounded(sx, sy, sw, sh, radii, style.bgColor);
         }
         m_displayList.push_back(bg);
     }
@@ -44,7 +45,8 @@ public:
         auto sc = [&](float v) { return m_hasLayoutTransition ? v : std::round(v); };
         float sx = sc(x), sy = sc(y);
         float sw = sc(w), sh = sc(h);
-        float rad = m_isTransitioning ? style.borderRadius : snapRadius(style.borderRadius);
+        float radii[4];
+        resolveBorderRadii(style, !m_isTransitioning, radii);
 
 #ifdef MORPH_FEATURE_TRANSFORM
         bool pushedSelf = pushSelfTransform(r, sx, sy);
@@ -54,15 +56,15 @@ public:
         for (auto& op : m_displayList) {
             switch (op.type) {
                 case DrawOp::Rect: r.drawRect(op.x,op.y,op.w,op.h,&op.r); break;
-                case DrawOp::RoundedRect: r.drawRoundedRect(op.x,op.y,op.w,op.h,op.data[0],&op.r); break;
+                case DrawOp::RoundedRect: r.drawRoundedRect(op.x,op.y,op.w,op.h,op.radii,&op.r); break;
                 case DrawOp::BorderedRect: r.drawBorderedRect(op.x,op.y,op.w,op.h,&op.r,op.data[1],&op.br); break;
-                case DrawOp::BorderedRoundedRect: r.drawBorderedRoundedRect(op.x,op.y,op.w,op.h,op.data[0],&op.r,op.data[1],&op.br); break;
+                case DrawOp::BorderedRoundedRect: r.drawBorderedRoundedRect(op.x,op.y,op.w,op.h,op.radii,&op.r,op.data[1],&op.br); break;
                 default: break;
             }
         }
 
         // 2. Clip + scroll + children
-        bool needRadiusClip = rad > 0.0f;
+        bool needRadiusClip = maxRadius4(radii) > 0.0f;
 #ifdef MORPH_FEATURE_SCROLL
         bool scrolling = scrollEnabled && contentH > sh;
         bool needRectClip = scrolling || style.overflow == "hidden" || style.overflow == "auto";
@@ -74,14 +76,14 @@ public:
 #ifdef MORPH_FEATURE_TRANSFORM
             if (needRectClip) {
                 if (pushedSelf)
-                    r.beginRoundedClip(sx, sy, sw, sh, 0.0f);
+                    r.beginRoundedClip(sx, sy, sw, sh, kSharpRadii);
                 else
                     r.beginClip(sx, sy, sw, sh);
             }
 #else
             if (needRectClip) r.beginClip(sx, sy, sw, sh);
 #endif
-            if (needRadiusClip) r.beginRoundedClip(sx, sy, sw, sh, rad);
+            if (needRadiusClip) r.beginRoundedClip(sx, sy, sw, sh, radii);
 #ifdef MORPH_FEATURE_SCROLL
             if (scrolling) r.pushScrollOffset(0, -scrollY);
 #endif
@@ -110,7 +112,8 @@ public:
         auto sc = [&](float v) { return m_hasLayoutTransition ? v : std::round(v); };
         float sx = sc(x), sy = sc(y);
         float sw = sc(w), sh = sc(h);
-        float rad = m_isTransitioning ? (style.borderRadius > 0.0f ? style.borderRadius : 6.0f) : snapRadius(style.borderRadius > 0.0f ? style.borderRadius : 6.0f);
+        float radii[4];
+        resolveControlRadii(style, !m_isTransitioning, radii);
 #ifdef MORPH_FEATURE_TRANSFORM
         bool pushedSelf = pushSelfTransform(r, sx, sy);
 #endif
@@ -119,21 +122,21 @@ public:
             float bw = m_isTransitioning ? style.borderWidth : snapBorderWidth(style.borderWidth);
             bool inner = (style.boxSizing == "border-box");
             if (inner)
-                r.drawBorderedRoundedRect(sx, sy, sw, sh, rad, style.bgColor,
+                r.drawBorderedRoundedRect(sx, sy, sw, sh, radii, style.bgColor,
                                           bw, style.borderColor);
             else
                 r.drawBorderedRoundedRect(sx - bw, sy - bw,
                                           sw + 2.0f * bw, sh + 2.0f * bw,
-                                          rad, style.bgColor,
+                                          radii, style.bgColor,
                                           bw, style.borderColor);
         } else
 #endif
-            r.drawRoundedRect(sx, sy, sw, sh, rad, style.bgColor);
+            r.drawRoundedRect(sx, sy, sw, sh, radii, style.bgColor);
 #ifdef MORPH_FEATURE_SCROLL
         if (scrollEnabled && contentH > sh) {
 #ifdef MORPH_FEATURE_TRANSFORM
             if (pushedSelf)
-                r.beginRoundedClip(sx, sy, sw, sh, 0.0f);
+                r.beginRoundedClip(sx, sy, sw, sh, kSharpRadii);
             else
                 r.beginClip(sx, sy, sw, sh);
 #else

@@ -28,11 +28,12 @@ public:
         auto sc = [&](float v) { return m_hasLayoutTransition ? v : std::round(v); };
         float sx = sc(x), sy = sc(y);
         float sw = sc(w), sh = sc(h);
-        float br = m_isTransitioning ? style.borderRadius : snapRadius(style.borderRadius);
+        float imRadii[4];
+        resolveBorderRadii(style, !m_isTransitioning, imRadii);
 
         // Clip self for borderRadius (each node's flat render handles children separately)
-        if (br > 0.0f) {
-            DrawOp cl; cl.setClip(sx, sy, sw, sh, true, br);
+        if (maxRadius4(imRadii) > 0.0f) {
+            DrawOp cl; cl.setClip(sx, sy, sw, sh, true, imRadii);
             m_displayList.push_back(cl);
         }
 
@@ -47,14 +48,14 @@ public:
         if (style.borderWidth > 0.0f && style.borderStyle == CSS::BorderStyle::Solid) {
             float bw = m_isTransitioning ? style.borderWidth : snapBorderWidth(style.borderWidth);
             DrawOp brr;
-            brr.setBordered(sx, sy, sw, sh, br, style.bgColor,
+            brr.setBordered(sx, sy, sw, sh, imRadii, style.bgColor,
                             bw, style.borderColor);
             brr.type = DrawOp::BorderRing;
             m_displayList.push_back(brr);
         }
 #endif
 
-        if (br > 0.0f) {
+        if (maxRadius4(imRadii) > 0.0f) {
             DrawOp ec; ec.setEndClip(true);
             m_displayList.push_back(ec);
         }
@@ -69,9 +70,9 @@ public:
             switch (op.type) {
                 case DrawOp::BeginClip: r.beginClip(op.x,op.y,op.w,op.h); break;
                 case DrawOp::EndClip: r.endClip(); break;
-                case DrawOp::BeginRoundedClip: r.beginRoundedClip(op.x,op.y,op.w,op.h,op.data[0]); break;
+                case DrawOp::BeginRoundedClip: r.beginRoundedClip(op.x,op.y,op.w,op.h,op.radii); break;
                 case DrawOp::EndRoundedClip: r.endRoundedClip(); break;
-                case DrawOp::BorderRing: r.drawBorderRing(op.x,op.y,op.w,op.h,op.data[0],op.data[1],&op.br); break;
+                case DrawOp::BorderRing: r.drawBorderRing(op.x,op.y,op.w,op.h,op.radii,op.data[1],&op.br); break;
                 case DrawOp::TextureQuad: r.drawTexture(op.texId, op.x, op.y, op.w, op.h); break;
                 default: break;
             }
@@ -92,9 +93,10 @@ public:
 
         if (textureId && imgW > 0 && imgH > 0) {
             float sw = sc(w), sh = sc(h);
-            float br = m_isTransitioning ? style.borderRadius : snapRadius(style.borderRadius);
-            if (br > 0.0f) {
-                r.beginRoundedClip(sx, sy, sw, sh, br);
+            float imRadii[4];
+            resolveBorderRadii(style, !m_isTransitioning, imRadii);
+            if (maxRadius4(imRadii) > 0.0f) {
+                r.beginRoundedClip(sx, sy, sw, sh, imRadii);
             }
 
             r.drawTexture(textureId, sx, sy, sw, sh);
@@ -102,12 +104,12 @@ public:
 #ifdef MORPH_FEATURE_BORDER
             if (style.borderWidth > 0.0f && style.borderStyle == CSS::BorderStyle::Solid) {
                 float bw = m_isTransitioning ? style.borderWidth : snapBorderWidth(style.borderWidth);
-                r.drawBorderRing(sx, sy, sw, sh, br,
+                r.drawBorderRing(sx, sy, sw, sh, imRadii,
                                  bw, style.borderColor);
             }
 #endif
 
-            if (br > 0.0f) {
+            if (maxRadius4(imRadii) > 0.0f) {
                 r.endRoundedClip();
             }
         }

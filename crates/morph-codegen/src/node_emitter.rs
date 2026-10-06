@@ -1218,6 +1218,18 @@ fn set_style(
     if s.border_radius > 0.0 {
         lines.push(format!("{ind}.borderRadius = {};", fmt(s.border_radius)));
     }
+    if let Some(v) = s.border_top_left_radius {
+        lines.push(format!("{ind}.borderTopLeftRadius = {};", fmt(v)));
+    }
+    if let Some(v) = s.border_top_right_radius {
+        lines.push(format!("{ind}.borderTopRightRadius = {};", fmt(v)));
+    }
+    if let Some(v) = s.border_bottom_right_radius {
+        lines.push(format!("{ind}.borderBottomRightRadius = {};", fmt(v)));
+    }
+    if let Some(v) = s.border_bottom_left_radius {
+        lines.push(format!("{ind}.borderBottomLeftRadius = {};", fmt(v)));
+    }
     // font-size is inherited: use the node's own value, else parent's, else 16.
     let fs = if s.font_size == 16.0 {
         parent.map(|p| p.font_size).filter(|&v| v != 16.0).unwrap_or(16.0)
@@ -1605,6 +1617,34 @@ fn emit_hover_style(
     if s.border_radius > 0.0 && s.border_radius != base.border_radius {
         o.push(format!("{hv}->borderRadius = {};", fmt(s.border_radius)));
     }
+    if s.border_top_left_radius != base.border_top_left_radius {
+        if let Some(v) = s.border_top_left_radius {
+            o.push(format!("{hv}->borderTopLeftRadius = {};", fmt(v)));
+        } else {
+            o.push(format!("{hv}->borderTopLeftRadius = -1.0f;"));
+        }
+    }
+    if s.border_top_right_radius != base.border_top_right_radius {
+        if let Some(v) = s.border_top_right_radius {
+            o.push(format!("{hv}->borderTopRightRadius = {};", fmt(v)));
+        } else {
+            o.push(format!("{hv}->borderTopRightRadius = -1.0f;"));
+        }
+    }
+    if s.border_bottom_right_radius != base.border_bottom_right_radius {
+        if let Some(v) = s.border_bottom_right_radius {
+            o.push(format!("{hv}->borderBottomRightRadius = {};", fmt(v)));
+        } else {
+            o.push(format!("{hv}->borderBottomRightRadius = -1.0f;"));
+        }
+    }
+    if s.border_bottom_left_radius != base.border_bottom_left_radius {
+        if let Some(v) = s.border_bottom_left_radius {
+            o.push(format!("{hv}->borderBottomLeftRadius = {};", fmt(v)));
+        } else {
+            o.push(format!("{hv}->borderBottomLeftRadius = -1.0f;"));
+        }
+    }
     if s.border_width > 0.0 && s.border_width != base.border_width {
         o.push(format!("{hv}->borderWidth = {};", fmt(s.border_width)));
     }
@@ -1885,6 +1925,34 @@ fn emit_active_style(
     }
     if s.border_radius > 0.0 && s.border_radius != base.border_radius {
         o.push(format!("{hv}->borderRadius = {};", fmt(s.border_radius)));
+    }
+    if s.border_top_left_radius != base.border_top_left_radius {
+        if let Some(v) = s.border_top_left_radius {
+            o.push(format!("{hv}->borderTopLeftRadius = {};", fmt(v)));
+        } else {
+            o.push(format!("{hv}->borderTopLeftRadius = -1.0f;"));
+        }
+    }
+    if s.border_top_right_radius != base.border_top_right_radius {
+        if let Some(v) = s.border_top_right_radius {
+            o.push(format!("{hv}->borderTopRightRadius = {};", fmt(v)));
+        } else {
+            o.push(format!("{hv}->borderTopRightRadius = -1.0f;"));
+        }
+    }
+    if s.border_bottom_right_radius != base.border_bottom_right_radius {
+        if let Some(v) = s.border_bottom_right_radius {
+            o.push(format!("{hv}->borderBottomRightRadius = {};", fmt(v)));
+        } else {
+            o.push(format!("{hv}->borderBottomRightRadius = -1.0f;"));
+        }
+    }
+    if s.border_bottom_left_radius != base.border_bottom_left_radius {
+        if let Some(v) = s.border_bottom_left_radius {
+            o.push(format!("{hv}->borderBottomLeftRadius = {};", fmt(v)));
+        } else {
+            o.push(format!("{hv}->borderBottomLeftRadius = -1.0f;"));
+        }
     }
     if s.border_width > 0.0 && s.border_width != base.border_width {
         o.push(format!("{hv}->borderWidth = {};", fmt(s.border_width)));

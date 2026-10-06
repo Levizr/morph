@@ -4932,9 +4932,45 @@ fn apply_css_prop(style: &mut IRStyle, prop: &str, val: &str) -> Option<&'static
             }
         }
         "border-radius" => {
-            if let Some(v) = parse_length(val) {
-                style.border_radius = v;
+            if let Some(v) = parse_border_radius(val) {
+                style.border_radius = v[0];
+                style.border_top_left_radius = Some(v[0]);
+                style.border_top_right_radius = Some(v[1]);
+                style.border_bottom_right_radius = Some(v[2]);
+                style.border_bottom_left_radius = Some(v[3]);
                 Some("border_radius")
+            } else {
+                None
+            }
+        }
+        "border-top-left-radius" => {
+            if let Some(v) = parse_length(val) {
+                style.border_top_left_radius = Some(v);
+                Some("border_top_left_radius")
+            } else {
+                None
+            }
+        }
+        "border-top-right-radius" => {
+            if let Some(v) = parse_length(val) {
+                style.border_top_right_radius = Some(v);
+                Some("border_top_right_radius")
+            } else {
+                None
+            }
+        }
+        "border-bottom-right-radius" => {
+            if let Some(v) = parse_length(val) {
+                style.border_bottom_right_radius = Some(v);
+                Some("border_bottom_right_radius")
+            } else {
+                None
+            }
+        }
+        "border-bottom-left-radius" => {
+            if let Some(v) = parse_length(val) {
+                style.border_bottom_left_radius = Some(v);
+                Some("border_bottom_left_radius")
             } else {
                 None
             }
@@ -5367,8 +5403,25 @@ fn parse_border_shorthand(style: &mut IRStyle, val: &str) {
     }
 }
 
-/// Parse CSS 1-4 value box shorthand (`10px`, `6px 12px`, ...) into
-/// [top, right, bottom, left], mirroring Python's per-side conversion.
+/// Parse `border-radius` (1-4 lengths, clockwise from top-left:
+/// TL TR BR BL). Elliptical `h / v` syntax keeps the horizontal
+/// radii; vertical radii are not supported yet.
+fn parse_border_radius(s: &str) -> Option<[f32; 4]> {
+    let horizontal = s.split('/').next().unwrap_or(s);
+    let parts: Vec<Option<f32>> = horizontal.split_whitespace().map(parse_length).collect();
+    if parts.is_empty() || parts.len() > 4 || parts.iter().any(std::option::Option::is_none) {
+        return None;
+    }
+    let v: Vec<f32> = parts.into_iter().map(|p| p.unwrap_or(0.0)).collect();
+    Some(match v.len() {
+        1 => [v[0], v[0], v[0], v[0]],
+        2 => [v[0], v[1], v[0], v[1]],
+        3 => [v[0], v[1], v[2], v[1]],
+        _ => [v[0], v[1], v[2], v[3]],
+    })
+}
+
+/// Parse CSS 1-4 value box shorthand into [top, right, bottom, left].
 fn parse_box_sides(s: &str) -> Option<[f32; 4]> {
     let parts: Vec<Option<f32>> = s.split_whitespace().map(parse_length).collect();
     if parts.is_empty() || parts.len() > 4 || parts.iter().any(std::option::Option::is_none) {
@@ -5934,6 +5987,14 @@ mod tests {
         assert_eq!(parse_box_sides("1px 2px 3px"), Some([1.0, 2.0, 3.0, 2.0]));
         assert_eq!(parse_box_sides("10px auto"), None);
         assert_eq!(parse_box_sides(""), None);
+        assert_eq!(parse_border_radius("16px"), Some([16.0, 16.0, 16.0, 16.0]));
+        assert_eq!(parse_border_radius("4px 16px"), Some([4.0, 16.0, 4.0, 16.0]));
+        assert_eq!(
+            parse_border_radius("4px 16px 28px 40px"),
+            Some([4.0, 16.0, 28.0, 40.0])
+        );
+        assert_eq!(parse_border_radius("10px 20px / 30px 40px"), Some([10.0, 20.0, 10.0, 20.0]));
+        assert_eq!(parse_border_radius("10px auto"), None);
     }
 
     #[test]

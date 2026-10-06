@@ -86,7 +86,8 @@ public:
     {
         float x, y, w, h;
         float r, g, b, a;
-        float radius;
+        // Per-corner radii, clockwise from top-left (TL TR BR BL).
+        float radii[4];
         float borderWidth;
         float br, bg, bb, ba;
         float borderOnly;
@@ -291,7 +292,7 @@ private:
     GLuint m_gradShader = 0;
     GLint m_gradUProj = -1, m_gradUModel = -1, m_gradURect = -1;
     GLint m_gradUDir = -1, m_gradUCount = -1, m_gradUColors = -1;
-    GLint m_gradUOffsets = -1, m_gradURepeating = -1, m_gradURadius = -1;
+    GLint m_gradUOffsets = -1, m_gradURepeating = -1, m_gradURadii = -1;
     GLint m_gradUPeriod = -1;
     GLint m_gradUBorderWidth = -1, m_gradUBorderColor = -1, m_gradUStencil = -1;
     GLint m_gradUBorderCount = -1, m_gradUBorderColors = -1, m_gradUBorderOffsets = -1;
@@ -328,7 +329,7 @@ public:
     void setClearColor(float r, float g, float b, float a) override { glClearColor(r, g, b, a); }
     void beginClip(float x, float y, float w, float h) override;
     void endClip() override;
-    void beginRoundedClip(float x, float y, float w, float h, float radius) override;
+    void beginRoundedClip(float x, float y, float w, float h, const float radii[4]) override;
     void endRoundedClip() override;
 
     // Damage-stencil protocol (forge partial present only):
@@ -401,7 +402,7 @@ public:
     {
         m_batch.push_back({x + m_scrollX, y + m_scrollY, w, h,
                            color[0], color[1], color[2], color[3],
-                           0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                           {0.0f, 0.0f, 0.0f, 0.0f}, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
                            0.0f});
 #ifdef MORPH_FEATURE_TRANSFORM
         applyModel(m_batch.back());
@@ -410,11 +411,11 @@ public:
 
 #ifdef MORPH_FEATURE_RADIUS
     void drawRoundedRect(float x, float y, float w, float h,
-                          float radius, float color[4]) override
+                          const float radii[4], float color[4]) override
     {
         m_batch.push_back({x + m_scrollX, y + m_scrollY, w, h,
                            color[0], color[1], color[2], color[3],
-                           radius, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                           {radii[0], radii[1], radii[2], radii[3]}, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
                            0.0f});
 #ifdef MORPH_FEATURE_TRANSFORM
         applyModel(m_batch.back());
@@ -429,12 +430,12 @@ public:
         // Fill
         m_batch.push_back({x + m_scrollX, y + m_scrollY, w, h,
                            color[0], color[1], color[2], color[3],
-                           0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                           {0.0f, 0.0f, 0.0f, 0.0f}, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
                            0.0f});
         // Border ring
         m_borderBatch.push_back({x + m_scrollX, y + m_scrollY, w, h,
                                  0.0f, 0.0f, 0.0f, 0.0f,
-                                 0.0f, borderWidth,
+                                 {0.0f, 0.0f, 0.0f, 0.0f}, borderWidth,
                                  borderColor[0], borderColor[1],
                                  borderColor[2], borderColor[3],
                                  1.0f, 0.0f, -1.0f, -1.0f});
@@ -445,19 +446,19 @@ public:
     }
 
     void drawBorderedRoundedRect(float x, float y, float w, float h,
-                                 float radius, float color[4],
+                                 const float radii[4], float color[4],
                                  float borderWidth,
                                  float borderColor[4]) override
     {
         // Fill
         m_batch.push_back({x + m_scrollX, y + m_scrollY, w, h,
                            color[0], color[1], color[2], color[3],
-                           radius, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                           {radii[0], radii[1], radii[2], radii[3]}, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
                            0.0f});
         // Border ring
         m_borderBatch.push_back({x + m_scrollX, y + m_scrollY, w, h,
                                  0.0f, 0.0f, 0.0f, 0.0f,
-                                 radius, borderWidth,
+                                 {radii[0], radii[1], radii[2], radii[3]}, borderWidth,
                                  borderColor[0], borderColor[1],
                                  borderColor[2], borderColor[3],
                                  1.0f, 0.0f, -1.0f, -1.0f});
@@ -468,7 +469,7 @@ public:
     }
 
     void drawBorderRing(float x, float y, float w, float h,
-                        float radius, float borderWidth,
+                        const float radii[4], float borderWidth,
                         float borderColor[4], float mode = 0.0f,
                         float adjStart = -1.0f, float adjEnd = -1.0f) override
     {
@@ -476,7 +477,7 @@ public:
         float adjE = (adjEnd < 0.0f) ? borderWidth : adjEnd;
         m_borderBatch.push_back({x + m_scrollX, y + m_scrollY, w, h,
                                  0.0f, 0.0f, 0.0f, 0.0f,
-                                 radius, borderWidth,
+                                 {radii[0], radii[1], radii[2], radii[3]}, borderWidth,
                                  borderColor[0], borderColor[1],
                                  borderColor[2], borderColor[3],
                                  1.0f, mode, adjS, adjE});
@@ -486,7 +487,7 @@ public:
     }
 
 #ifdef MORPH_FEATURE_GRADIENT
-    void drawGradRect(float x, float y, float w, float h, float radius,
+    void drawGradRect(float x, float y, float w, float h, const float radii[4],
                       float color[4], const BgGradient* grad,
                       float borderWidth, const float borderColor[4],
                       const BgGradient* borderGrad = nullptr) override;

@@ -181,6 +181,10 @@ impl IRSerializer {
         );
         out.insert("padding".to_string(), floats(&s.padding));
         out.insert("border_radius".to_string(), num(s.border_radius));
+        out.insert("border_top_left_radius".to_string(), opt_num(s.border_top_left_radius));
+        out.insert("border_top_right_radius".to_string(), opt_num(s.border_top_right_radius));
+        out.insert("border_bottom_right_radius".to_string(), opt_num(s.border_bottom_right_radius));
+        out.insert("border_bottom_left_radius".to_string(), opt_num(s.border_bottom_left_radius));
         out.insert("font_size".to_string(), num(s.font_size));
         out.insert("font_weight".to_string(), Value::String(s.font_weight.clone()));
         out.insert("text_align".to_string(), Value::String(s.text_align.clone()));
@@ -514,6 +518,18 @@ fn fallback_declared(style: &IRStyle) -> HashSet<&'static str> {
     }
     if style.border_radius != 0.0 {
         keep.insert("border_radius");
+    }
+    if style.border_top_left_radius.is_some() {
+        keep.insert("border_top_left_radius");
+    }
+    if style.border_top_right_radius.is_some() {
+        keep.insert("border_top_right_radius");
+    }
+    if style.border_bottom_right_radius.is_some() {
+        keep.insert("border_bottom_right_radius");
+    }
+    if style.border_bottom_left_radius.is_some() {
+        keep.insert("border_bottom_left_radius");
     }
     if style.font_size != 16.0 {
         keep.insert("font_size");

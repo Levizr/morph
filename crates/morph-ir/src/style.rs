@@ -17,6 +17,11 @@ pub struct IRStyle {
     pub margin_auto: [bool; 4],
     pub padding: [f32; 4],
     pub border_radius: f32,
+    // Per-corner radius (longhand, clockwise from top-left)
+    pub border_top_left_radius: Option<f32>,
+    pub border_top_right_radius: Option<f32>,
+    pub border_bottom_right_radius: Option<f32>,
+    pub border_bottom_left_radius: Option<f32>,
     pub font_size: f32,
     pub font_weight: String,
     pub text_align: String,
@@ -125,6 +130,10 @@ impl IRStyle {
             && self.padding == [0.0, 0.0, 0.0, 0.0]
             && self.margin == [0.0, 0.0, 0.0, 0.0]
             && self.border_radius == 0.0
+            && self.border_top_left_radius.is_none()
+            && self.border_top_right_radius.is_none()
+            && self.border_bottom_right_radius.is_none()
+            && self.border_bottom_left_radius.is_none()
             && self.font_size == 16.0
             && self.font_weight == "normal"
             && self.text_align == "left"

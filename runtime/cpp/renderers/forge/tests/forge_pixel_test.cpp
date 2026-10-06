@@ -552,7 +552,7 @@ int buildBorderScene(RenderFrame& frame, int& ringX, int& ringY, int& ring2X,
         float bc[4] = {sides[side][0], sides[side][1], sides[side][2],
                        sides[side][3]};
         // Modes pack (side + 1) * 16 + style (solid = 1), adjacents 6.
-        ring.setBorderRing(24.0f, 24.0f, 132.0f, 82.0f, 0.0f, 6.0f, bc,
+        ring.setBorderRing(24.0f, 24.0f, 132.0f, 82.0f, kSharpRadii, 6.0f, bc,
                            (float)((side + 1) * 16 + 1), 6.0f, 6.0f);
         frame.drawOps.push_back(ring);
     }
@@ -591,7 +591,7 @@ int buildBorderScene(RenderFrame& frame, int& ringX, int& ringY, int& ring2X,
         int nStart, nEnd;
         sideNeighbors(side, nStart, nEnd);
         mode += borderJointFrac(bcolors, bmodes, side, nStart, nEnd);
-        ring.setBorderRing(24.0f, 116.0f, 132.0f, 78.0f, 0.0f,
+        ring.setBorderRing(24.0f, 116.0f, 132.0f, 78.0f, kSharpRadii,
                            (float)widths2[side], bc, mode, adjS, adjE);
         frame.drawOps.push_back(ring);
     }

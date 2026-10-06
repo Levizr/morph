@@ -1,0 +1,19 @@
+import "./style.css"
+
+export const windowConfig = { title: "BorderRadius", width: 800, height: 600 }
+
+export default function App() {
+  return (
+    <body>
+      <div className="screen">
+        <div className="uniform">uniform radius</div>
+        <div className="corners">per-corner radius</div>
+        <div className="cornercolors">per-corner radius, per-side colors</div>
+        <div className="cornerdots">per-corner radius, dotted</div>
+        <div className="cornerdashes">per-corner radius, dashed</div>
+        <div className="pill">pill clamp</div>
+        <div className="fillonly">rounded fill, no border</div>
+      </div>
+    </body>
+  )
+}

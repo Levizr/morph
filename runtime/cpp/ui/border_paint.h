@@ -86,16 +86,18 @@ inline void borderRingBox(const MorphStyle& style, float sx, float sy,
 }
 
 // Record the fill op plus border ops for a box. plainRounded selects the
-// no-border fill shape (buttons/inputs always round, rects only when
-// radius > 0); rad is the caller-computed corner radius.
+// no-border fill shape (buttons/inputs always round, rects only when a
+// corner radius is set).
 inline void recordBoxOps(std::vector<DrawOp>& out, MorphStyle& style,
-                         float sx, float sy, float sw, float sh, float rad,
+                         float sx, float sy, float sw, float sh,
                          bool snap, bool plainRounded)
 {
     float widths[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     const float* colors[4] = {nullptr, nullptr, nullptr, nullptr};
     float modes[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     int visible = resolveBorderSides(style, widths, colors, modes);
+    float radii[4];
+    resolveBorderRadii(style, snap, radii);
     bool imgGrad = borderImageGradActive(style);
     bool uniformSolid = !imgGrad && visible > 0 &&
         borderSidesUniform(widths, colors, modes) &&
@@ -108,20 +110,20 @@ inline void recordBoxOps(std::vector<DrawOp>& out, MorphStyle& style,
         DrawOp bg;
         if (style.boxSizing == CSS::BoxSizing::BorderBox)
         {
-            bg.setBordered(sx, sy, sw, sh, rad, style.bgColor, bw, bc);
+            bg.setBordered(sx, sy, sw, sh, radii, style.bgColor, bw, bc);
         }
         else
         {
             bg.setBordered(sx - bw, sy - bw, sw + 2.0f * bw, sh + 2.0f * bw,
-                           rad, style.bgColor, bw, bc);
+                           radii, style.bgColor, bw, bc);
         }
         out.push_back(bg);
         return;
     }
     DrawOp fill;
-    if (plainRounded || rad > 0.0f)
+    if (plainRounded || maxRadius4(radii) > 0.0f)
     {
-        fill.setRounded(sx, sy, sw, sh, rad, style.bgColor);
+        fill.setRounded(sx, sy, sw, sh, radii, style.bgColor);
     }
     else
     {
@@ -148,7 +150,7 @@ inline void recordBoxOps(std::vector<DrawOp>& out, MorphStyle& style,
         }
         float dummy[4] = {0.0f, 0.0f, 0.0f, 0.0f};
         DrawOp ring;
-        ring.setBorderRing(bx, by, bw, bh, rad, maxW, dummy, 0.0f);
+        ring.setBorderRing(bx, by, bw, bh, radii, maxW, dummy, 0.0f);
         out.push_back(ring);
         return;
     }
@@ -165,7 +167,7 @@ inline void recordBoxOps(std::vector<DrawOp>& out, MorphStyle& style,
         float bc[4] = {colors[0][0], colors[0][1], colors[0][2],
                        colors[0][3]};
         DrawOp ring;
-        ring.setBorderRing(bx, by, bw, bh, rad, w[0], bc, fullMode, w[0],
+        ring.setBorderRing(bx, by, bw, bh, radii, w[0], bc, fullMode, w[0],
                            w[0]);
         out.push_back(ring);
         return;
@@ -186,20 +188,22 @@ inline void recordBoxOps(std::vector<DrawOp>& out, MorphStyle& style,
         sideNeighbors(side, nStart, nEnd);
         mode += borderJointFrac(colors, modes, side, nStart, nEnd);
         DrawOp ring;
-        ring.setBorderRing(bx, by, bw, bh, rad, w[side], bc, mode, adjS, adjE);
+        ring.setBorderRing(bx, by, bw, bh, radii, w[side], bc, mode, adjS, adjE);
         out.push_back(ring);
     }
 }
 
 // Ring ops for the non-uniform / patterned / border-image cases.
 inline void paintBoxRings(Renderer& r, MorphStyle& style,
-                          float sx, float sy, float sw, float sh, float rad,
+                          float sx, float sy, float sw, float sh,
                           bool snap)
 {
     float widths[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     const float* colors[4] = {nullptr, nullptr, nullptr, nullptr};
     float modes[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     resolveBorderSides(style, widths, colors, modes);
+    float radii[4];
+    resolveBorderRadii(style, snap, radii);
     float w[4];
     snappedBorderWidths(style, snap, w);
     float bx, by, bw, bh;
@@ -216,7 +220,7 @@ inline void paintBoxRings(Renderer& r, MorphStyle& style,
             }
         }
         float clear[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-        r.drawGradRect(bx, by, bw, bh, rad, clear, nullptr, maxW, nullptr,
+        r.drawGradRect(bx, by, bw, bh, radii, clear, nullptr, maxW, nullptr,
                        &style.borderGradient);
         return;
     }
@@ -233,7 +237,7 @@ inline void paintBoxRings(Renderer& r, MorphStyle& style,
         float fullMode = (float)(int)getBorderStyle(style, 0);
         float bc[4] = {colors[0][0], colors[0][1], colors[0][2],
                        colors[0][3]};
-        r.drawBorderRing(bx, by, bw, bh, rad, w[0], bc, fullMode, w[0],
+        r.drawBorderRing(bx, by, bw, bh, radii, w[0], bc, fullMode, w[0],
                          w[0]);
         return;
     }
@@ -252,19 +256,21 @@ inline void paintBoxRings(Renderer& r, MorphStyle& style,
         int nStart, nEnd;
         sideNeighbors(side, nStart, nEnd);
         mode += borderJointFrac(colors, modes, side, nStart, nEnd);
-        r.drawBorderRing(bx, by, bw, bh, rad, w[side], bc, mode, adjS, adjE);
+        r.drawBorderRing(bx, by, bw, bh, radii, w[side], bc, mode, adjS, adjE);
     }
 }
 
 // Immediate-mode twin of recordBoxOps for the legacy draw() path.
 inline void paintBoxDirect(Renderer& r, MorphStyle& style,
-                           float sx, float sy, float sw, float sh, float rad,
+                           float sx, float sy, float sw, float sh,
                            bool snap, bool plainRounded)
 {
     float widths[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     const float* colors[4] = {nullptr, nullptr, nullptr, nullptr};
     float modes[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     int visible = resolveBorderSides(style, widths, colors, modes);
+    float radii[4];
+    resolveBorderRadii(style, snap, radii);
     bool imgGrad = borderImageGradActive(style);
     bool uniformSolid = !imgGrad && visible > 0 &&
         borderSidesUniform(widths, colors, modes) &&
@@ -287,11 +293,11 @@ inline void paintBoxDirect(Renderer& r, MorphStyle& style,
                 gh += 2.0f * bw;
             }
         }
-        r.drawGradRect(gx, gy, gw, gh, rad, style.bgColor, &style.bgGradient,
+        r.drawGradRect(gx, gy, gw, gh, radii, style.bgColor, &style.bgGradient,
                        bw, bc, nullptr);
         if (!uniformSolid && visible > 0)
         {
-            paintBoxRings(r, style, sx, sy, sw, sh, rad, snap);
+            paintBoxRings(r, style, sx, sy, sw, sh, snap);
         }
         return;
     }
@@ -303,20 +309,20 @@ inline void paintBoxDirect(Renderer& r, MorphStyle& style,
                        colors[0][3]};
         if (style.boxSizing == CSS::BoxSizing::BorderBox)
         {
-            r.drawBorderedRoundedRect(sx, sy, sw, sh, rad, style.bgColor, bw,
+            r.drawBorderedRoundedRect(sx, sy, sw, sh, radii, style.bgColor, bw,
                                       bc);
         }
         else
         {
             r.drawBorderedRoundedRect(sx - bw, sy - bw, sw + 2.0f * bw,
-                                      sh + 2.0f * bw, rad, style.bgColor, bw,
+                                      sh + 2.0f * bw, radii, style.bgColor, bw,
                                       bc);
         }
         return;
     }
-    if (plainRounded || rad > 0.0f)
+    if (plainRounded || maxRadius4(radii) > 0.0f)
     {
-        r.drawRoundedRect(sx, sy, sw, sh, rad, style.bgColor);
+        r.drawRoundedRect(sx, sy, sw, sh, radii, style.bgColor);
     }
     else
     {
@@ -324,7 +330,7 @@ inline void paintBoxDirect(Renderer& r, MorphStyle& style,
     }
     if (visible > 0)
     {
-        paintBoxRings(r, style, sx, sy, sw, sh, rad, snap);
+        paintBoxRings(r, style, sx, sy, sw, sh, snap);
     }
 }
 
@@ -336,15 +342,15 @@ inline void execBorderRingOp(Renderer& r, DrawOp& op, MorphStyle& style)
     if (borderImageGradActive(style))
     {
         float clear[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-        r.drawGradRect(op.x, op.y, op.w, op.h, op.data[0], clear, nullptr,
+        r.drawGradRect(op.x, op.y, op.w, op.h, op.radii, clear, nullptr,
                        op.data[1], nullptr, &style.borderGradient);
         return;
     }
 #else
     (void)style;
 #endif
-    r.drawBorderRing(op.x, op.y, op.w, op.h, op.data[0], op.data[1],
-                     (float*)&op.br, op.data[2], op.data[3], op.data[4]);
+    r.drawBorderRing(op.x, op.y, op.w, op.h, op.radii,
+                     op.data[1], (float*)&op.br, op.data[2], op.data[3], op.data[4]);
 }
 
 #endif // MORPH_FEATURE_BORDER

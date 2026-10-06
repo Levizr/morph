@@ -1,0 +1,7 @@
+{
+  "name": "border-radius",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "BorderRadius" },
+  "dependencies": {},
+  "cpp_sources": []
+}

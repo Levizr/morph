@@ -8,18 +8,30 @@
 
 enum class TextAlign { Left, Center, Right };
 
+// Sharp (zero-radius) corners for call sites without rounding.
+inline constexpr float kSharpRadii[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+
+// Broadcast one radius to all four corners.
+inline void fillRadii(float out[4], float r)
+{
+    out[0] = r;
+    out[1] = r;
+    out[2] = r;
+    out[3] = r;
+}
+
 class Renderer {
 public:
     virtual void clear() = 0;
     virtual void drawRect(float x, float y, float w, float h,
                           float color[4]) = 0;
     virtual void drawRoundedRect(float x, float y, float w, float h,
-                                  float radius, float color[4]) {}
+                                  const float radii[4], float color[4]) {}
     virtual void drawBorderedRect(float x, float y, float w, float h,
                                   float color[4], float borderWidth,
                                   float borderColor[4]) {}
     virtual void drawBorderedRoundedRect(float x, float y, float w, float h,
-                                         float radius, float color[4],
+                                         const float radii[4], float color[4],
                                          float borderWidth,
                                          float borderColor[4]) {}
     virtual void drawText(const std::string& text,
@@ -33,14 +45,14 @@ public:
                                     CSS::FontWeight fontWeight = CSS::FontWeight::Normal) { return 0; }
     virtual void beginClip(float x, float y, float w, float h) {}
     virtual void endClip() {}
-    virtual void beginRoundedClip(float x, float y, float w, float h, float radius) {}
+    virtual void beginRoundedClip(float x, float y, float w, float h, const float radii[4]) {}
     virtual void endRoundedClip() {}
 
     virtual void drawTexture(unsigned int tex,
                              float x, float y, float w, float h,
                              const float tint[4] = nullptr) = 0;
     virtual void drawBorderRing(float x, float y, float w, float h,
-                                float radius, float borderWidth,
+                                const float radii[4], float borderWidth,
                                 float borderColor[4], float mode = 0.0f,
                                 float adjStart = -1.0f, float adjEnd = -1.0f)
     {
@@ -53,7 +65,7 @@ public:
     // border share one SDF edge). Renderers without gradient support fall
     // back to the solid fill; the border is dropped in that fallback.
     virtual void drawGradRect(float x, float y, float w, float h,
-                              float radius, float color[4],
+                              const float radii[4], float color[4],
                               const BgGradient* grad, float borderWidth,
                               const float borderColor[4],
                               const BgGradient* borderGrad)

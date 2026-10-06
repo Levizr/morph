@@ -52,6 +52,8 @@ struct FlatRenderNode {
     float bgColor[4];
     float color[4];
     float borderRadius;
+    // Per-corner longhands (unset entries fall back to borderRadius).
+    float cornerRadii[4] = {-1.0f, -1.0f, -1.0f, -1.0f};
     float borderWidth;
     float borderColor[4];
     CSS::BorderStyle borderStyle = CSS::BorderStyle::None;
@@ -135,6 +137,16 @@ struct FlatRenderNode {
     // Children (indices into frame's nodes array)
     std::vector<int> children;
 };
+
+// Effective corner radii of a flat node in clockwise order from
+// top-left: a set longhand wins, otherwise the shorthand applies.
+inline void resolveNodeRadii(const FlatRenderNode& n, float out[4])
+{
+    out[0] = n.cornerRadii[0] >= 0.0f ? n.cornerRadii[0] : n.borderRadius;
+    out[1] = n.cornerRadii[1] >= 0.0f ? n.cornerRadii[1] : n.borderRadius;
+    out[2] = n.cornerRadii[2] >= 0.0f ? n.cornerRadii[2] : n.borderRadius;
+    out[3] = n.cornerRadii[3] >= 0.0f ? n.cornerRadii[3] : n.borderRadius;
+}
 
 struct FlatTextOp {
     int nodeId;

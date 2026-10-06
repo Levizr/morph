@@ -308,6 +308,14 @@ static void applyStyle(MorphStyle& s, const JsonValue& styleVal) {
 
     if (!styleVal["border_radius"].isNull())
         s.borderRadius = styleVal["border_radius"].asFloat();
+    if (!styleVal["border_top_left_radius"].isNull())
+        s.borderTopLeftRadius = styleVal["border_top_left_radius"].asFloat();
+    if (!styleVal["border_top_right_radius"].isNull())
+        s.borderTopRightRadius = styleVal["border_top_right_radius"].asFloat();
+    if (!styleVal["border_bottom_right_radius"].isNull())
+        s.borderBottomRightRadius = styleVal["border_bottom_right_radius"].asFloat();
+    if (!styleVal["border_bottom_left_radius"].isNull())
+        s.borderBottomLeftRadius = styleVal["border_bottom_left_radius"].asFloat();
     if (!styleVal["font_size"].isNull())
         s.fontSize = styleVal["font_size"].asFloat();
 

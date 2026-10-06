@@ -15,6 +15,15 @@
 #include "dev_log.h"
 #include "dev_net.h"
 
+// Uniform corner radii for inspector chrome literals (consumed
+// synchronously by the draw call, so the shared buffer is safe).
+inline const float* inspRadii(float r)
+{
+    thread_local float out[4];
+    out[0] = out[1] = out[2] = out[3] = r;
+    return out;
+}
+
 struct DevTools {
     bool open = false;
     bool inspecting = false;
@@ -351,9 +360,9 @@ private:
         float x = (winW - w) * 0.5f;
         float y = 12.0f, h = 46.0f;
         float bg[4] = {0.086f, 0.094f, 0.122f, 0.97f};
-        r.drawRoundedRect(x, y, w, h, 10, bg);
+        r.drawRoundedRect(x, y, w, h, inspRadii(10), bg);
         float border[4] = {0.16f, 0.18f, 0.24f, 1.0f};
-        r.drawBorderRing(x, y, w, h, 10, 1.0f, border);
+        r.drawBorderRing(x, y, w, h, inspRadii(10), 1.0f, border);
 
         float edge[4] = {0.486f, 0.416f, 0.961f, 1.0f};
         switch (m_toastLevel) {
@@ -362,7 +371,7 @@ private:
             case LOG_OK:    edge[0] = 0.12f; edge[1] = 0.79f; edge[2] = 0.54f; break;
             default: break;
         }
-        r.drawRoundedRect(x + 8, y + 9, 4, h - 18, 2, edge);
+        r.drawRoundedRect(x + 8, y + 9, 4, h - 18, inspRadii(2), edge);
 
         float tc[4] = {0.90f, 0.91f, 0.95f, 1.0f};
         drawTextAt(r, m_toastText, x + 20, y + 13.0f, tc, 12.0f, CSS::FontWeight::Normal);
@@ -439,13 +448,13 @@ private:
     static void drawCard(GLRenderer& r, float x, float y, float w, float h) {
         float bg[4] = {0.055f, 0.061f, 0.082f, 0.96f};
         float border[4] = {0.125f, 0.14f, 0.19f, 1.0f};
-        r.drawBorderedRoundedRect(x, y, w, h, 8.0f, bg, 1.0f, border);
+        r.drawBorderedRoundedRect(x, y, w, h, inspRadii(8.0), bg, 1.0f, border);
     }
 
     static void drawSectionLabel(GLRenderer& r, float x, float y,
                                  const std::string& label) {
         float accent[4] = {0.486f, 0.416f, 0.961f, 1.0f};
-        r.drawRoundedRect(x, y + 2, 3, 12, 1.5f, accent);
+        r.drawRoundedRect(x, y + 2, 3, 12, inspRadii(1.5), accent);
         float lbl[4] = {0.55f, 0.58f, 0.68f, 1.0f};
         drawTextAt(r, label, x + 9, y, lbl, 9.0f, CSS::FontWeight::Bold);
     }
@@ -480,22 +489,22 @@ private:
 
     static void drawSwatch(GLRenderer& r, float x, float y, float color[4]) {
         float border[4] = {0.14f, 0.16f, 0.21f, 1.0f};
-        r.drawRoundedRect(x, y, 12, 12, 3, border);
-        r.drawRoundedRect(x + 1, y + 1, 10, 10, 2, color);
+        r.drawRoundedRect(x, y, 12, 12, inspRadii(3), border);
+        r.drawRoundedRect(x + 1, y + 1, 10, 10, inspRadii(2), color);
     }
 
     static void drawSwitch(GLRenderer& r, float x, float y, bool on) {
         float trackW = 36.0f, trackH = 18.0f;
         if (on) {
             float onCol[4] = {0.486f, 0.416f, 0.961f, 1.0f};
-            r.drawRoundedRect(x, y, trackW, trackH, 9.0f, onCol);
+            r.drawRoundedRect(x, y, trackW, trackH, inspRadii(9.0), onCol);
             float knob[4] = {1.0f, 1.0f, 1.0f, 1.0f};
-            r.drawRoundedRect(x + trackW - 16.0f, y + 2.0f, 14.0f, 14.0f, 7.0f, knob);
+            r.drawRoundedRect(x + trackW - 16.0f, y + 2.0f, 14.0f, 14.0f, inspRadii(7.0), knob);
         } else {
             float offCol[4] = {0.13f, 0.14f, 0.17f, 1.0f};
-            r.drawRoundedRect(x, y, trackW, trackH, 9.0f, offCol);
+            r.drawRoundedRect(x, y, trackW, trackH, inspRadii(9.0), offCol);
             float knob[4] = {0.5f, 0.52f, 0.6f, 1.0f};
-            r.drawRoundedRect(x + 2.0f, y + 2.0f, 14.0f, 14.0f, 7.0f, knob);
+            r.drawRoundedRect(x + 2.0f, y + 2.0f, 14.0f, 14.0f, inspRadii(7.0), knob);
         }
     }
 
@@ -543,7 +552,7 @@ private:
 
         // Logo mark
         float logoBg[4] = {0.486f, 0.416f, 0.961f, 1.0f};
-        r.drawRoundedRect(px + 12, 11, 28, 28, 8, logoBg);
+        r.drawRoundedRect(px + 12, 11, 28, 28, inspRadii(8), logoBg);
         float mw = r.measureTextWidth("m", 17.0f, CSS::FontWeight::Bold);
         float white[4] = {1.0f, 1.0f, 1.0f, 1.0f};
         drawTextAt(r, "m", px + 12 + (28.0f - mw) * 0.5f, 15.0f, white, 17.0f, CSS::FontWeight::Bold);
@@ -557,7 +566,7 @@ private:
         // F12 key-cap chip
         float chipBg[4] = {0.12f, 0.13f, 0.17f, 1.0f};
         float chipBorder[4] = {0.18f, 0.20f, 0.26f, 1.0f};
-        r.drawBorderedRoundedRect(px + pw - 58, 13, 44, 22, 6, chipBg, 1.0f, chipBorder);
+        r.drawBorderedRoundedRect(px + pw - 58, 13, 44, 22, inspRadii(6), chipBg, 1.0f, chipBorder);
         float chipCol[4] = {0.55f, 0.58f, 0.68f, 1.0f};
         drawTextAt(r, "F12", px + pw - 53, 17.0f, chipCol, 10.0f, CSS::FontWeight::Bold);
     }
@@ -566,14 +575,14 @@ private:
     void drawTabs(GLRenderer& r, float px, float pw) {
         float containerW = pw - 20.0f, segW = (containerW - 6.0f) / 4.0f;
         float containerBg[4] = {0.043f, 0.047f, 0.063f, 1.0f};
-        r.drawRoundedRect(px + 10, kTabY, containerW, kTabH, 8, containerBg);
+        r.drawRoundedRect(px + 10, kTabY, containerW, kTabH, inspRadii(8), containerBg);
 
         const char* labels[4] = {"Elements", "Rendering", "Network", "Logs"};
         for (int i = 0; i < 4; i++) {
             float pillX = px + 10 + 3 + segW * i;
             if (m_activeTab == i) {
                 float pill[4] = {0.486f, 0.416f, 0.961f, 1.0f};
-                r.drawRoundedRect(pillX, kTabY + 3, segW, kTabH - 6, 6, pill);
+                r.drawRoundedRect(pillX, kTabY + 3, segW, kTabH - 6, inspRadii(6), pill);
             }
             float tw = r.measureTextWidth(labels[i], 11.0f, CSS::FontWeight::Bold);
             float col[4];
@@ -598,7 +607,7 @@ private:
             btnCol[0] = 0.85f; btnCol[1] = 0.87f; btnCol[2] = 0.92f; btnCol[3] = 1.0f;
         }
         float btnBorder[4] = {0.17f, 0.19f, 0.24f, 1.0f};
-        r.drawBorderedRoundedRect(px + 10, y0, pw - 20, 34, 8, btnBg, 1.0f, btnBorder);
+        r.drawBorderedRoundedRect(px + 10, y0, pw - 20, 34, inspRadii(8), btnBg, 1.0f, btnBorder);
         drawTextAt(r, inspecting ? "Inspecting  \xC2\xB7  Esc to stop" : "Inspect Element  \xC2\xB7  F2",
                    px + 18, y0 + 9.0f, btnCol, 12.0f, CSS::FontWeight::Bold);
 
@@ -746,7 +755,7 @@ private:
         } else {
             pillBg[0] = 0.10f; pillBg[1] = 0.42f; pillBg[2] = 0.42f; pillBg[3] = 1.0f;
         }
-        r.drawRoundedRect(pillX, y0 + 27, pillW, 20, 10, pillBg);
+        r.drawRoundedRect(pillX, y0 + 27, pillW, 20, inspRadii(10), pillBg);
         float pillText[4] = {1.0f, 1.0f, 1.0f, 1.0f};
         drawTextAt(r, name, pillX + 10, y0 + 30, pillText, 11.0f, CSS::FontWeight::Bold);
 
@@ -767,7 +776,7 @@ private:
     void drawRendererSegmented(GLRenderer& r, float px, float y, float pw, bool isForge) {
         float cW = pw - 20, h = 28.0f;
         float cBg[4] = {0.035f, 0.039f, 0.055f, 1.0f};
-        r.drawRoundedRect(px + 10, y, cW, h, 7, cBg);
+        r.drawRoundedRect(px + 10, y, cW, h, inspRadii(7), cBg);
 
         float half = (cW - 6.0f) * 0.5f;
         const char* labels[2] = {"Flash", "Forge"};
@@ -781,7 +790,7 @@ private:
                 } else {
                     pill[0] = 0.486f; pill[1] = 0.416f; pill[2] = 0.961f; pill[3] = 1.0f;
                 }
-                r.drawRoundedRect(bx, y + 3, half, h - 6, 5, pill);
+                r.drawRoundedRect(bx, y + 3, half, h - 6, inspRadii(5), pill);
             }
             float tw = r.measureTextWidth(labels[i], 11.0f, CSS::FontWeight::Bold);
             float tc[4];
@@ -875,7 +884,7 @@ private:
         drawSectionLabel(r, px + 22, y0, "MESSAGES");
         float clearBg[4] = {0.10f, 0.11f, 0.14f, 1.0f};
         float clearBorder[4] = {0.17f, 0.19f, 0.24f, 1.0f};
-        r.drawBorderedRoundedRect(px + pw - 78.0f, y0, 66.0f, 22.0f, 6, clearBg, 1.0f, clearBorder);
+        r.drawBorderedRoundedRect(px + pw - 78.0f, y0, 66.0f, 22.0f, inspRadii(6), clearBg, 1.0f, clearBorder);
         float clearCol[4] = {0.72f, 0.74f, 0.82f, 1.0f};
         drawTextAt(r, "Clear", px + pw - 64.0f, y0 + 5.0f, clearCol, 10.0f, CSS::FontWeight::Bold);
 
@@ -948,7 +957,7 @@ private:
             float thumbH = std::max(24.0f, (viewH / contentH) * viewH);
             float maxScroll = contentH - viewH;
             float thumbY = top + (m_logScroll.scroll / maxScroll) * (viewH - thumbH);
-            r.drawRoundedRect(trackX, thumbY, 6.0f, thumbH, 3.0f, thumbCol);
+            r.drawRoundedRect(trackX, thumbY, 6.0f, thumbH, inspRadii(3.0), thumbCol);
         }
     }
 
@@ -1001,7 +1010,7 @@ private:
         drawSectionLabel(r, px + 22, y0, "REQUESTS");
         float clearBg[4] = {0.10f, 0.11f, 0.14f, 1.0f};
         float clearBorder[4] = {0.17f, 0.19f, 0.24f, 1.0f};
-        r.drawBorderedRoundedRect(px + pw - 78.0f, y0, 66.0f, 22.0f, 6, clearBg, 1.0f, clearBorder);
+        r.drawBorderedRoundedRect(px + pw - 78.0f, y0, 66.0f, 22.0f, inspRadii(6), clearBg, 1.0f, clearBorder);
         float clearCol[4] = {0.72f, 0.74f, 0.82f, 1.0f};
         drawTextAt(r, "Clear", px + pw - 64.0f, y0 + 5.0f, clearCol, 10.0f, CSS::FontWeight::Bold);
 
@@ -1081,7 +1090,7 @@ private:
                 else if (e.status >= 300 && e.status < 400) sCol = colBlue;
                 else if (e.status >= 400 && e.status < 500) sCol = colOrange;
                 else if (e.status >= 500) sCol = colErr;
-                r.drawRoundedRect(px + 14, rowY + 8, 8, 8, 4, sCol);
+                r.drawRoundedRect(px + 14, rowY + 8, 8, 8, inspRadii(4), sCol);
 
                 // Status code
                 float* codeCol = bad ? colErr : (e.status == 0 ? colPending : colStatus);
@@ -1119,7 +1128,7 @@ private:
             float thumbH = std::max(24.0f, (listH / contentH) * listH);
             float maxScroll = contentH - listH;
             float thumbY = top + (m_netScroll.scroll / maxScroll) * (listH - thumbH);
-            r.drawRoundedRect(trackX, thumbY, 6.0f, thumbH, 3.0f, thumbCol);
+            r.drawRoundedRect(trackX, thumbY, 6.0f, thumbH, inspRadii(3.0), thumbCol);
         }
     }
 
@@ -1128,7 +1137,7 @@ private:
         // ── Toolbar: Back button + status ──
         float bbBg[4] = {0.10f, 0.11f, 0.14f, 1.0f};
         float bbBorder[4] = {0.17f, 0.19f, 0.24f, 1.0f};
-        r.drawBorderedRoundedRect(px + 10, y0, 64.0f, 22.0f, 6, bbBg, 1.0f, bbBorder);
+        r.drawBorderedRoundedRect(px + 10, y0, 64.0f, 22.0f, inspRadii(6), bbBg, 1.0f, bbBorder);
         float bbCol[4] = {0.72f, 0.74f, 0.82f, 1.0f};
         drawTextAt(r, "\xC2\xAB Back", px + 20, y0 + 5.0f, bbCol, 10.0f, CSS::FontWeight::Bold);
 
@@ -1278,7 +1287,7 @@ private:
             float thumbH = std::max(24.0f, (viewH / contentH) * viewH);
             float maxScroll = contentH - viewH;
             float thumbY = top + (m_netScroll.scroll / maxScroll) * (viewH - thumbH);
-            r.drawRoundedRect(trackX, thumbY, 6.0f, thumbH, 3.0f, thumbCol);
+            r.drawRoundedRect(trackX, thumbY, 6.0f, thumbH, inspRadii(3.0), thumbCol);
         }
     }
 
@@ -1306,13 +1315,13 @@ private:
         float badgeW = r.measureTextWidth("<" + tag + ">", 11.0f, CSS::FontWeight::Bold) + 16.0f;
         float badgeBg[4] = {0.19f, 0.17f, 0.36f, 1.0f};
         float badgeBorder[4] = {0.486f, 0.416f, 0.961f, 0.55f};
-        r.drawBorderedRoundedRect(px + 22, y + 22, badgeW, 22, 6, badgeBg, 1.0f, badgeBorder);
+        r.drawBorderedRoundedRect(px + 22, y + 22, badgeW, 22, inspRadii(6), badgeBg, 1.0f, badgeBorder);
         drawTextAt(r, "<" + tag + ">", px + 30, y + 26, white, 11.0f, CSS::FontWeight::Bold);
 
         // Clear selection button
         if (n == selectedNode) {
             float cbBg[4] = {0.11f, 0.12f, 0.15f, 1.0f};
-            r.drawRoundedRect(px + pw - 44.0f, y + 22, 24, 22, 6, cbBg);
+            r.drawRoundedRect(px + pw - 44.0f, y + 22, 24, 22, inspRadii(6), cbBg);
             float cbCol[4] = {0.75f, 0.45f, 0.45f, 1.0f};
             drawTextAt(r, "\xC3\x97", px + pw - 36.0f, y + 25, cbCol, 14.0f, CSS::FontWeight::Bold);
         }

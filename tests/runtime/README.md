@@ -13,6 +13,7 @@ Fixtures are grouped by the subsystem they hold accountable:
 |---|---|
 | `app/` | The app spine — components + cross-file state, C++ interop, windows, routing |
 | `render/` | Paint order and visual properties — culling, opacity, transform, z-index, hover |
+| `border/` | Border rendering — styles, per-side widths/colors, radius, Chrome parity |
 | `layout/` | Flex and full-UI layout breadth |
 | `reactivity/` | Keyed reconciliation and effects |
 | `widgets/` | Element behavior — `<input>`, the DOM event surface |
