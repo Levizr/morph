@@ -1,0 +1,29 @@
+body { margin: 0; background: #0b1220; color: #e2e8f0; }
+.screen { display: flex; flex-direction: column; gap: 16px; padding: 20px; }
+.hovcolor { padding: 16px; background: #16213a; border: 4px solid #ffffff; border-radius: 12px; color: #fff; transition: border-color 0.3s; }
+.hovcolor:hover { border-color: #22d3ee; }
+.hovwidth { padding: 16px; background: #16213a; border: 2px solid #ffffff; border-radius: 4px; color: #fff; transition: border-width 0.3s, border-radius 0.3s; }
+.hovwidth:hover { border-width: 8px; border-top-left-radius: 24px; }
+.hovsides { padding: 16px; background: #16213a; border: 4px solid #ffffff; border-radius: 8px; color: #fff; transition: border-color 0.3s; }
+.hovsides:hover { border-top-color: #ff0000; border-right-color: #00ff00; border-bottom-color: #0000ff; border-left-color: #ffff00; }
+.hovimage { padding: 16px; background: #16213a; border: 6px solid #ffffff; border-image: linear-gradient(to right, #ffffff, #ffffff) 1; border-radius: 8px; color: #fff; transition: border-image 0.3s; }
+.hovimage:hover { border-image: linear-gradient(to right, #ff0000, #0000ff) 1; }
+.presscolor { padding: 16px; background: #16213a; border: 4px solid #ffffff; border-radius: 8px; color: #fff; }
+.presscolor:active { border-color: #a855f7; border-style: dashed; }
+@keyframes borderpulse {
+  0% { border-color: #ff0000; }
+  50% { border-color: #00ff00; }
+  100% { border-color: #0000ff; }
+}
+.animcolor { padding: 16px; background: #16213a; border: 4px solid #ffffff; border-radius: 8px; color: #fff; animation: borderpulse 3s infinite; }
+@keyframes bordergrow {
+  0% { border-width: 2px; }
+  50% { border-width: 10px; }
+  100% { border-width: 2px; }
+}
+.animwidth { padding: 16px; background: #16213a; border: 2px solid #ffffff; border-radius: 8px; color: #fff; animation: bordergrow 3s infinite; }
+@keyframes bordershift {
+  0% { border-image: linear-gradient(to right, #ff0000, #0000ff) 1; }
+  100% { border-image: linear-gradient(to right, #0000ff, #ff0000) 1; }
+}
+.animimage { padding: 16px; background: #16213a; border: 6px solid #ffffff; border-radius: 8px; color: #fff; animation: bordershift 3s infinite; }

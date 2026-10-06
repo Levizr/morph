@@ -56,7 +56,8 @@ inline bool resolveValue(const KeyframeValue& kv, MorphNode* node, float out[4])
         case KeyframeProperty::Width:
         case KeyframeProperty::Height:
         case KeyframeProperty::Left:
-        case KeyframeProperty::Top: {
+        case KeyframeProperty::Top:
+        case KeyframeProperty::BorderWidth: {
             if (!kv.css.empty()) {
                 // % resolves against the parent's box for width/height/left/top,
                 // and the element's own min dimension for border-radius.
@@ -83,6 +84,7 @@ inline bool resolveValue(const KeyframeValue& kv, MorphNode* node, float out[4])
         }
         case KeyframeProperty::BgColor:
         case KeyframeProperty::Color:
+        case KeyframeProperty::BorderColor:
             for (int i = 0; i < 4; i++) out[i] = kv.v[i];
             return true;
         default:
@@ -172,6 +174,20 @@ inline void applyValue(MorphNode* node, KeyframeProperty prop, const float* v) {
             node->style.borderRadius = v[0];
             node->markDirty(PaintDirty);
             break;
+#ifdef MORPH_FEATURE_BORDER
+        case KeyframeProperty::BorderColor:
+            node->style.borderColor[0] = v[0];
+            node->style.borderColor[1] = v[1];
+            node->style.borderColor[2] = v[2];
+            node->style.borderColor[3] = v[3];
+            node->markDirty(PaintDirty);
+            break;
+        case KeyframeProperty::BorderWidth:
+            node->style.borderWidth = v[0];
+            node->markDirty(LayoutDirty);
+            node->markDirty(PaintDirty);
+            break;
+#endif
         case KeyframeProperty::FontSize:
             node->style.fontSize = v[0];
             node->markDirty(LayoutDirty);
@@ -233,6 +249,27 @@ inline void restoreProp(MorphNode* node, KeyframeProperty prop,
             node->style.borderRadius = base.borderRadius;
             node->markDirty(PaintDirty);
             break;
+#ifdef MORPH_FEATURE_BORDER
+        case KeyframeProperty::BorderColor:
+            std::memcpy(node->style.borderColor, base.borderColor, sizeof(float) * 4);
+            node->markDirty(PaintDirty);
+            break;
+        case KeyframeProperty::BorderWidth:
+            node->style.borderWidth = base.borderWidth;
+            node->markDirty(LayoutDirty);
+            node->markDirty(PaintDirty);
+            break;
+#endif
+#if defined(MORPH_FEATURE_GRADIENT) && defined(MORPH_FEATURE_BORDER)
+        case KeyframeProperty::BorderGradient:
+            node->style.borderGradient = base.borderGradient;
+            node->style.borderGradientSet = base.borderGradientSet;
+            node->style.borderImageEnabled = base.borderImageEnabled;
+            node->style.borderImageIsGradient = base.borderImageIsGradient;
+            std::memcpy(node->style.borderColor, base.borderColor, sizeof(float) * 4);
+            node->markDirty(PaintDirty);
+            break;
+#endif
         case KeyframeProperty::FontSize:
             node->style.fontSize = base.fontSize;
             node->markDirty(LayoutDirty);
@@ -275,7 +312,7 @@ inline void restoreProp(MorphNode* node, KeyframeProperty prop,
 // Restore every property in the mask (KeyframeProperty bit indices).
 inline void restoreProps(MorphNode* node, const MorphStyle& base,
                          uint32_t mask) {
-    for (int p = 0; p <= (int)KeyframeProperty::BgGradient; p++)
+    for (int p = 0; p <= (int)KeyframeProperty::BorderGradient; p++)
         if (mask & ((uint32_t)1 << p))
             restoreProp(node, (KeyframeProperty)p, base);
 }
@@ -348,7 +385,8 @@ void MorphNode::updateCssAnimations(float dt) {
                      KeyframeProperty::FontSize, KeyframeProperty::Width,
                      KeyframeProperty::Height, KeyframeProperty::Left,
                      KeyframeProperty::Top, KeyframeProperty::Transform,
-                     KeyframeProperty::BgGradient}) {
+                     KeyframeProperty::BgGradient, KeyframeProperty::BorderColor,
+                     KeyframeProperty::BorderWidth, KeyframeProperty::BorderGradient}) {
                 auto sv = morph_anim_detail::sampleProperty(kfs, prop, te);
                 if (!sv.applies) continue;
 
@@ -409,6 +447,34 @@ void MorphNode::updateCssAnimations(float dt) {
 #endif
                     continue;
                 }
+
+#if defined(MORPH_FEATURE_GRADIENT) && defined(MORPH_FEATURE_BORDER)
+                if (prop == KeyframeProperty::BorderGradient) {
+                    BgGradient ga;
+                    if (!morph::parseGradientCss(sv.left->css, ga))
+                        continue;              // invalid → underlying
+                    BgGradient sampled = ga;
+                    if (sv.right) {
+                        BgGradient gb;
+                        if (morph::parseGradientCss(sv.right->css, gb)) {
+                            if (morph::gradientsCompatible(ga, gb)) {
+                                morph::lerpGradient(sampled, ga, gb, sv.f);
+                            } else if (sv.f >= 0.5f) {
+                                sampled = gb;  // discrete flip, like browsers
+                            }
+                        }
+                    }
+                    style.borderGradient = sampled;
+                    style.borderGradientSet = true;
+                    style.borderImageEnabled = true;
+                    style.borderImageIsGradient = true;
+                    if (sampled.enabled && sampled.stopCount > 0)
+                        std::memcpy(style.borderColor, sampled.stops[0].color,
+                                    sizeof(float) * 4);
+                    markDirty(PaintDirty);
+                    continue;
+                }
+#endif
 
                 float a[4], b[4];
                 if (!morph_anim_detail::resolveValue(*sv.left, this, a))

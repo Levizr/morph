@@ -1576,6 +1576,53 @@ fn set_style(
     }
 }
 
+/// Emit border-image delta lines for a hover/active style object.
+/// Mirrors the base `set_style` border-image block, but only for fields
+/// that differ from the base style so untouched state stays unset.
+fn emit_border_image_delta(hv: &str, s: &IRStyle, base: &IRStyle, gradient: bool) -> Vec<String> {
+    let mut o = Vec::new();
+    if s.border_image != base.border_image {
+        match &s.border_image {
+            Some(img) if !img.is_empty() => {
+                o.push(format!("{hv}->borderImageEnabled = true;"));
+                if img.contains("linear-gradient")
+                    || img.contains("radial-gradient")
+                    || img.contains("conic-gradient")
+                {
+                    o.push(format!("{hv}->borderImageIsGradient = true;"));
+                    if let Some(slice_pos) = img.rfind(' ') {
+                        if let Ok(slice) = img[slice_pos + 1..].parse::<f32>() {
+                            o.push(format!("{hv}->borderImageSlice = {};", fmt(slice)));
+                        } else {
+                            o.push(format!("{hv}->borderImageSlice = 1.0f;"));
+                        }
+                    }
+                } else {
+                    o.push(format!("{hv}->borderImageIsGradient = false;"));
+                }
+            }
+            _ => {
+                o.push(format!("{hv}->borderImageEnabled = false;"));
+                o.push(format!("{hv}->borderImageIsGradient = false;"));
+            }
+        }
+    }
+    if s.border_image_slice != base.border_image_slice {
+        match s.border_image_slice {
+            Some(v) => o.push(format!("{hv}->borderImageSlice = {};", fmt(v))),
+            None => o.push(format!("{hv}->borderImageSlice = 1.0f;")),
+        }
+    }
+    if gradient && s.border_gradient != base.border_gradient {
+        o.push(format!("{hv}->borderGradientSet = true;"));
+        match &s.border_gradient {
+            Some(g) => o.extend(emit_gradient(&format!("{hv}->borderGradient."), g)),
+            None => o.push(format!("{hv}->borderGradient.enabled = false;")),
+        }
+    }
+    o
+}
+
 /// Emit `node->hoverStyle = new MorphStyle(); ...` delta overrides.
 /// Returns "" when there is no hover_style.
 fn emit_hover_style(
@@ -1772,6 +1819,7 @@ fn emit_hover_style(
         let lit = keyword_literal("borderStyle", &s.border_style).unwrap();
         o.push(format!("{hv}->borderStyle = {lit};"));
     }
+    o.extend(emit_border_image_delta(&hv, s, base, features.contains("gradient")));
     if s.padding != [0.0, 0.0, 0.0, 0.0] && s.padding != base.padding {
         o.push(format!("{hv}->padding[0] = {};", fmt(s.padding[0])));
         o.push(format!("{hv}->padding[1] = {};", fmt(s.padding[1])));
@@ -1923,6 +1971,12 @@ fn emit_active_style(
         o.push(format!("{hv}->color[1] = {:.4}f;", s.color[1]));
         o.push(format!("{hv}->color[2] = {:.4}f;", s.color[2]));
     }
+    if s.border_color != [0.0, 0.0, 0.0, 1.0] && s.border_color != base.border_color {
+        o.push(format!("{hv}->borderColor[0] = {:.4}f;", s.border_color[0]));
+        o.push(format!("{hv}->borderColor[1] = {:.4}f;", s.border_color[1]));
+        o.push(format!("{hv}->borderColor[2] = {:.4}f;", s.border_color[2]));
+        o.push(format!("{hv}->borderColor[3] = {:.4}f;", s.border_color[3]));
+    }
     if s.border_radius > 0.0 && s.border_radius != base.border_radius {
         o.push(format!("{hv}->borderRadius = {};", fmt(s.border_radius)));
     }
@@ -2039,11 +2093,49 @@ fn emit_active_style(
             o.push(format!("{hv}->borderLeftColor[3] = -1.0f;"));
         }
     }
+    // Per-side border styles
+    if s.border_top_style != base.border_top_style {
+        if let Some(ref st) = s.border_top_style {
+            if let Some(lit) = keyword_literal("borderTopStyle", st) {
+                o.push(format!("{hv}->borderTopStyle = {lit};"));
+            }
+        } else {
+            o.push(format!("{hv}->borderTopStyle = CSS::BorderStyle::None;"));
+        }
+    }
+    if s.border_right_style != base.border_right_style {
+        if let Some(ref st) = s.border_right_style {
+            if let Some(lit) = keyword_literal("borderRightStyle", st) {
+                o.push(format!("{hv}->borderRightStyle = {lit};"));
+            }
+        } else {
+            o.push(format!("{hv}->borderRightStyle = CSS::BorderStyle::None;"));
+        }
+    }
+    if s.border_bottom_style != base.border_bottom_style {
+        if let Some(ref st) = s.border_bottom_style {
+            if let Some(lit) = keyword_literal("borderBottomStyle", st) {
+                o.push(format!("{hv}->borderBottomStyle = {lit};"));
+            }
+        } else {
+            o.push(format!("{hv}->borderBottomStyle = CSS::BorderStyle::None;"));
+        }
+    }
+    if s.border_left_style != base.border_left_style {
+        if let Some(ref st) = s.border_left_style {
+            if let Some(lit) = keyword_literal("borderLeftStyle", st) {
+                o.push(format!("{hv}->borderLeftStyle = {lit};"));
+            }
+        } else {
+            o.push(format!("{hv}->borderLeftStyle = CSS::BorderStyle::None;"));
+        }
+    }
     if s.border_style != "none" && !s.border_style.is_empty() && s.border_style != base.border_style
     {
-        o.push(format!("{hv}->zIndex = {};", s.z_index.unwrap()));
-        o.push(format!("{hv}->zIndexSet = true;"));
+        let lit = keyword_literal("borderStyle", &s.border_style).unwrap();
+        o.push(format!("{hv}->borderStyle = {lit};"));
     }
+    o.extend(emit_border_image_delta(&hv, s, base, features.contains("gradient")));
     if features.contains("opacity")
         && (s.opacity - 1.0).abs() > f32::EPSILON
         && s.opacity != base.opacity
@@ -2670,7 +2762,9 @@ pub fn keyframe_registration_code(
                 if let Some(enum_name) = raw_prop_to_enum(prop.as_str()) {
                     // Gradient keyframes need the gradient runtime compiled in;
                     // without it the property stays at its underlying value.
-                    if enum_name == "BgGradient" && !features.contains("gradient") {
+                    if (enum_name == "BgGradient" || enum_name == "BorderGradient")
+                        && !features.contains("gradient")
+                    {
                         continue;
                     }
                     let escaped = css.replace('\\', "\\\\").replace('"', "\\\"");
@@ -2690,6 +2784,8 @@ fn keyframe_style_value(field: &str, s: &IRStyle) -> Option<(&'static str, Strin
         "opacity" => Some(("Opacity", fmt(s.opacity))),
         "bg_color" => Some(("BgColor", color4(&s.bg_color))),
         "color" => Some(("Color", color4(&s.color))),
+        "border_color" => Some(("BorderColor", color4(&s.border_color))),
+        "border_width" => Some(("BorderWidth", fmt(s.border_width))),
         "border_radius" => Some(("BorderRadius", fmt(s.border_radius))),
         "font_size" => Some(("FontSize", fmt(s.font_size))),
         "width" => s.width.map(|w| ("Width", fmt(w))),
@@ -2705,6 +2801,7 @@ fn raw_prop_to_enum(prop: &str) -> Option<&'static str> {
         "opacity" => Some("Opacity"),
         "background-color" => Some("BgColor"),
         "background-image" => Some("BgGradient"),
+        "border-image" => Some("BorderGradient"),
         "color" => Some("Color"),
         "border-radius" => Some("BorderRadius"),
         "font-size" => Some("FontSize"),

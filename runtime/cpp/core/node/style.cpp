@@ -161,9 +161,42 @@ static void applyStyleDelta(MorphStyle& target, const MorphStyle& delta) {
 #endif
 #ifdef MORPH_FEATURE_BORDER
     if (delta.borderWidth > 0.0f) target.borderWidth = delta.borderWidth;
+    if (delta.borderTopWidth >= 0.0f) target.borderTopWidth = delta.borderTopWidth;
+    if (delta.borderRightWidth >= 0.0f) target.borderRightWidth = delta.borderRightWidth;
+    if (delta.borderBottomWidth >= 0.0f) target.borderBottomWidth = delta.borderBottomWidth;
+    if (delta.borderLeftWidth >= 0.0f) target.borderLeftWidth = delta.borderLeftWidth;
     if (delta.borderColor[0] != 0.0f || delta.borderColor[1] != 0.0f || delta.borderColor[2] != 0.0f || delta.borderColor[3] != 1.0f)
         memcpy(target.borderColor, delta.borderColor, sizeof(float)*4);
+    if (delta.borderTopColor[0] >= 0.0f)
+        memcpy(target.borderTopColor, delta.borderTopColor, sizeof(float)*4);
+    if (delta.borderRightColor[0] >= 0.0f)
+        memcpy(target.borderRightColor, delta.borderRightColor, sizeof(float)*4);
+    if (delta.borderBottomColor[0] >= 0.0f)
+        memcpy(target.borderBottomColor, delta.borderBottomColor, sizeof(float)*4);
+    if (delta.borderLeftColor[0] >= 0.0f)
+        memcpy(target.borderLeftColor, delta.borderLeftColor, sizeof(float)*4);
     if (delta.borderStyle != CSS::BorderStyle::None) target.borderStyle = delta.borderStyle;
+    if (delta.borderTopStyle != CSS::BorderStyle::None) target.borderTopStyle = delta.borderTopStyle;
+    if (delta.borderRightStyle != CSS::BorderStyle::None) target.borderRightStyle = delta.borderRightStyle;
+    if (delta.borderBottomStyle != CSS::BorderStyle::None) target.borderBottomStyle = delta.borderBottomStyle;
+    if (delta.borderLeftStyle != CSS::BorderStyle::None) target.borderLeftStyle = delta.borderLeftStyle;
+    if (delta.borderTopLeftRadius >= 0.0f) target.borderTopLeftRadius = delta.borderTopLeftRadius;
+    if (delta.borderTopRightRadius >= 0.0f) target.borderTopRightRadius = delta.borderTopRightRadius;
+    if (delta.borderBottomRightRadius >= 0.0f) target.borderBottomRightRadius = delta.borderBottomRightRadius;
+    if (delta.borderBottomLeftRadius >= 0.0f) target.borderBottomLeftRadius = delta.borderBottomLeftRadius;
+    if (delta.borderImageEnabled)
+    {
+        target.borderImageEnabled = true;
+        target.borderImageIsGradient = delta.borderImageIsGradient;
+        target.borderImageSlice = delta.borderImageSlice;
+    }
+#endif
+#ifdef MORPH_FEATURE_GRADIENT
+    if (delta.borderGradientSet)
+    {
+        target.borderGradient = delta.borderGradient;
+        target.borderGradientSet = true;
+    }
 #endif
 #ifdef MORPH_FEATURE_SCROLL
     if (delta.scrollbarWidth != 8.0f) target.scrollbarWidth = delta.scrollbarWidth;
@@ -249,9 +282,42 @@ static void buildReleaseStyle(MorphStyle& target, const MorphStyle& current,
     SCALAR_REVERT(maxHeight);
 #ifdef MORPH_FEATURE_BORDER
     SCALAR_REVERT(borderWidth);
+    SCALAR_REVERT(borderTopWidth);
+    SCALAR_REVERT(borderRightWidth);
+    SCALAR_REVERT(borderBottomWidth);
+    SCALAR_REVERT(borderLeftWidth);
     SCALAR_REVERT(borderStyle);
+    SCALAR_REVERT(borderTopStyle);
+    SCALAR_REVERT(borderRightStyle);
+    SCALAR_REVERT(borderBottomStyle);
+    SCALAR_REVERT(borderLeftStyle);
+    SCALAR_REVERT(borderTopLeftRadius);
+    SCALAR_REVERT(borderTopRightRadius);
+    SCALAR_REVERT(borderBottomRightRadius);
+    SCALAR_REVERT(borderBottomLeftRadius);
+    SCALAR_REVERT(borderImageEnabled);
+    SCALAR_REVERT(borderImageIsGradient);
+    SCALAR_REVERT(borderImageSlice);
     if (arrDiff(pressStyle.borderColor, preState.borderColor) && arrSame(current.borderColor, pressStyle.borderColor))
         memcpy(target.borderColor, preState.borderColor, sizeof(float) * 4);
+    if (arrDiff(pressStyle.borderTopColor, preState.borderTopColor) && arrSame(current.borderTopColor, pressStyle.borderTopColor))
+        memcpy(target.borderTopColor, preState.borderTopColor, sizeof(float) * 4);
+    if (arrDiff(pressStyle.borderRightColor, preState.borderRightColor) && arrSame(current.borderRightColor, pressStyle.borderRightColor))
+        memcpy(target.borderRightColor, preState.borderRightColor, sizeof(float) * 4);
+    if (arrDiff(pressStyle.borderBottomColor, preState.borderBottomColor) && arrSame(current.borderBottomColor, pressStyle.borderBottomColor))
+        memcpy(target.borderBottomColor, preState.borderBottomColor, sizeof(float) * 4);
+    if (arrDiff(pressStyle.borderLeftColor, preState.borderLeftColor) && arrSame(current.borderLeftColor, pressStyle.borderLeftColor))
+        memcpy(target.borderLeftColor, preState.borderLeftColor, sizeof(float) * 4);
+#endif
+#ifdef MORPH_FEATURE_GRADIENT
+    if ((pressStyle.borderGradientSet != preState.borderGradientSet ||
+         !morph::gradientsEqual(pressStyle.borderGradient, preState.borderGradient)) &&
+        current.borderGradientSet == pressStyle.borderGradientSet &&
+        morph::gradientsEqual(current.borderGradient, pressStyle.borderGradient))
+    {
+        target.borderGradient = preState.borderGradient;
+        target.borderGradientSet = preState.borderGradientSet;
+    }
 #endif
 #ifdef MORPH_FEATURE_FLEX
     SCALAR_REVERT(flexDirection);
@@ -590,9 +656,65 @@ void MorphNode::interpolateStyles(MorphStyle& out, const MorphStyle& a,
 
 #ifdef MORPH_FEATURE_BORDER
     out.borderWidth = a.borderWidth + (b.borderWidth - a.borderWidth) * t;
+    // Per-side widths/colors and corners interpolate from their used
+    // values: an unset side falls back to its shorthand, so a hover
+    // that introduces a per-side override animates smoothly instead of
+    // snapping. Both unset stays unset.
+    auto lerpSide = [t](float as, float bs, float ah, float bh) {
+        if (as < 0.0f && bs < 0.0f) return bs;
+        float ea = as >= 0.0f ? as : ah;
+        float eb = bs >= 0.0f ? bs : bh;
+        return ea + (eb - ea) * t;
+    };
+    out.borderTopWidth = lerpSide(a.borderTopWidth, b.borderTopWidth, a.borderWidth, b.borderWidth);
+    out.borderRightWidth = lerpSide(a.borderRightWidth, b.borderRightWidth, a.borderWidth, b.borderWidth);
+    out.borderBottomWidth = lerpSide(a.borderBottomWidth, b.borderBottomWidth, a.borderWidth, b.borderWidth);
+    out.borderLeftWidth = lerpSide(a.borderLeftWidth, b.borderLeftWidth, a.borderWidth, b.borderWidth);
     for (int i = 0; i < 4; i++)
         out.borderColor[i] = a.borderColor[i] + (b.borderColor[i] - a.borderColor[i]) * t;
+    auto lerpSideColor = [t](const float* as, const float* bs, const float* ah, const float* bh, float* o) {
+        if (as[0] < 0.0f && bs[0] < 0.0f) {
+            for (int i = 0; i < 4; i++) o[i] = bs[i];
+            return;
+        }
+        const float* ea = as[0] >= 0.0f ? as : ah;
+        const float* eb = bs[0] >= 0.0f ? bs : bh;
+        for (int i = 0; i < 4; i++) o[i] = ea[i] + (eb[i] - ea[i]) * t;
+    };
+    lerpSideColor(a.borderTopColor, b.borderTopColor, a.borderColor, b.borderColor, out.borderTopColor);
+    lerpSideColor(a.borderRightColor, b.borderRightColor, a.borderColor, b.borderColor, out.borderRightColor);
+    lerpSideColor(a.borderBottomColor, b.borderBottomColor, a.borderColor, b.borderColor, out.borderBottomColor);
+    lerpSideColor(a.borderLeftColor, b.borderLeftColor, a.borderColor, b.borderColor, out.borderLeftColor);
     out.borderStyle = b.borderStyle;
+    out.borderTopStyle = b.borderTopStyle;
+    out.borderRightStyle = b.borderRightStyle;
+    out.borderBottomStyle = b.borderBottomStyle;
+    out.borderLeftStyle = b.borderLeftStyle;
+    out.borderTopLeftRadius = lerpSide(a.borderTopLeftRadius, b.borderTopLeftRadius, a.borderRadius, b.borderRadius);
+    out.borderTopRightRadius = lerpSide(a.borderTopRightRadius, b.borderTopRightRadius, a.borderRadius, b.borderRadius);
+    out.borderBottomRightRadius = lerpSide(a.borderBottomRightRadius, b.borderBottomRightRadius, a.borderRadius, b.borderRadius);
+    out.borderBottomLeftRadius = lerpSide(a.borderBottomLeftRadius, b.borderBottomLeftRadius, a.borderRadius, b.borderRadius);
+    out.borderImageEnabled = b.borderImageEnabled;
+    out.borderImageIsGradient = b.borderImageIsGradient;
+    out.borderImageSlice = b.borderImageSlice;
+#endif
+#ifdef MORPH_FEATURE_GRADIENT
+    if (a.borderGradientSet && b.borderGradientSet)
+    {
+        morph::lerpGradient(out.borderGradient, a.borderGradient, b.borderGradient, t);
+        out.borderGradientSet = true;
+    }
+    else if (t < 0.5f)
+    {
+        // Discrete flip toward/away from "no gradient", like browsers.
+        out.borderGradient = a.borderGradient;
+        out.borderGradientSet = a.borderGradientSet;
+    }
+    else
+    {
+        out.borderGradient = b.borderGradient;
+        out.borderGradientSet = b.borderGradientSet;
+    }
 #endif
 
 #ifdef MORPH_FEATURE_FLEX
@@ -702,6 +824,10 @@ static bool hasLayoutDiff(const MorphStyle& a, const MorphStyle& b) {
     if (a.fontSize != b.fontSize) return true;
 #ifdef MORPH_FEATURE_BORDER
     if (a.borderWidth != b.borderWidth) return true;
+    if (a.borderTopWidth != b.borderTopWidth) return true;
+    if (a.borderRightWidth != b.borderRightWidth) return true;
+    if (a.borderBottomWidth != b.borderBottomWidth) return true;
+    if (a.borderLeftWidth != b.borderLeftWidth) return true;
 #endif
 #ifdef MORPH_FEATURE_FLEX
     if (a.gap != b.gap) return true;

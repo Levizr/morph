@@ -1,0 +1,20 @@
+import "./style.css"
+
+export const windowConfig = { title: "BorderState", width: 800, height: 600 }
+
+export default function App() {
+  return (
+    <body>
+      <div className="screen">
+        <div className="hovcolor">hover border-color</div>
+        <div className="hovwidth">hover border-width + radius</div>
+        <div className="hovsides">hover per-side colors</div>
+        <div className="hovimage">hover gradient border</div>
+        <div className="presscolor">active border-color + style</div>
+        <div className="animcolor">animated border-color</div>
+        <div className="animwidth">animated border-width</div>
+        <div className="animimage">animated gradient border</div>
+      </div>
+    </body>
+  )
+}

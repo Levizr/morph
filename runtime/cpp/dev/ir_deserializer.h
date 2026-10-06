@@ -132,6 +132,9 @@ static KeyframeProperty keyframePropFor(const std::string& cssProp) {
 #ifdef MORPH_FEATURE_GRADIENT
     if (cssProp == "background-image") return KeyframeProperty::BgGradient;
 #endif
+#if defined(MORPH_FEATURE_GRADIENT) && defined(MORPH_FEATURE_BORDER)
+    if (cssProp == "border-image") return KeyframeProperty::BorderGradient;
+#endif
     return KeyframeProperty::None;
 }
 
@@ -171,6 +174,16 @@ static void keyframeValuesFromStyle(std::vector<KeyframeValue>& values,
         const JsonValue& br = styleVal["border_radius"];
         if (!br.isNull())
             pushKeyframeValue(values, KeyframeProperty::BorderRadius, br.asFloat());
+#ifdef MORPH_FEATURE_BORDER
+        const JsonValue& bc = styleVal["border_color"];
+        if (bc.type() == JsonType::Array && bc.size() >= 4)
+            pushKeyframeValue(values, KeyframeProperty::BorderColor,
+                              bc[0].asFloat(), bc[1].asFloat(),
+                              bc[2].asFloat(), bc[3].asFloat());
+        const JsonValue& bw = styleVal["border_width"];
+        if (!bw.isNull())
+            pushKeyframeValue(values, KeyframeProperty::BorderWidth, bw.asFloat());
+#endif
         const JsonValue& fs = styleVal["font_size"];
         if (!fs.isNull())
             pushKeyframeValue(values, KeyframeProperty::FontSize, fs.asFloat());

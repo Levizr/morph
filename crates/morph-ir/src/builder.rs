@@ -259,10 +259,7 @@ impl IRBuilder {
             min_height: wc.and_then(|w| w.min_height),
             max_height: wc.and_then(|w| w.max_height),
             modal: wc.is_some_and(|w| w.modal),
-            renderer: self
-                .app_renderer
-                .clone()
-                .unwrap_or_else(|| "flash".into()),
+            renderer: self.app_renderer.clone().unwrap_or_else(|| "flash".into()),
             nodes: vec![],
             startup_logs,
             premain_functions: premain,
@@ -536,10 +533,7 @@ impl IRBuilder {
             min_height: wc.and_then(|w| w.min_height),
             max_height: wc.and_then(|w| w.max_height),
             modal: wc.is_some_and(|w| w.modal),
-            renderer: self
-                .app_renderer
-                .clone()
-                .unwrap_or_else(|| "flash".into()),
+            renderer: self.app_renderer.clone().unwrap_or_else(|| "flash".into()),
             nodes: vec![root_node],
             startup_logs: ctx.logs.clone(),
             premain_functions: ctx.premain.clone(),
@@ -743,10 +737,7 @@ impl IRBuilder {
             min_height: None,
             max_height: None,
             modal: false,
-            renderer: self
-                .app_renderer
-                .clone()
-                .unwrap_or_else(|| "flash".into()),
+            renderer: self.app_renderer.clone().unwrap_or_else(|| "flash".into()),
             nodes: vec![root_node],
             startup_logs: ctx.logs.clone(),
             premain_functions: ctx.premain.clone(),
@@ -2499,6 +2490,11 @@ impl IRBuilder {
                     .into_iter()
                     .filter(|anim| keyframes.contains_key(&anim.name))
                     .collect();
+                // CSS transitions from merged declarations; the emitter
+                // and serializer skip these unless the duration is > 0.
+                let (transition_duration, transition_easing) = parse_transition(&base_props);
+                node.transition_duration = transition_duration;
+                node.transition_easing = transition_easing;
                 // `<a href>` desugar (navigation links): when `href` is
                 // present the link keys are consumed here — never rendered
                 // as node attrs — and synthesized into a click event.
@@ -2926,6 +2922,12 @@ impl IRBuilder {
                         && val.contains("gradient(")
                     {
                         raw.insert("background-image".to_string(), val.clone());
+                        continue;
+                    }
+                    // Gradient borders ride the same css-string path as
+                    // gradient backgrounds (runtime parses/interpolates).
+                    if prop == "border-image" && val.contains("gradient(") {
+                        raw.insert("border-image".to_string(), val.clone());
                         continue;
                     }
                     if prop == "transform" || needs_layout(val) {
@@ -4049,6 +4051,9 @@ fn is_animatable(prop: &str) -> bool {
             | "background"
             | "background-image"
             | "color"
+            | "border-color"
+            | "border-width"
+            | "border-image"
             | "border-radius"
             | "font-size"
             | "width"
@@ -5597,6 +5602,41 @@ fn apply_animation_longhand(anim: &mut crate::node::IRAnimation, prop: &str, val
     true
 }
 
+/// Duration + easing for the `transition` shorthand and the
+/// `transition-duration` / `transition-timing-function` longhands.
+/// The shorthand takes the first time token as duration and the first
+/// known easing token; longhands override. transition-property/delay
+/// are informational only: the runtime interpolates the whole state
+/// delta, with no delay support.
+fn parse_transition(merged: &HashMap<String, String>) -> (f32, String) {
+    let mut duration = 0.0f32;
+    let mut easing = "ease-in-out".to_string();
+    if let Some(sh) = merged.get("transition") {
+        for tok in sh.split_whitespace() {
+            if duration <= 0.0 {
+                if let Some(t) = parse_css_time(tok) {
+                    duration = t;
+                    continue;
+                }
+            }
+            if let Some(e) = map_easing(&tok.to_lowercase()) {
+                easing = e.to_string();
+            }
+        }
+    }
+    if let Some(d) = merged.get("transition-duration") {
+        if let Some(t) = parse_css_time(d) {
+            duration = t;
+        }
+    }
+    if let Some(e) = merged.get("transition-timing-function") {
+        if let Some(m) = map_easing(&e.trim().to_lowercase()) {
+            easing = m.to_string();
+        }
+    }
+    (duration, easing)
+}
+
 /// Build a node's animation list from merged CSS declarations: the
 /// `animation` shorthand first, then longhands as per-index overrides
 /// (CSS list semantics: the last value repeats). Animations without a
@@ -5989,10 +6029,7 @@ mod tests {
         assert_eq!(parse_box_sides(""), None);
         assert_eq!(parse_border_radius("16px"), Some([16.0, 16.0, 16.0, 16.0]));
         assert_eq!(parse_border_radius("4px 16px"), Some([4.0, 16.0, 4.0, 16.0]));
-        assert_eq!(
-            parse_border_radius("4px 16px 28px 40px"),
-            Some([4.0, 16.0, 28.0, 40.0])
-        );
+        assert_eq!(parse_border_radius("4px 16px 28px 40px"), Some([4.0, 16.0, 28.0, 40.0]));
         assert_eq!(parse_border_radius("10px 20px / 30px 40px"), Some([10.0, 20.0, 10.0, 20.0]));
         assert_eq!(parse_border_radius("10px auto"), None);
     }

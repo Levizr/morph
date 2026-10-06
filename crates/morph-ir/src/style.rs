@@ -121,6 +121,21 @@ impl IRStyle {
             && self.border_color == [0.0, 0.0, 0.0, 1.0]
             && self.border_width == 0.0
             && self.border_style == "none"
+            && self.border_top_width.is_none()
+            && self.border_right_width.is_none()
+            && self.border_bottom_width.is_none()
+            && self.border_left_width.is_none()
+            && self.border_top_color.is_none()
+            && self.border_right_color.is_none()
+            && self.border_bottom_color.is_none()
+            && self.border_left_color.is_none()
+            && self.border_top_style.is_none()
+            && self.border_right_style.is_none()
+            && self.border_bottom_style.is_none()
+            && self.border_left_style.is_none()
+            && self.border_image.is_none()
+            && self.border_image_slice.is_none()
+            && self.border_gradient.is_none()
             && self.width.is_none()
             && self.height.is_none()
             && self.min_width.is_none()

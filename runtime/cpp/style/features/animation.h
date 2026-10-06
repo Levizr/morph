@@ -29,6 +29,9 @@ enum class KeyframeProperty : uint8_t {
     Top,
     Transform,
     BgGradient,
+    BorderColor,
+    BorderWidth,
+    BorderGradient,
 };
 
 // One typed value inside a keyframe.

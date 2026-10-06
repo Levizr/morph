@@ -287,6 +287,9 @@ impl FeatureSet {
                     if kf.raw.keys().any(|p| p == "background-image") {
                         self.features.insert("gradient".into());
                     }
+                    if kf.raw.keys().any(|p| p == "border-image") {
+                        self.features.insert("gradient".into());
+                    }
                 }
             }
             for node in Self::walk(&win.nodes) {
