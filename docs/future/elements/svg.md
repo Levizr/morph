@@ -17,6 +17,20 @@ Companion product doc: [Icons & SVG](icons-svg.md) (the `<svg>` subset, `morph-i
 - The binary contains only the math it uses: `MORPH_FEATURE_SVG_*` defines per capability, emitted from the actual element/attribute set found at build.
 - Animation comes in layers: CSS `@keyframes` on SVG presentation attributes reuses the existing animation engine; JS-driven SVG animation waits for the imperative animation API (`animations.md` scope). SMIL is not planned.
 
+### Why SVG at all
+
+Every app needs resolution-independent graphics — icons, logos, illustrations — and raster formats fail that job structurally:
+
+- **PNGs don't scale.** HiDPI turned fixed-resolution assets into a bug factory: one asset per density, blurriness on fractional scales, ballooning asset folders. A vector scales to any size and DPR from a single file, for free.
+- **One asset, every size.** The same 2KB icon file renders a 16px toolbar glyph and a 256px empty-state illustration. No export matrix, no stale assets when a size changes.
+- **Small where it counts.** Icons and logos are overwhelmingly paths and fills — kilobytes of math instead of hundreds of kilobytes of pixels. The binary and memory savings compound across an app's whole icon set.
+- **Themable by construction.** `currentColor` lets icons inherit text styling — dark mode and accent changes flow through with zero asset variants. Raster assets need a full duplicate set per theme.
+- **Designers already speak SVG.** Figma, Illustrator, and icon libraries export SVG natively. Supporting it removes an asset-conversion step (and its bugs) from every project's pipeline.
+- **Motion-ready.** Vectors animate cleanly — transforms stay crisp mid-animation where scaled rasters smear. Today's icons become tomorrow's animated illustrations with no format migration.
+- **The alternatives are worse.** PNG-per-density multiplies assets; icon fonts hijack text shaping, break with emoji, and can't do multicolor; drawing icons from divs doesn't scale past geometric toys. Each workaround this engine removes is complexity deleted from userland.
+
+In short: SVG is the only format that is simultaneously scalable, small, themeable, designer-native, and animatable. That combination is why it gets an engine, not just a decoder.
+
 ## 2. Current state in Morph
 
 | Piece | State |
