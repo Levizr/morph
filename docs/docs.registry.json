@@ -2259,6 +2259,25 @@
         "changefreq": "monthly"
       },
       {
+        "title": "Animation Engine — Timing Functions & Property Support (Planned)",
+        "sidebarTitle": "Animation Engine",
+        "slug": "future/css/fixing-animation",
+        "file": "future/css/fixing-animation",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "Animation engine internals planned for Morph: spec-exact easings with cubic-bezier and steps, per-property support cost, Chrome and Qt comparison.",
+        "keywords": [
+          "morph animation engine",
+          "morph cubic-bezier steps",
+          "morph timing functions",
+          "morph animation internals"
+        ],
+        "lastUpdated": "2026-10-07",
+        "publishedAt": "2026-10-07",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
         "title": "Dynamic Styles & Classes (Runtime Path)",
         "sidebarTitle": "Dynamic Styles",
         "slug": "future/css/dynamic-styles",
@@ -2623,6 +2642,25 @@
         ],
         "lastUpdated": "2026-09-28",
         "publishedAt": "2026-09-28",
+        "priority": 0.5,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Morph SVG Engine — Own Renderer with Chrome Parity (Planned)",
+        "sidebarTitle": "SVG Engine",
+        "slug": "future/elements/svg",
+        "file": "future/elements/svg",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "SVG engine planned for Morph: own renderer instead of third-party, Chrome-look parity, per-feature dead-code elimination, CSS and JS animation path.",
+        "keywords": [
+          "morph svg engine",
+          "morph svg renderer",
+          "morph svg chrome parity",
+          "morph vector graphics"
+        ],
+        "lastUpdated": "2026-10-07",
+        "publishedAt": "2026-10-07",
         "priority": 0.5,
         "changefreq": "monthly"
       },

@@ -15,6 +15,7 @@ Plans are grouped by area. Each group is a folder under `docs/future/` and a sec
 | Magical CSS — trick-free effects & Morph-only ideas (possibility showcase, basics first) | [Magical CSS](css/magical.md) | Low | More CSS |
 | **Dynamic Styles & Classes** (state-driven keyword styles, dynamic className) | [Dynamic Styles](css/dynamic-styles.md) | Medium | Kill Strings |
 | Transitions, springs & shared-element animation | [Animations](css/animations.md) | Medium | Forge Renderer |
+| Animation engine fixes — timing functions, property support cost, Chrome/Qt comparison | [Animation Engine](css/fixing-animation.md) | Medium | Animations |
 
 ## Windows
 
@@ -53,6 +54,7 @@ Plans are grouped by area. Each group is a folder under `docs/future/` and a sec
 |---|---|---|---|
 | Text input (caret, focus, selection) | [Text Input](elements/text-input.md) | High | — |
 | SVG element & `morph-icons` system | [Icons & SVG](elements/icons-svg.md) | Medium | Packages |
+| SVG engine — own renderer, Chrome-look parity, pay-for-what-you-use math | [SVG Engine](elements/svg.md) | Medium | Icons & SVG |
 
 ## Platform
 
