@@ -100,51 +100,48 @@ See [Flexbox](flexbox.md) for a deep-dive.
 
 ## Scrolling
 
-Nothing scrolls by default — and that's deliberate. `overflow` defaults to `visible`, so content that exceeds its parent simply paints outside it; apps are expected to size to their window. Scrolling is opt-in per container:
+Scrolling works like a browser. The page scrolls by default whenever content is taller than the window — no CSS needed. A fixed-size box needs `overflow: auto` (or `scroll`); with the default `visible`, overflowing content simply paints outside the box and the wheel passes through to the page underneath:
 
 ```css
 .panel {
   height: 400px;
-  overflow: auto;   /* or scroll */
+  overflow: auto;   /* or overflow-y: auto for vertical only */
 }
 ```
 
 | Value | Behavior |
 |---|---|
 | `visible` (default) | No scrolling. Overflowing content paints outside the box. |
-| `hidden` | Clips overflowing content. Still no scrolling. |
-| `auto` | Scrolls **only when** the content is taller than the box. |
+| `hidden` | Clips overflowing content. Still no scrolling — this is the manual off switch, including on `body` (locks page scroll). |
+| `clip` | Like `hidden`, but also forbids programmatic scrolling. |
+| `auto` | Scrolls **only when** the content is taller/wider than the box, independently per axis. |
 | `scroll` | Always a scroll container. |
 
-No explicit height is required: a box sizes from its children and clamps to its parent's height, so scrolling kicks in as soon as the children exceed the available space. An explicit `height`/`max-height` works too and is the common case for fixed panels.
+`overflow-x` and `overflow-y` are independent: `overflow-x: auto; overflow-y: hidden` gives a horizontal strip that never scrolls vertically. No explicit height is required on scrollers: a box sizes from its children and scrolls as soon as they exceed the available space. An explicit `height`/`max-height` works too and is the common case for fixed panels.
 
 Rules that bite:
 
-- **Mouse wheel scrolls the nearest scroll container** under the cursor; nested scrollers work inside-out.
-- **`auto`/`scroll` always clip** their children to the box — like `hidden` plus scrolling. Don't put them on a box whose children intentionally paint outside it (tooltips, dropdowns, shadows).
+- **Mouse wheel scrolls the nearest scroll container** under the cursor; nested scrollers work inside-out, and a spent scroller hands the remainder to its parent (scroll chaining).
+- **Shift+wheel scrolls horizontally**, and trackpads scroll both axes.
+- **`auto`/`scroll`/`hidden`/`clip` always clip** their children to the box. Don't put them on a box whose children intentionally paint outside it (tooltips, dropdowns, shadows) — leave those `visible` and let the page scroll instead.
 
-Tailwind equivalents: `overflow-auto`, `overflow-scroll`, `overflow-hidden`, `overflow-visible`. Scrollbar appearance is styled with the [`scrollbar-*` properties](#scrollbar) below.
+Tailwind equivalents: `overflow-auto`, `overflow-scroll`, `overflow-hidden`, `overflow-visible`, plus `overflow-x-auto`, `overflow-x-hidden`, `overflow-x-scroll`, `overflow-y-auto`, `overflow-y-hidden`, `overflow-y-scroll`. Scrollbar appearance is styled with the [`scrollbar-*` properties](#scrollbar) below.
 
-Page-level scrolling (content taller than the window) is the same mechanism — `overflow: auto` on `body`:
+To lock page scroll (e.g. behind a modal), put `overflow: hidden` on `body` — it propagates to the viewport like in browsers:
 
 ```css
-body { overflow: auto; }
+body.modal-open { overflow: hidden; }   /* page holds still */
 ```
 
 The `*` selector matches every element, so broad rules are one line — but remember the clipping rule above: `* { overflow: auto }` clips *everything*, so prefer scoping to the containers that actually scroll:
 
 ```css
 * { box-sizing: border-box; }  /* fine: no clipping involved */
-body { overflow: auto; }       /* scoped: only the page scrolls */
 ```
 
 ### Open questions
 
-Scrolling defaults are still up for debate — tell us what you want at [suggestions.morph@levizr.com](mailto:suggestions.morph@levizr.com):
-
-- **Opt-in (current) vs browser-like scroll-by-default?** Today nothing scrolls unless you say so, because apps were assumed to size to their window. Should scroll containers appear automatically like in browsers instead?
-- **Is `overflow` the right property?** It carries web semantics (clip + scroll coupled). Should Morph grow its own property (e.g. a dedicated scroll opt-in) that decouples the two?
-- **Better ideas?** If you've hit a scrolling case this model handles badly, send the layout — real cases beat speculation.
+Ideas and edge cases welcome at [suggestions.morph@levizr.com](mailto:suggestions.morph@levizr.com). The `overflow`-as-scroll-switch debate is settled: standard `overflow` with per-axis longhands stays — no Morph-specific property.
 
 ## Scrollbar
 

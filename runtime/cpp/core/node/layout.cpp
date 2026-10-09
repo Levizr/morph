@@ -1822,15 +1822,24 @@ after_children:
     // Children keep their laid-out positions (flow runs top-down).
     if (!parent && parentH > 0.0f && h > parentH) h = parentH;
 
-    // Each axis scrolls independently: `scroll` always arms the axis (the
-    // scrollbar draws only when content overflows, like Chrome), `auto`
-    // arms it only on overflow, `hidden`/`clip`/`visible` never do —
-    // except at the root, where `visible` propagates to the viewport as
-    // `auto` (CSS 2.1 §11.1.1, simplified to the root box), enabling page
-    // scroll. An explicit `hidden`/`clip` on the root still disables it.
+    // Viewport propagation (CSS 2.1 §11.1.1): with a single page body,
+    // the body's overflow sets the viewport's when the root's own is
+    // visible — so `body { overflow: hidden }` locks page scroll like in
+    // browsers. A `visible` that survives propagation still scrolls as
+    // `auto`, so pages scroll by default with no CSS at all.
     CSS::Overflow effX = style.overflowX;
     CSS::Overflow effY = style.overflowY;
     if (!parent) {
+        CSS::Overflow bodyX = CSS::Overflow::Visible;
+        CSS::Overflow bodyY = CSS::Overflow::Visible;
+        if (children.size() == 1) {
+            bodyX = children[0]->style.overflowX;
+            bodyY = children[0]->style.overflowY;
+        }
+        if (effX == CSS::Overflow::Visible && bodyX != CSS::Overflow::Visible)
+            effX = bodyX;
+        if (effY == CSS::Overflow::Visible && bodyY != CSS::Overflow::Visible)
+            effY = bodyY;
         if (effX == CSS::Overflow::Visible) effX = CSS::Overflow::Auto;
         if (effY == CSS::Overflow::Visible) effY = CSS::Overflow::Auto;
     }

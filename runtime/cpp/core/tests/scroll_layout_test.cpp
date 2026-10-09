@@ -291,6 +291,60 @@ static void testThumbGeometry()
     CHECK(near(p + s, box->w), "h thumb ends at track end");
 }
 
+// `overflow: hidden` on the body locks page scroll (viewport
+// propagation, like browsers) — the manual off switch for pages.
+static void testBodyHiddenDisablesPageScroll()
+{
+    LayoutNode holder;
+    LayoutNode* body = makeBox(-1.0f, -1.0f);
+    body->style.overflowY = CSS::Overflow::Hidden;
+    LayoutNode* tall = makeBox(-1.0f, 900.0f);
+    attach(&holder, body);
+    attach(body, tall);
+    holder.layout(0.0f, 0.0f, 800.0f, 600.0f, nullptr);
+    CHECK(!holder.scrollYEnabled, "body hidden disables page scroll");
+    MorphEvent e = wheel(0.0f, -1.0f);
+    CHECK(!holder.dispatchEvent(e, 400.0f, 300.0f), "locked page wheel unhandled");
+    CHECK(near(holder.scrollY, 0.0f), "locked page holds zero");
+}
+
+// A fixed-height box with default (visible) overflow never scrolls
+// itself: content paints outside the box, exactly like Chrome.
+static void testVisibleDivOverflowsWithoutScrolling()
+{
+    LayoutNode holder;
+    LayoutNode* box = makeBox(200.0f, 100.0f);
+    LayoutNode* tall = makeBox(-1.0f, 300.0f);
+    attach(&holder, box);
+    attach(box, tall);
+    holder.layout(0.0f, 0.0f, 800.0f, 600.0f, nullptr);
+    CHECK(!box->scrollYEnabled, "visible box never arms scroll");
+    CHECK(!box->clipsOverflowBox(), "visible box never clips");
+    CHECK(tall->y + tall->h > box->y + box->h, "content paints outside the box");
+    MorphEvent e = wheel(0.0f, -1.0f);
+    holder.dispatchEvent(e, box->x + 10.0f, box->y + 10.0f);
+    CHECK(near(box->scrollY, 0.0f), "visible box holds zero under wheel");
+}
+
+// Wheel over a visible box inside a tall page chains past it: the box
+// holds still while the page scrolls underneath.
+static void testDivWheelChainsToPage()
+{
+    LayoutNode holder;
+    LayoutNode* box = makeBox(200.0f, 100.0f);
+    LayoutNode* mid = makeBox(-1.0f, 300.0f);
+    LayoutNode* tail = makeBox(-1.0f, 700.0f);
+    attach(&holder, box);
+    attach(box, mid);
+    attach(&holder, tail);
+    holder.layout(0.0f, 0.0f, 800.0f, 600.0f, nullptr);
+    CHECK(holder.scrollYEnabled, "tall page arms root scroll");
+    MorphEvent e = wheel(0.0f, -1.0f);
+    CHECK(holder.dispatchEvent(e, box->x + 10.0f, box->y + 10.0f), "chained page wheel handled");
+    CHECK(near(box->scrollY, 0.0f), "visible box holds still");
+    CHECK(near(holder.scrollY, 40.0f), "page scrolls under visible box");
+}
+
 int main()
 {
     testVerticalOnly();
@@ -304,6 +358,9 @@ int main()
     testShiftWheel();
     testClamps();
     testPageScroll();
+    testBodyHiddenDisablesPageScroll();
+    testVisibleDivOverflowsWithoutScrolling();
+    testDivWheelChainsToPage();
     testThumbGeometry();
     std::printf("[scroll-layout-test] %d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;
