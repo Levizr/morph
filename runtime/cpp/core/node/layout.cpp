@@ -68,8 +68,9 @@ static bool isTransparentInline(MorphNode* n)
         || !n->style.margin[2].isZero() || !n->style.margin[3].isZero())
         return false;
     if (n->style.explicitWidth.isSet() || n->style.explicitHeight.isSet()) return false;
-    if (n->scrollEnabled) return false;
-    if (n->style.overflow != CSS::Overflow::Visible) return false;
+    if (n->scrollYEnabled || n->scrollXEnabled) return false;
+    if (n->style.overflowX != CSS::Overflow::Visible) return false;
+    if (n->style.overflowY != CSS::Overflow::Visible) return false;
     for (auto* c : n->children)
     {
         if (c->style.display != CSS::Display::Inline
@@ -736,7 +737,9 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
         for (auto* c : children)
             c->layout(0.0f, 0.0f, 0.0f, 0.0f, r);
         contentH = 0.0f;
-        scrollEnabled = false;
+        contentW = 0.0f;
+        scrollXEnabled = false;
+        scrollYEnabled = false;
         return;
     }
 #endif
@@ -774,7 +777,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
     }
 
     float maxBottom = cy;
-    float maxRight  = 0.0f;
+    float maxRight  = cx;
 
 #ifdef MORPH_FEATURE_MARGIN_COLLAPSE
     // Parent–child margin-collapse tracking: a boundary-less block parent
@@ -1201,7 +1204,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                 cursor += (isCol ? outerH + ci->mt + ci->mb : outerW + ci->ml + ci->mr) + itemGap;
                 float cb = ci->node->y + outerH + ci->mb;
                 if (cb > maxBottom) maxBottom = cb;
-                if (isRow) {
+                {
                     float rb = ci->node->x + outerW + ci->mr;
                     if (rb > maxRight) maxRight = rb;
                 }
@@ -1568,6 +1571,8 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                 curY = c->y + c->h + cmb;
                 float bottom = c->y + c->h + cmb;
                 if (bottom > maxBottom) maxBottom = bottom;
+                float right = c->x + c->w + c->m_computedMargin[1];
+                if (right > maxRight) maxRight = right;
             }
         }
 
@@ -1619,6 +1624,8 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
             curY = c->y + c->h + cmb;
             float bottom = c->y + c->h + cmb;
             if (bottom > maxBottom) maxBottom = bottom;
+            float right = c->x + c->w + c->m_computedMargin[1];
+            if (right > maxRight) maxRight = right;
         }
 #endif
     }
@@ -1710,7 +1717,7 @@ after_children:
 #endif
 
     if (!style.explicitHeight.isSet() &&
-        (style.overflow == CSS::Overflow::Auto || style.overflow == CSS::Overflow::Scroll) &&
+        (style.overflowY == CSS::Overflow::Auto || style.overflowY == CSS::Overflow::Scroll) &&
         parentH > 0.0f && h > parentH) {
         h = parentH;
     }
@@ -1747,6 +1754,10 @@ after_children:
         contentH -= lastChildMbEff;
 #endif
     if (contentH < h) contentH = h;
+    // Scrollable overflow width mirrors height (margins never collapse
+    // horizontally, so no collapsed-through adjustment applies).
+    contentW = maxRight - cx + pl + pr + bw * 2.0f;
+    if (contentW < w) contentW = w;
 
 #ifdef MORPH_FEATURE_MARGIN_COLLAPSE
     // Pass collapsed-through margins up to our parent (parent–child margin
@@ -1804,8 +1815,29 @@ after_children:
         }
     }
 
-    scrollEnabled = (style.overflow == CSS::Overflow::Scroll) ||
-                    (style.overflow == CSS::Overflow::Auto && contentH > h);
+    // Page scroll (viewport propagation): an auto-height root taller than
+    // the window clamps to the viewport so the normal scroll machinery
+    // engages. Chrome sizes the viewport — not the html box — to the
+    // window; absolutely-positioned viewport children already use m_winH.
+    // Children keep their laid-out positions (flow runs top-down).
+    if (!parent && parentH > 0.0f && h > parentH) h = parentH;
+
+    // Each axis scrolls independently: `scroll` always arms the axis (the
+    // scrollbar draws only when content overflows, like Chrome), `auto`
+    // arms it only on overflow, `hidden`/`clip`/`visible` never do —
+    // except at the root, where `visible` propagates to the viewport as
+    // `auto` (CSS 2.1 §11.1.1, simplified to the root box), enabling page
+    // scroll. An explicit `hidden`/`clip` on the root still disables it.
+    CSS::Overflow effX = style.overflowX;
+    CSS::Overflow effY = style.overflowY;
+    if (!parent) {
+        if (effX == CSS::Overflow::Visible) effX = CSS::Overflow::Auto;
+        if (effY == CSS::Overflow::Visible) effY = CSS::Overflow::Auto;
+    }
+    scrollYEnabled = (effY == CSS::Overflow::Scroll) ||
+                    (effY == CSS::Overflow::Auto && contentH > h);
+    scrollXEnabled = (effX == CSS::Overflow::Scroll) ||
+                    (effX == CSS::Overflow::Auto && contentW > w);
 #ifdef MORPH_FEATURE_POSITION
     // Sticky clamps resolve after heights (ours and the scrollport's) are
     // final. Each level resolves its direct sticky children; deeper ones
@@ -1813,9 +1845,13 @@ after_children:
     for (auto* c : stickyChildren)
         c->updateStickySubtree();
 #endif
-    if (scrollEnabled) {
+    if (scrollYEnabled) {
         if (scrollY > contentH - h) scrollY = contentH - h;
         if (scrollY < 0) scrollY = 0;
+    }
+    if (scrollXEnabled) {
+        if (scrollX > contentW - w) scrollX = contentW - w;
+        if (scrollX < 0) scrollX = 0;
     }
 
     clearDirty(LayoutDirty);

@@ -1,0 +1,36 @@
+import "./style.css"
+
+export const windowConfig = { title: "Scroll", width: 800, height: 600 }
+
+export default function App() {
+  return (
+    <body>
+      <div className="screen">
+        <div className="vscroll">
+          <div className="tall">tall content top</div>
+          <div className="tall">tall content mid</div>
+          <div className="tall">tall content bottom</div>
+        </div>
+        <div className="outer">
+          <div className="inner">
+            <div className="tall">nested top</div>
+            <div className="tall">nested bottom</div>
+          </div>
+          <div className="tall">outer tail</div>
+        </div>
+        <div className="hscroll">
+          <div className="widerow">
+            <div className="cell">cell one</div>
+            <div className="cell">cell two</div>
+            <div className="cell">cell three</div>
+            <div className="cell">cell four</div>
+          </div>
+        </div>
+        <div className="clipbox">
+          <div className="tall">clipped away top</div>
+          <div className="tall">clipped away bottom</div>
+        </div>
+      </div>
+    </body>
+  )
+}

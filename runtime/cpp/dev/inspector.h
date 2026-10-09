@@ -343,9 +343,16 @@ private:
     static float screenY(MorphNode* n) {
         float sy = n->y;
         for (auto* p = n->parent; p; p = p->parent) {
-            if (p->scrollEnabled) sy -= p->scrollY;
+            if (p->scrollYEnabled) sy -= p->scrollY;
         }
         return sy;
+    }
+    static float screenX(MorphNode* n) {
+        float sx = n->x;
+        for (auto* p = n->parent; p; p = p->parent) {
+            if (p->scrollXEnabled) sx -= p->scrollX;
+        }
+        return sx;
     }
 
     void drawFlash(GLRenderer& r, MorphNode* n, float t) {
@@ -391,7 +398,7 @@ private:
         bw = n->resolvedBorderWidth();
 #endif
 
-        float sx = n->x, sy = screenY(n);
+        float sx = screenX(n), sy = screenY(n);
 
         float bx = sx, by = sy, bwdt = n->w, bhgt = n->h;
 

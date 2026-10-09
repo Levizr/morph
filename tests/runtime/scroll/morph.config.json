@@ -1,0 +1,7 @@
+{
+  "name": "scroll",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "Scroll" },
+  "dependencies": {},
+  "cpp_sources": []
+}

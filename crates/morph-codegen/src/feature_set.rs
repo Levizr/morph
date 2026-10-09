@@ -18,7 +18,11 @@ impl FeatureSet {
         if s.font_weight != "normal" && !s.font_weight.is_empty() {
             self.features.insert("bold".into());
         }
-        if s.overflow == "auto" || s.overflow == "scroll" {
+        if s.overflow_x == "auto"
+            || s.overflow_x == "scroll"
+            || s.overflow_y == "auto"
+            || s.overflow_y == "scroll"
+        {
             self.features.insert("scroll".into());
         }
         if s.scrollbar_width != 8.0
@@ -145,7 +149,7 @@ impl FeatureSet {
             | "scrollbar-border-radius" => vec!["scroll"],
             "flex-direction" | "flex-wrap" | "flex-basis" | "flex-grow" | "flex-shrink"
             | "justify-content" | "align-items" | "align-self" | "gap" => vec!["flex"],
-            "overflow" => vec!["scroll"],
+            "overflow" | "overflow-x" | "overflow-y" => vec!["scroll"],
             "display" => vec!["flex", "display_none", "inline"],
             "font-weight" => vec!["bold"],
             "border-radius" => vec!["radius"],

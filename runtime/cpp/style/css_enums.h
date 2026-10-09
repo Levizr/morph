@@ -173,6 +173,7 @@ enum class Overflow : uint8_t
 {
     Visible,
     Hidden,
+    Clip,
     Scroll,
     Auto
 };
@@ -306,6 +307,8 @@ inline Overflow parseOverflow(std::string_view s)
 {
     if (s == "hidden")
         return Overflow::Hidden;
+    if (s == "clip")
+        return Overflow::Clip;
     if (s == "scroll")
         return Overflow::Scroll;
     if (s == "auto")
@@ -463,6 +466,8 @@ inline const char* toString(Overflow o)
     {
     case Overflow::Hidden:
         return "hidden";
+    case Overflow::Clip:
+        return "clip";
     case Overflow::Scroll:
         return "scroll";
     case Overflow::Auto:
@@ -470,6 +475,13 @@ inline const char* toString(Overflow o)
     default:
         return "visible";
     }
+}
+
+// Every overflow mode except `visible` clips content to the box
+// (`clip` behaves like `hidden` — it just never scrolls either).
+inline bool clipsOverflow(Overflow o)
+{
+    return o != Overflow::Visible;
 }
 
 inline const char* toString(BoxSizing b)

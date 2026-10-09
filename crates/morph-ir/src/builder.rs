@@ -5202,9 +5202,43 @@ fn apply_css_prop(style: &mut IRStyle, prop: &str, val: &str) -> Option<&'static
             Some("cursor")
         }
         "overflow" => {
-            style.overflow = val.to_string();
+            // Shorthand sets both axes (one value) or x then y (two values,
+            // per spec). Unknown keywords drop the whole declaration.
+            fn axis_keyword(v: &str) -> Option<&str> {
+                match v {
+                    "visible" | "hidden" | "clip" | "scroll" | "auto" => Some(v),
+                    _ => None,
+                }
+            }
+            let parts: Vec<&str> = val.split_whitespace().collect();
+            if parts.len() == 1 {
+                let k = axis_keyword(parts[0])?;
+                style.overflow_x = k.to_string();
+                style.overflow_y = k.to_string();
+            } else if parts.len() == 2 {
+                let x = axis_keyword(parts[0])?;
+                let y = axis_keyword(parts[1])?;
+                style.overflow_x = x.to_string();
+                style.overflow_y = y.to_string();
+            } else {
+                return None;
+            }
             Some("overflow")
         }
+        "overflow-x" => match val.trim() {
+            "visible" | "hidden" | "clip" | "scroll" | "auto" => {
+                style.overflow_x = val.trim().to_string();
+                Some("overflow-x")
+            }
+            _ => None,
+        },
+        "overflow-y" => match val.trim() {
+            "visible" | "hidden" | "clip" | "scroll" | "auto" => {
+                style.overflow_y = val.trim().to_string();
+                Some("overflow-y")
+            }
+            _ => None,
+        },
         "opacity" => {
             if let Ok(v) = val.trim().parse::<f32>() {
                 style.opacity = v;
@@ -5922,6 +5956,25 @@ mod tests {
         assert!(!match_sel(".btn.ghost", &["btn"]), ".btn.ghost should NOT match btn only");
         assert!(match_sel(".btn", &["btn", "ghost"]), ".btn should match btn ghost");
         assert!(match_sel(".btn.ghost:hover", &["btn", "ghost"]), "hover compound should match");
+    }
+
+    #[test]
+    fn overflow_axes_expand_and_validate() {
+        let mut s = IRStyle::default();
+        assert_eq!(apply_css_prop(&mut s, "overflow", "hidden auto"), Some("overflow"));
+        assert_eq!(s.overflow_x, "hidden");
+        assert_eq!(s.overflow_y, "auto");
+        assert_eq!(apply_css_prop(&mut s, "overflow", "scroll"), Some("overflow"));
+        assert_eq!(s.overflow_x, "scroll");
+        assert_eq!(s.overflow_y, "scroll");
+        assert_eq!(apply_css_prop(&mut s, "overflow-x", "visible"), Some("overflow-x"));
+        assert_eq!(s.overflow_x, "visible");
+        assert_eq!(s.overflow_y, "scroll");
+        // Unknown keywords drop the declaration, leaving prior values.
+        assert_eq!(apply_css_prop(&mut s, "overflow", "hidden garbage"), None);
+        assert_eq!(s.overflow_x, "visible");
+        assert_eq!(apply_css_prop(&mut s, "overflow-y", "bounce"), None);
+        assert_eq!(s.overflow_y, "scroll");
     }
 
     #[test]

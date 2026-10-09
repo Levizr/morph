@@ -84,8 +84,8 @@ public:
         // 2. Clip + scroll + children
         bool needRadiusClip = maxRadius4(radii) > 0.0f;
 #ifdef MORPH_FEATURE_SCROLL
-        bool scrolling = scrollEnabled && contentH > sh;
-        bool needRectClip = scrolling || style.overflow == CSS::Overflow::Hidden || style.overflow == CSS::Overflow::Auto;
+        bool scrolling = scrollsVertically(sh) || scrollsHorizontally(sw);
+        bool needRectClip = scrolling || clipsOverflowBox();
 #else
         bool needRectClip = false;
 #endif
@@ -103,12 +103,12 @@ public:
 #endif
             if (needRadiusClip) r.beginRoundedClip(sx, sy, sw, sh, radii);
 #ifdef MORPH_FEATURE_SCROLL
-            if (scrolling) r.pushScrollOffset(0, -scrollY);
+            if (scrolling) r.pushScrollOffset(-effScrollX(sw), -effScrollY(sh));
 #endif
             for (auto* child : paintOrder())
                 child->executeDisplayList(r);
 #ifdef MORPH_FEATURE_SCROLL
-            if (scrolling) r.popScrollOffset(0, -scrollY);
+            if (scrolling) r.popScrollOffset(-effScrollX(sw), -effScrollY(sh));
 #endif
             if (needRadiusClip) r.endRoundedClip();
             if (needRectClip) r.endClip();
@@ -152,7 +152,7 @@ public:
 #endif
 #endif
 #ifdef MORPH_FEATURE_SCROLL
-        if (scrollEnabled && contentH > sh) {
+        if (scrollsVertically(sh) || scrollsHorizontally(sw)) {
 #ifdef MORPH_FEATURE_TRANSFORM
             if (pushedSelf)
                 r.beginRoundedClip(sx, sy, sw, sh, kSharpRadii);
@@ -161,13 +161,15 @@ public:
 #else
             r.beginClip(sx, sy, sw, sh);
 #endif
-            r.pushScrollOffset(0, -scrollY);
+            r.pushScrollOffset(-effScrollX(sw), -effScrollY(sh));
             for (auto* child : paintOrder()) {
-                float childVisY = child->y - scrollY;
-                if (childVisY + child->h > sy && childVisY < sy + sh)
+                float childVisX = child->x - effScrollX(sw);
+                float childVisY = child->y - effScrollY(sh);
+                if (childVisX + child->w > sx && childVisX < sx + sw &&
+                    childVisY + child->h > sy && childVisY < sy + sh)
                     child->draw(r);
             }
-            r.popScrollOffset(0, -scrollY);
+            r.popScrollOffset(-effScrollX(sw), -effScrollY(sh));
             r.endClip();
             drawScrollbar(r);
         } else
@@ -188,18 +190,40 @@ public:
         float sx = sc(x), sy = sc(y);
         float sw = sc(w), sh = sc(h);
         float sbw = m_isTransitioning ? style.scrollbarWidth : snapBorderWidth(style.scrollbarWidth);
-        float trackX = sx + sw - sbw;
-        r.drawRect(trackX, sy, sbw, sh, style.scrollbarTrackColor);
-        float thumbH = sc((sh / contentH) * sh);
-        float thumbY = sy + sc((scrollY / (contentH - sh)) * (sh - thumbH));
-        if (thumbY < sy) thumbY = sy;
-        if (thumbY + thumbH > sy + sh) thumbY = sy + sh - thumbH;
         float radius = m_isTransitioning ? style.scrollbarBorderRadius : snapRadius(style.scrollbarBorderRadius);
-        if (radius > thumbH * 0.5f) radius = thumbH * 0.5f;
-        if (radius < 0.5f) radius = 0.5f;
         float sbRadii[4];
-        fillRadii(sbRadii, radius);
-        r.drawRoundedRect(trackX, thumbY, sbw, thumbH, sbRadii, style.scrollbarThumbColor);
+        bool vBar = scrollsVertically(sh);
+        if (vBar) {
+            float trackX = sx + sw - sbw;
+            r.drawRect(trackX, sy, sbw, sh, style.scrollbarTrackColor);
+            float tp, ts;
+            vScrollThumb(sh, &tp, &ts);
+            float thumbH = sc(ts);
+            float thumbY = sy + sc(tp);
+            if (thumbY < sy) thumbY = sy;
+            if (thumbY + thumbH > sy + sh) thumbY = sy + sh - thumbH;
+            float tr = radius;
+            if (tr > thumbH * 0.5f) tr = thumbH * 0.5f;
+            if (tr < 0.5f) tr = 0.5f;
+            fillRadii(sbRadii, tr);
+            r.drawRoundedRect(trackX, thumbY, sbw, thumbH, sbRadii, style.scrollbarThumbColor);
+        }
+        if (scrollsHorizontally(sw)) {
+            float trackW = sw - (vBar ? sbw : 0.0f);
+            float trackY = sy + sh - sbw;
+            r.drawRect(sx, trackY, trackW, sbw, style.scrollbarTrackColor);
+            float tp, ts;
+            hScrollThumb(trackW, &tp, &ts);
+            float thumbW = sc(ts);
+            float thumbX = sx + sc(tp);
+            if (thumbX < sx) thumbX = sx;
+            if (thumbX + thumbW > sx + trackW) thumbX = sx + trackW - thumbW;
+            float tr = radius;
+            if (tr > thumbW * 0.5f) tr = thumbW * 0.5f;
+            if (tr < 0.5f) tr = 0.5f;
+            fillRadii(sbRadii, tr);
+            r.drawRoundedRect(thumbX, trackY, thumbW, sbw, sbRadii, style.scrollbarThumbColor);
+        }
     }
 #endif
 };

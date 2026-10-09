@@ -44,7 +44,7 @@ struct TestNode : MorphNode
     void executeDisplayList(Renderer&) override
     {
     }
-    int flatten(RenderFrame&, int, float = 0.0f) override
+    int flatten(RenderFrame&, int, float = 0.0f, float = 0.0f) override
     {
         return 0;
     }

@@ -167,8 +167,11 @@ void MorphNode::syncPaintDirtyAfterLayout() {
         m_lastPaintX = x; m_lastPaintY = y;
         m_lastPaintW = w; m_lastPaintH = h;
         m_lastPaintContentH = contentH;
+        m_lastPaintContentW = contentW;
+        m_lastPaintScrollX = scrollX;
         m_lastPaintScrollY = scrollY;
-        m_lastPaintScrollEnabled = scrollEnabled;
+        m_lastPaintScrollXEnabled = scrollXEnabled;
+        m_lastPaintScrollYEnabled = scrollYEnabled;
         return;
     }
     // A node whose absolute box (or scrollport) moved during layout must
@@ -178,14 +181,20 @@ void MorphNode::syncPaintDirtyAfterLayout() {
     if (x != m_lastPaintX || y != m_lastPaintY ||
         w != m_lastPaintW || h != m_lastPaintH ||
         contentH != m_lastPaintContentH ||
-        scrollEnabled != m_lastPaintScrollEnabled ||
+        contentW != m_lastPaintContentW ||
+        scrollXEnabled != m_lastPaintScrollXEnabled ||
+        scrollYEnabled != m_lastPaintScrollYEnabled ||
+        scrollX != m_lastPaintScrollX ||
         scrollY != m_lastPaintScrollY) {
         markDirty(PaintDirty);
         m_lastPaintX = x; m_lastPaintY = y;
         m_lastPaintW = w; m_lastPaintH = h;
         m_lastPaintContentH = contentH;
+        m_lastPaintContentW = contentW;
+        m_lastPaintScrollX = scrollX;
         m_lastPaintScrollY = scrollY;
-        m_lastPaintScrollEnabled = scrollEnabled;
+        m_lastPaintScrollXEnabled = scrollXEnabled;
+        m_lastPaintScrollYEnabled = scrollYEnabled;
     }
 }
 #endif

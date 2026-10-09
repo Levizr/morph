@@ -24,7 +24,9 @@ namespace forge
 struct PrevRect
 {
     DamageRect m_box;
+    float m_scrollX = 0;
     float m_scrollY = 0;
+    float m_contentW = 0;
     float m_contentH = 0;
 };
 
@@ -284,17 +286,30 @@ static DamageRect thumbRect(int x, int y, int w, int h, float scrollY, float con
     return {x + w - bar, (int)thumbY, bar + 1, (int)(thumbH + 1.0f)};
 }
 
-// Screen-space Y of a node: root-space Y minus every scrolling ancestor's
-// offset. This is the same rule renderNode uses when drawing (scrolling ==
-// scrollEnabled with taller content), so commit-time damage and
+// Screen-space X/Y of a node: root-space minus every scrolling ancestor's
+// offset. This is the same rule renderNode uses when drawing (an axis
+// scrolls only when its content overflows), so commit-time damage and
 // present-time culling share one coordinate space. Without it, partial
 // damage over scrolled content both clears and culls the wrong region.
+static float screenXOf(MorphNode* node)
+{
+    float sx = node->x;
+    for (MorphNode* p = node->parent; p; p = p->parent)
+    {
+        if (p->scrollXEnabled && p->contentW > p->w)
+        {
+            sx -= p->scrollX;
+        }
+    }
+    return sx;
+}
+
 static float screenYOf(MorphNode* node)
 {
     float sy = node->y;
     for (MorphNode* p = node->parent; p; p = p->parent)
     {
-        if (p->scrollEnabled && p->contentH > p->h)
+        if (p->scrollYEnabled && p->contentH > p->h)
         {
             sy -= p->scrollY;
         }
@@ -305,7 +320,7 @@ static float screenYOf(MorphNode* node)
 // Screen-space box of a node (no ancestor expansion).
 static DamageRect nodeScreenBox(MorphNode* node)
 {
-    return {static_cast<int>(node->x), static_cast<int>(screenYOf(node)),
+    return {static_cast<int>(screenXOf(node)), static_cast<int>(screenYOf(node)),
             static_cast<int>(node->w), static_cast<int>(node->h)};
 }
 
@@ -317,9 +332,9 @@ static void damageNodeScreen(DamageSet& damage, MorphNode* node)
     damage.add(nodeScreenBox(node));
     for (MorphNode* a = node->parent; a; a = a->parent)
     {
-        if (a->scrollEnabled)
+        if (a->scrollXEnabled || a->scrollYEnabled)
         {
-            damage.add({static_cast<int>(a->x), static_cast<int>(screenYOf(a)),
+            damage.add({static_cast<int>(screenXOf(a)), static_cast<int>(screenYOf(a)),
                         static_cast<int>(a->w), static_cast<int>(a->h)});
         }
     }
@@ -331,7 +346,7 @@ static void damageNodeScreen(DamageSet& damage, MorphNode* node)
 // offset (nested shifts fall back to full-container damage).
 static bool shiftSafeAncestors(MorphNode* node)
 {
-    int contX = static_cast<int>(node->x);
+    int contX = static_cast<int>(screenXOf(node));
     int contY = static_cast<int>(screenYOf(node));
     int contR = contX + static_cast<int>(node->w);
     int contB = contY + static_cast<int>(node->h);
@@ -347,13 +362,18 @@ static bool shiftSafeAncestors(MorphNode* node)
             return false;
         }
 #endif
-        if (p->scrollEnabled && p->contentH > p->h && p->scrollY != 0.0f)
+        if (p->scrollYEnabled && p->contentH > p->h && p->scrollY != 0.0f)
         {
             return false;
         }
-        if (p->style.overflow != CSS::Overflow::Visible)
+        if (p->scrollXEnabled && p->contentW > p->w && p->scrollX != 0.0f)
         {
-            int ancX = static_cast<int>(p->x);
+            return false;
+        }
+        if (p->style.overflowX != CSS::Overflow::Visible ||
+            p->style.overflowY != CSS::Overflow::Visible)
+        {
+            int ancX = static_cast<int>(screenXOf(p));
             int ancY = static_cast<int>(screenYOf(p));
             int ancR = ancX + static_cast<int>(p->w);
             int ancB = ancY + static_cast<int>(p->h);
@@ -446,18 +466,24 @@ void forgeCommit(MorphWindow& win)
         walkTree(win.root(), [&](MorphNode* node) {
             auto it = state.m_prevRects.find(node);
             bool boxChanged = it == state.m_prevRects.end();
+            float oldScrollX = 0.0f;
             float oldScrollY = 0.0f;
+            float oldContentW = 0.0f;
             float oldContentH = 0.0f;
             if (!boxChanged)
             {
                 const PrevRect& prev = it->second;
+                oldScrollX = prev.m_scrollX;
                 oldScrollY = prev.m_scrollY;
+                oldContentW = prev.m_contentW;
                 oldContentH = prev.m_contentH;
                 boxChanged = (static_cast<int>(node->x) != prev.m_box.x ||
                               static_cast<int>(node->y) != prev.m_box.y ||
                               static_cast<int>(node->w) != prev.m_box.w ||
                               static_cast<int>(node->h) != prev.m_box.h ||
+                              static_cast<int>(node->scrollX) != static_cast<int>(prev.m_scrollX) ||
                               static_cast<int>(node->scrollY) != static_cast<int>(prev.m_scrollY) ||
+                              static_cast<int>(node->contentW) != static_cast<int>(prev.m_contentW) ||
                               static_cast<int>(node->contentH) != static_cast<int>(prev.m_contentH));
             }
             if (boxChanged)
@@ -467,12 +493,17 @@ void forgeCommit(MorphWindow& win)
                 int scrW = static_cast<int>(node->w);
                 int scrH = static_cast<int>(node->h);
                 bool scrollOnly = false;
-                if (it != state.m_prevRects.end() && node->scrollEnabled &&
+                if (it != state.m_prevRects.end() && node->scrollYEnabled &&
                     static_cast<int>(node->x) == it->second.m_box.x &&
                     static_cast<int>(node->y) == it->second.m_box.y &&
                     static_cast<int>(node->w) == it->second.m_box.w &&
                     static_cast<int>(node->h) == it->second.m_box.h &&
                     static_cast<int>(node->contentH) == static_cast<int>(oldContentH) &&
+                    // The vertical shift fast path only handles pure-Y
+                    // scrolls; any horizontal movement falls through to a
+                    // full repaint below.
+                    static_cast<int>(node->scrollX) == static_cast<int>(oldScrollX) &&
+                    static_cast<int>(node->contentW) == static_cast<int>(oldContentW) &&
                     paintBefore.count(node) == 0 && shiftSafeAncestors(node))
                 {
                     bool rounded = !node->style.borderRadius.isZero();
@@ -630,7 +661,9 @@ void forgeCommit(MorphWindow& win)
                       static_cast<int>(node->y),
                       static_cast<int>(node->w),
                       static_cast<int>(node->h)};
+        prev.m_scrollX = node->scrollX;
         prev.m_scrollY = node->scrollY;
+        prev.m_contentW = node->contentW;
         prev.m_contentH = node->contentH;
         state.m_prevRects[node] = prev;
     });
@@ -751,7 +784,7 @@ void forgePresent(MorphWindow& win, std::function<void(GLRenderer&, DirtyStats&)
                     break;
                 }
                 const auto& parent = frame->nodes[static_cast<size_t>(p)];
-                if (parent.scrollEnabled && parent.contentH > parent.h)
+                if (parent.scrollYEnabled && parent.contentH > parent.h)
                 {
                     screenY -= parent.scrollY;
                 }

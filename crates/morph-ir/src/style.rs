@@ -117,7 +117,8 @@ pub struct IRStyle {
     pub align_self: String,
     pub flex_wrap: String,
     pub cursor: String,
-    pub overflow: String,
+    pub overflow_x: String,
+    pub overflow_y: String,
     pub border_width: Length,
     pub border_color: [f32; 4],
     pub border_style: String,
@@ -168,7 +169,8 @@ impl IRStyle {
             justify_content: "flex-start".to_string(),
             align_items: "stretch".to_string(),
             align_self: "auto".to_string(),
-            overflow: "visible".to_string(),
+            overflow_x: "visible".to_string(),
+            overflow_y: "visible".to_string(),
             opacity: 1.0,
             border_style: "none".to_string(),
             box_sizing: "content-box".to_string(),
@@ -237,7 +239,8 @@ impl IRStyle {
             && self.align_self == "auto"
             && self.flex_wrap == "nowrap"
             && self.cursor == "default"
-            && self.overflow == "visible"
+            && self.overflow_x == "visible"
+            && self.overflow_y == "visible"
             && self.box_sizing == "content-box"
             && self.opacity == 1.0
             && self.z_index.is_none()

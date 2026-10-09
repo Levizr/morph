@@ -372,8 +372,10 @@ static void applyStyle(MorphStyle& s, const JsonValue& styleVal) {
         s.textAlign = CSS::parseTextAlign(styleVal["text_align"].asString());
     if (!styleVal["display"].isNull())
         s.display = CSS::parseDisplay(styleVal["display"].asString());
-    if (!styleVal["overflow"].isNull())
-        s.overflow = CSS::parseOverflow(styleVal["overflow"].asString());
+    if (!styleVal["overflow-x"].isNull())
+        s.overflowX = CSS::parseOverflow(styleVal["overflow-x"].asString());
+    if (!styleVal["overflow-y"].isNull())
+        s.overflowY = CSS::parseOverflow(styleVal["overflow-y"].asString());
     if (!styleVal["position"].isNull())
         s.position = CSS::parsePosition(styleVal["position"].asString());
     if (!styleVal["cursor"].isNull())

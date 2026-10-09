@@ -101,6 +101,7 @@ pub(crate) fn style_enum_literal(prop: &str, value: &str) -> Option<&'static str
         ("borderStyle", "outset") => Some("CSS::BorderStyle::Outset"),
         ("overflow", "visible") => Some("CSS::Overflow::Visible"),
         ("overflow", "hidden") => Some("CSS::Overflow::Hidden"),
+        ("overflow", "clip") => Some("CSS::Overflow::Clip"),
         ("overflow", "scroll") => Some("CSS::Overflow::Scroll"),
         ("overflow", "auto") => Some("CSS::Overflow::Auto"),
         ("boxSizing", "content-box") => Some("CSS::BoxSizing::ContentBox"),
@@ -133,7 +134,7 @@ fn keyword_literal(field: &str, value: &str) -> Option<&'static str> {
         "borderRightStyle" => ("borderStyle", "CSS::BorderStyle::None"),
         "borderBottomStyle" => ("borderStyle", "CSS::BorderStyle::None"),
         "borderLeftStyle" => ("borderStyle", "CSS::BorderStyle::None"),
-        "overflow" => ("overflow", "CSS::Overflow::Visible"),
+        "overflow" | "overflow-x" | "overflow-y" => ("overflow", "CSS::Overflow::Visible"),
         "boxSizing" => ("boxSizing", "CSS::BoxSizing::ContentBox"),
         _ => return None,
     };
@@ -1404,9 +1405,13 @@ fn set_style(
     if let Some(v) = s.max_height {
         lines.extend(emit_length(&format!("{ind}.maxHeight"), v));
     }
-    if s.overflow != "visible" {
-        let lit = keyword_literal("overflow", &s.overflow).unwrap();
-        lines.push(format!("{ind}.overflow = {lit};"));
+    if s.overflow_x != "visible" {
+        let lit = keyword_literal("overflow-x", &s.overflow_x).unwrap();
+        lines.push(format!("{ind}.overflowX = {lit};"));
+    }
+    if s.overflow_y != "visible" {
+        let lit = keyword_literal("overflow-y", &s.overflow_y).unwrap();
+        lines.push(format!("{ind}.overflowY = {lit};"));
     }
     if s.display != "block" {
         let lit = keyword_literal("display", &s.display).unwrap();
@@ -1949,9 +1954,13 @@ fn emit_hover_style(
         let lit = style_enum_literal("display", &s.display).unwrap_or("CSS::Display::Block");
         o.push(format!("{hv}->display = {lit};"));
     }
-    if s.overflow != "visible" && s.overflow != base.overflow {
-        let lit = keyword_literal("overflow", &s.overflow).unwrap();
-        o.push(format!("{hv}->overflow = {lit};"));
+    if s.overflow_x != "visible" && s.overflow_x != base.overflow_x {
+        let lit = keyword_literal("overflow-x", &s.overflow_x).unwrap();
+        o.push(format!("{hv}->overflowX = {lit};"));
+    }
+    if s.overflow_y != "visible" && s.overflow_y != base.overflow_y {
+        let lit = keyword_literal("overflow-y", &s.overflow_y).unwrap();
+        o.push(format!("{hv}->overflowY = {lit};"));
     }
     if s.position != "static" && s.position != base.position {
         let lit = style_enum_literal("position", &s.position).unwrap_or("CSS::Position::Static");
@@ -2466,7 +2475,8 @@ pub(crate) fn css_to_style_field(css_prop: &str) -> Option<(&'static str, &'stat
         "cursor" => ("cursor", "string"),
         "border-style" => ("borderStyle", "string"),
         "box-sizing" => ("boxSizing", "string"),
-        "overflow" => ("overflow", "string"),
+        "overflow-x" => ("overflowX", "string"),
+        "overflow-y" => ("overflowY", "string"),
         "position" => ("position", "string"),
         "flex-basis" => ("flexBasis", "string"),
         "transform" => ("transform", "transform"),
@@ -2551,7 +2561,8 @@ pub(crate) fn css_field_reset(node_var: &str, field_name: &str, indent: &str) ->
         "cursor" => vec![format!("{indent}        {prefix} = CSS::Cursor::Default;")],
         "borderStyle" => vec![format!("{indent}        {prefix} = CSS::BorderStyle::None;")],
         "boxSizing" => vec![format!("{indent}        {prefix} = CSS::BoxSizing::ContentBox;")],
-        "overflow" => vec![format!("{indent}        {prefix} = CSS::Overflow::Visible;")],
+        "overflowX" => vec![format!("{indent}        {prefix} = CSS::Overflow::Visible;")],
+        "overflowY" => vec![format!("{indent}        {prefix} = CSS::Overflow::Visible;")],
         "position" => vec![format!("{indent}        {prefix} = CSS::Position::Static;")],
         "flexBasis" => vec![format!("{indent}        {prefix} = \"auto\";")],
         _ => vec![],
@@ -2662,11 +2673,29 @@ pub(crate) fn css_val_to_cpp(
     if css_prop == "padding" || css_prop == "margin" {
         return box_shorthand_to_cpp(node_var, css_prop, css_val, indent);
     }
+    if css_prop == "overflow" {
+        // Shorthand sets both axes (one value) or x then y (two values),
+        // mirroring the IR builder; unknown keywords drop the declaration.
+        let parts: Vec<&str> = css_val.split_whitespace().collect();
+        let axis = |v: &str| keyword_literal("overflow", v.trim());
+        let mut out = vec![];
+        if parts.len() == 1 {
+            if let Some(lit) = axis(parts[0]) {
+                out.push(format!("{indent}        {node_var}->style.overflowX = {lit};"));
+                out.push(format!("{indent}        {node_var}->style.overflowY = {lit};"));
+            }
+        } else if parts.len() == 2 {
+            if let (Some(x), Some(y)) = (axis(parts[0]), axis(parts[1])) {
+                out.push(format!("{indent}        {node_var}->style.overflowX = {x};"));
+                out.push(format!("{indent}        {node_var}->style.overflowY = {y};"));
+            }
+        }
+        return out;
+    }
     if css_prop == "overflow-x" || css_prop == "overflow-y" {
-        // The runtime tracks a single overflow mode; single-axis values
-        // apply to it exactly like `overflow`.
-        if let Some(lit) = keyword_literal("overflow", css_val.trim()) {
-            return vec![format!("{indent}        {node_var}->style.overflow = {lit};")];
+        let field = if css_prop == "overflow-x" { "overflowX" } else { "overflowY" };
+        if let Some(lit) = keyword_literal(css_prop, css_val.trim()) {
+            return vec![format!("{indent}        {node_var}->style.{field} = {lit};")];
         }
         return vec![];
     }
@@ -3147,6 +3176,7 @@ mod tests {
         assert_eq!(style_enum_literal("borderStyle", "none"), Some("CSS::BorderStyle::None"));
         assert_eq!(style_enum_literal("overflow", "auto"), Some("CSS::Overflow::Auto"));
         assert_eq!(style_enum_literal("overflow", "visible"), Some("CSS::Overflow::Visible"));
+        assert_eq!(style_enum_literal("overflow", "clip"), Some("CSS::Overflow::Clip"));
         assert_eq!(
             style_enum_literal("boxSizing", "border-box"),
             Some("CSS::BoxSizing::BorderBox")
@@ -3174,6 +3204,8 @@ mod tests {
         assert!(keyword_literal("display", "flex").is_some());
         assert!(keyword_literal("position", "fixed").is_some());
         assert!(keyword_literal("overflow", "auto").is_some());
+        assert!(keyword_literal("overflow-x", "hidden").is_some());
+        assert!(keyword_literal("overflow-y", "clip").is_some());
         assert!(keyword_literal("cursor", "pointer").is_some());
         assert!(keyword_literal("flexDirection", "column").is_some());
         // Behavioral fallbacks for unknown values.

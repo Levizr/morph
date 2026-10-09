@@ -318,13 +318,17 @@ int addNode(RenderFrame& frame, int parentId, float x, float y, float w, float h
     node.boxSizing = CSS::BoxSizing::ContentBox;
     node.display = CSS::Display::Block;
     node.position = CSS::Position::Static;
-    node.overflow = CSS::Overflow::Visible;
+    node.overflowX = CSS::Overflow::Visible;
+    node.overflowY = CSS::Overflow::Visible;
     node.fontSize = 16.0f;
     node.textAlign = CSS::TextAlign::Left;
     node.fontWeight = CSS::FontWeight::Normal;
+    node.scrollX = 0.0f;
     node.scrollY = 0.0f;
+    node.contentW = 0.0f;
     node.contentH = 0.0f;
-    node.scrollEnabled = false;
+    node.scrollXEnabled = false;
+    node.scrollYEnabled = false;
     node.scrollbarWidth = 8.0f;
     node.scrollbarTrackColor[0] = 0.85f;
     node.scrollbarTrackColor[1] = 0.85f;
@@ -386,12 +390,14 @@ void buildScene(RenderFrame& frame, float scrollY)
     if (scrollY < 0.0f)
     {
         // Static control: no clipping, no scrolling.
-        frame.nodes[(size_t)list].overflow = CSS::Overflow::Visible;
+        frame.nodes[(size_t)list].overflowX = CSS::Overflow::Visible;
+        frame.nodes[(size_t)list].overflowY = CSS::Overflow::Visible;
     }
     else
     {
-        frame.nodes[(size_t)list].overflow = CSS::Overflow::Hidden;
-        frame.nodes[(size_t)list].scrollEnabled = true;
+        frame.nodes[(size_t)list].overflowX = CSS::Overflow::Visible;
+        frame.nodes[(size_t)list].overflowY = CSS::Overflow::Hidden;
+        frame.nodes[(size_t)list].scrollYEnabled = true;
         frame.nodes[(size_t)list].scrollY = scrollY;
     }
     frame.nodes[(size_t)list].contentH = 540.0f;

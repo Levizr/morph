@@ -201,7 +201,8 @@ impl IRSerializer {
         out.insert("flex_shrink".to_string(), num(s.flex_shrink));
         out.insert("flex_basis".to_string(), Value::String(s.flex_basis.clone()));
         out.insert("gap".to_string(), length(s.gap));
-        out.insert("overflow".to_string(), Value::String(s.overflow.clone()));
+        out.insert("overflow-x".to_string(), Value::String(s.overflow_x.clone()));
+        out.insert("overflow-y".to_string(), Value::String(s.overflow_y.clone()));
         out.insert("position".to_string(), Value::String(s.position.clone()));
         out.insert("left".to_string(), opt_length(s.left));
         out.insert("right".to_string(), opt_length(s.right));

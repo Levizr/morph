@@ -17,7 +17,7 @@ static float flatScreenY(const RenderFrame* frame, int idx)
             break;
         }
         const auto& parent = frame->nodes[(size_t)p];
-        if (parent.scrollEnabled && parent.contentH > parent.h)
+        if (parent.scrollYEnabled && parent.contentH > parent.h)
         {
             sy -= parent.scrollY;
         }
@@ -78,8 +78,9 @@ bool tryMoverLayer(const RenderFrame* frame, int& outIdx, MoverLayerGates& gates
     g.m_hasRadius = node.borderRadius > 0.0f;
     g.m_hasBorder =
         node.borderWidth > 0.0f && node.borderStyle != CSS::BorderStyle::None;
-    g.m_overflowVisible = node.overflow == CSS::Overflow::Visible;
-    g.m_scrollEnabled = node.scrollEnabled;
+    g.m_overflowVisible = node.overflowX == CSS::Overflow::Visible &&
+                            node.overflowY == CSS::Overflow::Visible;
+    g.m_scrollEnabled = node.scrollXEnabled || node.scrollYEnabled;
     g.m_hasLayoutTransition = node.hasLayoutTransition;
 #ifdef MORPH_FEATURE_TRANSFORM
     g.m_transformed = node.transformSet;
@@ -139,11 +140,13 @@ bool tryMoverLayer(const RenderFrame* frame, int& outIdx, MoverLayerGates& gates
             g.m_ancestorTransformed = true;
         }
 #endif
-        if (parent.scrollEnabled && parent.contentH > parent.h)
+        if ((parent.scrollYEnabled && parent.contentH > parent.h) ||
+            (parent.scrollXEnabled && parent.contentW > parent.w))
         {
             g.m_ancestorScrolled = true;
         }
-        if (parent.overflow != CSS::Overflow::Visible)
+        if (parent.overflowX != CSS::Overflow::Visible ||
+            parent.overflowY != CSS::Overflow::Visible)
         {
             g.m_ancestorClipped = true;
         }

@@ -202,7 +202,7 @@ static void testStickyScroller()
 {
     LayoutNode holder;
     LayoutNode* scroller = makeBox(-1.0f, 100.0f);
-    scroller->style.overflow = CSS::Overflow::Scroll;
+    scroller->style.overflowY = CSS::Overflow::Scroll;
     LayoutNode* sticky = makeBox(-1.0f, 40.0f);
     sticky->style.position = CSS::Position::Sticky;
     sticky->style.top.value = 0.0f;
@@ -211,7 +211,7 @@ static void testStickyScroller()
     attach(scroller, sticky);
     attach(scroller, tall);
     holder.layout(0.0f, 0.0f, 800.0f, 600.0f, nullptr);
-    CHECK(scroller->scrollEnabled, "tall content enables scroll");
+    CHECK(scroller->scrollYEnabled, "tall content enables scroll");
     CHECK(near(sticky->y, scroller->y), "sticky rests at flow slot");
     scroller->scrollY = 50.0f;
     scroller->updateStickySubtree();
@@ -224,13 +224,13 @@ static void testFixedExemption()
 {
     LayoutNode holder;
     LayoutNode* scroller = makeBox(-1.0f, 100.0f);
-    scroller->style.overflow = CSS::Overflow::Scroll;
+    scroller->style.overflowY = CSS::Overflow::Scroll;
     LayoutNode* tall = makeBox(-1.0f, 300.0f);
     LayoutNode* fixed = makeBox(100.0f, 40.0f);
     fixed->style.position = CSS::Position::Fixed;
     fixed->style.top.value = 10.0f;
     fixed->style.left.value = 10.0f;
-    fixed->style.overflow = CSS::Overflow::Hidden;
+    fixed->style.overflowY = CSS::Overflow::Hidden;
     attach(&holder, scroller);
     attach(scroller, tall);
     attach(scroller, fixed);

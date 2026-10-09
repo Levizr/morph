@@ -119,7 +119,8 @@ static void applyStyleDelta(MorphStyle& target, const MorphStyle& delta) {
     if (delta.fontWeight != CSS::FontWeight::Normal) target.fontWeight = delta.fontWeight;
     if (delta.textAlign != CSS::TextAlign::Left) target.textAlign = delta.textAlign;
     if (delta.display != CSS::Display::Block) target.display = delta.display;
-    if (delta.overflow != CSS::Overflow::Visible)  target.overflow = delta.overflow;
+    if (delta.overflowX != CSS::Overflow::Visible) target.overflowX = delta.overflowX;
+    if (delta.overflowY != CSS::Overflow::Visible) target.overflowY = delta.overflowY;
     if (delta.position != CSS::Position::Static) target.position = delta.position;
     if (delta.boxSizing != CSS::BoxSizing::ContentBox) target.boxSizing = delta.boxSizing;
     if (!delta.padding[0].isZero() || !delta.padding[1].isZero() || !delta.padding[2].isZero() || !delta.padding[3].isZero())
@@ -285,7 +286,8 @@ static void buildReleaseStyle(MorphStyle& target, const MorphStyle& current,
     SCALAR_REVERT(fontWeight);
     SCALAR_REVERT(textAlign);
     SCALAR_REVERT(display);
-    SCALAR_REVERT(overflow);
+    SCALAR_REVERT(overflowX);
+    SCALAR_REVERT(overflowY);
     SCALAR_REVERT(position);
     SCALAR_REVERT(boxSizing);
     SCALAR_REVERT(explicitWidth);
@@ -669,7 +671,8 @@ void MorphNode::interpolateStyles(MorphStyle& out, const MorphStyle& a,
     out.maxHeight = lerpLength(a.maxHeight, b.maxHeight);
 
     out.fontWeight = b.fontWeight;
-    out.overflow = b.overflow;
+    out.overflowX = b.overflowX;
+    out.overflowY = b.overflowY;
     out.display = b.display;
     out.position = b.position;
     out.textAlign = b.textAlign;

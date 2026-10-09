@@ -67,7 +67,8 @@ struct FlatRenderNode {
     BgGradient borderGrad;
 #endif
 
-    CSS::Overflow overflow = CSS::Overflow::Visible;
+    CSS::Overflow overflowX = CSS::Overflow::Visible;
+    CSS::Overflow overflowY = CSS::Overflow::Visible;
     CSS::BoxSizing boxSizing = CSS::BoxSizing::ContentBox;
     CSS::Display display = CSS::Display::Block;
     CSS::Position position = CSS::Position::Static;
@@ -82,9 +83,12 @@ struct FlatRenderNode {
     CSS::FontWeight fontWeight = CSS::FontWeight::Normal;
 
     // Scroll
+    float scrollX;
     float scrollY;
+    float contentW;
     float contentH;
-    bool scrollEnabled;
+    bool scrollXEnabled;
+    bool scrollYEnabled;
     float scrollbarWidth;
     float scrollbarTrackColor[4];
     float scrollbarThumbColor[4];

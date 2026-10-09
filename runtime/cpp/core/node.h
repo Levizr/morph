@@ -176,7 +176,7 @@ public:
     }
     MorphNode* nearestScrollContainer() {
         for (MorphNode* p = parent; p; p = p->parent)
-            if (p->scrollEnabled) return p;
+            if (p->scrollXEnabled || p->scrollYEnabled) return p;
         return nullptr;
     }
     void applySticky();
@@ -213,18 +213,65 @@ public:
     // siblings like "Cheers: " and "0" on slightly different baselines).
     bool m_centerInk = true;
     NodeType type = NodeType::Div;
-    // Scroll state (always present — zero overhead when unused)
+    // Scroll state (always present — zero overhead when unused).
+    // Both axes scroll independently like browsers: vertical uses scrollY
+    // against contentH, horizontal uses scrollX against contentW.
+    float scrollX = 0;
     float scrollY = 0;
+    float contentW = 0;
     float contentH = 0;
-    bool scrollEnabled = false;
+    bool scrollXEnabled = false;
+    bool scrollYEnabled = false;
     bool scrollThumbHover = false;
     bool scrollDragging = false;
+    // Drag axis: false = vertical thumb, true = horizontal thumb.
+    bool scrollDragX = false;
+    float scrollDragStartX = 0;
     float scrollDragStartY = 0;
     float scrollDragStartVal = 0;
-    // Advance an in-progress thumb drag to the given y (window coords).
+    // Advance an in-progress thumb drag to the given point (window coords).
     // Absolute from the grab point, so out-of-box/out-of-window moves
     // through the capture path land exactly where the cursor is.
-    void scrollDragTo(float ey);
+    void scrollDragTo(float ex, float ey);
+    // Wheel scroll for one chaining level: consumes scrollable axes into
+    // the event, leaving the remainder for ancestors (see events.cpp).
+    void scrollWheel(MorphEvent& e);
+    // Scroll/clip predicates shared by the retained (window) and immediate
+    // (ui/) render paths, resolved against the given box size. Unconditional:
+    // the state they read costs nothing when scrolling is unused.
+    bool scrollsVertically(float boxH) const { return scrollYEnabled && contentH > boxH; }
+    bool scrollsHorizontally(float boxW) const { return scrollXEnabled && contentW > boxW; }
+    bool clipsOverflowBox() const {
+        return CSS::clipsOverflow(style.overflowX) || CSS::clipsOverflow(style.overflowY);
+    }
+    float effScrollX(float boxW) const { return scrollsHorizontally(boxW) ? scrollX : 0.0f; }
+    float effScrollY(float boxH) const { return scrollsVertically(boxH) ? scrollY : 0.0f; }
+    // Scrollbar thumb for a track of length trackLen (window coords):
+    // outputs clamp into [0, trackLen] and fill the track when content
+    // fits (overflow:scroll without overflow). Single source of truth
+    // for paint and hit-testing geometry.
+    void hScrollThumb(float trackLen, float* pos, float* size) const {
+        float t = (contentW > 0.0f) ? (trackLen / contentW) * trackLen : trackLen;
+        if (t > trackLen) t = trackLen;
+        float p = 0.0f;
+        if (scrollXEnabled && contentW > w)
+            p = (scrollX / (contentW - w)) * (trackLen - t);
+        if (p < 0.0f) p = 0.0f;
+        if (p + t > trackLen) p = trackLen - t;
+        *pos = p;
+        *size = t;
+    }
+    void vScrollThumb(float trackLen, float* pos, float* size) const {
+        float t = (contentH > 0.0f) ? (trackLen / contentH) * trackLen : trackLen;
+        if (t > trackLen) t = trackLen;
+        float p = 0.0f;
+        if (scrollYEnabled && contentH > h)
+            p = (scrollY / (contentH - h)) * (trackLen - t);
+        if (p < 0.0f) p = 0.0f;
+        if (p + t > trackLen) p = trackLen - t;
+        *pos = p;
+        *size = t;
+    }
 
     // True while this node has an active hover/programmatic transition (no propagation)
     bool m_isTransitioning = false;
@@ -255,8 +302,11 @@ public:
     float m_lastPaintX = 0.0f, m_lastPaintY = 0.0f;
     float m_lastPaintW = 0.0f, m_lastPaintH = 0.0f;
     float m_lastPaintContentH = 0.0f;
+    float m_lastPaintContentW = 0.0f;
+    float m_lastPaintScrollX = 0.0f;
     float m_lastPaintScrollY = 0.0f;
-    bool m_lastPaintScrollEnabled = false;
+    bool m_lastPaintScrollXEnabled = false;
+    bool m_lastPaintScrollYEnabled = false;
     bool m_hasPaintedOnce = false;
     void syncPaintDirtyAfterLayout();
 #endif
@@ -373,9 +423,11 @@ public:
         evt.set("clientY", JsNumber(e.y));
         evt.set("offsetX", JsNumber(e.x - x));
         evt.set("offsetY", JsNumber(e.y - y));
+        float pageX = e.x;
         float pageY = e.y;
         for (MorphNode* p = parent; p; p = p->parent) pageY += p->scrollY;
-        evt.set("pageX", JsNumber(e.x));
+        for (MorphNode* p = parent; p; p = p->parent) pageX += p->scrollX;
+        evt.set("pageX", JsNumber(pageX));
         evt.set("pageY", JsNumber(pageY));
         const auto ms = std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -388,7 +440,7 @@ public:
         evt.set("repeat", JsBoolean(e.repeat));
         evt.set("scroll", JsNumber(e.scroll));
         evt.set("deltaY", JsNumber(e.scroll));
-        evt.set("deltaX", JsNumber(0));
+        evt.set("deltaX", JsNumber(e.scrollX));
         evt.set("ctrlKey", JsBoolean((e.mods & 0x02) != 0));
         evt.set("shiftKey", JsBoolean((e.mods & 0x01) != 0));
         evt.set("altKey", JsBoolean((e.mods & 0x04) != 0));
@@ -598,12 +650,13 @@ public:
 
     // Flatten into a lock-free render frame for the compositor thread
     virtual int flatten(RenderFrame& frame, int parentId,
-                        float scrollOffset = 0.0f);
+                        float scrollOffset = 0.0f, float scrollOffsetX = 0.0f);
     // Recursive flatten with the accumulated parent transform matrix
     // (identity when MORPH_FEATURE_TRANSFORM is off or no ancestor
     // carries a transform) and the accumulated parent opacity product.
     int flattenImpl(RenderFrame& frame, int parentId, float scrollOffset,
-                    const float* parentAcc, float parentOpacity);
+                    const float* parentAcc, float parentOpacity,
+                    float scrollOffsetX = 0.0f);
     virtual int flattenExtra(RenderFrame& frame, FlatRenderNode& fn);
 
 #ifdef MORPH_FEATURE_TRANSFORM

@@ -28,16 +28,16 @@ bool MorphNode::subtreeMayMove() const {
     return false;
 }
 
-int MorphNode::flatten(RenderFrame& frame, int parentId, float scrollOffset) {
+int MorphNode::flatten(RenderFrame& frame, int parentId, float scrollOffset, float scrollOffsetX) {
     float identity[16];
 #ifdef MORPH_FEATURE_TRANSFORM
     morph::mat4Identity(identity);
 #endif
-    return flattenImpl(frame, parentId, scrollOffset, identity, 1.0f);
+    return flattenImpl(frame, parentId, scrollOffset, identity, 1.0f, scrollOffsetX);
 }
 
 int MorphNode::flattenImpl(RenderFrame& frame, int parentId, float scrollOffset,
-                           const float* parentAcc, float parentOpacity) {
+                           const float* parentAcc, float parentOpacity, float scrollOffsetX) {
 #ifdef MORPH_FEATURE_TRANSFORM
     // Accumulated model transform of this node, matching the renderer's push
     // order in renderNode():
@@ -87,12 +87,14 @@ int MorphNode::flattenImpl(RenderFrame& frame, int parentId, float scrollOffset,
     // Accumulated transform passed to children: A(child) = A(node) ×
     // S(node) × T(rel_child) × M(child) — the node's own scroll translate
     // composes between the node and its children, exactly like the
-    // renderer's pushScrollOffset(0, -scrollY) under the model path.
+    // renderer's pushScrollOffset(-scrollX, -scrollY) under the model path.
     float passAcc[16];
     {
-        float nodeScroll = (scrollEnabled && contentH > h) ? scrollY : 0.0f;
+        float nodeScroll = (scrollYEnabled && contentH > h) ? scrollY : 0.0f;
+        float nodeScrollX = (scrollXEnabled && contentW > w) ? scrollX : 0.0f;
         float s[16];
         morph::mat4Identity(s);
+        s[12] = -nodeScrollX;
         s[13] = -nodeScroll;
         morph::mat4Multiply(passAcc, acc, s);
     }
@@ -106,14 +108,15 @@ int MorphNode::flattenImpl(RenderFrame& frame, int parentId, float scrollOffset,
     // Off-screen culling: skip anything whose box is fully outside the scene
     // viewport. Node coords are absolute root-space but do NOT include scroll:
     // a scrolling ancestor shifts the whole subtree at draw time via
-    // pushScrollOffset(0, -scrollY). So the effective screen Y is
-    // y - scrollOffset, where scrollOffset accumulates the scrollY of every
-    // scrolling ancestor on the path (set per-child below).  When a transform
-    // is involved, the test uses the screen-space AABB of the transformed
-    // corners instead.
+    // pushScrollOffset(-scrollX, -scrollY). So the effective screen position
+    // is (x - scrollOffsetX, y - scrollOffset), where the offsets accumulate
+    // the scroll of every scrolling ancestor on the path (set per-child
+    // below).  When a transform is involved, the test uses the screen-space
+    // AABB of the transformed corners instead.
+    float sx = x - scrollOffsetX;
     float sy = y - scrollOffset;
     bool offscreen = frame.viewW > 0.0f && frame.viewH > 0.0f &&
-                     (x + w <= 0.0f || x >= frame.viewW ||
+                     (sx + w <= 0.0f || sx >= frame.viewW ||
                       sy + h <= 0.0f || sy >= frame.viewH);
 #ifdef MORPH_FEATURE_TRANSFORM
     float cullX = 0, cullY = 0, cullW = 0, cullH = 0;
@@ -144,8 +147,8 @@ int MorphNode::flattenImpl(RenderFrame& frame, int parentId, float scrollOffset,
 #endif
     if (offscreen)
     {
-        bool clips = style.overflow == CSS::Overflow::Hidden || style.overflow == CSS::Overflow::Scroll ||
-                     style.overflow == CSS::Overflow::Auto || !style.borderRadius.isZero() ||
+        bool clips = CSS::clipsOverflow(style.overflowX) || CSS::clipsOverflow(style.overflowY) ||
+                     !style.borderRadius.isZero() ||
                      style.borderTopLeftRadius.isSet() || style.borderTopRightRadius.isSet() ||
                      style.borderBottomRightRadius.isSet() || style.borderBottomLeftRadius.isSet();
         // Clipping nodes fully contain their descendants. If nothing in the
@@ -230,7 +233,8 @@ int MorphNode::flattenImpl(RenderFrame& frame, int parentId, float scrollOffset,
 #endif
     }
 
-    fn.overflow = style.overflow;
+    fn.overflowX = style.overflowX;
+    fn.overflowY = style.overflowY;
     fn.boxSizing = style.boxSizing;
     fn.display = style.display;
     fn.position = style.position;
@@ -240,9 +244,12 @@ int MorphNode::flattenImpl(RenderFrame& frame, int parentId, float scrollOffset,
     fn.textAlign = style.textAlign;
     fn.fontWeight = style.fontWeight;
 
+    fn.scrollX = scrollX;
     fn.scrollY = scrollY;
+    fn.contentW = contentW;
     fn.contentH = contentH;
-    fn.scrollEnabled = scrollEnabled;
+    fn.scrollXEnabled = scrollXEnabled;
+    fn.scrollYEnabled = scrollYEnabled;
     fn.scrollbarWidth = 8.0f;
     { float c[4] = {0.85f,0.85f,0.85f,0.4f}; memcpy(fn.scrollbarTrackColor, c, sizeof(float)*4); }
     { float c[4] = {0.5f,0.5f,0.5f,0.6f}; memcpy(fn.scrollbarThumbColor, c, sizeof(float)*4); }
@@ -346,36 +353,42 @@ int MorphNode::flattenImpl(RenderFrame& frame, int parentId, float scrollOffset,
     frame.nodes.push_back(fn);
 
     // Accumulate this node's scroll for descendants: matches the renderer's
-    // pushScrollOffset, which is applied only when the content overflows
-    // (scrollEnabled && contentH > h).
+    // pushScrollOffset, which offsets only when the content overflows
+    // (scrollXEnabled && contentW > w, scrollYEnabled && contentH > h).
     float childScroll = scrollOffset +
-                        (scrollEnabled && contentH > h ? scrollY : 0.0f);
+                        (scrollYEnabled && contentH > h ? scrollY : 0.0f);
+    float childScrollX = scrollOffsetX +
+                         (scrollXEnabled && contentW > w ? scrollX : 0.0f);
 
     for (auto* child : paintOrder()) {
         float cs = childScroll;
+        float csx = childScrollX;
         const float* childAcc = passAcc;
         bool exemptChild = false;
 #ifdef MORPH_FEATURE_POSITION
         // Viewport-locked fixed subtrees skip every ancestor scroll above
         // them (unless a transformed ancestor reframes them — then they
         // keep scrolling with its content, like today). Both the scalar
-        // cull coordinate and the matrix path (which bakes this level's
+        // cull coordinates and the matrix path (which bakes this level's
         // scroll translate into passAcc) shed this level's contribution.
         exemptChild = child->m_subtreeHasFixed && !child->hasTransformedAncestor();
-        if (exemptChild)
-            cs -= (scrollEnabled && contentH > h ? scrollY : 0.0f);
+        if (exemptChild) {
+            cs -= (scrollYEnabled && contentH > h ? scrollY : 0.0f);
+            csx -= (scrollXEnabled && contentW > w ? scrollX : 0.0f);
+        }
 #endif
 #ifdef MORPH_FEATURE_TRANSFORM
         float childAccBuf[16];
         if (exemptChild) {
             float inv[16];
             morph::mat4Identity(inv);
-            inv[13] = (scrollEnabled && contentH > h ? scrollY : 0.0f);
+            inv[12] = (scrollXEnabled && contentW > w ? scrollX : 0.0f);
+            inv[13] = (scrollYEnabled && contentH > h ? scrollY : 0.0f);
             morph::mat4Multiply(childAccBuf, passAcc, inv);
             childAcc = childAccBuf;
         }
 #endif
-        int childIdx = child->flattenImpl(frame, idx, cs, childAcc, opac);
+        int childIdx = child->flattenImpl(frame, idx, cs, childAcc, opac, csx);
         if (childIdx >= 0) {
             frame.nodes[idx].children.push_back(childIdx);
             if (frame.nodes[childIdx].hasFixedSubtree)

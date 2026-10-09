@@ -186,7 +186,8 @@ struct StyleBase {
     CssLength maxHeight;
 
     CSS::FontWeight fontWeight = CSS::FontWeight::Normal;
-    CSS::Overflow overflow = CSS::Overflow::Visible;
+    CSS::Overflow overflowX = CSS::Overflow::Visible;
+    CSS::Overflow overflowY = CSS::Overflow::Visible;
     CSS::Display display = CSS::Display::Block;
     CSS::Position position = CSS::Position::Static;
     CSS::TextAlign textAlign = CSS::TextAlign::Left;

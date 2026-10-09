@@ -1,0 +1,10 @@
+body { margin: 0; background: #0b1220; color: #e2e8f0; }
+.screen { display: flex; flex-direction: column; gap: 12px; padding: 16px; }
+.tall { height: 120px; padding: 8px; }
+.vscroll { background: #16213a; height: 140px; overflow-y: auto; color: #fff; }
+.outer { background: #16213a; height: 150px; overflow-y: auto; color: #fff; }
+.inner { background: #1f2b4d; height: 90px; overflow-y: auto; margin: 8px; color: #fff; }
+.hscroll { background: #16213a; height: 64px; overflow-x: auto; overflow-y: hidden; color: #fff; }
+.widerow { display: flex; flex-direction: row; gap: 8px; width: 1000px; padding: 8px; }
+.cell { width: 200px; background: #a855f7; padding: 8px; }
+.clipbox { background: #16213a; height: 60px; overflow: hidden; color: #fff; }
