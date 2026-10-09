@@ -72,6 +72,11 @@ struct FlatRenderNode {
     CSS::Display display = CSS::Display::Block;
     CSS::Position position = CSS::Position::Static;
 
+    // True when this node is (or contains) position:fixed. Fixed subtrees
+    // render viewport-locked: exempt from ancestor scroll offsets and
+    // overflow clips (unless locked by a transformed ancestor).
+    bool hasFixedSubtree = false;
+
     float fontSize;
     CSS::TextAlign textAlign = CSS::TextAlign::Left;
     CSS::FontWeight fontWeight = CSS::FontWeight::Normal;

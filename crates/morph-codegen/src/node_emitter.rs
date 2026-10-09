@@ -1,4 +1,4 @@
-use morph_ir::{IRNode, IRStyle};
+use morph_ir::{IRNode, IRStyle, Length};
 use std::fmt::Write as _;
 
 /// Handler bodies mentioning window constructs (`new Window(…)` /
@@ -197,6 +197,99 @@ fn color4(c: &[f32; 4]) -> String {
 /// `node_1->style.bgGradient.` or `node_1->hoverStyle->bgGradient.`
 /// (feature: gradient). Field names mirror `BgGradient` in
 /// `runtime/cpp/style/features/gradient.h`.
+/// Emit assignments for a `Length` into a runtime `CssLength`
+/// (`<target>.value` / `<target>.unit`). The unit always rides along:
+/// state/class swaps mutate units in place, so a px write over a `%`
+/// base must reset it. Unset stays default.
+fn emit_length(target: &str, v: Length) -> Vec<String> {
+    vec![
+        format!("{target}.value = {};", fmt(v.number())),
+        format!("{target}.unit = LengthUnit::{};", length_unit_name(v)),
+    ]
+}
+
+fn length_unit_name(v: Length) -> &'static str {
+    match v {
+        Length::Px(_) => "Px",
+        Length::Pct(_) => "Pct",
+        Length::Em(_) => "Em",
+        Length::Rem(_) => "Rem",
+        Length::Vw(_) => "Vw",
+        Length::Vh(_) => "Vh",
+        Length::Vmin(_) => "Vmin",
+        Length::Vmax(_) => "Vmax",
+        Length::Ch(_) => "Ch",
+        Length::Ex(_) => "Ex",
+    }
+}
+
+/// Parse a literal CSS length (static/class-swap path) into (value, unit).
+/// Mirrors the IR builder's `parse_length` table, including physical-unit
+/// folding to px. Returns None for keywords (`auto`) and garbage.
+fn parse_css_length(css_val: &str) -> Option<(f32, &'static str)> {
+    let t = css_val.trim();
+    if t.is_empty() {
+        return None;
+    }
+    if let Some(num) = t.strip_suffix('%') {
+        return num.trim().parse::<f32>().ok().map(|v| (v, "Pct"));
+    }
+    let low = t.to_ascii_lowercase();
+    // Longest suffixes first.
+    let table: &[(&str, f32, &'static str)] = &[
+        ("vmin", 1.0, "Vmin"),
+        ("vmax", 1.0, "Vmax"),
+        ("svmin", 1.0, "Vmin"),
+        ("svmax", 1.0, "Vmax"),
+        ("lvmin", 1.0, "Vmin"),
+        ("lvmax", 1.0, "Vmax"),
+        ("dvmin", 1.0, "Vmin"),
+        ("dvmax", 1.0, "Vmax"),
+        ("svh", 1.0, "Vh"),
+        ("lvh", 1.0, "Vh"),
+        ("dvh", 1.0, "Vh"),
+        ("svw", 1.0, "Vw"),
+        ("lvw", 1.0, "Vw"),
+        ("dvw", 1.0, "Vw"),
+        ("rem", 1.0, "Rem"),
+        ("vh", 1.0, "Vh"),
+        ("vw", 1.0, "Vw"),
+        ("em", 1.0, "Em"),
+        ("ex", 1.0, "Ex"),
+        ("ch", 1.0, "Ch"),
+        ("px", 1.0, "Px"),
+        ("in", 96.0, "Px"),
+        ("cm", 96.0 / 2.54, "Px"),
+        ("mm", 96.0 / 25.4, "Px"),
+        ("pt", 96.0 / 72.0, "Px"),
+        ("pc", 16.0, "Px"),
+        ("q", 96.0 / 101.6, "Px"),
+    ];
+    for &(suffix, scale, unit) in table {
+        if let Some(num) = low.strip_suffix(suffix) {
+            let num = num.trim();
+            if num.is_empty()
+                || !(num.ends_with(|c: char| c.is_ascii_digit()) || num.ends_with('.'))
+            {
+                continue;
+            }
+            return num.parse::<f32>().ok().map(|v| (v * scale, unit));
+        }
+    }
+    t.parse::<f32>().ok().map(|v| (v, "Px"))
+}
+
+/// Emit a literal length assignment pair (`<target>.value` + `.unit`).
+fn emit_css_length(target: &str, indent: &str, css_val: &str) -> Vec<String> {
+    match parse_css_length(css_val) {
+        Some((v, unit)) => vec![
+            format!("{indent}        {target}.value = {};", fmt(v)),
+            format!("{indent}        {target}.unit = LengthUnit::{unit};"),
+        ],
+        None => vec![],
+    }
+}
+
 fn emit_gradient(access: &str, g: &morph_ir::IRGradient) -> Vec<String> {
     use morph_ir::{GradientAxis, GradientPosition};
     let mut o = Vec::new();
@@ -1024,8 +1117,8 @@ fn conditional_flex_passthrough(node_id: &str, style: &IRStyle) -> Vec<String> {
                 lines.push(format!("{ind}.flexDirection = {lit};"));
             }
         }
-        if style.gap > 0.0 {
-            lines.push(format!("{ind}.gap = {};", fmt(style.gap)));
+        if !style.gap.is_zero() {
+            lines.extend(emit_length(&format!("{ind}.gap"), style.gap));
         }
         if style.justify_content != "flex-start" {
             if let Some(lit) = keyword_literal("justifyContent", &style.justify_content) {
@@ -1215,29 +1308,29 @@ fn set_style(
             lines.extend(emit_gradient(&format!("{ind}.borderGradient."), g));
         }
     }
-    if s.border_radius > 0.0 {
-        lines.push(format!("{ind}.borderRadius = {};", fmt(s.border_radius)));
+    if !s.border_radius.is_zero() {
+        lines.extend(emit_length(&format!("{ind}.borderRadius"), s.border_radius));
     }
     if let Some(v) = s.border_top_left_radius {
-        lines.push(format!("{ind}.borderTopLeftRadius = {};", fmt(v)));
+        lines.extend(emit_length(&format!("{ind}.borderTopLeftRadius"), v));
     }
     if let Some(v) = s.border_top_right_radius {
-        lines.push(format!("{ind}.borderTopRightRadius = {};", fmt(v)));
+        lines.extend(emit_length(&format!("{ind}.borderTopRightRadius"), v));
     }
     if let Some(v) = s.border_bottom_right_radius {
-        lines.push(format!("{ind}.borderBottomRightRadius = {};", fmt(v)));
+        lines.extend(emit_length(&format!("{ind}.borderBottomRightRadius"), v));
     }
     if let Some(v) = s.border_bottom_left_radius {
-        lines.push(format!("{ind}.borderBottomLeftRadius = {};", fmt(v)));
+        lines.extend(emit_length(&format!("{ind}.borderBottomLeftRadius"), v));
     }
     // font-size is inherited: use the node's own value, else parent's, else 16.
-    let fs = if s.font_size == 16.0 {
-        parent.map(|p| p.font_size).filter(|&v| v != 16.0).unwrap_or(16.0)
+    let fs = if s.font_size == Length::Px(16.0) {
+        parent.map(|p| p.font_size).filter(|&v| v != Length::Px(16.0)).unwrap_or(Length::Px(16.0))
     } else {
         s.font_size
     };
-    if fs != 16.0 {
-        lines.push(format!("{ind}.fontSize = {};", fmt(fs)));
+    if fs != Length::Px(16.0) {
+        lines.extend(emit_length(&format!("{ind}.fontSize"), fs));
     }
     // font-weight is inherited similarly.
     let fw = if s.font_weight != "normal" && !s.font_weight.is_empty() {
@@ -1275,18 +1368,18 @@ fn set_style(
             lines.push(format!("{}->m_colorInherited = true;", node.node_id));
         }
     }
-    if s.padding != [0.0, 0.0, 0.0, 0.0] {
-        lines.push(format!("{ind}.padding[0] = {};", fmt(s.padding[0])));
-        lines.push(format!("{ind}.padding[1] = {};", fmt(s.padding[1])));
-        lines.push(format!("{ind}.padding[2] = {};", fmt(s.padding[2])));
-        lines.push(format!("{ind}.padding[3] = {};", fmt(s.padding[3])));
+    if s.padding.iter().any(|v| !v.is_zero()) {
+        for i in 0..4 {
+            if !s.padding[i].is_zero() {
+                lines.extend(emit_length(&format!("{ind}.padding[{i}]"), s.padding[i]));
+            }
+        }
     }
-    if s.margin != [0.0, 0.0, 0.0, 0.0] {
+    if s.margin.iter().any(|v| !v.is_zero()) || s.margin_auto != [false; 4] {
         for i in 0..4 {
             let v = s.margin[i];
-            if v != 0.0 || s.margin_auto[i] {
-                let coded = if v.is_finite() { fmt(v) } else { "-1.0f".into() };
-                lines.push(format!("{ind}.margin[{i}] = {coded};"));
+            if !v.is_zero() || s.margin_auto[i] {
+                lines.extend(emit_length(&format!("{ind}.margin[{i}]"), v));
                 if s.margin_auto[i] {
                     lines.push(format!("{ind}.marginAuto[{i}] = true;"));
                 }
@@ -1294,22 +1387,22 @@ fn set_style(
         }
     }
     if let Some(w) = s.width {
-        lines.push(format!("{ind}.explicitWidth = {};", fmt(w)));
+        lines.extend(emit_length(&format!("{ind}.explicitWidth"), w));
     }
     if let Some(h) = s.height {
-        lines.push(format!("{ind}.explicitHeight = {};", fmt(h)));
+        lines.extend(emit_length(&format!("{ind}.explicitHeight"), h));
     }
     if let Some(v) = s.min_width {
-        lines.push(format!("{ind}.minWidth = {};", fmt(v)));
+        lines.extend(emit_length(&format!("{ind}.minWidth"), v));
     }
     if let Some(v) = s.max_width {
-        lines.push(format!("{ind}.maxWidth = {};", fmt(v)));
+        lines.extend(emit_length(&format!("{ind}.maxWidth"), v));
     }
     if let Some(v) = s.min_height {
-        lines.push(format!("{ind}.minHeight = {};", fmt(v)));
+        lines.extend(emit_length(&format!("{ind}.minHeight"), v));
     }
     if let Some(v) = s.max_height {
-        lines.push(format!("{ind}.maxHeight = {};", fmt(v)));
+        lines.extend(emit_length(&format!("{ind}.maxHeight"), v));
     }
     if s.overflow != "visible" {
         let lit = keyword_literal("overflow", &s.overflow).unwrap();
@@ -1355,8 +1448,8 @@ fn set_style(
             let lit = keyword_literal("flexDirection", &s.flex_dir).unwrap();
             lines.push(format!("{ind}.flexDirection = {lit};"));
         }
-        if s.gap > 0.0 {
-            lines.push(format!("{ind}.gap = {};", fmt(s.gap)));
+        if !s.gap.is_zero() {
+            lines.extend(emit_length(&format!("{ind}.gap"), s.gap));
         }
         if s.justify_content != "flex-start" {
             let lit = keyword_literal("justifyContent", &s.justify_content).unwrap();
@@ -1388,16 +1481,16 @@ fn set_style(
     // ── POSITION ──
     if features.contains("position") {
         if let Some(v) = s.left {
-            lines.push(format!("{ind}.left = {};", fmt(v)));
+            lines.extend(emit_length(&format!("{ind}.left"), v));
         }
         if let Some(v) = s.right {
-            lines.push(format!("{ind}.right = {};", fmt(v)));
+            lines.extend(emit_length(&format!("{ind}.right"), v));
         }
         if let Some(v) = s.top {
-            lines.push(format!("{ind}.top = {};", fmt(v)));
+            lines.extend(emit_length(&format!("{ind}.top"), v));
         }
         if let Some(v) = s.bottom {
-            lines.push(format!("{ind}.bottom = {};", fmt(v)));
+            lines.extend(emit_length(&format!("{ind}.bottom"), v));
         }
     }
 
@@ -1423,8 +1516,8 @@ fn set_style(
     // ── BORDER ──
     if features.contains("border") {
         // Shorthand
-        if s.border_width > 0.0 {
-            lines.push(format!("{ind}.borderWidth = {};", fmt(s.border_width)));
+        if !s.border_width.is_zero() {
+            lines.extend(emit_length(&format!("{ind}.borderWidth"), s.border_width));
         }
         if s.border_color != [0.0, 0.0, 0.0, 1.0] {
             lines.push(format!("{ind}.borderColor[0] = {:.4}f;", s.border_color[0]));
@@ -1438,16 +1531,16 @@ fn set_style(
         }
         // Per-side widths
         if let Some(v) = s.border_top_width {
-            lines.push(format!("{ind}.borderTopWidth = {};", fmt(v)));
+            lines.extend(emit_length(&format!("{ind}.borderTopWidth"), v));
         }
         if let Some(v) = s.border_right_width {
-            lines.push(format!("{ind}.borderRightWidth = {};", fmt(v)));
+            lines.extend(emit_length(&format!("{ind}.borderRightWidth"), v));
         }
         if let Some(v) = s.border_bottom_width {
-            lines.push(format!("{ind}.borderBottomWidth = {};", fmt(v)));
+            lines.extend(emit_length(&format!("{ind}.borderBottomWidth"), v));
         }
         if let Some(v) = s.border_left_width {
-            lines.push(format!("{ind}.borderLeftWidth = {};", fmt(v)));
+            lines.extend(emit_length(&format!("{ind}.borderLeftWidth"), v));
         }
         // Per-side colors
         if let Some(c) = s.border_top_color {
@@ -1661,67 +1754,75 @@ fn emit_hover_style(
         o.push(format!("{hv}->borderColor[2] = {:.4}f;", s.border_color[2]));
         o.push(format!("{hv}->borderColor[3] = {:.4}f;", s.border_color[3]));
     }
-    if s.border_radius > 0.0 && s.border_radius != base.border_radius {
-        o.push(format!("{hv}->borderRadius = {};", fmt(s.border_radius)));
+    if !s.border_radius.is_zero() && s.border_radius != base.border_radius {
+        o.extend(emit_length(&format!("{hv}->borderRadius"), s.border_radius));
     }
     if s.border_top_left_radius != base.border_top_left_radius {
         if let Some(v) = s.border_top_left_radius {
-            o.push(format!("{hv}->borderTopLeftRadius = {};", fmt(v)));
+            o.extend(emit_length(&format!("{hv}->borderTopLeftRadius"), v));
         } else {
-            o.push(format!("{hv}->borderTopLeftRadius = -1.0f;"));
+            o.push(format!("{hv}->borderTopLeftRadius.value = -1e9f;"));
+            o.push(format!("{hv}->borderTopLeftRadius.unit = LengthUnit::Px;"));
         }
     }
     if s.border_top_right_radius != base.border_top_right_radius {
         if let Some(v) = s.border_top_right_radius {
-            o.push(format!("{hv}->borderTopRightRadius = {};", fmt(v)));
+            o.extend(emit_length(&format!("{hv}->borderTopRightRadius"), v));
         } else {
-            o.push(format!("{hv}->borderTopRightRadius = -1.0f;"));
+            o.push(format!("{hv}->borderTopRightRadius.value = -1e9f;"));
+            o.push(format!("{hv}->borderTopRightRadius.unit = LengthUnit::Px;"));
         }
     }
     if s.border_bottom_right_radius != base.border_bottom_right_radius {
         if let Some(v) = s.border_bottom_right_radius {
-            o.push(format!("{hv}->borderBottomRightRadius = {};", fmt(v)));
+            o.extend(emit_length(&format!("{hv}->borderBottomRightRadius"), v));
         } else {
-            o.push(format!("{hv}->borderBottomRightRadius = -1.0f;"));
+            o.push(format!("{hv}->borderBottomRightRadius.value = -1e9f;"));
+            o.push(format!("{hv}->borderBottomRightRadius.unit = LengthUnit::Px;"));
         }
     }
     if s.border_bottom_left_radius != base.border_bottom_left_radius {
         if let Some(v) = s.border_bottom_left_radius {
-            o.push(format!("{hv}->borderBottomLeftRadius = {};", fmt(v)));
+            o.extend(emit_length(&format!("{hv}->borderBottomLeftRadius"), v));
         } else {
-            o.push(format!("{hv}->borderBottomLeftRadius = -1.0f;"));
+            o.push(format!("{hv}->borderBottomLeftRadius.value = -1e9f;"));
+            o.push(format!("{hv}->borderBottomLeftRadius.unit = LengthUnit::Px;"));
         }
     }
-    if s.border_width > 0.0 && s.border_width != base.border_width {
-        o.push(format!("{hv}->borderWidth = {};", fmt(s.border_width)));
+    if !s.border_width.is_zero() && s.border_width != base.border_width {
+        o.extend(emit_length(&format!("{hv}->borderWidth"), s.border_width));
     }
     // Per-side border widths
     if s.border_top_width != base.border_top_width {
         if let Some(v) = s.border_top_width {
-            o.push(format!("{hv}->borderTopWidth = {};", fmt(v)));
+            o.extend(emit_length(&format!("{hv}->borderTopWidth"), v));
         } else {
-            o.push(format!("{hv}->borderTopWidth = -1.0f;"));
+            o.push(format!("{hv}->borderTopWidth.value = -1e9f;"));
+            o.push(format!("{hv}->borderTopWidth.unit = LengthUnit::Px;"));
         }
     }
     if s.border_right_width != base.border_right_width {
         if let Some(v) = s.border_right_width {
-            o.push(format!("{hv}->borderRightWidth = {};", fmt(v)));
+            o.extend(emit_length(&format!("{hv}->borderRightWidth"), v));
         } else {
-            o.push(format!("{hv}->borderRightWidth = -1.0f;"));
+            o.push(format!("{hv}->borderRightWidth.value = -1e9f;"));
+            o.push(format!("{hv}->borderRightWidth.unit = LengthUnit::Px;"));
         }
     }
     if s.border_bottom_width != base.border_bottom_width {
         if let Some(v) = s.border_bottom_width {
-            o.push(format!("{hv}->borderBottomWidth = {};", fmt(v)));
+            o.extend(emit_length(&format!("{hv}->borderBottomWidth"), v));
         } else {
-            o.push(format!("{hv}->borderBottomWidth = -1.0f;"));
+            o.push(format!("{hv}->borderBottomWidth.value = -1e9f;"));
+            o.push(format!("{hv}->borderBottomWidth.unit = LengthUnit::Px;"));
         }
     }
     if s.border_left_width != base.border_left_width {
         if let Some(v) = s.border_left_width {
-            o.push(format!("{hv}->borderLeftWidth = {};", fmt(v)));
+            o.extend(emit_length(&format!("{hv}->borderLeftWidth"), v));
         } else {
-            o.push(format!("{hv}->borderLeftWidth = -1.0f;"));
+            o.push(format!("{hv}->borderLeftWidth.value = -1e9f;"));
+            o.push(format!("{hv}->borderLeftWidth.unit = LengthUnit::Px;"));
         }
     }
     // Per-side border colors
@@ -1820,24 +1921,27 @@ fn emit_hover_style(
         o.push(format!("{hv}->borderStyle = {lit};"));
     }
     o.extend(emit_border_image_delta(&hv, s, base, features.contains("gradient")));
-    if s.padding != [0.0, 0.0, 0.0, 0.0] && s.padding != base.padding {
-        o.push(format!("{hv}->padding[0] = {};", fmt(s.padding[0])));
-        o.push(format!("{hv}->padding[1] = {};", fmt(s.padding[1])));
-        o.push(format!("{hv}->padding[2] = {};", fmt(s.padding[2])));
-        o.push(format!("{hv}->padding[3] = {};", fmt(s.padding[3])));
+    if s.padding.iter().any(|v| !v.is_zero()) && s.padding != base.padding {
+        for i in 0..4 {
+            o.extend(emit_length(&format!("{hv}->padding[{i}]"), s.padding[i]));
+        }
     }
-    if s.font_size != 16.0 && s.font_size != base.font_size {
-        o.push(format!("{hv}->fontSize = {};", fmt(s.font_size)));
+    if s.font_size != Length::Px(16.0) && s.font_size != base.font_size {
+        o.extend(emit_length(&format!("{hv}->fontSize"), s.font_size));
     }
     if s.font_weight != "normal" && !s.font_weight.is_empty() && s.font_weight != base.font_weight {
         let lit = keyword_literal("fontWeight", &s.font_weight).unwrap();
         o.push(format!("{hv}->fontWeight = {lit};"));
     }
     if s.width.is_some() && s.width != base.width {
-        o.push(format!("{hv}->explicitWidth = {};", fmt(s.width.unwrap())));
+        if let Some(w) = s.width {
+            o.extend(emit_length(&format!("{hv}->explicitWidth"), w));
+        }
     }
     if s.height.is_some() && s.height != base.height {
-        o.push(format!("{hv}->explicitHeight = {};", fmt(s.height.unwrap())));
+        if let Some(h) = s.height {
+            o.extend(emit_length(&format!("{hv}->explicitHeight"), h));
+        }
     }
     if s.display != "block" && s.display != base.display {
         // Unknown values behave as the default everywhere; emit it
@@ -1862,8 +1966,8 @@ fn emit_hover_style(
             let lit = keyword_literal("flexDirection", &s.flex_dir).unwrap();
             o.push(format!("{hv}->flexDirection = {lit};"));
         }
-        if s.gap > 0.0 && s.gap != base.gap {
-            o.push(format!("{hv}->gap = {};", fmt(s.gap)));
+        if !s.gap.is_zero() && s.gap != base.gap {
+            o.extend(emit_length(&format!("{hv}->gap"), s.gap));
         }
         if s.justify_content != "flex-start" && s.justify_content != base.justify_content {
             let lit = keyword_literal("justifyContent", &s.justify_content).unwrap();
@@ -1884,16 +1988,24 @@ fn emit_hover_style(
     }
     if features.contains("position") {
         if s.left.is_some() && s.left != base.left {
-            o.push(format!("{hv}->left = {};", fmt(s.left.unwrap())));
+            if let Some(v) = s.left {
+                o.extend(emit_length(&format!("{hv}->left"), v));
+            }
         }
         if s.right.is_some() && s.right != base.right {
-            o.push(format!("{hv}->right = {};", fmt(s.right.unwrap())));
+            if let Some(v) = s.right {
+                o.extend(emit_length(&format!("{hv}->right"), v));
+            }
         }
         if s.top.is_some() && s.top != base.top {
-            o.push(format!("{hv}->top = {};", fmt(s.top.unwrap())));
+            if let Some(v) = s.top {
+                o.extend(emit_length(&format!("{hv}->top"), v));
+            }
         }
         if s.bottom.is_some() && s.bottom != base.bottom {
-            o.push(format!("{hv}->bottom = {};", fmt(s.bottom.unwrap())));
+            if let Some(v) = s.bottom {
+                o.extend(emit_length(&format!("{hv}->bottom"), v));
+            }
         }
     }
     if features.contains("zindex") && s.z_index.is_some() && s.z_index != base.z_index {
@@ -1977,67 +2089,75 @@ fn emit_active_style(
         o.push(format!("{hv}->borderColor[2] = {:.4}f;", s.border_color[2]));
         o.push(format!("{hv}->borderColor[3] = {:.4}f;", s.border_color[3]));
     }
-    if s.border_radius > 0.0 && s.border_radius != base.border_radius {
-        o.push(format!("{hv}->borderRadius = {};", fmt(s.border_radius)));
+    if !s.border_radius.is_zero() && s.border_radius != base.border_radius {
+        o.extend(emit_length(&format!("{hv}->borderRadius"), s.border_radius));
     }
     if s.border_top_left_radius != base.border_top_left_radius {
         if let Some(v) = s.border_top_left_radius {
-            o.push(format!("{hv}->borderTopLeftRadius = {};", fmt(v)));
+            o.extend(emit_length(&format!("{hv}->borderTopLeftRadius"), v));
         } else {
-            o.push(format!("{hv}->borderTopLeftRadius = -1.0f;"));
+            o.push(format!("{hv}->borderTopLeftRadius.value = -1e9f;"));
+            o.push(format!("{hv}->borderTopLeftRadius.unit = LengthUnit::Px;"));
         }
     }
     if s.border_top_right_radius != base.border_top_right_radius {
         if let Some(v) = s.border_top_right_radius {
-            o.push(format!("{hv}->borderTopRightRadius = {};", fmt(v)));
+            o.extend(emit_length(&format!("{hv}->borderTopRightRadius"), v));
         } else {
-            o.push(format!("{hv}->borderTopRightRadius = -1.0f;"));
+            o.push(format!("{hv}->borderTopRightRadius.value = -1e9f;"));
+            o.push(format!("{hv}->borderTopRightRadius.unit = LengthUnit::Px;"));
         }
     }
     if s.border_bottom_right_radius != base.border_bottom_right_radius {
         if let Some(v) = s.border_bottom_right_radius {
-            o.push(format!("{hv}->borderBottomRightRadius = {};", fmt(v)));
+            o.extend(emit_length(&format!("{hv}->borderBottomRightRadius"), v));
         } else {
-            o.push(format!("{hv}->borderBottomRightRadius = -1.0f;"));
+            o.push(format!("{hv}->borderBottomRightRadius.value = -1e9f;"));
+            o.push(format!("{hv}->borderBottomRightRadius.unit = LengthUnit::Px;"));
         }
     }
     if s.border_bottom_left_radius != base.border_bottom_left_radius {
         if let Some(v) = s.border_bottom_left_radius {
-            o.push(format!("{hv}->borderBottomLeftRadius = {};", fmt(v)));
+            o.extend(emit_length(&format!("{hv}->borderBottomLeftRadius"), v));
         } else {
-            o.push(format!("{hv}->borderBottomLeftRadius = -1.0f;"));
+            o.push(format!("{hv}->borderBottomLeftRadius.value = -1e9f;"));
+            o.push(format!("{hv}->borderBottomLeftRadius.unit = LengthUnit::Px;"));
         }
     }
-    if s.border_width > 0.0 && s.border_width != base.border_width {
-        o.push(format!("{hv}->borderWidth = {};", fmt(s.border_width)));
+    if !s.border_width.is_zero() && s.border_width != base.border_width {
+        o.extend(emit_length(&format!("{hv}->borderWidth"), s.border_width));
     }
     // Per-side border widths
     if s.border_top_width != base.border_top_width {
         if let Some(v) = s.border_top_width {
-            o.push(format!("{hv}->borderTopWidth = {};", fmt(v)));
+            o.extend(emit_length(&format!("{hv}->borderTopWidth"), v));
         } else {
-            o.push(format!("{hv}->borderTopWidth = -1.0f;"));
+            o.push(format!("{hv}->borderTopWidth.value = -1e9f;"));
+            o.push(format!("{hv}->borderTopWidth.unit = LengthUnit::Px;"));
         }
     }
     if s.border_right_width != base.border_right_width {
         if let Some(v) = s.border_right_width {
-            o.push(format!("{hv}->borderRightWidth = {};", fmt(v)));
+            o.extend(emit_length(&format!("{hv}->borderRightWidth"), v));
         } else {
-            o.push(format!("{hv}->borderRightWidth = -1.0f;"));
+            o.push(format!("{hv}->borderRightWidth.value = -1e9f;"));
+            o.push(format!("{hv}->borderRightWidth.unit = LengthUnit::Px;"));
         }
     }
     if s.border_bottom_width != base.border_bottom_width {
         if let Some(v) = s.border_bottom_width {
-            o.push(format!("{hv}->borderBottomWidth = {};", fmt(v)));
+            o.extend(emit_length(&format!("{hv}->borderBottomWidth"), v));
         } else {
-            o.push(format!("{hv}->borderBottomWidth = -1.0f;"));
+            o.push(format!("{hv}->borderBottomWidth.value = -1e9f;"));
+            o.push(format!("{hv}->borderBottomWidth.unit = LengthUnit::Px;"));
         }
     }
     if s.border_left_width != base.border_left_width {
         if let Some(v) = s.border_left_width {
-            o.push(format!("{hv}->borderLeftWidth = {};", fmt(v)));
+            o.extend(emit_length(&format!("{hv}->borderLeftWidth"), v));
         } else {
-            o.push(format!("{hv}->borderLeftWidth = -1.0f;"));
+            o.push(format!("{hv}->borderLeftWidth.value = -1e9f;"));
+            o.push(format!("{hv}->borderLeftWidth.unit = LengthUnit::Px;"));
         }
     }
     // Per-side border colors
@@ -2136,6 +2256,38 @@ fn emit_active_style(
         o.push(format!("{hv}->borderStyle = {lit};"));
     }
     o.extend(emit_border_image_delta(&hv, s, base, features.contains("gradient")));
+    if s.width.is_some() && s.width != base.width {
+        if let Some(w) = s.width {
+            o.extend(emit_length(&format!("{hv}->explicitWidth"), w));
+        }
+    }
+    if s.height.is_some() && s.height != base.height {
+        if let Some(h) = s.height {
+            o.extend(emit_length(&format!("{hv}->explicitHeight"), h));
+        }
+    }
+    if features.contains("position") {
+        if s.left.is_some() && s.left != base.left {
+            if let Some(v) = s.left {
+                o.extend(emit_length(&format!("{hv}->left"), v));
+            }
+        }
+        if s.right.is_some() && s.right != base.right {
+            if let Some(v) = s.right {
+                o.extend(emit_length(&format!("{hv}->right"), v));
+            }
+        }
+        if s.top.is_some() && s.top != base.top {
+            if let Some(v) = s.top {
+                o.extend(emit_length(&format!("{hv}->top"), v));
+            }
+        }
+        if s.bottom.is_some() && s.bottom != base.bottom {
+            if let Some(v) = s.bottom {
+                o.extend(emit_length(&format!("{hv}->bottom"), v));
+            }
+        }
+    }
     if features.contains("opacity")
         && (s.opacity - 1.0).abs() > f32::EPSILON
         && s.opacity != base.opacity
@@ -2283,24 +2435,24 @@ pub(crate) fn css_to_style_field(css_prop: &str) -> Option<(&'static str, &'stat
         "border-color" => ("borderColor", "color"),
         "scrollbar-track-color" => ("scrollbarTrackColor", "color"),
         "scrollbar-thumb-color" => ("scrollbarThumbColor", "color"),
-        "width" => ("explicitWidth", "float"),
-        "min-width" => ("minWidth", "float"),
-        "max-width" => ("maxWidth", "float"),
-        "height" => ("explicitHeight", "float"),
-        "min-height" => ("minHeight", "float"),
-        "max-height" => ("maxHeight", "float"),
-        "border-radius" => ("borderRadius", "float"),
-        "font-size" => ("fontSize", "float"),
-        "gap" => ("gap", "float"),
-        "left" => ("left", "float"),
-        "right" => ("right", "float"),
-        "top" => ("top", "float"),
-        "bottom" => ("bottom", "float"),
+        "width" => ("explicitWidth", "length"),
+        "min-width" => ("minWidth", "length"),
+        "max-width" => ("maxWidth", "length"),
+        "height" => ("explicitHeight", "length"),
+        "min-height" => ("minHeight", "length"),
+        "max-height" => ("maxHeight", "length"),
+        "border-radius" => ("borderRadius", "length"),
+        "font-size" => ("fontSize", "length"),
+        "gap" => ("gap", "length"),
+        "left" => ("left", "length"),
+        "right" => ("right", "length"),
+        "top" => ("top", "length"),
+        "bottom" => ("bottom", "length"),
         "flex-grow" => ("flexGrow", "float"),
         "flex-shrink" => ("flexShrink", "float"),
         "scrollbar-width" => ("scrollbarWidth", "float"),
         "scrollbar-border-radius" => ("scrollbarBorderRadius", "float"),
-        "border-width" => ("borderWidth", "float"),
+        "border-width" => ("borderWidth", "length"),
         "z-index" => ("zIndex", "int"),
         "opacity" => ("opacity", "float"),
         "font-weight" => ("fontWeight", "string"),
@@ -2351,16 +2503,34 @@ pub(crate) fn css_field_reset(node_var: &str, field_name: &str, indent: &str) ->
                 .map(|s| format!("{indent}        {prefix}{s}"))
                 .collect()
         }
-        "explicitWidth" | "explicitHeight" | "minWidth" | "maxWidth" | "minHeight"
-        | "maxHeight" => {
-            vec![format!("{indent}        {prefix} = -1.0f;")]
+        "explicitWidth" | "explicitHeight" | "left" | "right" | "top" | "bottom" | "minWidth"
+        | "maxWidth" | "minHeight" | "maxHeight" => {
+            vec![
+                format!("{indent}        {prefix}.value = -1e9f;"),
+                format!("{indent}        {prefix}.unit = LengthUnit::Px;"),
+            ]
         }
-        "borderRadius" | "left" | "right" | "top" | "bottom" | "flexGrow" | "scrollbarWidth"
-        | "borderWidth" => {
+        "borderRadius" | "borderWidth" => {
+            vec![
+                format!("{indent}        {prefix}.value = 0.0f;"),
+                format!("{indent}        {prefix}.unit = LengthUnit::Px;"),
+            ]
+        }
+        "flexGrow" | "scrollbarWidth" => {
             vec![format!("{indent}        {prefix} = 0.0f;")]
         }
-        "fontSize" => vec![format!("{indent}        {prefix} = 16.0f;")],
-        "gap" => vec![format!("{indent}        {prefix} = 0.0f;")],
+        "fontSize" => {
+            vec![
+                format!("{indent}        {prefix}.value = 16.0f;"),
+                format!("{indent}        {prefix}.unit = LengthUnit::Px;"),
+            ]
+        }
+        "gap" => {
+            vec![
+                format!("{indent}        {prefix}.value = 0.0f;"),
+                format!("{indent}        {prefix}.unit = LengthUnit::Px;"),
+            ]
+        }
         "flexShrink" => vec![format!("{indent}        {prefix} = 1.0f;")],
         "scrollbarBorderRadius" => vec![format!("{indent}        {prefix} = 4.0f;")],
         "opacity" => vec![format!("{indent}        {prefix} = 1.0f;")],
@@ -2431,23 +2601,49 @@ fn box_shorthand_to_cpp(
     css_val: &str,
     indent: &str,
 ) -> Vec<String> {
-    let vals: Vec<f32> = css_val
-        .split_whitespace()
-        .map(|p| p.trim_end_matches("px").trim().parse::<f32>())
-        .collect::<Result<Vec<f32>, _>>()
-        .unwrap_or_default();
-    let sides = match vals.len() {
-        1 => [vals[0], vals[0], vals[0], vals[0]],
-        2 => [vals[0], vals[1], vals[0], vals[1]],
-        3 => [vals[0], vals[1], vals[2], vals[1]],
-        4 => [vals[0], vals[1], vals[2], vals[3]],
+    // Each side is a length or (margin only) `auto`. Anything else drops
+    // the whole declaration like browsers do.
+    let mut vals: Vec<Option<(f32, &str)>> = Vec::new();
+    let mut autos: Vec<bool> = Vec::new();
+    for part in css_val.split_whitespace() {
+        if part.eq_ignore_ascii_case("auto") {
+            if css_prop != "margin" {
+                return vec![];
+            }
+            vals.push(None);
+            autos.push(true);
+        } else if let Some((v, unit)) = parse_css_length(part) {
+            vals.push(Some((v, unit)));
+            autos.push(false);
+        } else {
+            return vec![];
+        }
+    }
+    let idx: [usize; 4] = match vals.len() {
+        1 => [0, 0, 0, 0],
+        2 => [0, 1, 0, 1],
+        3 => [0, 1, 2, 1],
+        4 => [0, 1, 2, 3],
         _ => return vec![],
     };
-    sides
-        .iter()
-        .enumerate()
-        .map(|(i, v)| format!("{indent}        {node_var}->style.{css_prop}[{i}] = {};", fmt(*v)))
-        .collect()
+    let mut out = Vec::new();
+    for i in 0..4 {
+        let target = format!("{node_var}->style.{css_prop}[{}]", idx[i]);
+        match vals[idx[i]] {
+            Some((v, unit)) => {
+                out.push(format!("{indent}        {target}.value = {};", fmt(v)));
+                out.push(format!("{indent}        {target}.unit = LengthUnit::{unit};"));
+            }
+            None => {
+                out.push(format!("{indent}        {target}.value = 0.0f;"));
+                out.push(format!("{indent}        {target}.unit = LengthUnit::Px;"));
+            }
+        }
+        if autos[idx[i]] {
+            out.push(format!("{indent}        {node_var}->style.marginAuto[{i}] = true;"));
+        }
+    }
+    out
 }
 
 /// Resolve a literal CSS value to C++ `<node_var>->style.<field>` assignments.
@@ -2484,6 +2680,13 @@ pub(crate) fn css_val_to_cpp(
                 Ok(f) => vec![format!("{indent}        {prefix} = {};", fmt(f))],
                 Err(_) => vec![],
             }
+        }
+        "length" => {
+            // Border-width rejects % (invalid CSS drops the declaration).
+            if field_name == "borderWidth" && css_val.trim().ends_with('%') {
+                return vec![];
+            }
+            emit_css_length(&prefix, indent, css_val)
         }
         "int" => {
             let raw = css_val.trim();
@@ -2595,6 +2798,19 @@ fn emit_reactive_effects(
                     lines.push(format!("{indent}    {id}->markDirty(PaintDirty);"));
                     lines.push(close_effect.to_string());
                 }
+                "length" => {
+                    lines.push(open_effect(id, &cpp));
+                    lines.push(format!("{indent}    {id}->interruptStateTransitions();"));
+                    lines.push(format!(
+                        "{indent}    {id}->style.{field_name}.value = (float)({cpp});"
+                    ));
+                    lines.push(format!(
+                        "{indent}    {id}->style.{field_name}.unit = LengthUnit::Px;"
+                    ));
+                    lines.push(format!("{indent}    {id}->markDirty(LayoutDirty);"));
+                    lines.push(format!("{indent}    {id}->markDirty(PaintDirty);"));
+                    lines.push(close_effect.to_string());
+                }
                 "string" => {
                     lines.push(open_effect(id, &cpp));
                     lines.push(format!("{indent}    {id}->interruptStateTransitions();"));
@@ -2634,7 +2850,14 @@ fn emit_reactive_effects(
             }
             lines.push(open_effect(id, &cpp));
             lines.push(format!("{indent}    {}->interruptStateTransitions();", child.node_id));
-            lines.push(format!("{indent}    {}->style.fontSize = (float)({cpp});", child.node_id));
+            lines.push(format!(
+                "{indent}    {}->style.fontSize.value = (float)({cpp});",
+                child.node_id
+            ));
+            lines.push(format!(
+                "{indent}    {}->style.fontSize.unit = LengthUnit::Px;",
+                child.node_id
+            ));
             lines.push(format!("{indent}    {}->markDirty(LayoutDirty);", child.node_id));
             lines.push(format!("{indent}    {}->markDirty(PaintDirty);", child.node_id));
             lines.push(close_effect.to_string());
@@ -2785,13 +3008,34 @@ fn keyframe_style_value(field: &str, s: &IRStyle) -> Option<(&'static str, Strin
         "bg_color" => Some(("BgColor", color4(&s.bg_color))),
         "color" => Some(("Color", color4(&s.color))),
         "border_color" => Some(("BorderColor", color4(&s.border_color))),
-        "border_width" => Some(("BorderWidth", fmt(s.border_width))),
-        "border_radius" => Some(("BorderRadius", fmt(s.border_radius))),
-        "font_size" => Some(("FontSize", fmt(s.font_size))),
-        "width" => s.width.map(|w| ("Width", fmt(w))),
-        "height" => s.height.map(|h| ("Height", fmt(h))),
-        "left" => s.left.map(|v| ("Left", fmt(v))),
-        "top" => s.top.map(|v| ("Top", fmt(v))),
+        "border_width" => match s.border_width {
+            Length::Px(v) => Some(("BorderWidth", fmt(v))),
+            _ => None,
+        },
+        "border_radius" => match s.border_radius {
+            Length::Px(v) => Some(("BorderRadius", fmt(v))),
+            _ => None,
+        },
+        "font_size" => match s.font_size {
+            Length::Px(v) => Some(("FontSize", fmt(v))),
+            _ => None,
+        },
+        "width" => s.width.and_then(|w| match w {
+            Length::Px(px) => Some(("Width", fmt(px))),
+            _ => None,
+        }),
+        "height" => s.height.and_then(|h| match h {
+            Length::Px(px) => Some(("Height", fmt(px))),
+            _ => None,
+        }),
+        "left" => s.left.and_then(|v| match v {
+            Length::Px(px) => Some(("Left", fmt(px))),
+            _ => None,
+        }),
+        "top" => s.top.and_then(|v| match v {
+            Length::Px(px) => Some(("Top", fmt(px))),
+            _ => None,
+        }),
         _ => None,
     }
 }

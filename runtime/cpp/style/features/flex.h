@@ -2,6 +2,7 @@
 #include <string>
 
 #include "../css_enums.h"
+#include "base.h"
 
 #ifdef MORPH_FEATURE_FLEX
 struct FlexStyle {
@@ -13,6 +14,6 @@ struct FlexStyle {
     float flexGrow = 0.0f;
     float flexShrink = 1.0f;
     std::string flexBasis = "auto";
-    float gap = 0.0f;
+    CssLength gap = pxLen(0.0f);
 };
 #endif

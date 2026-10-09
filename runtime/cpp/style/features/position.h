@@ -1,10 +1,12 @@
 #pragma once
 
 #ifdef MORPH_FEATURE_POSITION
+// `auto` is value <= -1e8f; percentages resolve against the
+// containing block (width for left/right, height for top/bottom).
 struct PositionStyle {
-    float left   = -1e9f;
-    float right  = -1e9f;
-    float top    = -1e9f;
-    float bottom = -1e9f;
+    CssLength left;
+    CssLength right;
+    CssLength top;
+    CssLength bottom;
 };
 #endif

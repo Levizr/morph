@@ -24,13 +24,13 @@ inline bool borderImageGradActive(const MorphStyle& style)
 }
 
 // Snapped per-side widths (index 0=top, 1=right, 2=bottom, 3=left).
-inline void snappedBorderWidths(const MorphStyle& style, bool snap,
+inline void snappedBorderWidths(const MorphStyle& style, const UnitEnv& env, bool snap,
                                 float out[4])
 {
     float widths[4];
     const float* colors[4];
     float modes[4];
-    resolveBorderSides(style, widths, colors, modes);
+    resolveBorderSides(style, env, widths, colors, modes);
     for (int side = 0; side < 4; side++)
     {
         out[side] = snap ? snapBorderWidth(widths[side]) : widths[side];
@@ -88,16 +88,16 @@ inline void borderRingBox(const MorphStyle& style, float sx, float sy,
 // Record the fill op plus border ops for a box. plainRounded selects the
 // no-border fill shape (buttons/inputs always round, rects only when a
 // corner radius is set).
-inline void recordBoxOps(std::vector<DrawOp>& out, MorphStyle& style,
+inline void recordBoxOps(std::vector<DrawOp>& out, MorphStyle& style, const UnitEnv& env,
                          float sx, float sy, float sw, float sh,
                          bool snap, bool plainRounded)
 {
     float widths[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     const float* colors[4] = {nullptr, nullptr, nullptr, nullptr};
     float modes[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-    int visible = resolveBorderSides(style, widths, colors, modes);
+    int visible = resolveBorderSides(style, env, widths, colors, modes);
     float radii[4];
-    resolveBorderRadii(style, snap, radii);
+    resolveBorderRadii(style, env, snap, radii);
     bool imgGrad = borderImageGradActive(style);
     bool uniformSolid = !imgGrad && visible > 0 &&
         borderSidesUniform(widths, colors, modes) &&
@@ -135,7 +135,7 @@ inline void recordBoxOps(std::vector<DrawOp>& out, MorphStyle& style,
         return;
     }
     float w[4];
-    snappedBorderWidths(style, snap, w);
+    snappedBorderWidths(style, env, snap, w);
     float bx, by, bw, bh;
     borderRingBox(style, sx, sy, sw, sh, w, bx, by, bw, bh);
     if (imgGrad)
@@ -194,18 +194,18 @@ inline void recordBoxOps(std::vector<DrawOp>& out, MorphStyle& style,
 }
 
 // Ring ops for the non-uniform / patterned / border-image cases.
-inline void paintBoxRings(Renderer& r, MorphStyle& style,
+inline void paintBoxRings(Renderer& r, MorphStyle& style, const UnitEnv& env,
                           float sx, float sy, float sw, float sh,
                           bool snap)
 {
     float widths[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     const float* colors[4] = {nullptr, nullptr, nullptr, nullptr};
     float modes[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-    resolveBorderSides(style, widths, colors, modes);
+    resolveBorderSides(style, env, widths, colors, modes);
     float radii[4];
-    resolveBorderRadii(style, snap, radii);
+    resolveBorderRadii(style, env, snap, radii);
     float w[4];
-    snappedBorderWidths(style, snap, w);
+    snappedBorderWidths(style, env, snap, w);
     float bx, by, bw, bh;
     borderRingBox(style, sx, sy, sw, sh, w, bx, by, bw, bh);
 #ifdef MORPH_FEATURE_GRADIENT
@@ -261,16 +261,16 @@ inline void paintBoxRings(Renderer& r, MorphStyle& style,
 }
 
 // Immediate-mode twin of recordBoxOps for the legacy draw() path.
-inline void paintBoxDirect(Renderer& r, MorphStyle& style,
+inline void paintBoxDirect(Renderer& r, MorphStyle& style, const UnitEnv& env,
                            float sx, float sy, float sw, float sh,
                            bool snap, bool plainRounded)
 {
     float widths[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     const float* colors[4] = {nullptr, nullptr, nullptr, nullptr};
     float modes[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-    int visible = resolveBorderSides(style, widths, colors, modes);
+    int visible = resolveBorderSides(style, env, widths, colors, modes);
     float radii[4];
-    resolveBorderRadii(style, snap, radii);
+    resolveBorderRadii(style, env, snap, radii);
     bool imgGrad = borderImageGradActive(style);
     bool uniformSolid = !imgGrad && visible > 0 &&
         borderSidesUniform(widths, colors, modes) &&
@@ -297,7 +297,7 @@ inline void paintBoxDirect(Renderer& r, MorphStyle& style,
                        bw, bc, nullptr);
         if (!uniformSolid && visible > 0)
         {
-            paintBoxRings(r, style, sx, sy, sw, sh, snap);
+            paintBoxRings(r, style, env, sx, sy, sw, sh, snap);
         }
         return;
     }
@@ -330,7 +330,7 @@ inline void paintBoxDirect(Renderer& r, MorphStyle& style,
     }
     if (visible > 0)
     {
-        paintBoxRings(r, style, sx, sy, sw, sh, snap);
+        paintBoxRings(r, style, env, sx, sy, sw, sh, snap);
     }
 }
 

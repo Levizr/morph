@@ -9,7 +9,7 @@ use oxc_span::GetSpan;
 
 use crate::css_registry;
 use crate::node::{IREvent, IRNode, IRWindow};
-use crate::style::IRStyle;
+use crate::style::{IRStyle, Length};
 use crate::tailwind::TailwindResolver;
 use crate::transforms;
 
@@ -2446,17 +2446,21 @@ impl IRBuilder {
                 // configure the opened window, not the element box.
                 if tag != "a" && style.width.is_none() {
                     if let Some(morph_parser::JsxPropValue::String(raw)) = props.get("width") {
-                        if let Some(px) = parse_length(raw) {
-                            style.width = Some(px);
-                            base_props.insert("width".to_string(), raw.clone());
+                        if let Some(len) = parse_length(raw) {
+                            if matches!(len, Length::Px(_) | Length::Pct(_)) {
+                                style.width = Some(len);
+                                base_props.insert("width".to_string(), raw.clone());
+                            }
                         }
                     }
                 }
                 if tag != "a" && style.height.is_none() {
                     if let Some(morph_parser::JsxPropValue::String(raw)) = props.get("height") {
-                        if let Some(px) = parse_length(raw) {
-                            style.height = Some(px);
-                            base_props.insert("height".to_string(), raw.clone());
+                        if let Some(len) = parse_length(raw) {
+                            if matches!(len, Length::Px(_) | Length::Pct(_)) {
+                                style.height = Some(len);
+                                base_props.insert("height".to_string(), raw.clone());
+                            }
                         }
                     }
                 }
@@ -4065,11 +4069,24 @@ fn is_animatable(prop: &str) -> bool {
 }
 
 fn needs_layout(val: &str) -> bool {
-    let v = val.trim();
+    let v = val.trim().to_ascii_lowercase();
     if v.is_empty() || v == "auto" {
         return true;
     }
-    v.ends_with('%') || v.ends_with("vh") || v.ends_with("vw")
+    // Any relative length unit forces the runtime (layout-aware) path:
+    // `%`, viewport (`vw/vh/vmin/vmax` + `sv*/lv*/dv*` aliases) and
+    // font-relative (`em/rem/ex/ch`). The digit guard keeps bare words
+    // like `system` from matching the `em` suffix.
+    const REL: &[&str] = &[
+        "%", "vmin", "vmax", "vh", "vw", "svh", "lvh", "dvh", "svw", "lvw", "dvw", "svmin",
+        "svmax", "lvmin", "lvmax", "dvmin", "dvmax", "rem", "em", "ex", "ch",
+    ];
+    REL.iter().any(|u| {
+        v.ends_with(u) && v.len() > u.len() && {
+            let c = v.as_bytes()[v.len() - u.len() - 1] as char;
+            c.is_ascii_digit() || c == '.'
+        }
+    })
 }
 
 /// User-agent default styles for HTML tags (lowest priority — overridden by
@@ -4929,8 +4946,9 @@ fn apply_css_prop(style: &mut IRStyle, prop: &str, val: &str) -> Option<&'static
             }
         }
         "margin" => {
-            if let Some(v) = parse_box_sides(val) {
+            if let Some((v, auto_flags)) = parse_margin_sides(val) {
                 style.margin = v;
+                style.margin_auto = auto_flags;
                 Some("margin")
             } else {
                 None
@@ -5084,8 +5102,8 @@ fn apply_css_prop(style: &mut IRStyle, prop: &str, val: &str) -> Option<&'static
             let v = val.trim();
             style.flex_basis = if v == "auto" {
                 "auto".to_string()
-            } else if let Some(px) = parse_length(v) {
-                format!("{px}px")
+            } else if let Some(len) = parse_length(v) {
+                len.to_css()
             } else {
                 v.to_string()
             };
@@ -5100,7 +5118,11 @@ fn apply_css_prop(style: &mut IRStyle, prop: &str, val: &str) -> Option<&'static
             Some("border")
         }
         "margin-top" => {
-            if let Some(v) = parse_length(val) {
+            if val.trim().eq_ignore_ascii_case("auto") {
+                style.margin[0] = Length::Px(0.0);
+                style.margin_auto[0] = true;
+                Some("margin")
+            } else if let Some(v) = parse_length(val) {
                 style.margin[0] = v;
                 Some("margin")
             } else {
@@ -5108,7 +5130,11 @@ fn apply_css_prop(style: &mut IRStyle, prop: &str, val: &str) -> Option<&'static
             }
         }
         "margin-right" => {
-            if let Some(v) = parse_length(val) {
+            if val.trim().eq_ignore_ascii_case("auto") {
+                style.margin[1] = Length::Px(0.0);
+                style.margin_auto[1] = true;
+                Some("margin")
+            } else if let Some(v) = parse_length(val) {
                 style.margin[1] = v;
                 Some("margin")
             } else {
@@ -5116,7 +5142,11 @@ fn apply_css_prop(style: &mut IRStyle, prop: &str, val: &str) -> Option<&'static
             }
         }
         "margin-bottom" => {
-            if let Some(v) = parse_length(val) {
+            if val.trim().eq_ignore_ascii_case("auto") {
+                style.margin[2] = Length::Px(0.0);
+                style.margin_auto[2] = true;
+                Some("margin")
+            } else if let Some(v) = parse_length(val) {
                 style.margin[2] = v;
                 Some("margin")
             } else {
@@ -5124,7 +5154,11 @@ fn apply_css_prop(style: &mut IRStyle, prop: &str, val: &str) -> Option<&'static
             }
         }
         "margin-left" => {
-            if let Some(v) = parse_length(val) {
+            if val.trim().eq_ignore_ascii_case("auto") {
+                style.margin[3] = Length::Px(0.0);
+                style.margin_auto[3] = true;
+                Some("margin")
+            } else if let Some(v) = parse_length(val) {
                 style.margin[3] = v;
                 Some("margin")
             } else {
@@ -5212,7 +5246,7 @@ fn apply_css_prop(style: &mut IRStyle, prop: &str, val: &str) -> Option<&'static
             }
         }
         "border-width" => {
-            if let Some(v) = parse_length(val) {
+            if let Some(v) = parse_length_no_pct(val) {
                 style.border_width = v;
                 Some("border_width")
             } else {
@@ -5237,7 +5271,7 @@ fn apply_css_prop(style: &mut IRStyle, prop: &str, val: &str) -> Option<&'static
         }
         // Per-side border width
         "border-top-width" => {
-            if let Some(v) = parse_length(val) {
+            if let Some(v) = parse_length_no_pct(val) {
                 style.border_top_width = Some(v);
                 Some("border_top_width")
             } else {
@@ -5245,7 +5279,7 @@ fn apply_css_prop(style: &mut IRStyle, prop: &str, val: &str) -> Option<&'static
             }
         }
         "border-right-width" => {
-            if let Some(v) = parse_length(val) {
+            if let Some(v) = parse_length_no_pct(val) {
                 style.border_right_width = Some(v);
                 Some("border_right_width")
             } else {
@@ -5253,7 +5287,7 @@ fn apply_css_prop(style: &mut IRStyle, prop: &str, val: &str) -> Option<&'static
             }
         }
         "border-bottom-width" => {
-            if let Some(v) = parse_length(val) {
+            if let Some(v) = parse_length_no_pct(val) {
                 style.border_bottom_width = Some(v);
                 Some("border_bottom_width")
             } else {
@@ -5261,7 +5295,7 @@ fn apply_css_prop(style: &mut IRStyle, prop: &str, val: &str) -> Option<&'static
             }
         }
         "border-left-width" => {
-            if let Some(v) = parse_length(val) {
+            if let Some(v) = parse_length_no_pct(val) {
                 style.border_left_width = Some(v);
                 Some("border_left_width")
             } else {
@@ -5402,7 +5436,7 @@ fn parse_border_shorthand(style: &mut IRStyle, val: &str) {
             if let Some(c) = parse_color(part) {
                 style.border_color = c;
             }
-        } else if let Some(w) = parse_length(part) {
+        } else if let Some(w) = parse_length_no_pct(part) {
             style.border_width = w;
         }
     }
@@ -5411,13 +5445,13 @@ fn parse_border_shorthand(style: &mut IRStyle, val: &str) {
 /// Parse `border-radius` (1-4 lengths, clockwise from top-left:
 /// TL TR BR BL). Elliptical `h / v` syntax keeps the horizontal
 /// radii; vertical radii are not supported yet.
-fn parse_border_radius(s: &str) -> Option<[f32; 4]> {
+fn parse_border_radius(s: &str) -> Option<[Length; 4]> {
     let horizontal = s.split('/').next().unwrap_or(s);
-    let parts: Vec<Option<f32>> = horizontal.split_whitespace().map(parse_length).collect();
+    let parts: Vec<Option<Length>> = horizontal.split_whitespace().map(parse_length).collect();
     if parts.is_empty() || parts.len() > 4 || parts.iter().any(std::option::Option::is_none) {
         return None;
     }
-    let v: Vec<f32> = parts.into_iter().map(|p| p.unwrap_or(0.0)).collect();
+    let v: Vec<Length> = parts.into_iter().map(|p| p.unwrap_or(Length::Px(0.0))).collect();
     Some(match v.len() {
         1 => [v[0], v[0], v[0], v[0]],
         2 => [v[0], v[1], v[0], v[1]],
@@ -5427,18 +5461,50 @@ fn parse_border_radius(s: &str) -> Option<[f32; 4]> {
 }
 
 /// Parse CSS 1-4 value box shorthand into [top, right, bottom, left].
-fn parse_box_sides(s: &str) -> Option<[f32; 4]> {
-    let parts: Vec<Option<f32>> = s.split_whitespace().map(parse_length).collect();
+fn parse_box_sides(s: &str) -> Option<[Length; 4]> {
+    let parts: Vec<Option<Length>> = s.split_whitespace().map(parse_length).collect();
     if parts.is_empty() || parts.len() > 4 || parts.iter().any(std::option::Option::is_none) {
         return None;
     }
-    let v: Vec<f32> = parts.into_iter().map(|p| p.unwrap_or(0.0)).collect();
+    let v: Vec<Length> = parts.into_iter().map(|p| p.unwrap_or(Length::Px(0.0))).collect();
     Some(match v.len() {
         1 => [v[0], v[0], v[0], v[0]],
         2 => [v[0], v[1], v[0], v[1]],
         3 => [v[0], v[1], v[2], v[1]],
         _ => [v[0], v[1], v[2], v[3]],
     })
+}
+
+/// Parse a CSS `margin` shorthand where each side is a length or `auto`.
+/// Returns the values (auto reads as 0) plus per-side auto flags.
+fn parse_margin_sides(s: &str) -> Option<([Length; 4], [bool; 4])> {
+    let parts: Vec<&str> = s.split_whitespace().collect();
+    if parts.is_empty() || parts.len() > 4 {
+        return None;
+    }
+    let mut values = Vec::with_capacity(parts.len());
+    let mut autos = Vec::with_capacity(parts.len());
+    for part in &parts {
+        if part.eq_ignore_ascii_case("auto") {
+            values.push(Length::Px(0.0));
+            autos.push(true);
+        } else if let Some(v) = parse_length(part) {
+            values.push(v);
+            autos.push(false);
+        } else {
+            return None;
+        }
+    }
+    let idx: [usize; 4] = match values.len() {
+        1 => [0, 0, 0, 0],
+        2 => [0, 1, 0, 1],
+        3 => [0, 1, 2, 1],
+        _ => [0, 1, 2, 3],
+    };
+    Some((
+        [values[idx[0]], values[idx[1]], values[idx[2]], values[idx[3]]],
+        [autos[idx[0]], autos[idx[1]], autos[idx[2]], autos[idx[3]]],
+    ))
 }
 
 /// Parse a CSS time (`0.3s` / `500ms` / unitless seconds) to seconds.
@@ -5669,21 +5735,76 @@ fn parse_animations(merged: &HashMap<String, String>) -> Vec<crate::node::IRAnim
     anims.into_iter().filter(|a| !a.name.is_empty()).collect()
 }
 
-fn parse_length(s: &str) -> Option<f32> {
-    let s = s.trim();
-    if let Some(num) = s.strip_suffix("px") {
-        return num.trim().parse().ok();
-    }
-    if let Some(num) = s.strip_suffix("rem") {
-        return num.trim().parse::<f32>().ok().map(|v| v * 16.0);
-    }
-    if let Some(num) = s.strip_suffix("em") {
-        return num.trim().parse::<f32>().ok().map(|v| v * 16.0);
-    }
-    if s.ends_with('%') {
+/// Parse a CSS length with browser-style units into an IR `Length`.
+///
+/// Supported: `px`, bare numbers (= px, lenient), `%`, font-relative
+/// (`em/rem/ex/ch`), viewport (`vw/vh/vmin/vmax` plus `sv*/lv*/dv*`
+/// aliases, which all mean the layout viewport here). Absolute physical
+/// units fold to px at 96dpi (`in/cm/mm/q/pt/pc`).
+/// Returns `None` for anything else (keywords like `auto` are handled by
+/// the callers, so the declaration is dropped like browsers do).
+fn parse_length(s: &str) -> Option<Length> {
+    let t = s.trim();
+    if t.is_empty() {
         return None;
     }
-    s.parse().ok()
+    if let Some(num) = t.strip_suffix('%') {
+        return num.trim().parse::<f32>().ok().map(Length::Pct);
+    }
+    let low = t.to_ascii_lowercase();
+    // Longest suffixes first: "rem" before "em", "vmin/vmax" before "vh".
+    let table: &[(&str, f32, fn(f32) -> Length)] = &[
+        ("vmin", 1.0, Length::Vmin),
+        ("vmax", 1.0, Length::Vmax),
+        ("svmin", 1.0, Length::Vmin),
+        ("svmax", 1.0, Length::Vmax),
+        ("lvmin", 1.0, Length::Vmin),
+        ("lvmax", 1.0, Length::Vmax),
+        ("dvmin", 1.0, Length::Vmin),
+        ("dvmax", 1.0, Length::Vmax),
+        ("svh", 1.0, Length::Vh),
+        ("lvh", 1.0, Length::Vh),
+        ("dvh", 1.0, Length::Vh),
+        ("svw", 1.0, Length::Vw),
+        ("lvw", 1.0, Length::Vw),
+        ("dvw", 1.0, Length::Vw),
+        ("rem", 1.0, Length::Rem),
+        ("vh", 1.0, Length::Vh),
+        ("vw", 1.0, Length::Vw),
+        ("em", 1.0, Length::Em),
+        ("ex", 1.0, Length::Ex),
+        ("ch", 1.0, Length::Ch),
+        ("px", 1.0, Length::Px),
+        ("in", 96.0, Length::Px),
+        ("cm", 96.0 / 2.54, Length::Px),
+        ("mm", 96.0 / 25.4, Length::Px),
+        ("pt", 96.0 / 72.0, Length::Px),
+        ("pc", 16.0, Length::Px),
+        ("q", 96.0 / 101.6, Length::Px),
+    ];
+    for (suffix, scale, ctor) in table {
+        if let Some(num) = low.strip_suffix(suffix) {
+            // Guard against bare identifiers that merely end with a unit
+            // spelling ("system" is not "syste"+"m"... "em" needs a digit).
+            let num = num.trim();
+            if num.is_empty()
+                || !(num.ends_with(|c: char| c.is_ascii_digit()) || num.ends_with('.'))
+            {
+                continue;
+            }
+            return num.parse::<f32>().ok().map(|v| ctor(v * scale));
+        }
+    }
+    t.parse::<f32>().ok().map(Length::Px)
+}
+
+/// Parse a length for properties where `%` is invalid CSS (`border-width`).
+/// Relative font/viewport units stay; percentages drop the declaration.
+fn parse_length_no_pct(s: &str) -> Option<Length> {
+    match parse_length(s)? {
+        Length::Pct(_) => None,
+        v => Some(v),
+    }
 }
 
 pub(crate) fn parse_color(s: &str) -> Option<[f32; 4]> {
@@ -5893,7 +6014,7 @@ mod tests {
             &mut Vec::new(),
             &HashMap::new(),
         );
-        assert_eq!(node.style.width, Some(400.0));
+        assert_eq!(node.style.width, Some(Length::Px(400.0)));
 
         let mut props = HashMap::new();
         props.insert("width".to_string(), JsxPropValue::String("400".to_string()));
@@ -5922,7 +6043,7 @@ mod tests {
             &mut Vec::new(),
             &HashMap::new(),
         );
-        assert_eq!(node.style.width, Some(100.0));
+        assert_eq!(node.style.width, Some(Length::Px(100.0)));
     }
 
     #[test]
@@ -6021,17 +6142,65 @@ mod tests {
 
     #[test]
     fn box_shorthands_expand_per_side() {
-        assert_eq!(parse_box_sides("18px"), Some([18.0, 18.0, 18.0, 18.0]));
-        assert_eq!(parse_box_sides("10px 6px"), Some([10.0, 6.0, 10.0, 6.0]));
-        assert_eq!(parse_box_sides("36px 32px 28px 32px"), Some([36.0, 32.0, 28.0, 32.0]));
-        assert_eq!(parse_box_sides("1px 2px 3px"), Some([1.0, 2.0, 3.0, 2.0]));
+        use Length::*;
+        assert_eq!(parse_box_sides("18px"), Some([Px(18.0), Px(18.0), Px(18.0), Px(18.0)]));
+        assert_eq!(parse_box_sides("10px 6px"), Some([Px(10.0), Px(6.0), Px(10.0), Px(6.0)]));
+        assert_eq!(
+            parse_box_sides("36px 32px 28px 32px"),
+            Some([Px(36.0), Px(32.0), Px(28.0), Px(32.0)])
+        );
+        assert_eq!(parse_box_sides("1px 2px 3px"), Some([Px(1.0), Px(2.0), Px(3.0), Px(2.0)]));
+        assert_eq!(parse_box_sides("10% 2rem"), Some([Pct(10.0), Rem(2.0), Pct(10.0), Rem(2.0)]));
         assert_eq!(parse_box_sides("10px auto"), None);
         assert_eq!(parse_box_sides(""), None);
-        assert_eq!(parse_border_radius("16px"), Some([16.0, 16.0, 16.0, 16.0]));
-        assert_eq!(parse_border_radius("4px 16px"), Some([4.0, 16.0, 4.0, 16.0]));
-        assert_eq!(parse_border_radius("4px 16px 28px 40px"), Some([4.0, 16.0, 28.0, 40.0]));
-        assert_eq!(parse_border_radius("10px 20px / 30px 40px"), Some([10.0, 20.0, 10.0, 20.0]));
+        assert_eq!(parse_border_radius("16px"), Some([Px(16.0), Px(16.0), Px(16.0), Px(16.0)]));
+        assert_eq!(parse_border_radius("4px 16px"), Some([Px(4.0), Px(16.0), Px(4.0), Px(16.0)]));
+        assert_eq!(
+            parse_border_radius("4px 16px 28px 40px"),
+            Some([Px(4.0), Px(16.0), Px(28.0), Px(40.0)])
+        );
+        assert_eq!(
+            parse_border_radius("10px 20px / 30px 40px"),
+            Some([Px(10.0), Px(20.0), Px(10.0), Px(20.0)])
+        );
+        assert_eq!(parse_border_radius("50%"), Some([Pct(50.0), Pct(50.0), Pct(50.0), Pct(50.0)]));
         assert_eq!(parse_border_radius("10px auto"), None);
+    }
+
+    #[test]
+    fn length_units_parse_like_browsers() {
+        use Length::*;
+        assert_eq!(parse_length("12px"), Some(Px(12.0)));
+        assert_eq!(parse_length("12"), Some(Px(12.0)));
+        assert_eq!(parse_length("0"), Some(Px(0.0)));
+        assert_eq!(parse_length("50%"), Some(Pct(50.0)));
+        assert_eq!(parse_length("1.5em"), Some(Em(1.5)));
+        assert_eq!(parse_length("2rem"), Some(Rem(2.0)));
+        assert_eq!(parse_length("10vw"), Some(Vw(10.0)));
+        assert_eq!(parse_length("20vh"), Some(Vh(20.0)));
+        assert_eq!(parse_length("5vmin"), Some(Vmin(5.0)));
+        assert_eq!(parse_length("5vmax"), Some(Vmax(5.0)));
+        assert_eq!(parse_length("3ch"), Some(Ch(3.0)));
+        assert_eq!(parse_length("2ex"), Some(Ex(2.0)));
+        assert_eq!(parse_length("10DVW"), Some(Vw(10.0)));
+        assert_eq!(parse_length("10svh"), Some(Vh(10.0)));
+        // Physical units fold to px at 96dpi.
+        assert_eq!(parse_length("1in"), Some(Px(96.0)));
+        assert_eq!(parse_length("2.54cm"), Some(Px(96.0)));
+        assert_eq!(parse_length("25.4mm"), Some(Px(96.0)));
+        assert_eq!(parse_length("72pt"), Some(Px(96.0)));
+        assert_eq!(parse_length("6pc"), Some(Px(96.0)));
+        // Case-insensitive; bare words and garbage drop.
+        assert_eq!(parse_length("10PX"), Some(Px(10.0)));
+        assert_eq!(parse_length("auto"), None);
+        assert_eq!(parse_length("system"), None);
+        assert_eq!(parse_length("10pxx"), None);
+        assert_eq!(parse_length(""), None);
+        // Serializer round-trip spellings.
+        assert_eq!(Length::Pct(50.0).to_css(), "50%");
+        assert_eq!(Length::Em(1.5).to_css(), "1.5em");
+        assert_eq!(Length::Vw(10.0).to_css(), "10vw");
+        assert_eq!(Length::Px(12.0).to_css(), "12");
     }
 
     #[test]
@@ -6047,13 +6216,26 @@ mod tests {
         assert_eq!(style.flex_shrink, 1.0);
         assert_eq!(style.flex_basis, "0%");
         apply_css_prop(&mut style, "border", "1px solid #232b3d");
-        assert_eq!(style.border_width, 1.0);
+        assert_eq!(style.border_width, Length::Px(1.0));
         assert_eq!(style.border_style, "solid");
         assert!(style.border_color[0] > 0.1 && style.border_color[0] < 0.2);
         apply_css_prop(&mut style, "margin-top", "50px");
         apply_css_prop(&mut style, "padding-left", "6px");
-        assert_eq!(style.margin[0], 50.0);
-        assert_eq!(style.padding[3], 6.0);
+        assert_eq!(style.margin[0], Length::Px(50.0));
+        assert_eq!(style.padding[3], Length::Px(6.0));
+        // Relative units land on every box property, not just insets.
+        apply_css_prop(&mut style, "margin-top", "10%");
+        assert_eq!(style.margin[0], Length::Pct(10.0));
+        apply_css_prop(&mut style, "padding-left", "2rem");
+        assert_eq!(style.padding[3], Length::Rem(2.0));
+        apply_css_prop(&mut style, "gap", "5vw");
+        assert_eq!(style.gap, Length::Vw(5.0));
+        apply_css_prop(&mut style, "font-size", "1.5em");
+        assert_eq!(style.font_size, Length::Em(1.5));
+        apply_css_prop(&mut style, "min-width", "50vmin");
+        assert_eq!(style.min_width, Some(Length::Vmin(50.0)));
+        apply_css_prop(&mut style, "border-width", "50%");
+        assert_eq!(style.border_width, Length::Px(1.0));
         let _ = builder;
     }
 
@@ -6279,7 +6461,7 @@ mod tests {
         assert!((node.style.bg_color[0] - 0xef as f32 / 255.0).abs() < 0.001);
         assert!((node.style.bg_color[1] - 0x44 as f32 / 255.0).abs() < 0.001);
         assert_eq!(node.style.bg_color[3], 1.0);
-        assert_eq!(node.style.font_size, 18.0);
+        assert_eq!(node.style.font_size, Length::Px(18.0));
     }
 }
 

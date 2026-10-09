@@ -111,6 +111,30 @@ public:
     float x = 0, y = 0, w = 0, h = 0;
     MorphStyle style;
     float m_computedMargin[4] = {0}; // resolved margins after latest layout()
+    // Resolved box metrics after latest layout(): font size, padding and
+    // the last relative offset. Relative/font/viewport units in the style
+    // resolve against layout context, so paint and intrinsic sizing read
+    // these instead of re-resolving (or resolving against no base).
+    mutable float m_computedFontSize = -1.0f; // < 0 = not yet resolved
+    float m_computedPadding[4] = {0};
+    // Element font / root font / viewport unit environment for one
+    // resolution. pctBase is the caller's `%` base (CB dimension).
+    UnitEnv unitEnv(float pctBase, Renderer* r) const;
+    float parentFontSize() const;
+    float rootFontSize() const;
+    // Resolve style.fontSize (em/% vs parent, rem vs root) and store it.
+    float computeFontSize(Renderer* r) const;
+    float resolvedFontSize(Renderer* r) const {
+        return m_computedFontSize >= 0.0f ? m_computedFontSize : computeFontSize(r);
+    }
+    // Paint-time resolutions (flatten/paint run post-layout, so the
+    // computed font is fresh; ch/ex measure without a renderer falls
+    // back to 0.5em). `%` radii resolve against the own box width.
+#ifdef MORPH_FEATURE_BORDER
+    float resolvedBorderWidth() const;
+#endif
+    void resolvedRadii(float out[4], bool snap) const;
+    void resolvedControlRadii(float out[4], bool snap) const;
     MorphStyle* hoverStyle = nullptr; // allocated only when :hover rules exist
     MorphStyle* activeStyle = nullptr; // allocated only when :active rules exist
 
@@ -120,12 +144,36 @@ public:
     // of the nearest positioned ancestor (window coords). Set by the parent
     // before layout; a positioned node overwrites it with its own padding box.
     float m_absCbX = 0, m_absCbY = 0, m_absCbW = 0, m_absCbH = 0;
+    // Static position (window coords): the flow slot this out-of-flow box
+    // would occupy. Set by the parent from laid-out siblings before
+    // layout; used wherever the corresponding offset is auto.
+    float m_staticX = 0, m_staticY = 0;
+    // True when this node is (or contains) position:fixed. Set during
+    // layout; lets flatten/render/hit-test exempt the fixed subtree from
+    // ancestor scroll offsets and overflow clips (viewport-locked).
+    bool m_subtreeHasFixed = false;
+    // Last applied relative offset (0 unless position:relative). Lets
+    // layoutIfNeeded() re-pass the unoffset flow slot: layout() would
+    // otherwise add the offset onto the already-offset box.
+    float m_relOffX = 0, m_relOffY = 0;
     // Viewport size (for `fixed` positioning and the initial containing block).
     float m_winW = 0, m_winH = 0;
     // Normal-flow position after relative offset, before any sticky clamp.
     float m_flowX = 0, m_flowY = 0;
 
     bool isPositioned() const { return style.position != CSS::Position::Static; }
+    // True when a transformed ancestor sits above this node. A transform
+    // makes that ancestor the containing block for fixed descendants (no
+    // filter/perspective in the engine, so transform alone decides), and
+    // they keep scrolling with its content — scroll/clip exemption stays
+    // off for them.
+    bool hasTransformedAncestor() const {
+#ifdef MORPH_FEATURE_TRANSFORM
+        for (const MorphNode* p = parent; p; p = p->parent)
+            if (p->style.transformSet) return true;
+#endif
+        return false;
+    }
     MorphNode* nearestScrollContainer() {
         for (MorphNode* p = parent; p; p = p->parent)
             if (p->scrollEnabled) return p;

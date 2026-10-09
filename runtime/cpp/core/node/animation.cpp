@@ -32,18 +32,22 @@ inline const KeyframeValue* findValue(const Keyframe& kf,
     return nullptr;
 }
 
-// Resolve a raw % length against a base size. Inspects the unit suffix
-// in place — no heap string per tick. Acceptance matches the old
-// `std::string unit` compares exactly (case-sensitive, no trailing junk).
-inline bool resolvePct(const std::string& css, float base, float& out) {
-    const char* s = css.c_str();
-    char* end = nullptr;
-    double v = std::strtod(s, &end);
-    if (end == s) return false;
-    if (end[0] == '%' && end[1] == '\0') { out = (float)(v / 100.0 * base); return true; }
-    if (end[0] == '\0') { out = (float)v; return true; }
-    if (end[0] == 'p' && end[1] == 'x' && end[2] == '\0') { out = (float)v; return true; }
-    return false;
+// Resolve a raw CSS length against a base size. `%` uses the base;
+// every other unit resolves through the node's own environment
+// (font units vs its computed font, viewport units vs the window).
+inline bool resolveCssLength(const std::string& css, float base, MorphNode* node, float& out) {
+    CssLength l;
+    if (!parseCssLength(css, l)) return false;
+    UnitEnv e;
+    e.pctBase = base;
+    e.fontSize = node->resolvedFontSize(nullptr);
+    e.rootFont = node->rootFontSize();
+#ifdef MORPH_FEATURE_POSITION
+    e.vw = node->m_winW;
+    e.vh = node->m_winH;
+#endif
+    out = resolveUnits(l, e);
+    return true;
 }
 
 // Resolve a raw CSS length / color / number into v[4].  Returns false when
@@ -76,7 +80,7 @@ inline bool resolveValue(const KeyframeValue& kv, MorphNode* node, float out[4])
                         break;
                     default: break;
                 }
-                if (!resolvePct(kv.css, base, out[0])) return false;
+                if (!resolveCssLength(kv.css, base, node, out[0])) return false;
             } else {
                 out[0] = kv.v[0];
             }
@@ -171,7 +175,8 @@ inline void applyValue(MorphNode* node, KeyframeProperty prop, const float* v) {
             node->markDirty(PaintDirty);
             break;
         case KeyframeProperty::BorderRadius:
-            node->style.borderRadius = v[0];
+            node->style.borderRadius.value = v[0];
+            node->style.borderRadius.unit = LengthUnit::Px;
             node->markDirty(PaintDirty);
             break;
 #ifdef MORPH_FEATURE_BORDER
@@ -183,34 +188,40 @@ inline void applyValue(MorphNode* node, KeyframeProperty prop, const float* v) {
             node->markDirty(PaintDirty);
             break;
         case KeyframeProperty::BorderWidth:
-            node->style.borderWidth = v[0];
+            node->style.borderWidth.value = v[0];
+            node->style.borderWidth.unit = LengthUnit::Px;
             node->markDirty(LayoutDirty);
             node->markDirty(PaintDirty);
             break;
 #endif
         case KeyframeProperty::FontSize:
-            node->style.fontSize = v[0];
+            node->style.fontSize.value = v[0];
+            node->style.fontSize.unit = LengthUnit::Px;
             node->markDirty(LayoutDirty);
             node->markDirty(PaintDirty);
             break;
         case KeyframeProperty::Width:
-            node->style.explicitWidth = v[0];
+            node->style.explicitWidth.value = v[0];
+            node->style.explicitWidth.unit = LengthUnit::Px;
             node->markDirty(LayoutDirty);
             node->markDirty(PaintDirty);
             break;
         case KeyframeProperty::Height:
-            node->style.explicitHeight = v[0];
+            node->style.explicitHeight.value = v[0];
+            node->style.explicitHeight.unit = LengthUnit::Px;
             node->markDirty(LayoutDirty);
             node->markDirty(PaintDirty);
             break;
 #ifdef MORPH_FEATURE_POSITION
         case KeyframeProperty::Left:
-            node->style.left = v[0];
+            node->style.left.value = v[0];
+            node->style.left.unit = LengthUnit::Px;
             node->markDirty(LayoutDirty);
             node->markDirty(PaintDirty);
             break;
         case KeyframeProperty::Top:
-            node->style.top = v[0];
+            node->style.top.value = v[0];
+            node->style.top.unit = LengthUnit::Px;
             node->markDirty(LayoutDirty);
             node->markDirty(PaintDirty);
             break;

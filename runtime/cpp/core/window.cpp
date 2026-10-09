@@ -1075,6 +1075,26 @@ static bool subtreeFitsBox(const RenderFrame *frame, int nodeIdx,
     return true;
 }
 
+// True when a transformed ancestor sits above the frame node: fixed
+// descendants stay in the transformed frame (and keep scrolling with its
+// content), so scroll/clip exemption stays off for them. Only transforms
+// reframe fixed positioning (no filter/perspective in the engine).
+static bool frameHasTransformedAncestor(const RenderFrame *frame, int nodeIdx)
+{
+#ifdef MORPH_FEATURE_TRANSFORM
+    int id = frame->nodes[nodeIdx].parentId;
+    while (id >= 0 && id < (int)frame->nodes.size())
+    {
+        if (frame->nodes[id].transformSet) return true;
+        id = frame->nodes[id].parentId;
+    }
+#else
+    (void)frame;
+    (void)nodeIdx;
+#endif
+    return false;
+}
+
 void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx,
                              const DamageSet *damageClip, float scrollOffset,
                              int skipIdx)
@@ -1104,6 +1124,11 @@ void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx,
         radiusClip = false;
     }
     bool scrolling = node.scrollEnabled && node.contentH > sh;
+
+    // A viewport-locked fixed descendant can be visible even when this
+    // node's own box is culled: never cull the subtree away from under
+    // it (rendering then proceeds normally and each child culls itself).
+    bool visitFixed = node.hasFixedSubtree && !frameHasTransformedAncestor(frame, nodeIdx);
 
     // Effective screen position: node coords are absolute root-space but do
     // NOT include scroll — a scrolling ancestor shifts the whole subtree via
@@ -1137,7 +1162,7 @@ void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx,
             (node.cullX + node.cullW <= 0.0f || node.cullX >= cw ||
              node.cullY + node.cullH <= 0.0f || node.cullY >= ch))
         {
-            if (overflowClipped || radiusClip)
+            if ((overflowClipped || radiusClip) && !visitFixed)
                 return;
             for (int childIdx : node.children)
                 renderNode(frame, childIdx, damageClip, scrollOffset, skipIdx);
@@ -1149,10 +1174,11 @@ void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx,
     if (sx + sw <= 0.0f || sx >= cw || screenY + sh <= 0.0f || screenY >= ch)
     {
         // Clipping nodes fully contain their descendants, so skipping the
-        // whole subtree is safe. Unclipped nodes can have overflowed
-        // children that DO reach the view — recurse them without touching
-        // this node's pixels.
-        if (overflowClipped || radiusClip)
+        // whole subtree is safe — except for a viewport-locked fixed
+        // descendant, which can reach the view from anywhere. Unclipped
+        // nodes can have overflowed children that DO reach the view —
+        // recurse them without touching this node's pixels.
+        if ((overflowClipped || radiusClip) && !visitFixed)
             return;
         for (int childIdx : node.children)
             renderNode(frame, childIdx, damageClip, scrollOffset, skipIdx);
@@ -1181,7 +1207,7 @@ void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx,
             // whole subtree is safe. Unclipped nodes can have overflowed
             // children that DO reach the damage — recurse them without
             // touching this node's pixels.
-            if (overflowClipped || radiusClip)
+            if ((overflowClipped || radiusClip) && !visitFixed)
                 return;
             for (int childIdx : node.children)
                 renderNode(frame, childIdx, damageClip, scrollOffset, skipIdx);
@@ -1314,24 +1340,52 @@ void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx,
     float childScroll = scrollOffset + (scrolling ? node.scrollY : 0.0f);
     for (int childIdx : node.children)
     {
+        const auto &child = frame->nodes[childIdx];
+        // A viewport-locked fixed subtree renders without this level's
+        // scroll offset and clips, so its viewport-based boxes land
+        // unshifted and unclipped: unwind both around it, then re-wind
+        // in the original order. Locked by a transformed ancestor (which
+        // reframes fixed positioning) → keep today's path.
+        bool exempt = child.hasFixedSubtree && !frameHasTransformedAncestor(frame, childIdx);
+        float cs = childScroll;
+        if (exempt && scrolling)
+        {
+            m_renderer.popScrollOffset(0, -node.scrollY);
+            cs -= node.scrollY;
+        }
+        if (exempt)
+        {
+            if (radiusClip)
+                m_renderer.endRoundedClip();
+            if (overflowClipped)
+                m_renderer.endClip();
+        }
         if (scrolling && !transformed)
         {
-            const auto &child = frame->nodes[childIdx];
             // Screen-space visibility: the child's drawn position minus
             // the full accumulated scroll (ancestors included) against the
             // node's screen top. Single-level scrolling reduces to the old
             // test; nested scrolling was previously culled wrong.
-            float childVisY = child.y + child.animOffsetY - childScroll;
+            float childVisY = child.y + child.animOffsetY - cs;
             float nodeTop = sy - scrollOffset;
             if (childVisY + child.h > nodeTop && childVisY < nodeTop + sh)
             {
-                renderNode(frame, childIdx, damageClip, childScroll, skipIdx);
+                renderNode(frame, childIdx, damageClip, cs, skipIdx);
             }
         }
         else
         {
-            renderNode(frame, childIdx, damageClip, childScroll, skipIdx);
+            renderNode(frame, childIdx, damageClip, cs, skipIdx);
         }
+        if (exempt)
+        {
+            if (overflowClipped)
+                m_renderer.beginClip(sx, sy, sw, sh);
+            if (radiusClip)
+                m_renderer.beginRoundedClip(sx, sy, sw, sh, nodeRadii);
+        }
+        if (exempt && scrolling)
+            m_renderer.pushScrollOffset(0, -node.scrollY);
     }
     if (scrolling)
         m_renderer.popScrollOffset(0, -node.scrollY);

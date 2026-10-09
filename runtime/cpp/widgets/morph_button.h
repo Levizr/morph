@@ -22,11 +22,12 @@ public:
         float sx = sc(x), sy = sc(y);
         float sw = sc(w), sh = sc(h);
         float radii[4];
-        resolveControlRadii(style, !m_isTransitioning, radii);
+        resolvedControlRadii(radii, !m_isTransitioning);
         DrawOp bg;
 #ifdef MORPH_FEATURE_BORDER
-        if (style.borderWidth > 0.0f && style.borderStyle == "solid") {
-            float bw = m_isTransitioning ? style.borderWidth : snapBorderWidth(style.borderWidth);
+        if (resolvedBorderWidth() > 0.0f && style.borderStyle == "solid") {
+            float bw0 = resolvedBorderWidth();
+            float bw = m_isTransitioning ? bw0 : snapBorderWidth(bw0);
             bool inner = (style.boxSizing == "border-box");
             if (inner)
                 bg.setBordered(sx, sy, sw, sh, radii, style.bgColor, bw, style.borderColor);
@@ -46,7 +47,7 @@ public:
         float sx = sc(x), sy = sc(y);
         float sw = sc(w), sh = sc(h);
         float radii[4];
-        resolveBorderRadii(style, !m_isTransitioning, radii);
+        resolvedRadii(radii, !m_isTransitioning);
 
 #ifdef MORPH_FEATURE_TRANSFORM
         bool pushedSelf = pushSelfTransform(r, sx, sy);
@@ -113,13 +114,14 @@ public:
         float sx = sc(x), sy = sc(y);
         float sw = sc(w), sh = sc(h);
         float radii[4];
-        resolveControlRadii(style, !m_isTransitioning, radii);
+        resolvedControlRadii(radii, !m_isTransitioning);
 #ifdef MORPH_FEATURE_TRANSFORM
         bool pushedSelf = pushSelfTransform(r, sx, sy);
 #endif
 #ifdef MORPH_FEATURE_BORDER
-        if (style.borderWidth > 0.0f && style.borderStyle == "solid") {
-            float bw = m_isTransitioning ? style.borderWidth : snapBorderWidth(style.borderWidth);
+        if (resolvedBorderWidth() > 0.0f && style.borderStyle == "solid") {
+            float bw0 = resolvedBorderWidth();
+            float bw = m_isTransitioning ? bw0 : snapBorderWidth(bw0);
             bool inner = (style.boxSizing == "border-box");
             if (inner)
                 r.drawBorderedRoundedRect(sx, sy, sw, sh, radii, style.bgColor,
@@ -178,7 +180,9 @@ public:
         float radius = m_isTransitioning ? style.scrollbarBorderRadius : snapRadius(style.scrollbarBorderRadius);
         if (radius > thumbH * 0.5f) radius = thumbH * 0.5f;
         if (radius < 0.5f) radius = 0.5f;
-        r.drawRoundedRect(trackX, thumbY, sbw, thumbH, radius, style.scrollbarThumbColor);
+        float sbRadii[4];
+        fillRadii(sbRadii, radius);
+        r.drawRoundedRect(trackX, thumbY, sbw, thumbH, sbRadii, style.scrollbarThumbColor);
     }
 #endif
 };

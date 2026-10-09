@@ -145,9 +145,9 @@ int MorphNode::flattenImpl(RenderFrame& frame, int parentId, float scrollOffset,
     if (offscreen)
     {
         bool clips = style.overflow == CSS::Overflow::Hidden || style.overflow == CSS::Overflow::Scroll ||
-                     style.overflow == CSS::Overflow::Auto || style.borderRadius > 0.0f ||
-                     style.borderTopLeftRadius > 0.0f || style.borderTopRightRadius > 0.0f ||
-                     style.borderBottomRightRadius > 0.0f || style.borderBottomLeftRadius > 0.0f;
+                     style.overflow == CSS::Overflow::Auto || !style.borderRadius.isZero() ||
+                     style.borderTopLeftRadius.isSet() || style.borderTopRightRadius.isSet() ||
+                     style.borderBottomRightRadius.isSet() || style.borderBottomLeftRadius.isSet();
         // Clipping nodes fully contain their descendants. If nothing in the
         // subtree can move (running animation/transition), it can never
         // become visible — drop the whole subtree. Non-clipping nodes still
@@ -175,16 +175,18 @@ int MorphNode::flattenImpl(RenderFrame& frame, int parentId, float scrollOffset,
 
     memcpy(fn.bgColor, style.bgColor, sizeof(float)*4);
     memcpy(fn.color, style.color, sizeof(float)*4);
-    fn.borderRadius = style.borderRadius;
-    fn.cornerRadii[0] = style.borderTopLeftRadius;
-    fn.cornerRadii[1] = style.borderTopRightRadius;
-    fn.cornerRadii[2] = style.borderBottomRightRadius;
-    fn.cornerRadii[3] = style.borderBottomLeftRadius;
+    // Radii/borders resolve here (flatten runs post-layout): `%` radii
+    // against the own box width, font units against the computed font.
+    UnitEnv flatEnv = unitEnv(w, nullptr);
+    resolveBorderRadii(style, flatEnv, false, fn.cornerRadii);
+    fn.borderRadius = resolveUnits(style.borderRadius, flatEnv);
+    UnitEnv bwEnv = flatEnv;
+    bwEnv.pctBase = 0.0f;
     fn.borderWidth = 0.0f;
     fn.borderColor[0] = fn.borderColor[1] = fn.borderColor[2] = 0.0f; fn.borderColor[3] = 1.0f;
     fn.borderStyle = CSS::BorderStyle::None;
 #ifdef MORPH_FEATURE_BORDER
-    fn.borderWidth = style.borderWidth;
+    fn.borderWidth = resolveUnits(style.borderWidth, bwEnv);
     memcpy(fn.borderColor, style.borderColor, sizeof(float)*4);
     fn.borderStyle = style.borderStyle;
 #endif
@@ -232,8 +234,9 @@ int MorphNode::flattenImpl(RenderFrame& frame, int parentId, float scrollOffset,
     fn.boxSizing = style.boxSizing;
     fn.display = style.display;
     fn.position = style.position;
+    fn.hasFixedSubtree = style.position == CSS::Position::Fixed;
 
-    fn.fontSize = style.fontSize;
+    fn.fontSize = resolvedFontSize(nullptr);
     fn.textAlign = style.textAlign;
     fn.fontWeight = style.fontWeight;
 
@@ -349,9 +352,35 @@ int MorphNode::flattenImpl(RenderFrame& frame, int parentId, float scrollOffset,
                         (scrollEnabled && contentH > h ? scrollY : 0.0f);
 
     for (auto* child : paintOrder()) {
-        int childIdx = child->flattenImpl(frame, idx, childScroll, passAcc, opac);
-        if (childIdx >= 0)
+        float cs = childScroll;
+        const float* childAcc = passAcc;
+        bool exemptChild = false;
+#ifdef MORPH_FEATURE_POSITION
+        // Viewport-locked fixed subtrees skip every ancestor scroll above
+        // them (unless a transformed ancestor reframes them — then they
+        // keep scrolling with its content, like today). Both the scalar
+        // cull coordinate and the matrix path (which bakes this level's
+        // scroll translate into passAcc) shed this level's contribution.
+        exemptChild = child->m_subtreeHasFixed && !child->hasTransformedAncestor();
+        if (exemptChild)
+            cs -= (scrollEnabled && contentH > h ? scrollY : 0.0f);
+#endif
+#ifdef MORPH_FEATURE_TRANSFORM
+        float childAccBuf[16];
+        if (exemptChild) {
+            float inv[16];
+            morph::mat4Identity(inv);
+            inv[13] = (scrollEnabled && contentH > h ? scrollY : 0.0f);
+            morph::mat4Multiply(childAccBuf, passAcc, inv);
+            childAcc = childAccBuf;
+        }
+#endif
+        int childIdx = child->flattenImpl(frame, idx, cs, childAcc, opac);
+        if (childIdx >= 0) {
             frame.nodes[idx].children.push_back(childIdx);
+            if (frame.nodes[childIdx].hasFixedSubtree)
+                frame.nodes[idx].hasFixedSubtree = true;
+        }
     }
 
     return idx;

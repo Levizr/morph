@@ -1,0 +1,9 @@
+import { morphShared, morphEvent } from 'morph'
+
+// Per-window readable value + app-global sync event. Windows diverge by
+// design (morphShared is per-window), so every pick writes the local copy
+// and broadcasts over prefsChanged; each sibling applies it to its copy.
+export const [theme, setTheme] = morphShared<string>("dark")
+export const [codeSize, setCodeSize] = morphShared<string>("normal")
+
+export const prefsChanged = morphEvent<{ theme: string, codeSize: string }>()

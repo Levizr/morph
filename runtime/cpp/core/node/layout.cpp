@@ -5,25 +5,32 @@
 #include <cstdlib>
 #include <cstring>
 
-static float hBonus(const MorphStyle& s) {
+// Padding/border allowance outside the content box, with relative units
+// resolved against the child's own fonts (pctBase = CB width for the
+// `%` fallback; border `%` is invalid CSS and never parses).
+static float hBonus(const MorphNode* n, float pctBase, Renderer* r) {
 #ifdef MORPH_FEATURE_BORDER_BOX
-    if (s.boxSizing == CSS::BoxSizing::BorderBox) return 0.0f;
+    if (n->style.boxSizing == CSS::BoxSizing::BorderBox) return 0.0f;
 #endif
-    float pl = s.padding[3], pr = s.padding[1];
+    UnitEnv env = const_cast<MorphNode*>(n)->unitEnv(pctBase, r);
+    float pl = resolveUnits(n->style.padding[3], env);
+    float pr = resolveUnits(n->style.padding[1], env);
 #ifdef MORPH_FEATURE_BORDER
-    return pl + pr + borderOuterH(s);
+    return pl + pr + borderOuterH(n->style, env);
 #else
     return pl + pr;
 #endif
 }
 
-static float vBonus(const MorphStyle& s) {
+static float vBonus(const MorphNode* n, float pctBase, Renderer* r) {
 #ifdef MORPH_FEATURE_BORDER_BOX
-    if (s.boxSizing == CSS::BoxSizing::BorderBox) return 0.0f;
+    if (n->style.boxSizing == CSS::BoxSizing::BorderBox) return 0.0f;
 #endif
-    float pt = s.padding[0], pb = s.padding[2];
+    UnitEnv env = const_cast<MorphNode*>(n)->unitEnv(pctBase, r);
+    float pt = resolveUnits(n->style.padding[0], env);
+    float pb = resolveUnits(n->style.padding[2], env);
 #ifdef MORPH_FEATURE_BORDER
-    return pt + pb + borderOuterV(s);
+    return pt + pb + borderOuterV(n->style, env);
 #else
     return pt + pb;
 #endif
@@ -52,15 +59,15 @@ static bool isTransparentInline(MorphNode* n)
     if (n->style.display != CSS::Display::Inline) return false;
     if (n->style.bgColor[3] != 0.0f) return false;
 #ifdef MORPH_FEATURE_BORDER
-    if (n->style.borderWidth != 0.0f) return false;
+    if (!n->style.borderWidth.isZero()) return false;
 #endif
-    if (n->style.padding[0] != 0.0f || n->style.padding[1] != 0.0f
-        || n->style.padding[2] != 0.0f || n->style.padding[3] != 0.0f)
+    if (!n->style.padding[0].isZero() || !n->style.padding[1].isZero()
+        || !n->style.padding[2].isZero() || !n->style.padding[3].isZero())
         return false;
-    if (n->style.margin[0] != 0.0f || n->style.margin[1] != 0.0f
-        || n->style.margin[2] != 0.0f || n->style.margin[3] != 0.0f)
+    if (!n->style.margin[0].isZero() || !n->style.margin[1].isZero()
+        || !n->style.margin[2].isZero() || !n->style.margin[3].isZero())
         return false;
-    if (n->style.explicitWidth >= 0.0f || n->style.explicitHeight >= 0.0f) return false;
+    if (n->style.explicitWidth.isSet() || n->style.explicitHeight.isSet()) return false;
     if (n->scrollEnabled) return false;
     if (n->style.overflow != CSS::Overflow::Visible) return false;
     for (auto* c : n->children)
@@ -160,14 +167,14 @@ static bool trySplitInlineItem(std::vector<InlineItem>& items, size_t i,
     if (r == nullptr) return false;
     if (n->type != NodeType::Text && n->type != NodeType::Expr) return false;
     if (it.ws) return false;
-    if (n->style.explicitWidth >= 0.0f) return false;
+    if (n->style.explicitWidth.isSet()) return false;
     std::string text = n->textContent();
     if (text.find('\n') != std::string::npos) return false;
     std::vector<std::string> words = splitInlineWords(text);
     size_t start = (it.fwn == 0) ? 0 : it.fw0;
     size_t total = (it.fwn == 0) ? words.size() : it.fwn;
     if (total < 2 || start + total > words.size()) return false;
-    float fontSize = n->style.fontSize;
+    float fontSize = n->resolvedFontSize(r);
     float spaceW = r->measureTextWidth(" ", fontSize, n->style.fontWeight);
     float acc = 0.0f;
     size_t take = 0;
@@ -182,7 +189,7 @@ static bool trySplitInlineItem(std::vector<InlineItem>& items, size_t i,
     // Fragments each hold one visual line: single-line height, not the
     // whole node's measured height (multi-line measured text would inflate
     // every spanned row otherwise).
-    float fragH = (n->style.fontSize > 0.0f) ? (n->style.fontSize * 1.4f) : it.h;
+    float fragH = (fontSize > 0.0f) ? (fontSize * 1.4f) : it.h;
     // The boundary space belongs to the prefix box (it separates the frags
     // visually when both land on one row) while staying invisible at a line
     // end when the remainder wraps, like browsers.
@@ -215,6 +222,19 @@ static bool trySplitInlineItem(std::vector<InlineItem>& items, size_t i,
 #endif
 
 #ifdef MORPH_FEATURE_POSITION
+// Resolve a CssLength against a base size for inset/width layout.
+// Unset stays the -1e9 sentinel so existing auto checks keep working;
+// every set unit resolves through the element's unit environment
+// (px passes through, `%` against the base, font units against the
+// element font, viewport units against the window).
+inline float resolveInset(const CssLength& l, float base, const UnitEnv& env)
+{
+    if (!l.isSet()) return l.value;
+    UnitEnv e = env;
+    e.pctBase = base;
+    return resolveUnits(l, e);
+}
+
 // Shift a sticky node and every descendant so children stay glued to it.
 static void shiftStickySubtree(MorphNode* n, float dx, float dy) {
     n->x += dx;
@@ -224,35 +244,57 @@ static void shiftStickySubtree(MorphNode* n, float dx, float dy) {
 
 // `position: sticky` — keeps its normal-flow box (m_flowX/m_flowY) but gets
 // clamped against the nearest scroll container's scrollport, between the
-// top/bottom (and left/right) offsets and its containing block.
+// top/bottom (and left/right) offsets and its containing block. Without a
+// scroll ancestor the viewport is the scrollport (page-level sticky
+// headers stick on window scroll, which re-runs layout).
 void MorphNode::applySticky() {
+    float spLeft, spTop, spW, spH, scrolledY = 0.0f;
     MorphNode* sc = nearestScrollContainer();
-    if (!sc) return;
+    if (sc) {
+#ifdef MORPH_FEATURE_BORDER
+        UnitEnv scEnv = sc->unitEnv(0.0f, nullptr);
+        float bw = getBorderWidth(sc->style, 0, scEnv);
+#else
+        float bw = 0.0f;
+#endif
+        spLeft = sc->x + bw + sc->m_computedPadding[3];
+        spTop = sc->y + bw + sc->m_computedPadding[0];
+        spW = sc->w - 2.0f * bw - sc->m_computedPadding[3] - sc->m_computedPadding[1];
+        spH = sc->h - 2.0f * bw - sc->m_computedPadding[0] - sc->m_computedPadding[2];
+        scrolledY = sc->scrollY;
+    } else {
+        spLeft = 0.0f;
+        spTop = 0.0f;
+        spW = m_winW;
+        spH = m_winH;
+    }
+    if (spW < 0.0f) spW = 0.0f;
+    if (spH < 0.0f) spH = 0.0f;
 
     float newX = m_flowX;
     float newY = m_flowY;
+    // Sticky offsets belong to this element: font units use its font.
+    UnitEnv env = unitEnv(0.0f, nullptr);
 
-#ifdef MORPH_FEATURE_BORDER
-    float bw = sc->style.borderWidth;
-#else
-    float bw = 0.0f;
-#endif
-
-    if (style.left > -1e8f || style.right > -1e8f) {
-        float spLeft = sc->x + bw + sc->style.padding[3];
-        float spW = sc->w - 2.0f * bw - sc->style.padding[3] - sc->style.padding[1];
-        if (spW < 0.0f) spW = 0.0f;
-        if (style.left > -1e8f) {
-            float minX = spLeft + style.left;
+    if (style.left.isSet() || style.right.isSet()) {
+        if (style.left.isSet()) {
+            float minX = spLeft + resolveInset(style.left, spW, env);
             if (newX < minX) newX = minX;
         }
-        if (style.right > -1e8f) {
-            float maxX = spLeft + spW - style.right - w;
+        if (style.right.isSet()) {
+            float maxX = spLeft + spW - resolveInset(style.right, spW, env) - w;
             if (newX > maxX) newX = maxX;
         }
         if (parent) {
-            float cbLeft = parent->x + bw + parent->style.padding[3];
-            float cbW = parent->w - 2.0f * bw - parent->style.padding[3] - parent->style.padding[1];
+#ifdef MORPH_FEATURE_BORDER
+            UnitEnv pEnv = parent->unitEnv(0.0f, nullptr);
+            float pbwL = getBorderWidth(parent->style, 3, pEnv);
+            float pbwR = getBorderWidth(parent->style, 1, pEnv);
+#else
+            float pbwL = 0.0f, pbwR = 0.0f;
+#endif
+            float cbLeft = parent->x + pbwL + parent->m_computedPadding[3];
+            float cbW = parent->w - pbwL - pbwR - parent->m_computedPadding[3] - parent->m_computedPadding[1];
             if (cbW < 0.0f) cbW = 0.0f;
             if (newX < cbLeft) newX = cbLeft;
             float cbRight = cbLeft + cbW - w;
@@ -260,21 +302,25 @@ void MorphNode::applySticky() {
         }
     }
 
-    if (style.top > -1e8f || style.bottom > -1e8f) {
-        float spTop = sc->y + bw + sc->style.padding[0];
-        float spH = sc->h - 2.0f * bw - sc->style.padding[0] - sc->style.padding[2];
-        if (spH < 0.0f) spH = 0.0f;
-        if (style.top > -1e8f) {
-            float minY = spTop + style.top + sc->scrollY;
+    if (style.top.isSet() || style.bottom.isSet()) {
+        if (style.top.isSet()) {
+            float minY = spTop + resolveInset(style.top, spH, env) + scrolledY;
             if (newY < minY) newY = minY;
         }
-        if (style.bottom > -1e8f) {
-            float maxY = spTop + spH - style.bottom - h + sc->scrollY;
+        if (style.bottom.isSet()) {
+            float maxY = spTop + spH - resolveInset(style.bottom, spH, env) - h + scrolledY;
             if (newY > maxY) newY = maxY;
         }
         if (parent) {
-            float cbTop = parent->y + bw + parent->style.padding[0];
-            float cbH = parent->h - 2.0f * bw - parent->style.padding[0] - parent->style.padding[2];
+#ifdef MORPH_FEATURE_BORDER
+            UnitEnv pEnv = parent->unitEnv(0.0f, nullptr);
+            float pbwT = getBorderWidth(parent->style, 0, pEnv);
+            float pbwB = getBorderWidth(parent->style, 2, pEnv);
+#else
+            float pbwT = 0.0f, pbwB = 0.0f;
+#endif
+            float cbTop = parent->y + pbwT + parent->m_computedPadding[0];
+            float cbH = parent->h - pbwT - pbwB - parent->m_computedPadding[0] - parent->m_computedPadding[2];
             if (cbH < 0.0f) cbH = 0.0f;
             if (newY < cbTop) newY = cbTop;
             float cbBottom = cbTop + cbH - h;
@@ -295,6 +341,20 @@ void MorphNode::updateStickySubtree() {
 #endif
 
 #ifdef MORPH_FEATURE_FLEX
+// CSS flexbox §9.2: a non-`auto` flex-basis sets the hypothetical main
+// size. `%` resolves against the container's inner main size already in
+// `env.pctBase` (against an indefinite size there is no basis);
+// every other unit resolves through the item's own environment.
+static bool resolveFlexBasis(const std::string& fb, const UnitEnv& env, float* basis)
+{
+    if (fb.empty()) return false;
+    CssLength l;
+    if (!parseCssLength(fb, l)) return false;
+    if (l.unit == LengthUnit::Pct && env.pctBase <= 0.0f) return false;
+    *basis = resolveUnits(l, env);
+    return true;
+}
+
 // CSS flexbox §9.6: `align-self` overrides the container's `align-items`
 // for a single item (`auto` inherits it). `baseline` has no baseline
 // metrics to resolve against yet and behaves as flex-start.
@@ -320,20 +380,49 @@ static CSS::AlignItems effCrossAlign(const MorphStyle& container, const MorphSty
 
 void MorphNode::layout(float px, float py, float parentW, float parentH,
                        Renderer* r) {
-    float ml = style.margin[3], mr = style.margin[1];
-    float mt = style.margin[0], mb = style.margin[2];
+#ifdef MORPH_FEATURE_POSITION
+    // Root node: establish the viewport + initial containing block before
+    // anything resolves viewport units below.
+    if (!parent) {
+        m_winW = parentW;
+        m_winH = parentH;
+        m_absCbX = 0.0f; m_absCbY = 0.0f;
+        m_absCbW = parentW; m_absCbH = parentH;
+    }
+#endif
+    // Computed font first: margins, padding, insets and sizes below may
+    // all be font-relative. `%` margins/padding resolve against the
+    // containing-block width the parent passed in (CSS 2.1 §8.3/§10).
+    computeFontSize(r);
+    UnitEnv env = unitEnv(parentW, r);
+    float ml = resolveUnits(style.margin[3], env);
+    float mr = resolveUnits(style.margin[1], env);
+    float mt = resolveUnits(style.margin[0], env);
+    float mb = resolveUnits(style.margin[2], env);
     bool autoL = style.marginAuto[3], autoR = style.marginAuto[1];
     bool autoT = style.marginAuto[0], autoB = style.marginAuto[2];
 
-    float pl = style.padding[3], pr = style.padding[1];
-    float pt = style.padding[0], pb = style.padding[2];
+    float pl = resolveUnits(style.padding[3], env);
+    float pr = resolveUnits(style.padding[1], env);
+    float pt = resolveUnits(style.padding[0], env);
+    float pb = resolveUnits(style.padding[2], env);
+    m_computedPadding[3] = pl; m_computedPadding[1] = pr;
+    m_computedPadding[0] = pt; m_computedPadding[2] = pb;
+#ifdef MORPH_FEATURE_POSITION
+    // A fixed node flags itself; parents flag the ancestor chain when
+    // they place their fixed children (below). Resets run top-down while
+    // marking flows bottom-up, so nothing is wiped after being set.
+    m_subtreeHasFixed = (style.position == CSS::Position::Fixed);
+#endif
 
 #ifdef MORPH_FEATURE_BORDER
-    float bw = style.borderWidth;
-    float bwT = getBorderWidth(style, 0);
-    float bwR = getBorderWidth(style, 1);
-    float bwB = getBorderWidth(style, 2);
-    float bwL = getBorderWidth(style, 3);
+    UnitEnv bwEnv = env;
+    bwEnv.pctBase = 0.0f; // border `%` is invalid CSS and never parses
+    float bw = resolveUnits(style.borderWidth, bwEnv);
+    float bwT = getBorderWidth(style, 0, bwEnv);
+    float bwR = getBorderWidth(style, 1, bwEnv);
+    float bwB = getBorderWidth(style, 2, bwEnv);
+    float bwL = getBorderWidth(style, 3, bwEnv);
 #else
     float bw = 0.0f;
     float bwT = 0.0f;
@@ -343,21 +432,19 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 #endif
 
 #ifdef MORPH_FEATURE_POSITION
-    // Root node: establish the viewport + initial containing block.
-    if (!parent) {
-        m_winW = parentW;
-        m_winH = parentH;
-        m_absCbX = 0.0f; m_absCbY = 0.0f;
-        m_absCbW = parentW; m_absCbH = parentH;
-    }
-#endif
-
-#ifdef MORPH_FEATURE_POSITION
     bool isAbs = (style.position == CSS::Position::Absolute
                    || style.position == CSS::Position::Fixed);
     bool isRel = (style.position == CSS::Position::Relative
                    || style.position == CSS::Position::Sticky);
 
+    // Far-edge re-resolution for out-of-flow boxes (CSS 2.1 §10.3.7/§10.6.7):
+    // a right/bottom-only box with auto size is placed with a provisional
+    // size here; the true size is known only after children (auto height)
+    // and min/max clamps, so remember the far-edge inputs and re-resolve
+    // at each growth point below.
+    bool absFixRight = false, absFixBottom = false;
+    float absFixCbx = 0.0f, absFixCbw = 0.0f, absFixRR = 0.0f, absFixMR = 0.0f;
+    float absFixCby = 0.0f, absFixCbh = 0.0f, absFixRB = 0.0f, absFixMB = 0.0f;
     if (isAbs) {
         // ── Out of flow: absolute (nearest positioned ancestor's padding box)
         //    or fixed (viewport). px/py/parentW/parentH are ignored here.
@@ -370,67 +457,146 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
             cbw = m_absCbW; cbh = m_absCbH;
         }
 
-        // Width
-        if (style.explicitWidth >= 0.0f) {
-            w = style.explicitWidth;
+        // Every set unit resolves through the element's own environment:
+        // `%` against the containing block (width for horizontal insets
+        // and widths, height for vertical ones), font units against the
+        // element font, viewport units against the window.
+        float rL = resolveInset(style.left, cbw, env);
+        float rR = resolveInset(style.right, cbw, env);
+        float rT = resolveInset(style.top, cbh, env);
+        float rB = resolveInset(style.bottom, cbh, env);
+        bool lSet = rL > -1e8f, rSet = rR > -1e8f;
+        bool tSet = rT > -1e8f, bSet = rB > -1e8f;
+        float eW = resolveInset(style.explicitWidth, cbw, env);
+        float eH = resolveInset(style.explicitHeight, cbh, env);
+        bool wSet = eW > -1e8f, hSet = eH > -1e8f;
+
+        // Border/padding allowance for content-box sizing.
+        float padBwW = 0.0f, padBwH = 0.0f;
 #ifdef MORPH_FEATURE_BORDER_BOX
-            if (style.boxSizing != CSS::BoxSizing::BorderBox)
+        if (style.boxSizing != CSS::BoxSizing::BorderBox)
 #endif
-                w += pl + pr + bwL + bwR;
-        } else {
-            w = -1.0f;
+        {
+            padBwW = pl + pr + bwL + bwR;
+            padBwH = pt + pb + bwT + bwB;
         }
-        if (style.left > -1e8f && style.right > -1e8f)
-            w = cbw - style.left - style.right;
+
+        // Width: an explicit width always wins (over-constrained keeps
+        // width and ignores the far offset in LTR); left+right with auto
+        // width stretches; otherwise shrink-to-fit capped by available.
+        if (wSet)
+            w = eW + padBwW;
+        else if (lSet && rSet)
+            w = cbw - rL - rR;
+        else
+            w = -1.0f;
         if (w < 0.0f) w = 0.0f;
-        if (style.explicitWidth < 0.0f) {
+        if (!wSet && !(lSet && rSet)) {
             // Auto width → shrink-to-fit (content-based), capped by available.
             float avail = cbw;
-            if (style.left > -1e8f) avail -= style.left;
-            if (style.right > -1e8f) avail -= style.right;
-            if (style.left > -1e8f && style.right > -1e8f) avail = cbw - style.left - style.right;
+            if (lSet) avail -= rL;
+            if (rSet) avail -= rR;
             float sw = r ? contentWidth(r) : 0.0f;
             w = (sw > 0.0f && sw < avail) ? sw : avail;
             if (w < 0.0f) w = 0.0f;
         }
 
-        // Height
-        if (style.explicitHeight >= 0.0f) {
-            h = style.explicitHeight;
-#ifdef MORPH_FEATURE_BORDER_BOX
-            if (style.boxSizing != CSS::BoxSizing::BorderBox)
-#endif
-                h += pt + pb + bwT + bwB;
-        } else {
+        // Height: same rules vertically (auto height grows from in-flow
+        // children through the shared auto-height path below).
+        if (hSet)
+            h = eH + padBwH;
+        else if (tSet && bSet)
+            h = cbh - rT - rB;
+        else
             h = 0.0f;
-        }
-        if (style.top > -1e8f && style.bottom > -1e8f)
-            h = cbh - style.top - style.bottom;
         if (h < 0.0f) h = 0.0f;
 
-        // Position
-        x = cbx + (style.left > -1e8f ? style.left : 0.0f);
-        if (style.left <= -1e8f && style.right > -1e8f)
-            x = cbx + cbw - w - style.right;
-        y = cby + (style.top > -1e8f ? style.top : 0.0f);
-        if (style.top <= -1e8f && style.bottom > -1e8f)
-            y = cby + cbh - h - style.bottom;
-        x += ml;
-        y += mt;
+        // Margins: auto absorbs leftover space (centering) only when the
+        // offsets and size are all set; otherwise auto margins are 0.
+        // Position: all-auto holds the static (flow) position; a set near
+        // offset wins; right/bottom-only counts back from the far edge.
+        // Over-constrained keeps width/height and ignores the far offset.
+        float mL = ml, mR = mr, mT = mt, mB = mb;
+        if (lSet && rSet) {
+            // Auto margins absorb the leftover (centering); overflowing
+            // space left-sticks in LTR (the used left margin is 0).
+            if (autoL && autoR) {
+                float share = (cbw - w - rL - rR) * 0.5f;
+                if (share < 0.0f) {
+                    mL = 0.0f;
+                    mR = cbw - w - rL - rR;
+                } else {
+                    mL = mR = share;
+                }
+            } else if (autoL)
+                mL = cbw - w - rL - rR - mr;
+            else if (autoR)
+                mR = cbw - w - rL - rR - ml;
+            x = cbx + rL + mL;
+        } else {
+            if (autoL) mL = 0.0f;
+            if (autoR) mR = 0.0f;
+            if (!lSet && !rSet)
+                x = m_staticX + mL;
+            else if (lSet)
+                x = cbx + rL + mL;
+            else
+                x = cbx + cbw - rR - w - mR;
+            if (!lSet && rSet) {
+                absFixRight = true;
+                absFixCbx = cbx; absFixCbw = cbw;
+                absFixRR = rR; absFixMR = mR;
+            }
+        }
+        if (tSet && bSet) {
+            if (autoT && autoB) {
+                float share = (cbh - h - rT - rB) * 0.5f;
+                if (share < 0.0f) {
+                    mT = 0.0f;
+                    mB = cbh - h - rT - rB;
+                } else {
+                    mT = mB = share;
+                }
+            } else if (autoT)
+                mT = cbh - h - rT - rB - mb;
+            else if (autoB)
+                mB = cbh - h - rT - rB - mt;
+            y = cby + rT + mT;
+        } else {
+            if (autoT) mT = 0.0f;
+            if (autoB) mB = 0.0f;
+            if (!tSet && !bSet)
+                y = m_staticY + mT;
+            else if (tSet)
+                y = cby + rT + mT;
+            else
+                y = cby + cbh - rB - h - mB;
+            if (!tSet && bSet) {
+                absFixBottom = true;
+                absFixCby = cby; absFixCbh = cbh;
+                absFixRB = rB; absFixMB = mB;
+            }
+        }
+        m_computedMargin[3] = mL; m_computedMargin[1] = mR;
+        m_computedMargin[0] = mT; m_computedMargin[2] = mB;
     } else
 #endif
     {
     float mlForWidth = autoL ? 0.0f : ml;
     float mrForWidth = autoR ? 0.0f : mr;
 
-    if (style.explicitWidth >= 0.0f) {
+    if (style.explicitWidth.isSet()) {
+        // `%` against the containing-block width the parent passed in
+        // (same base as the auto fill below); every other unit resolves
+        // through the element's own environment.
+        float ew = resolveUnits(style.explicitWidth, env);
 #ifdef MORPH_FEATURE_BORDER_BOX
         if (style.boxSizing == CSS::BoxSizing::BorderBox) {
-            w = style.explicitWidth;
+            w = ew;
         } else
 #endif
         {
-            w = style.explicitWidth + pl + pr + bwL + bwR;
+            w = ew + pl + pr + bwL + bwR;
         }
     } else {
         w = parentW - mlForWidth - mrForWidth;
@@ -457,14 +623,20 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
     x = px + ml;
     y = py + mt;
 
-    if (style.explicitHeight >= 0.0f) {
+    // `%` heights resolve against the containing-block height when
+    // definite; against an indefinite (auto) height they behave as
+    // auto, per spec. Every other unit resolves unconditionally.
+    if (style.explicitHeight.isSet() && (!style.explicitHeight.isPercent() || parentH > 0.0f)) {
+        UnitEnv hEnv = env;
+        hEnv.pctBase = parentH;
+        float eh = resolveUnits(style.explicitHeight, hEnv);
 #ifdef MORPH_FEATURE_BORDER_BOX
         if (style.boxSizing == CSS::BoxSizing::BorderBox) {
-            h = style.explicitHeight;
+            h = eh;
         } else
 #endif
         {
-            h = style.explicitHeight + pt + pb + bwT + bwB;
+            h = eh + pt + pb + bwT + bwB;
         }
     } else {
         h = 0.0f;
@@ -475,13 +647,19 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
     // Sticky skips the fixed offset here — its offset is the scroll clamp
     // applied in applySticky() (called below), anchored at m_flowX/m_flowY.
     if (style.position == CSS::Position::Relative) {
+        // `%` against the containing-block size the parent passed in:
+        // width for left/right, height for top/bottom (against an
+        // indefinite height they evaluate to 0, i.e. auto). Font and
+        // viewport units resolve through the element's environment.
         float offX = 0.0f, offY = 0.0f;
-        if (style.left > -1e8f) offX = style.left;
-        else if (style.right > -1e8f) offX = -style.right;
-        if (style.top > -1e8f) offY = style.top;
-        else if (style.bottom > -1e8f) offY = -style.bottom;
+        if (style.left.isSet()) offX = resolveInset(style.left, parentW, env);
+        else if (style.right.isSet()) offX = -resolveInset(style.right, parentW, env);
+        if (style.top.isSet()) offY = resolveInset(style.top, parentH, env);
+        else if (style.bottom.isSet()) offY = -resolveInset(style.bottom, parentH, env);
         x += offX;
         y += offY;
+        m_relOffX = offX;
+        m_relOffY = offY;
     }
 #endif
     }
@@ -489,15 +667,40 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 #ifdef MORPH_FEATURE_POSITION
     m_flowX = x;
     m_flowY = y;
-    if (style.position == CSS::Position::Sticky)
-        applySticky();
 #endif
 
 #ifdef MORPH_FEATURE_MIN_MAX
-    if (style.minWidth > 0.0f && w < style.minWidth) w = style.minWidth;
-    if (style.maxWidth > 0.0f && w > style.maxWidth) w = style.maxWidth;
-    if (style.minHeight > 0.0f && h < style.minHeight) h = style.minHeight;
-    if (style.maxHeight > 0.0f && h > style.maxHeight) h = style.maxHeight;
+    // `%` clamps resolve against the containing block (width for widths,
+    // height for heights when definite); other units via the environment.
+    if (style.minWidth.isSet()) {
+        float v = resolveUnits(style.minWidth, env);
+        if (v > 0.0f && w < v) w = v;
+    }
+    if (style.maxWidth.isSet()) {
+        float v = resolveUnits(style.maxWidth, env);
+        if (v > 0.0f && w > v) w = v;
+    }
+    if (style.minHeight.isSet() && (!style.minHeight.isPercent() || parentH > 0.0f)) {
+        UnitEnv hEnv = env;
+        hEnv.pctBase = parentH;
+        float v = resolveUnits(style.minHeight, hEnv);
+        if (v > 0.0f && h < v) h = v;
+    }
+    if (style.maxHeight.isSet() && (!style.maxHeight.isPercent() || parentH > 0.0f)) {
+        UnitEnv hEnv = env;
+        hEnv.pctBase = parentH;
+        float v = resolveUnits(style.maxHeight, hEnv);
+        if (v > 0.0f && h > v) h = v;
+    }
+#endif
+#ifdef MORPH_FEATURE_POSITION
+    // Right-only boxes count back from the far edge, so a min/max width
+    // clamp above must move the box (children are not laid out yet, so no
+    // subtree shift is needed here).
+    if (absFixRight) {
+        x = absFixCbx + absFixCbw - absFixRR - w - absFixMR;
+        m_flowX = x;
+    }
 #endif
 
     float cw = w - pl - pr - bwL - bwR;
@@ -541,6 +744,13 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
     std::vector<MorphNode*> normal;
     std::vector<MorphNode*> absChildren;
     std::vector<MorphNode*> fixedChildren;
+#ifdef MORPH_FEATURE_POSITION
+    // Sticky boxes lay out in flow like their static siblings; their
+    // scroll clamps resolve after our height is final (see below), once
+    // every box the clamp reads — including the parent box — has real
+    // geometry.
+    std::vector<MorphNode*> stickyChildren;
+#endif
     for (auto* c : children) {
 #ifdef MORPH_FEATURE_POSITION
         if (c->style.position == CSS::Position::Absolute) {
@@ -551,6 +761,8 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
             fixedChildren.push_back(c);
             continue;
         }
+        if (c->style.position == CSS::Position::Sticky)
+            stickyChildren.push_back(c);
 #endif
 #ifdef MORPH_FEATURE_DISPLAY_NONE
         if (c->style.display == CSS::Display::None) {
@@ -604,7 +816,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
             if (c->isWhitespaceOnly()) continue;
             c->layout(0.0f, 0.0f, cw, 0.0f, r);
 
-            if (isRow && c->style.explicitWidth < 0.0f) {
+            if (isRow && !c->style.explicitWidth.isSet()) {
                 float cwVal = c->contentWidth(r);
                 if (cwVal > 0.0f) c->w = cwVal;
             }
@@ -618,31 +830,27 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
             // content width.
             if (c->style.flexBasis != "auto") {
                 const std::string& fb = c->style.flexBasis;
+                // `%` against the container's inner main size (indefinite
+                // sizes fall back to content, as before); every other unit
+                // resolves through the item's own environment.
+                UnitEnv fbEnv = c->unitEnv(isCol ? ch : cw, r);
                 float basis = 0.0f;
-                bool haveBasis = false;
-                if (!fb.empty() && fb.back() == '%') {
-                    float pct = strtof(fb.c_str(), nullptr);
-                    float avail = isCol ? ch : cw;
-                    if (avail > 0.0f) {
-                        basis = avail * pct / 100.0f;
-                        haveBasis = true;
-                    }
-                } else if (!fb.empty()) {
-                    basis = strtof(fb.c_str(), nullptr);
-                    haveBasis = true;
-                }
+                bool haveBasis = resolveFlexBasis(fb, fbEnv, &basis);
                 if (haveBasis) {
                     if (basis < 0.0f) basis = 0.0f;
                     if (isRow) {
-                        c->w = basis + hBonus(c->style);
+                        c->w = basis + hBonus(c, cw, r);
                     } else {
-                        c->h = basis + vBonus(c->style);
+                        c->h = basis + vBonus(c, ch, r);
                     }
                 }
             }
 
-            float cmt = c->style.margin[0], cmb = c->style.margin[2];
-            float cml = c->style.margin[3], cmr = c->style.margin[1];
+            UnitEnv cEnv = c->unitEnv(cw, r);
+            float cmt = resolveUnits(c->style.margin[0], cEnv);
+            float cmb = resolveUnits(c->style.margin[2], cEnv);
+            float cml = resolveUnits(c->style.margin[3], cEnv);
+            float cmr = resolveUnits(c->style.margin[1], cEnv);
             bool cmtA = c->style.marginAuto[0], cmbA = c->style.marginAuto[2];
             bool cmlA = c->style.marginAuto[3], cmrA = c->style.marginAuto[1];
             float childMain = isCol ? (c->h + cmt + cmb) : (c->w + cml + cmr);
@@ -651,6 +859,15 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
         }
 
         float mainAvail = isCol ? ch : cw;
+        // `gap` percentages resolve against the content box on their own
+        // axis: main gaps against the inner main size, cross gaps against
+        // the inner cross size. Font/viewport units use the container font.
+        UnitEnv gapMainEnv = env;
+        gapMainEnv.pctBase = isCol ? ch : cw;
+        UnitEnv gapCrossEnv = env;
+        gapCrossEnv.pctBase = isCol ? cw : ch;
+        float gapMain = resolveUnits(style.gap, gapMainEnv);
+        float gapCross = resolveUnits(style.gap, gapCrossEnv);
         // CSS flexbox §8.3: `wrap` and `wrap-reverse` both break lines;
         // reverse only flips the cross stacking direction (handled below).
         bool doWrap = (style.flexWrap == CSS::FlexWrap::Wrap
@@ -663,12 +880,12 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 
         for (auto& item : items) {
             if (doWrap && !curLine.fItems.empty()
-                && curLine.totalMain + style.gap + item.main > mainAvail) {
+                && curLine.totalMain + gapMain + item.main > mainAvail) {
                 lines.push_back(curLine);
                 curLine = FlexLine();
             }
             curLine.fItems.push_back(&item);
-            curLine.totalMain += item.main + (curLine.fItems.size() > 1 ? style.gap : 0.0f);
+            curLine.totalMain += item.main + (curLine.fItems.size() > 1 ? gapMain : 0.0f);
             if (item.cross > curLine.crossSize) curLine.crossSize = item.cross;
         }
         if (!curLine.fItems.empty()) lines.push_back(curLine);
@@ -696,7 +913,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
         }
 
         for (auto& line : lines) {
-            float extraGap = line.fItems.size() > 1 ? style.gap * (line.fItems.size() - 1) : 0.0f;
+            float extraGap = line.fItems.size() > 1 ? gapMain * (line.fItems.size() - 1) : 0.0f;
             float remaining = mainAvail - line.totalMain;
 
             if (remaining > 0.0f) {
@@ -738,27 +955,53 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 #ifdef MORPH_FEATURE_MIN_MAX
             for (auto* item : line.fItems) {
                 auto& st = item->node->style;
+                // Item's own environment: `%` clamps against the container
+                // inner main size, font units against the item font.
+                UnitEnv itemEnv = item->node->unitEnv(isRow ? cw : ch, r);
+                auto clampW = [&](const CssLength& lim) -> float {
+                    return resolveUnits(lim, itemEnv);
+                };
                 if (isRow) {
-                    if (st.minWidth > 0.0f && item->node->w < st.minWidth) {
-                        item->main += st.minWidth - item->node->w;
-                        item->node->w = st.minWidth;
+                    if (st.minWidth.isSet()) {
+                        float v = clampW(st.minWidth);
+                        if (v > 0.0f && item->node->w < v) {
+                            item->main += v - item->node->w;
+                            item->node->w = v;
+                        }
                     }
-                    if (st.maxWidth > 0.0f && item->node->w > st.maxWidth) {
-                        item->main -= item->node->w - st.maxWidth;
-                        item->node->w = st.maxWidth;
+                    if (st.maxWidth.isSet()) {
+                        float v = clampW(st.maxWidth);
+                        if (v > 0.0f && item->node->w > v) {
+                            item->main -= item->node->w - v;
+                            item->node->w = v;
+                        }
                     }
                     if (item->node->w < 0.0f) {
                         item->main -= item->node->w;
                         item->node->w = 0.0f;
                     }
                 } else {
-                    if (st.minHeight > 0.0f && item->node->h < st.minHeight) {
-                        item->main += st.minHeight - item->node->h;
-                        item->node->h = st.minHeight;
+                    // Column main axis: `%` heights need a definite cross
+                    // size, else the clamp is skipped like the item's own
+                    // height would be.
+                    UnitEnv hItemEnv = item->node->unitEnv(ch, r);
+                    auto clampH = [&](const CssLength& lim) -> float {
+                        return resolveUnits(lim, hItemEnv);
+                    };
+                    bool hDefinite = ch > 0.0f;
+                    if (st.minHeight.isSet() && (!st.minHeight.isPercent() || hDefinite)) {
+                        float v = clampH(st.minHeight);
+                        if (v > 0.0f && item->node->h < v) {
+                            item->main += v - item->node->h;
+                            item->node->h = v;
+                        }
                     }
-                    if (st.maxHeight > 0.0f && item->node->h > st.maxHeight) {
-                        item->main -= item->node->h - st.maxHeight;
-                        item->node->h = st.maxHeight;
+                    if (st.maxHeight.isSet() && (!st.maxHeight.isPercent() || hDefinite)) {
+                        float v = clampH(st.maxHeight);
+                        if (v > 0.0f && item->node->h > v) {
+                            item->main -= item->node->h - v;
+                            item->node->h = v;
+                        }
                     }
                     if (item->node->h < 0.0f) {
                         item->main -= item->node->h;
@@ -800,14 +1043,14 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                 totalCross += ln.crossSize;
             }
             if (lines.size() > 1) {
-                totalCross += style.gap * (float)(lines.size() - 1);
+                totalCross += gapCross * (float)(lines.size() - 1);
             }
             float crossExtent = totalCross;
             if (isCol) {
                 if (cw > crossExtent) {
                     crossExtent = cw;
                 }
-            } else if (style.explicitHeight >= 0.0f && ch > crossExtent) {
+            } else if (style.explicitHeight.isSet() && ch > crossExtent) {
                 crossExtent = ch;
             }
             revBase.resize(lines.size());
@@ -815,7 +1058,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
             for (size_t li = 0; li < lines.size(); li++) {
                 cc -= lines[li].crossSize;
                 revBase[li] = cc;
-                cc -= style.gap;
+                cc -= gapCross;
             }
         }
 
@@ -830,11 +1073,22 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
             // content of their own collapse to zero on the cross axis).
             if (!doWrap) {
                 float definiteCross = -1.0f;
-                if (isCol && style.explicitWidth >= 0.0f) definiteCross = cw;
-                if (!isCol && style.explicitHeight >= 0.0f) definiteCross = ch;
+                UnitEnv dcEnv = env;
+                if (isCol && style.explicitWidth.isSet()) {
+                    dcEnv.pctBase = cw;
+                    definiteCross = style.explicitWidth.isPercent()
+                        ? resolveUnits(style.explicitWidth, dcEnv)
+                        : cw;
+                }
+                if (!isCol && style.explicitHeight.isSet()) {
+                    dcEnv.pctBase = ch;
+                    definiteCross = style.explicitHeight.isPercent()
+                        ? resolveUnits(style.explicitHeight, dcEnv)
+                        : ch;
+                }
                 if (definiteCross > lineCross) lineCross = definiteCross;
             }
-            float extraGap = line.fItems.size() > 1 ? style.gap * (line.fItems.size() - 1) : 0.0f;
+            float extraGap = line.fItems.size() > 1 ? gapMain * (line.fItems.size() - 1) : 0.0f;
             float free = mainAvail - line.totalMain;
 
             // Distribute free space to auto margins on main axis
@@ -866,17 +1120,17 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
             }
 
             float offset = 0.0f;
-            float itemGap = style.gap;
+            float itemGap = gapMain;
             if (effJustify == CSS::JustifyContent::Center) {
                 offset = free * 0.5f;
             } else if (effJustify == CSS::JustifyContent::FlexEnd) {
                 offset = free;
             } else if (effJustify == CSS::JustifyContent::SpaceBetween) {
                 offset = 0.0f;
-                itemGap = (line.fItems.size() > 1) ? style.gap + free / (line.fItems.size() - 1) : 0.0f;
+                itemGap = (line.fItems.size() > 1) ? gapMain + free / (line.fItems.size() - 1) : 0.0f;
             } else if (effJustify == CSS::JustifyContent::SpaceAround) {
                 offset = line.fItems.size() > 0 ? free / (line.fItems.size() * 2) : 0.0f;
-                itemGap = line.fItems.size() > 0 ? style.gap + free / line.fItems.size() : 0.0f;
+                itemGap = line.fItems.size() > 0 ? gapMain + free / line.fItems.size() : 0.0f;
             }
 
             float cursor = mainStart + offset;
@@ -905,7 +1159,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                 float childPW = isCol ? ((effAlign == CSS::AlignItems::Stretch) ? crossSize : crossDim) : childMain;
                 float childPH = isCol ? childMain : ((effAlign == CSS::AlignItems::Stretch) ? lineCross : crossDim);
 
-                if (effAlign != CSS::AlignItems::Stretch && ci->node->style.explicitWidth < 0.0f && isCol) {
+                if (effAlign != CSS::AlignItems::Stretch && !ci->node->style.explicitWidth.isSet() && isCol) {
                     float cwVal = ci->node->contentWidth(r);
                     if (cwVal > 0.0f && cwVal < childPW) {
                         crossDim = cwVal;
@@ -931,12 +1185,12 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                 ci->node->m_computedMargin[2] = savedCM[2];
                 ci->node->m_computedMargin[3] = savedCM[3];
 
-                if (effAlign == CSS::AlignItems::Stretch && ci->node->style.explicitWidth < 0.0f && isCol) {
+                if (effAlign == CSS::AlignItems::Stretch && !ci->node->style.explicitWidth.isSet() && isCol) {
                     float availW = lineCross - ci->ml - ci->mr;
                     if (availW < 0.0f) availW = 0.0f;
                     if (availW > ci->node->w) ci->node->w = availW;
                 }
-                if (effAlign == CSS::AlignItems::Stretch && ci->node->style.explicitHeight < 0.0f && isRow) {
+                if (effAlign == CSS::AlignItems::Stretch && !ci->node->style.explicitHeight.isSet() && isRow) {
                     float availH = lineCross - ci->mt - ci->mb;
                     if (availH < 0.0f) availH = 0.0f;
                     if (availH > ci->node->h) ci->node->h = availH;
@@ -953,7 +1207,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                 }
             }
 
-            cursorCross += lineCross + style.gap;
+            cursorCross += lineCross + gapCross;
         }
         goto after_children;
     }
@@ -983,7 +1237,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                     c->m_frags.clear();
                 c->layout(0.0f, 0.0f, cw, 0.0f, r);
                 float iw = 0.0f;
-                if (c->style.explicitWidth >= 0.0f) {
+                if (c->style.explicitWidth.isSet()) {
                     iw = c->w;
                 } else if (c->contentWidth(r) > 0.0f) {
                     iw = c->contentWidth(r);
@@ -993,7 +1247,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                 // would push siblings down a line until content arrives.
                 if (iw <= 0.0f)
                     iw = c->isEmptyText() ? 0.0f : cw;
-                float ih = (c->h > 0.0f) ? c->h : (c->style.fontSize * 1.4f);
+                float ih = (c->h > 0.0f) ? c->h : (c->resolvedFontSize(r) * 1.4f);
                 items.push_back({c, iw, ih, c->isWhitespaceOnly()});
             }
 
@@ -1029,7 +1283,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
             }
             for (size_t i = (size_t)firstVis; i <= (size_t)lastVis; i++) {
                 if (items[i].ws) {
-                    items[i].w = r ? r->measureTextWidth(" ", items[i].node->style.fontSize, CSS::FontWeight::Normal) : 4.0f;
+                    items[i].w = r ? r->measureTextWidth(" ", items[i].node->resolvedFontSize(r), items[i].node->style.fontWeight) : 4.0f;
                     items[i].h = 0.0f;
                 }
             }
@@ -1071,8 +1325,9 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                     // Continuation fragments carry no margins (accounted on
                     // the run's first fragment).
                     bool cont = (p.fwn != 0 && p.fw0 != 0);
-                    float pml = cont ? 0.0f : p.node->style.margin[3];
-                    float pmr = cont ? 0.0f : p.node->style.margin[1];
+                    UnitEnv pEnv = p.node->unitEnv(cw, r);
+                    float pml = cont ? 0.0f : resolveUnits(p.node->style.margin[3], pEnv);
+                    float pmr = cont ? 0.0f : resolveUnits(p.node->style.margin[1], pEnv);
                     // Child-to-parent: the item's box comes from its own
                     // measured size; children keep whatever THEIR layout
                     // pass computed, translated by the item's move delta.
@@ -1107,7 +1362,17 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                         // (Skipped for word fragments: their geometry comes
                         // from line breaking, and re-laying the whole node
                         // at a fragment box would clobber sibling frags.)
-                        p.node->layout(p.node->x, p.node->y,
+                        // Relative items re-layout from the unoffset box:
+                        // passing the placed box would add their offset
+                        // twice (same hazard as layoutIfNeeded above).
+                        float rpx = p.node->x, rpy = p.node->y;
+#ifdef MORPH_FEATURE_POSITION
+                        if (p.node->style.position == CSS::Position::Relative) {
+                            rpx -= p.node->m_relOffX;
+                            rpy -= p.node->m_relOffY;
+                        }
+#endif
+                        p.node->layout(rpx, rpy,
                                        p.node->w, p.node->h, r);
                         markSubtreePaintDirty(p.node);
                     }
@@ -1141,8 +1406,9 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                 auto isCont = [&](size_t k) -> bool {
                     return items[k].fwn != 0 && items[k].fw0 != 0;
                 };
-                float ml = isCont(i) ? 0.0f : items[i].node->style.margin[3];
-                float mr = isCont(i) ? 0.0f : items[i].node->style.margin[1];
+                UnitEnv iEnv = items[i].node->unitEnv(cw, r);
+                float ml = isCont(i) ? 0.0f : resolveUnits(items[i].node->style.margin[3], iEnv);
+                float mr = isCont(i) ? 0.0f : resolveUnits(items[i].node->style.margin[1], iEnv);
                 float need = ml + items[i].w + mr;
 
                 if (i > lineStart && lineX + need > cx + cw) {
@@ -1152,8 +1418,8 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                     // prefix and the remainder is inserted right after it,
                     // so it flows onto the following lines.
                     if (trySplitInlineItem(items, i, (cx + cw) - lineX - ml - mr, r)) {
-                        ml = isCont(i) ? 0.0f : items[i].node->style.margin[3];
-                        mr = isCont(i) ? 0.0f : items[i].node->style.margin[1];
+                        ml = isCont(i) ? 0.0f : resolveUnits(items[i].node->style.margin[3], iEnv);
+                        mr = isCont(i) ? 0.0f : resolveUnits(items[i].node->style.margin[1], iEnv);
                         need = ml + items[i].w + mr;
                     } else {
                         positionItems(i);
@@ -1241,8 +1507,9 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
             } else {
                 flushInline();
 
-                float ownMt = c->style.margin[0];
-                float ownMb = c->style.margin[2];
+                UnitEnv cEnv = c->unitEnv(cw, r);
+                float ownMt = resolveUnits(c->style.margin[0], cEnv);
+                float ownMb = resolveUnits(c->style.margin[2], cEnv);
 
 #ifdef MORPH_FEATURE_MARGIN_COLLAPSE
                 if (getenv("MORPH_LAYOUT_DEBUG")) {
@@ -1308,8 +1575,9 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 
 #else
         for (auto* c : normal) {
-            float ownMt = c->style.margin[0];
-            float ownMb = c->style.margin[2];
+            UnitEnv cEnv = c->unitEnv(cw, r);
+            float ownMt = resolveUnits(c->style.margin[0], cEnv);
+            float ownMb = resolveUnits(c->style.margin[2], cEnv);
 
 #ifdef MORPH_FEATURE_MARGIN_COLLAPSE
             // Provisional first pass to learn the child's collapsed-through
@@ -1360,15 +1628,52 @@ after_children:
 #ifdef MORPH_FEATURE_POSITION
     // Absolute children position themselves relative to their containing
     // block (m_absCb*, resolved inside layout) — out of flow, so they don't
-    // affect this node's height.
-    for (auto* c : absChildren)
+    // affect this node's height. Each records its static (flow-slot)
+    // position first: the content-box origin, or the bottom margin edge of
+    // the last preceding in-flow block sibling. Inline runs are skipped
+    // (line-box accounting would be needed for exactness there).
+    for (auto* c : absChildren) {
+        float sx = cx, sy = cy;
+        for (auto* s : children) {
+            if (s == c) break;
+            if (s->style.display == CSS::Display::None) continue;
+            if (s->style.position == CSS::Position::Absolute
+                || s->style.position == CSS::Position::Fixed)
+                continue;
+            if (s->isWhitespaceOnly()) continue;
+            if (s->style.display == CSS::Display::Inline
+                || s->type == NodeType::Text || s->type == NodeType::Expr)
+                continue;
+            sy = s->y + s->h + s->m_computedMargin[2];
+        }
+        c->m_staticX = sx;
+        c->m_staticY = sy;
         c->layout(0.0f, 0.0f, 0.0f, 0.0f, r);
+    }
     // Fixed children are positioned relative to the viewport.
-    for (auto* c : fixedChildren)
+    for (auto* c : fixedChildren) {
+        for (MorphNode* p = this; p; p = p->parent)
+            p->m_subtreeHasFixed = true;
+        float sx = cx, sy = cy;
+        for (auto* s : children) {
+            if (s == c) break;
+            if (s->style.display == CSS::Display::None) continue;
+            if (s->style.position == CSS::Position::Absolute
+                || s->style.position == CSS::Position::Fixed)
+                continue;
+            if (s->isWhitespaceOnly()) continue;
+            if (s->style.display == CSS::Display::Inline
+                || s->type == NodeType::Text || s->type == NodeType::Expr)
+                continue;
+            sy = s->y + s->h + s->m_computedMargin[2];
+        }
+        c->m_staticX = sx;
+        c->m_staticY = sy;
         c->layout(0.0f, 0.0f, 0.0f, 0.0f, r);
+    }
 #endif
 
-    if (style.explicitHeight < 0.0f) {
+    if (!style.explicitHeight.isSet()) {
         float autoH = (maxBottom - cy) + pt + pb + bwT + bwB;
 #ifdef MORPH_FEATURE_MARGIN_COLLAPSE
         // Parent–child margin collapse: the last block child's bottom margin
@@ -1382,7 +1687,7 @@ after_children:
     }
 
 #ifdef MORPH_FEATURE_FLEX
-    if (style.display == CSS::Display::Flex && style.explicitWidth < 0.0f && isRow
+    if (style.display == CSS::Display::Flex && !style.explicitWidth.isSet() && isRow
         && maxRight > cx + cw) {
         float autoW = maxRight - x + pr + bwR;
         if (autoW > w) w = autoW;
@@ -1390,15 +1695,51 @@ after_children:
 #endif
 
 #ifdef MORPH_FEATURE_MIN_MAX
-    if (style.minHeight > 0.0f && h < style.minHeight) h = style.minHeight;
-    if (style.maxHeight > 0.0f && h > style.maxHeight) h = style.maxHeight;
+    if (style.minHeight.isSet() && (!style.minHeight.isPercent() || parentH > 0.0f)) {
+        UnitEnv hEnv = env;
+        hEnv.pctBase = parentH;
+        float v = resolveUnits(style.minHeight, hEnv);
+        if (v > 0.0f && h < v) h = v;
+    }
+    if (style.maxHeight.isSet() && (!style.maxHeight.isPercent() || parentH > 0.0f)) {
+        UnitEnv hEnv = env;
+        hEnv.pctBase = parentH;
+        float v = resolveUnits(style.maxHeight, hEnv);
+        if (v > 0.0f && h > v) h = v;
+    }
 #endif
 
-    if (style.explicitHeight < 0.0f &&
+    if (!style.explicitHeight.isSet() &&
         (style.overflow == CSS::Overflow::Auto || style.overflow == CSS::Overflow::Scroll) &&
         parentH > 0.0f && h > parentH) {
         h = parentH;
     }
+
+#ifdef MORPH_FEATURE_POSITION
+    // Far-edge boxes count back against their final size (CSS 2.1
+    // §10.3.7/§10.6.7): the initial placement above used a provisional
+    // size, and min/max clamps plus auto-height growth above may have
+    // changed it since. Children were laid out at the provisional origin,
+    // so shift the whole subtree to the final one.
+    if (absFixRight) {
+        float newX = absFixCbx + absFixCbw - absFixRR - w - absFixMR;
+        float dx = newX - x;
+        if (dx != 0.0f) {
+            x = newX;
+            m_flowX = newX;
+            for (auto* c : children) shiftStickySubtree(c, dx, 0.0f);
+        }
+    }
+    if (absFixBottom) {
+        float newY = absFixCby + absFixCbh - absFixRB - h - absFixMB;
+        float dy = newY - y;
+        if (dy != 0.0f) {
+            y = newY;
+            m_flowY = newY;
+            for (auto* c : children) shiftStickySubtree(c, 0.0f, dy);
+        }
+    }
+#endif
 
     contentH = maxBottom - cy + pt + pb + bw * 2.0f;
 #ifdef MORPH_FEATURE_MARGIN_COLLAPSE
@@ -1411,7 +1752,7 @@ after_children:
     // Pass collapsed-through margins up to our parent (parent–child margin
     // collapse), e.g. an h1's 21px margins escape a boundary-less div that
     // wraps it and become the gap around that div.
-    if (style.display != CSS::Display::Flex && style.explicitHeight < 0.0f) {
+    if (style.display != CSS::Display::Flex && !style.explicitHeight.isSet()) {
         if (pt == 0.0f && bw == 0.0f && firstBlockChild && !inlineBeforeFirstBlock
             && firstChildMtEff > m_computedMargin[0])
             m_computedMargin[0] = firstChildMtEff;
@@ -1465,14 +1806,16 @@ after_children:
 
     scrollEnabled = (style.overflow == CSS::Overflow::Scroll) ||
                     (style.overflow == CSS::Overflow::Auto && contentH > h);
+#ifdef MORPH_FEATURE_POSITION
+    // Sticky clamps resolve after heights (ours and the scrollport's) are
+    // final. Each level resolves its direct sticky children; deeper ones
+    // are covered transitively when their own parent resolves.
+    for (auto* c : stickyChildren)
+        c->updateStickySubtree();
+#endif
     if (scrollEnabled) {
         if (scrollY > contentH - h) scrollY = contentH - h;
         if (scrollY < 0) scrollY = 0;
-#ifdef MORPH_FEATURE_POSITION
-        // Sticky descendants are laid out before scrollEnabled was known, so
-        // resolve their clamps now that the scrollport geometry is final.
-        updateStickySubtree();
-#endif
     }
 
     clearDirty(LayoutDirty);

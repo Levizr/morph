@@ -337,7 +337,7 @@ static bool shiftSafeAncestors(MorphNode* node)
     int contB = contY + static_cast<int>(node->h);
     for (MorphNode* p = node->parent; p; p = p->parent)
     {
-        if (p->style.borderRadius > 0.0f)
+        if (!p->style.borderRadius.isZero())
         {
             return false;
         }
@@ -475,7 +475,7 @@ void forgeCommit(MorphWindow& win)
                     static_cast<int>(node->contentH) == static_cast<int>(oldContentH) &&
                     paintBefore.count(node) == 0 && shiftSafeAncestors(node))
                 {
-                    bool rounded = node->style.borderRadius > 0.0f;
+                    bool rounded = !node->style.borderRadius.isZero();
                     bool transformed = false;
 #ifdef MORPH_FEATURE_TRANSFORM
                     transformed = node->style.transformSet;

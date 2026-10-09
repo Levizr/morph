@@ -90,19 +90,19 @@ static void testHoverShorthand()
 {
     TestNode node;
     setColor(node.style.borderColor, 1.0f, 1.0f, 1.0f, 1.0f);
-    node.style.borderWidth = 4.0f;
+    node.style.borderWidth = pxLen(4.0f);
     node.hoverStyle = new MorphStyle();
     setColor(node.hoverStyle->borderColor, 0.13f, 0.83f, 0.93f, 1.0f);
-    node.hoverStyle->borderWidth = 8.0f;
+    node.hoverStyle->borderWidth = pxLen(8.0f);
 
     node.onHover(true);
     const float cyan[4] = {0.13f, 0.83f, 0.93f, 1.0f};
     CHECK(colorNear(node.style.borderColor, cyan), "hover applies borderColor");
-    CHECK(near(node.style.borderWidth, 8.0f), "hover applies borderWidth");
+    CHECK(near(node.style.borderWidth.value, 8.0f), "hover applies borderWidth");
     node.onHover(false);
     const float white[4] = {1.0f, 1.0f, 1.0f, 1.0f};
     CHECK(colorNear(node.style.borderColor, white), "release restores borderColor");
-    CHECK(near(node.style.borderWidth, 4.0f), "release restores borderWidth");
+    CHECK(near(node.style.borderWidth.value, 4.0f), "release restores borderWidth");
 }
 
 // Per-side widths/colors and corner radii swap and revert.
@@ -111,19 +111,19 @@ static void testHoverPerSide()
     TestNode node;
     node.hoverStyle = new MorphStyle();
     setColor(node.hoverStyle->borderTopColor, 1.0f, 0.0f, 0.0f, 1.0f);
-    node.hoverStyle->borderTopWidth = 6.0f;
-    node.hoverStyle->borderTopLeftRadius = 24.0f;
+    node.hoverStyle->borderTopWidth = pxLen(6.0f);
+    node.hoverStyle->borderTopLeftRadius = pxLen(24.0f);
 
     node.onHover(true);
     const float red[4] = {1.0f, 0.0f, 0.0f, 1.0f};
     CHECK(colorNear(node.style.borderTopColor, red), "hover applies side color");
-    CHECK(near(node.style.borderTopWidth, 6.0f), "hover applies side width");
-    CHECK(near(node.style.borderTopLeftRadius, 24.0f), "hover applies corner");
-    CHECK(node.style.borderRightWidth < 0.0f, "untouched side stays unset");
+    CHECK(near(resolveUnits(node.style.borderTopWidth, node.unitEnv(0.0f, nullptr)), 6.0f), "hover applies side width");
+    CHECK(near(resolveUnits(node.style.borderTopLeftRadius, node.unitEnv(0.0f, nullptr)), 24.0f), "hover applies corner");
+    CHECK(!node.style.borderRightWidth.isSet(), "untouched side stays unset");
     node.onHover(false);
     CHECK(node.style.borderTopColor[0] < 0.0f, "release restores side color");
-    CHECK(node.style.borderTopWidth < 0.0f, "release restores side width");
-    CHECK(node.style.borderTopLeftRadius < 0.0f, "release restores corner");
+    CHECK(!node.style.borderTopWidth.isSet(), "release restores side width");
+    CHECK(!node.style.borderTopLeftRadius.isSet(), "release restores corner");
 }
 
 // Active swaps shorthand color plus style; release reverts both.
@@ -151,27 +151,27 @@ static void testTransitionLerp()
 {
     TestNode node;
     setColor(node.style.borderColor, 0.0f, 0.0f, 0.0f, 1.0f);
-    node.style.borderWidth = 4.0f;
+    node.style.borderWidth = pxLen(4.0f);
     node.m_transitionDuration = 1.0f;
     node.m_transitionEasing = Easing::Linear;
     node.hoverStyle = new MorphStyle();
     setColor(node.hoverStyle->borderColor, 1.0f, 1.0f, 1.0f, 1.0f);
-    node.hoverStyle->borderWidth = 8.0f;
+    node.hoverStyle->borderWidth = pxLen(8.0f);
     setColor(node.hoverStyle->borderTopColor, 1.0f, 0.0f, 0.0f, 1.0f);
-    node.hoverStyle->borderTopLeftRadius = 20.0f;
+    node.hoverStyle->borderTopLeftRadius = pxLen(20.0f);
 
     node.onHover(true);
     node.updateStateTransition(0.5f);
     const float mid[4] = {0.5f, 0.5f, 0.5f, 1.0f};
     CHECK(colorNear(node.style.borderColor, mid), "transition lerps borderColor");
-    CHECK(near(node.style.borderWidth, 6.0f), "transition lerps borderWidth");
+    CHECK(near(node.style.borderWidth.value, 6.0f), "transition lerps borderWidth");
     const float midRed[4] = {0.5f, 0.0f, 0.0f, 1.0f};
     CHECK(colorNear(node.style.borderTopColor, midRed), "transition lerps side color");
-    CHECK(near(node.style.borderTopLeftRadius, 10.0f), "transition lerps corner");
+    CHECK(near(resolveUnits(node.style.borderTopLeftRadius, node.unitEnv(0.0f, nullptr)), 10.0f), "transition lerps corner");
     node.updateStateTransition(0.6f);
     const float white[4] = {1.0f, 1.0f, 1.0f, 1.0f};
     CHECK(colorNear(node.style.borderColor, white), "transition reaches target");
-    CHECK(near(node.style.borderTopLeftRadius, 20.0f), "transition reaches corner");
+    CHECK(near(resolveUnits(node.style.borderTopLeftRadius, node.unitEnv(0.0f, nullptr)), 20.0f), "transition reaches corner");
     node.onHover(false);
     node.updateStateTransition(1.0f);
     const float black[4] = {0.0f, 0.0f, 0.0f, 1.0f};
@@ -183,7 +183,7 @@ static void testTransitionLerp()
 static void testHoverGradient()
 {
     TestNode node;
-    node.style.borderWidth = 6.0f;
+    node.style.borderWidth = pxLen(6.0f);
     node.hoverStyle = new MorphStyle();
     node.hoverStyle->borderImageEnabled = true;
     node.hoverStyle->borderImageIsGradient = true;
@@ -235,16 +235,16 @@ static void testKeyframeBorderWidth()
     morphAddKeyframe("bordergrow", 0.0f, {{KeyframeProperty::BorderWidth, {2.0f}}});
     morphAddKeyframe("bordergrow", 1.0f, {{KeyframeProperty::BorderWidth, {10.0f}}});
     TestNode node;
-    node.style.borderWidth = 2.0f;
+    node.style.borderWidth = pxLen(2.0f);
     CssAnimation anim;
     anim.name = "bordergrow";
     anim.duration = 1.0f;
     node.style.animations.push_back(anim);
 
     node.updateCssAnimations(0.5f);
-    CHECK(near(node.style.borderWidth, 6.0f), "keyframe lerps borderWidth");
+    CHECK(near(node.style.borderWidth.value, 6.0f), "keyframe lerps borderWidth");
     node.updateCssAnimations(0.6f);
-    CHECK(near(node.style.borderWidth, 2.0f), "finished keyframe restores width");
+    CHECK(near(node.style.borderWidth.value, 2.0f), "finished keyframe restores width");
     morphClearKeyframes();
 }
 

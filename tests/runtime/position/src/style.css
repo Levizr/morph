@@ -1,0 +1,17 @@
+body { margin: 0; background: #0b1220; color: #e2e8f0; }
+.screen { display: flex; flex-direction: column; gap: 12px; padding: 16px; }
+.relbox { background: #16213a; padding: 12px; color: #fff; }
+.relshift { position: relative; left: 10%; top: 6px; background: #22d3ee; color: #0b1220; padding: 8px; }
+.cb { position: relative; background: #16213a; height: 72px; color: #fff; }
+.anchored { position: absolute; left: 24px; top: 8px; width: 200px; background: #a855f7; padding: 8px; }
+.spacer { height: 20px; }
+.staticpos { position: absolute; width: 200px; background: #22d3ee; color: #0b1220; padding: 8px; }
+.cbwide { position: relative; background: #16213a; height: 64px; color: #fff; }
+.stretched { position: absolute; left: 16px; right: 16px; top: 8px; bottom: 8px; background: #a855f7; padding: 8px; }
+.centered { position: absolute; left: 0; right: 0; top: 50%; width: 200px; margin-left: auto; margin-right: auto; background: #22d3ee; color: #0b1220; padding: 8px; }
+.cbpct { position: relative; background: #16213a; height: 64px; color: #fff; }
+.halved { position: absolute; left: 25%; top: 8px; width: 50%; background: #a855f7; padding: 8px; }
+.scrollbox { position: relative; background: #16213a; height: 120px; overflow: auto; color: #fff; }
+.tallcontent { height: 300px; padding: 8px; }
+.pinned { position: fixed; right: 24px; bottom: 24px; background: #ff0000; color: #fff; padding: 8px; }
+.stickyhead { position: sticky; top: 0; background: #22d3ee; color: #0b1220; padding: 8px; }

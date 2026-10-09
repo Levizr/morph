@@ -3,20 +3,21 @@
 #include <string>
 
 #include "../css_enums.h"
+#include "base.h"
 
 #ifdef MORPH_FEATURE_BORDER
 
 struct BorderStyle {
     // All-side (shorthand)
-    float borderWidth = 0.0f;
+    CssLength borderWidth = pxLen(0.0f);
     float borderColor[4] = {0,0,0,1};
     CSS::BorderStyle borderStyle = CSS::BorderStyle::None;
 
-    // Per-side (longhand) - when any is >= 0, they take precedence over shorthand
-    float borderTopWidth = -1.0f;
-    float borderRightWidth = -1.0f;
-    float borderBottomWidth = -1.0f;
-    float borderLeftWidth = -1.0f;
+    // Per-side (longhand) - when set, they take precedence over shorthand
+    CssLength borderTopWidth;
+    CssLength borderRightWidth;
+    CssLength borderBottomWidth;
+    CssLength borderLeftWidth;
     float borderTopColor[4] = {-1,-1,-1,-1};
     float borderRightColor[4] = {-1,-1,-1,-1};
     float borderBottomColor[4] = {-1,-1,-1,-1};
@@ -36,14 +37,20 @@ struct BorderStyle {
 
 inline bool hasPerSideBorder(const BorderStyle& b)
 {
-    return b.borderTopWidth >= 0.0f || b.borderRightWidth >= 0.0f ||
-           b.borderBottomWidth >= 0.0f || b.borderLeftWidth >= 0.0f;
+    return b.borderTopWidth.isSet() || b.borderRightWidth.isSet() ||
+           b.borderBottomWidth.isSet() || b.borderLeftWidth.isSet();
 }
 
-inline float getBorderWidth(const BorderStyle& b, int side) // 0=top, 1=right, 2=bottom, 3=left
+// Specified (unresolved) per-side width: longhand wins, else shorthand.
+inline const CssLength& getBorderWidthSpec(const BorderStyle& b, int side) // 0=top, 1=right, 2=bottom, 3=left
 {
-    const float* widths = &b.borderTopWidth;
-    return (widths[side] >= 0.0f) ? widths[side] : b.borderWidth;
+    const CssLength* widths = &b.borderTopWidth;
+    return widths[side].isSet() ? widths[side] : b.borderWidth;
+}
+
+inline float getBorderWidth(const BorderStyle& b, int side, const UnitEnv& env)
+{
+    return resolveUnits(getBorderWidthSpec(b, side), env);
 }
 
 inline CSS::BorderStyle getBorderStyle(const BorderStyle& b, int side)
@@ -64,14 +71,14 @@ inline const float* getBorderColor(const BorderStyle& b, int side)
 // ((side + 1) * 16 + styleEnum) for sides 0=top..3=left. Returns the
 // count of visible sides (width > 0 and style != None). When every side
 // matches, the border is uniform and callers may use the single-ring
-// fast path with modes[0].
-inline int resolveBorderSides(const BorderStyle& b, float widths[4],
+// fast path with modes[0]. Relative widths resolve against `env`.
+inline int resolveBorderSides(const BorderStyle& b, const UnitEnv& env, float widths[4],
                               const float* colors[4], float modes[4])
 {
     int visible = 0;
     for (int side = 0; side < 4; side++)
     {
-        float w = getBorderWidth(b, side);
+        float w = getBorderWidth(b, side, env);
         CSS::BorderStyle st = getBorderStyle(b, side);
         widths[side] = w;
         colors[side] = getBorderColor(b, side);
@@ -194,14 +201,14 @@ inline float borderJointFrac(const float* colors[4], const float modes[4], int s
 // Total horizontal (left + right) and vertical (top + bottom) border
 // thickness for box sizing. Per-side widths fall back to the shorthand,
 // so uniform borders keep the old `borderWidth * 2` result exactly.
-inline float borderOuterH(const BorderStyle& b)
+inline float borderOuterH(const BorderStyle& b, const UnitEnv& env)
 {
-    return getBorderWidth(b, 3) + getBorderWidth(b, 1);
+    return getBorderWidth(b, 3, env) + getBorderWidth(b, 1, env);
 }
 
-inline float borderOuterV(const BorderStyle& b)
+inline float borderOuterV(const BorderStyle& b, const UnitEnv& env)
 {
-    return getBorderWidth(b, 0) + getBorderWidth(b, 2);
+    return getBorderWidth(b, 0, env) + getBorderWidth(b, 2, env);
 }
 
 #endif // MORPH_FEATURE_BORDER

@@ -28,10 +28,11 @@ public:
     void layout(float px, float py, float parentW, float parentH,
                 Renderer* r = nullptr) override {
         MorphNode::layout(px, py, parentW, parentH, r);
-        if (style.explicitHeight < 0.0f) {
-            float need = style.fontSize * 1.4f + style.padding[0] + style.padding[2];
+        if (!style.explicitHeight.isSet()) {
+            float need = m_computedFontSize * 1.4f + m_computedPadding[0] + m_computedPadding[2];
 #ifdef MORPH_FEATURE_BORDER
-            need += style.borderWidth * 2.0f;
+            UnitEnv bwEnv = unitEnv(0.0f, r);
+            need += resolveUnits(style.borderWidth, bwEnv) * 2.0f;
 #endif
             if (h < need) h = need;
             if (contentH < need) contentH = need;
@@ -610,9 +611,9 @@ public:
         float sx = sc(x), sy = sc(y);
         float sw = sc(w), sh = sc(h);
         float radii[4];
-        resolveControlRadii(style, !m_isTransitioning, radii);
+        resolvedControlRadii(radii, !m_isTransitioning);
 #ifdef MORPH_FEATURE_BORDER
-        recordBoxOps(m_displayList, style, sx, sy, sw, sh,
+        recordBoxOps(m_displayList, style, unitEnv(w, nullptr), sx, sy, sw, sh,
                      !m_isTransitioning, true);
 #else
         DrawOp bg;
@@ -634,7 +635,7 @@ public:
         float sx = sc(x), sy = sc(y);
         float sw = sc(w), sh = sc(h);
         float radii[4];
-        resolveBorderRadii(style, !m_isTransitioning, radii);
+        resolvedRadii(radii, !m_isTransitioning);
 
 #ifdef MORPH_FEATURE_TRANSFORM
         bool pushedSelf = pushSelfTransform(r, sx, sy);
@@ -741,12 +742,12 @@ public:
         float sx = sc(x), sy = sc(y);
         float sw = sc(w), sh = sc(h);
         float radii[4];
-        resolveControlRadii(style, !m_isTransitioning, radii);
+        resolvedControlRadii(radii, !m_isTransitioning);
 #ifdef MORPH_FEATURE_TRANSFORM
         bool pushedSelf = pushSelfTransform(r, sx, sy);
 #endif
 #ifdef MORPH_FEATURE_BORDER
-        paintBoxDirect(r, style, sx, sy, sw, sh, !m_isTransitioning,
+        paintBoxDirect(r, style, unitEnv(w, nullptr), sx, sy, sw, sh, !m_isTransitioning,
                        true);
 #else
 #ifdef MORPH_FEATURE_GRADIENT
@@ -1023,9 +1024,7 @@ private:
     }
 
     float effFontSize() const {
-        if (style.fontSize != 16.0f || !parent) return style.fontSize;
-        float pfs = parent->style.fontSize;
-        return (pfs != 16.0f) ? pfs : style.fontSize;
+        return resolvedFontSize(nullptr);
     }
     CSS::FontWeight effFontWeight() const {
         if (style.fontWeight != CSS::FontWeight::Normal || !parent) return style.fontWeight;

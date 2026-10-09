@@ -12,7 +12,7 @@ impl FeatureSet {
     }
 
     fn scan_style(&mut self, s: &IRStyle) {
-        if s.border_radius > 0.0 {
+        if !s.border_radius.is_zero() {
             self.features.insert("radius".into());
         }
         if s.font_weight != "normal" && !s.font_weight.is_empty() {
@@ -46,7 +46,7 @@ impl FeatureSet {
         if s.display == "inline" || s.display == "inline-block" {
             self.features.insert("inline".into());
         }
-        if s.margin.iter().any(|&m| m != 0.0) {
+        if s.margin.iter().any(|&m| !m.is_zero()) {
             self.features.insert("margin_collapse".into());
         }
         if s.min_width.is_some()
@@ -62,7 +62,7 @@ impl FeatureSet {
         if s.display == "flex" {
             self.features.insert("flex".into());
         }
-        if s.gap > 0.0 {
+        if !s.gap.is_zero() {
             self.features.insert("flex".into());
         }
         if s.justify_content != "flex-start"
@@ -80,7 +80,7 @@ impl FeatureSet {
         }
         // Any border member access needs the mixin — including a lone
         // border-color (e.g. hover-only), which carries no width/style.
-        if s.border_width > 0.0
+        if !s.border_width.is_zero()
             || (!s.border_style.is_empty() && s.border_style != "none")
             || s.border_color != [0.0, 0.0, 0.0, 1.0]
         {

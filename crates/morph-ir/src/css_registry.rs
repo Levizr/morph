@@ -177,7 +177,9 @@ pub fn property_feature(prop: &str) -> Option<&'static str> {
         "display" | "flex-direction" | "justify-content" | "align-items" | "align-self" | "gap"
         | "flex-wrap" | "flex-grow" | "flex-shrink" => Some("flex"),
         "border-radius" => Some("radius"),
-        "border-top-left-radius" | "border-top-right-radius" | "border-bottom-right-radius"
+        "border-top-left-radius"
+        | "border-top-right-radius"
+        | "border-bottom-right-radius"
         | "border-bottom-left-radius" => Some("radius"),
         "opacity" => Some("opacity"),
         "transform" | "transform-origin" => Some("transform"),

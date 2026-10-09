@@ -6,13 +6,13 @@
 
 ## Read this first — basics come first
 
-Morph's basics now cover solid/dotted/dashed borders, per-side widths/colors, `border-image` gradients, and AA'd per-side miter joints (all pixel-verified against Chrome); still missing: `background-image` on boxes, per-corner radius (single-value only), scoop/concave corners.
+Morph's basics now cover solid/dotted/dashed borders, per-side widths/colors, `border-image` gradients, AA'd per-side miter joints (all pixel-verified against Chrome), per-corner radius, and border hover/active/transitions/keyframes including gradients; still missing: `background-image` on boxes, radial/conic gradients, scoop/concave corners.
 
 An honest question this page must answer first: *why explore magical CSS when Morph doesn't yet support browser basics?*
 
 **The team is building the basics first. This page is not a priority list — it is a possibility showcase. It records what becomes possible once Morph owns its own GPU shader and layout engine, free of decades of web compatibility baggage.**
 
-Build order stays: solid basics (gradients → `background-image` → dotted/dashed → `border-image` → per-side borders → per-corner radius) *before* any magic below. Magic items reuse the same gradient/SDF plumbing, so designing them now keeps the basics from painting us into a corner.
+Build order stays: solid basics first (linear gradients → dotted/dashed → `border-image` → per-side borders → per-corner radius → border state/animation — all shipped; remaining basics: `background-image`, radial/conic gradients, scoop) *before* any magic below. Magic items reuse the same gradient/SDF plumbing, so designing them now keeps the basics from painting us into a corner.
 
 ## How to read each entry
 
@@ -64,7 +64,7 @@ Browser today: trivial. Morph gap: `MORPH_FEATURE_IMAGE` only serves `<img>`, ne
 }
 ```
 
-Browser today: trivial. Morph gap: single `float borderWidth` in `runtime/cpp/style/features/border.h`, single `BorderStyle`, `layout.cpp` does `borderWidth * 2`. Why it matters here: every magic border below builds on this. Cost: `cheap`.
+Browser today: trivial. Morph: shipped — per-side widths/colors/styles with AA'd miter joints, pixel-matched vs Chrome (`tests/runtime/border/border-test`); dotted/dashed run on arc length through rounded corners with midpoint gap straddling. Why it matters here: every magic border below builds on this. Cost: `cheap`.
 
 ### A4. Gradient border (standard `border-image`, no custom property)
 
@@ -72,7 +72,7 @@ Browser today: trivial. Morph gap: single `float borderWidth` in `runtime/cpp/st
 .grad-border { border: 4px solid; border-image: linear-gradient(red, blue) 1; }
 ```
 
-Browser today: works via `border-image`, but breaks with `border-radius` and can't animate smoothly. Why browsers struggle: ring has no single direction, slice/repeat model predates gradients. Morph native: sample the same gradient evaluator on the ring band instead of the interior. Cost: `cheap` static, `medium` when animated.
+Browser today: works via `border-image`, but breaks with `border-radius` and can't animate smoothly. Why browsers struggle: ring has no single direction, slice/repeat model predates gradients. Morph native: sample the same gradient evaluator on the ring band instead of the interior — radius and keyframe animation included (`tests/runtime/border/border-state`). Cost: `cheap` static, `medium` when animated.
 
 ### A5. Inverted / scoop radius
 
@@ -84,7 +84,7 @@ Browser today: works via `border-image`, but breaks with `border-radius` and can
 }
 ```
 
-Browser today: `::before { background: radial-gradient(circle at 100% 0%, transparent 100px, #dfdfdf 100px); }` + `::after { border-top-right-radius: 30px; }` with magic `100px` numbers that break on resize. Why browsers can't: `border-radius` is convex-only; concave needs boolean subtraction, only proposed as `corner-shape: scoop` draft. Morph native: `max(boxSDF, -circleSDF)` in `kQuadFragSrc` — one box, resizes correctly. Cost: `cheap`.
+Per-corner radius shipped; only the concave half is open. Browser today for the scoop half: `::before { background: radial-gradient(circle at 100% 0%, transparent 100px, #dfdfdf 100px); }` + `::after { border-top-right-radius: 30px; }` with magic `100px` numbers that break on resize. Why browsers can't: `border-radius` is convex-only; concave needs boolean subtraction, only proposed as `corner-shape: scoop` draft. Morph native: `max(boxSDF, -circleSDF)` in `kQuadFragSrc` — one box, resizes correctly. Cost: `cheap`.
 
 ### A6. Gradient text
 
@@ -266,19 +266,22 @@ Rule: any `hungry` effect must ship with an automatic static fallback (window bl
 | `background-image` on boxes | ❌ Not started (image pipeline is `<img>`-only) |
 | Dotted / dashed / per-side | ✅ Shipped (per-side widths/colors/styles, SDF ring mask + AA'd miter joints; `tests/runtime/render/border-test` parity vs Chrome, joints pixel-matched) |
 | `border-image` with gradients | ✅ Shipped (standard syntax, sampled on the ring band; parity-covered) |
-| Scoop / per-corner radius | ❌ Not started (single `border_radius: f32`, convex `sdRoundedBox` only) |
+| Scoop / concave corners | ❌ Not started (convex `sdRoundedBox` only; per-corner radius shipped) |
+| Position (static/relative/absolute/fixed/sticky) + CSS units | ✅ Shipped (CSS 2.1 §10.3.7/§10.6.7 solver; px/%/em/rem/vw/vh/vmin/vmax/ch/ex + physical fold at 96dpi; `tests/runtime/position` parity vs Chrome, boxes within 1–2px, text deltas are font-engine) |
 | Gradient text, patterns, shadows | ❌ Not started (`shadow.h` / `outline.h` dormant, see [More CSS](more-properties.md)) |
 | B1–B10 Morph-only magic | ❌ Not started (needs A-group plumbing first) |
 
 ## Build order (basics first, magic later)
 
-1. Gradients linear → radial → conic (+ repeating), static first then animation lerp.
+1. Gradients linear → radial → conic (+ repeating), static first then animation lerp. Linear static + state/animation shipped; radial/conic open.
 2. `background-image` cover/contain on boxes.
-3. Dotted/dashed, then per-side width/color, then `border-image`.
-4. Per-corner radius + `corner-shape: scoop`.
+3. ~~Dotted/dashed, then per-side width/color, then `border-image`.~~ Shipped + pixel-verified.
+4. ~~Per-corner radius~~ shipped + `corner-shape: scoop` open.
 5. Only then: B1–B10 behind `MORPH_FEATURE_*` flags with fixtures + screenshots.
 
 ## Decision log
 
 - 2026-09-29: `border-gradient` custom property **rejected** — use standard `border-image: <gradient> 1` instead. No compat break.
+- 2026-10-07: Per-corner `border-*-radius` shipped (Chrome-parity arcs, dotted/dashed arc flow, pill clamp); border hover/active/transitions/keyframes shipped incl. gradients (`tests/runtime/border/`).
+- 2026-10-09: Position + full CSS units shipped (far-edge re-resolution for bottom/right-only auto-height boxes; rem vs root font, em/%-font compounding, viewport via `m_winW/m_winH`; `check-position.sh` 37 checks, `check-units.sh` 24 checks; parity RMSE ~0.17, residual is font metrics + scrollbar policy).
 - 2026-09-29: This page classified as possibility showcase, explicitly **not** priority over browser-parity basics. Basics (solid → dotted/dashed, gradients, images) ship first.

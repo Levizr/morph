@@ -10,6 +10,81 @@ MorphNode* MorphNode::s_mouseCapture = nullptr;
 MorphNode* MorphNode::s_activePressNode = nullptr;
 MorphNode* MorphNode::s_lastClickNode = nullptr;
 
+// ── Font-relative unit support ─────────────────────────────────────
+// Element font for `em/ex/ch`: the parent's computed size (16 at the
+// root). Chains resolve on demand so pre-layout readers (intrinsic
+// sizing, paint before first layout) agree with layout.
+float MorphNode::parentFontSize() const {
+    if (!parent) return 16.0f;
+    if (parent->m_computedFontSize >= 0.0f) return parent->m_computedFontSize;
+    return parent->computeFontSize(nullptr);
+}
+
+// Root font for `rem`: the outermost node's computed size (html/body
+// `font-size` sets it); 16 until the root itself resolves.
+float MorphNode::rootFontSize() const {
+    const MorphNode* top = this;
+    while (top->parent) top = top->parent;
+    if (top != this && top->m_computedFontSize >= 0.0f) return top->m_computedFontSize;
+    return 16.0f;
+}
+
+float MorphNode::computeFontSize(Renderer* r) const {
+    float parentF = parentFontSize();
+    // Unspecified font inherits the parent's computed size (the codegen
+    // bakes this in for static trees; dynamic/hand-built trees need it
+    // at resolve time). Mirrors the old _effFontSize rule exactly.
+    if (style.fontSize == pxLen(16.0f) && parentF != 16.0f) {
+        m_computedFontSize = parentF;
+        return parentF;
+    }
+    UnitEnv e;
+    e.pctBase = parentF; // `%` font-size resolves against the parent font
+    e.fontSize = parentF;
+    e.rootFont = rootFontSize();
+#ifdef MORPH_FEATURE_POSITION
+    e.vw = m_winW;
+    e.vh = m_winH;
+#endif
+    if (r && parentF > 0.0f) {
+        e.chW = r->measureTextWidth("0", parentF, style.fontWeight);
+        e.exW = r->measureTextWidth("x", parentF, style.fontWeight);
+    }
+    m_computedFontSize = resolveUnits(style.fontSize, e);
+    return m_computedFontSize;
+}
+
+UnitEnv MorphNode::unitEnv(float pctBase, Renderer* r) const {
+    if (m_computedFontSize < 0.0f) computeFontSize(r);
+    UnitEnv e;
+    e.pctBase = pctBase;
+    e.fontSize = m_computedFontSize < 0.0f ? 16.0f : m_computedFontSize;
+    e.rootFont = rootFontSize();
+#ifdef MORPH_FEATURE_POSITION
+    e.vw = m_winW;
+    e.vh = m_winH;
+#endif
+    if (r && e.fontSize > 0.0f) {
+        e.chW = r->measureTextWidth("0", e.fontSize, style.fontWeight);
+        e.exW = r->measureTextWidth("x", e.fontSize, style.fontWeight);
+    }
+    return e;
+}
+
+#ifdef MORPH_FEATURE_BORDER
+float MorphNode::resolvedBorderWidth() const {
+    return resolveUnits(style.borderWidth, unitEnv(0.0f, nullptr));
+}
+#endif
+
+void MorphNode::resolvedRadii(float out[4], bool snap) const {
+    resolveBorderRadii(style, unitEnv(w, nullptr), snap, out);
+}
+
+void MorphNode::resolvedControlRadii(float out[4], bool snap) const {
+    resolveControlRadii(style, unitEnv(w, nullptr), snap, out);
+}
+
 void MorphNode::markDirty(DirtyFlag f) {
     if (f == Clean) return;
     m_dirtyFlags |= f;
@@ -49,6 +124,8 @@ void MorphNode::layoutIfNeeded(float px, float py, float parentW, float parentH,
         // layout() re-applies the child's own margins to px/py, so pass the
         // parent-assigned PRE-margin position and a margin-inclusive parent
         // width; otherwise re-layout double-applies the margins (frame 1).
+        // Relative offsets double-apply the same way, so back out the
+        // stored offset and pass the flow slot instead.
         //
         // Only propagate force when this node did NOT just lay out its
         // subtree itself: layout() lays out every child directly, clearing
@@ -59,12 +136,23 @@ void MorphNode::layoutIfNeeded(float px, float py, float parentW, float parentH,
         // passed parentH). Children that are genuinely dirty still run via
         // their own flags.
         bool propagateForce = (force || subtreeDirty) && !needsLayout;
-        float cw = c->w > 0 ? (c->w + c->style.margin[3] + c->style.margin[1])
+        // Margins resolve through the child's own environment (`%` against
+        // the width passed down, like layout's own base).
+        UnitEnv cEnv = c->unitEnv(parentW, r);
+        float cml = resolveUnits(c->style.margin[3], cEnv);
+        float cmt = resolveUnits(c->style.margin[0], cEnv);
+        float cpx = c->x - cml;
+        float cpy = c->y - cmt;
+#ifdef MORPH_FEATURE_POSITION
+        if (c->style.position == CSS::Position::Relative) {
+            cpx -= c->m_relOffX;
+            cpy -= c->m_relOffY;
+        }
+#endif
+        float cw = c->w > 0 ? (c->w + cml + resolveUnits(c->style.margin[1], cEnv))
                             : (parentW - c->x + px);
         float ch = c->h > 0 ? c->h : (parentH - c->y + py);
-        c->layoutIfNeeded(c->x - c->style.margin[3],
-                          c->y - c->style.margin[0],
-                          cw, ch, r, stats, propagateForce);
+        c->layoutIfNeeded(cpx, cpy, cw, ch, r, stats, propagateForce);
     }
     if (needsLayout) clearDirty(SubtreeDirty);
 }
@@ -103,20 +191,25 @@ void MorphNode::syncPaintDirtyAfterLayout() {
 #endif
 
 float MorphNode::contentWidth(Renderer* r) {
-    float pl = style.padding[3], pr = style.padding[1];
+    // Intrinsic sizing has no containing block yet: `%` has no base and
+    // resolves to 0 here (final layout re-resolves with the real base);
+    // every other unit is exact. Font units use this node's own font.
+    UnitEnv env = unitEnv(0.0f, r);
+    float pl = resolveUnits(style.padding[3], env);
+    float pr = resolveUnits(style.padding[1], env);
 #ifdef MORPH_FEATURE_BORDER
-    float bwH = borderOuterH(style);
+    float bwH = borderOuterH(style, env);
 #else
     float bwH = 0.0f;
 #endif
 
-    if (style.explicitWidth >= 0.0f) {
+    if (style.explicitWidth.isSet() && !style.explicitWidth.isPercent()) {
 #ifdef MORPH_FEATURE_BORDER_BOX
         if (style.boxSizing == CSS::BoxSizing::BorderBox) {
-            return style.explicitWidth;
+            return resolveUnits(style.explicitWidth, env);
         }
 #endif
-        return style.explicitWidth + pl + pr + bwH;
+        return resolveUnits(style.explicitWidth, env) + pl + pr + bwH;
     }
 
 #ifdef MORPH_FEATURE_FLEX
@@ -126,11 +219,13 @@ float MorphNode::contentWidth(Renderer* r) {
         for (auto* c : children) {
             float cw = c->contentWidth(r);
             if (cw < 0.0f) return -1.0f;
-            float cml = c->style.margin[3], cmr = c->style.margin[1];
+            UnitEnv cEnv = c->unitEnv(0.0f, r);
+            float cml = resolveUnits(c->style.margin[3], cEnv);
+            float cmr = resolveUnits(c->style.margin[1], cEnv);
             total += cw + cml + cmr;
             count++;
         }
-        if (count > 1) total += (count - 1) * style.gap;
+        if (count > 1) total += (count - 1) * resolveUnits(style.gap, env);
         return total + pl + pr + bwH;
     }
 #endif
@@ -142,8 +237,11 @@ float MorphNode::contentWidth(Renderer* r) {
             if (c->style.display == CSS::Display::Inline || c->style.display == CSS::Display::InlineBlock
                 || c->type == NodeType::Text || c->type == NodeType::Expr) {
                 float cw = c->contentWidth(r);
-                if (cw > 0.0f)
-                    totalInline += cw + c->style.margin[3] + c->style.margin[1];
+                if (cw > 0.0f) {
+                    UnitEnv cEnv = c->unitEnv(0.0f, r);
+                    totalInline += cw + resolveUnits(c->style.margin[3], cEnv)
+                        + resolveUnits(c->style.margin[1], cEnv);
+                }
             }
         }
         if (totalInline > 0.0f) {

@@ -1,0 +1,319 @@
+/* ── Material authenticator theme ───────────────────────
+   One stylesheet, two themes. The root .app carries theme-dark /
+   theme-light (+ code-normal / code-large); every themed value hangs
+   off those ancestor classes, so switching theme is a className swap
+   with zero style writes. contrast-tested pairs:
+   dark  bg #000 / text #f5f5f5 / code #8fd0f7
+   light bg #fff / text #1f1f1f / code #0b57d0                        */
+
+body {
+  background-color: #000000;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+}
+.theme-dark {
+  background-color: #000000;
+  color: #f5f5f5;
+}
+.theme-light {
+  background-color: #ffffff;
+  color: #1f1f1f;
+}
+
+/* ── Home: top bar ──────────────────────────────────────── */
+.topbar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 14px;
+  padding-left: 20px;
+  padding-right: 20px;
+  padding-bottom: 6px;
+}
+.apptitle {
+  font-size: 17px;
+  font-weight: bold;
+}
+.avatar {
+  display: flex;
+  width: 38px;
+  height: 38px;
+  border-radius: 19px;
+  background-color: #7b1fa2;
+  color: #ffffff;
+  font-size: 18px;
+  font-weight: bold;
+  justify-content: center;
+  align-items: center;
+}
+
+/* ── Home: search bar ───────────────────────────────────── */
+.searchbar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  height: 52px;
+  margin-top: 8px;
+  margin-left: 16px;
+  margin-right: 16px;
+  margin-bottom: 4px;
+  padding-left: 14px;
+  padding-right: 14px;
+  border-radius: 26px;
+  gap: 10px;
+}
+.theme-dark .searchbar {
+  background-color: #2e2e30;
+}
+.theme-light .searchbar {
+  background-color: #f1f3f4;
+}
+.iconbtn {
+  background-color: transparent;
+  font-size: 20px;
+  color: #b5b5b5;
+  cursor: pointer;
+}
+.search-field {
+  flex-grow: 1;
+  height: 40px;
+  background-color: transparent;
+  font-size: 15px;
+}
+.cloud {
+  font-size: 18px;
+  color: #66bb6a;
+}
+
+/* ── Home: account list ─────────────────────────────────── */
+.list {
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+  overflow: auto;
+  padding-bottom: 90px;
+}
+.acc-wrap {
+  display: flex;
+  flex-direction: column;
+}
+.hidden {
+  display: none;
+}
+.acc-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 12px;
+  padding-left: 20px;
+  padding-right: 20px;
+  padding-bottom: 12px;
+}
+.row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.acc-name {
+  font-size: 15px;
+}
+.acc-code {
+  font-size: 32px;
+}
+.theme-dark .acc-code {
+  color: #8fd0f7;
+}
+.theme-light .acc-code {
+  color: #0b57d0;
+}
+.code-large .acc-code {
+  font-size: 40px;
+}
+.copybtn {
+  display: flex;
+  width: 40px;
+  height: 40px;
+  background-color: transparent;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+}
+.copybox {
+  width: 13px;
+  height: 15px;
+  border-width: 2px;
+  border-style: solid;
+  border-radius: 3px;
+}
+.theme-dark .copybox {
+  border-color: #6aa9e8;
+}
+.theme-light .copybox {
+  border-color: #0b57d0;
+}
+.copied {
+  font-size: 18px;
+  color: #4caf50;
+}
+.divider {
+  height: 1px;
+  margin-left: 16px;
+  margin-right: 16px;
+}
+.theme-dark .divider {
+  background-color: #262626;
+}
+.theme-light .divider {
+  background-color: #e1e3e1;
+}
+
+/* ── Home: FAB ──────────────────────────────────────────── */
+.fab {
+  position: absolute;
+  right: 22px;
+  bottom: 26px;
+  display: flex;
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  justify-content: center;
+  align-items: center;
+  transition: all 0.15s ease;
+}
+.theme-dark .fab {
+  background-color: #3a3a3c;
+}
+.theme-light .fab {
+  background-color: #dde3ea;
+}
+.fab:active {
+  transform: scale(0.94);
+}
+/* multicolor "+" from 5 plain divs (no icon font needed) */
+.plus {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.arm-v {
+  width: 5px;
+  height: 10px;
+}
+.arm-top {
+  background-color: #fbbc05;
+}
+.arm-bot {
+  background-color: #34a853;
+}
+.plus-mid {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+.arm-h {
+  width: 10px;
+  height: 5px;
+}
+.arm-left {
+  background-color: #ea4335;
+}
+.arm-c {
+  width: 5px;
+  height: 5px;
+  background-color: #4285f4;
+}
+.arm-right {
+  background-color: #4285f4;
+}
+
+/* ── Settings route ─────────────────────────────────────── */
+.header {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 14px;
+  padding-top: 14px;
+  padding-left: 12px;
+  padding-right: 20px;
+  padding-bottom: 6px;
+}
+.pagetitle {
+  font-size: 19px;
+  font-weight: bold;
+}
+.section {
+  font-size: 12px;
+  margin-top: 18px;
+  margin-left: 20px;
+  margin-right: 20px;
+  margin-bottom: 6px;
+}
+.theme-dark .section {
+  color: #9aa0a6;
+}
+.theme-light .section {
+  color: #5f6368;
+}
+.opt {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  background-color: transparent;
+  padding-top: 13px;
+  padding-left: 20px;
+  padding-right: 20px;
+  padding-bottom: 13px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.theme-dark .opt:hover {
+  background-color: #1a1a1a;
+}
+.theme-light .opt:hover {
+  background-color: #f1f3f4;
+}
+.opt-label {
+  font-size: 15px;
+}
+.opt-state {
+  font-size: 13px;
+}
+.theme-dark .opt-state {
+  color: #9aa0a6;
+}
+.theme-light .opt-state {
+  color: #5f6368;
+}
+.theme-dark .opt.selected {
+  background-color: #14202f;
+}
+.theme-light .opt.selected {
+  background-color: #e8f0fe;
+}
+.theme-dark .opt.selected .opt-state {
+  color: #8fd0f7;
+}
+.theme-light .opt.selected .opt-state {
+  color: #0b57d0;
+}
+.about {
+  font-size: 13px;
+  margin-left: 20px;
+  margin-right: 20px;
+}
+.theme-dark .about {
+  color: #9aa0a6;
+}
+.theme-light .about {
+  color: #5f6368;
+}

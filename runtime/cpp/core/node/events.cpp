@@ -26,6 +26,16 @@ MorphNode* MorphNode::hitTest(float ex, float ey) {
 // receive hits) outside their parent's box. Children are checked first;
 // the node itself is a candidate only for points inside its own box.
 MorphNode* MorphNode::hitTestImpl(float ex, float ey, const float* accInv) {
+#ifdef MORPH_FEATURE_POSITION
+    // Viewport-locked fixed boxes don't move with ancestor scroll, but the
+    // dispatch path added every scrolling ancestor's scrollY into ey on the
+    // way down: back it out for this subtree (locked by a transformed
+    // ancestor → keep today's behavior).
+    if (!accInv && style.position == CSS::Position::Fixed && !hasTransformedAncestor()) {
+        for (MorphNode* p = parent; p; p = p->parent)
+            if (p->scrollEnabled) ey -= p->scrollY;
+    }
+#endif
     float lx = ex, ly = ey;
 #ifdef MORPH_FEATURE_TRANSFORM
     if (accInv)
@@ -200,8 +210,15 @@ bool MorphNode::dispatchEvent(MorphEvent& e, float ex, float ey) {
         if (!c->hitTest(ex, eyAdj))
             continue;
 #ifdef MORPH_FEATURE_SCROLL
-        float cy = c->y - (scrollEnabled ? scrollY : 0.0f);
-        if (scrollEnabled && (cy + c->h <= y || cy >= y + h))
+        // A viewport-locked fixed subtree is positioned in viewport coords
+        // and can be visible outside this scroller's box: never cull it by
+        // scrolled-out bounds (locked by transform → cull normally).
+        bool fixedBelow = false;
+#ifdef MORPH_FEATURE_POSITION
+        if (c->m_subtreeHasFixed && !c->hasTransformedAncestor()) fixedBelow = true;
+#endif
+        float cy = c->y - (scrollEnabled && !fixedBelow ? scrollY : 0.0f);
+        if (scrollEnabled && !fixedBelow && (cy + c->h <= y || cy >= y + h))
             continue;   // fully scrolled out of view
 #endif
         if (c->dispatchEvent(e, ex, eyAdj))

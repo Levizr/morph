@@ -1,0 +1,13 @@
+{
+  "name": "authenticator",
+  "entry": "src/App.mx",
+
+  "window": {
+    "width": 400,
+    "height": 740,
+    "title": "Authenticator"
+  },
+  "dependencies": {},
+  "cpp_sources": [],
+  "renderer": "flash"
+}

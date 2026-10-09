@@ -1,0 +1,56 @@
+import { useWindow } from 'morph'
+import { theme, setTheme, codeSize, setCodeSize, prefsChanged } from '../store.mx'
+import '../style.css'
+
+export const windowConfig = {
+  title: "Settings",
+  width: 400,
+  height: 600
+}
+
+export default function SettingsPage() {
+  function pick(t: string, c: string):int {
+    setTheme(t)
+    setCodeSize(c)
+    prefsChanged.emit({ theme: t, codeSize: c })
+    return 0
+  }
+
+  return (
+    <body>
+      <div className={theme == "dark" ? "app theme-dark" : "app theme-light"} id="settings-app">
+        <div className="header" id="header">
+          <button className="iconbtn" id="btn-back" onClick={() => { const w = useWindow(); w.close() }}>←</button>
+          <div className="pagetitle" id="pagetitle">Settings</div>
+        </div>
+
+        <div className="section">Appearance</div>
+        <button className={theme == "dark" ? "opt selected" : "opt"} id="opt-dark"
+                onClick={() => { pick("dark", codeSize) }}>
+          <span className="opt-label">Dark theme</span>
+          <span className="opt-state">{theme == "dark" ? "On" : ""}</span>
+        </button>
+        <button className={theme == "light" ? "opt selected" : "opt"} id="opt-light"
+                onClick={() => { pick("light", codeSize) }}>
+          <span className="opt-label">Light theme</span>
+          <span className="opt-state">{theme == "light" ? "On" : ""}</span>
+        </button>
+
+        <div className="section">Code size</div>
+        <button className={codeSize == "normal" ? "opt selected" : "opt"} id="opt-normal"
+                onClick={() => { pick(theme, "normal") }}>
+          <span className="opt-label">Normal</span>
+          <span className="opt-state">{codeSize == "normal" ? "On" : ""}</span>
+        </button>
+        <button className={codeSize == "large" ? "opt selected" : "opt"} id="opt-large"
+                onClick={() => { pick(theme, "large") }}>
+          <span className="opt-label">Large</span>
+          <span className="opt-state">{codeSize == "large" ? "On" : ""}</span>
+        </button>
+
+        <div className="section">About</div>
+        <div className="about">Material-style authenticator example. Theme and code size apply live via the shared event bus.</div>
+      </div>
+    </body>
+  )
+}

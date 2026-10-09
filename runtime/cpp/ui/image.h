@@ -29,7 +29,7 @@ public:
         float sx = sc(x), sy = sc(y);
         float sw = sc(w), sh = sc(h);
         float imRadii[4];
-        resolveBorderRadii(style, !m_isTransitioning, imRadii);
+        resolvedRadii(imRadii, !m_isTransitioning);
 
         // Clip self for borderRadius (each node's flat render handles children separately)
         if (maxRadius4(imRadii) > 0.0f) {
@@ -45,8 +45,9 @@ public:
         m_displayList.push_back(tex);
 
 #ifdef MORPH_FEATURE_BORDER
-        if (style.borderWidth > 0.0f && style.borderStyle == CSS::BorderStyle::Solid) {
-            float bw = m_isTransitioning ? style.borderWidth : snapBorderWidth(style.borderWidth);
+        if (resolvedBorderWidth() > 0.0f && style.borderStyle == CSS::BorderStyle::Solid) {
+            float bw0 = resolvedBorderWidth();
+            float bw = m_isTransitioning ? bw0 : snapBorderWidth(bw0);
             DrawOp brr;
             brr.setBordered(sx, sy, sw, sh, imRadii, style.bgColor,
                             bw, style.borderColor);
@@ -94,7 +95,7 @@ public:
         if (textureId && imgW > 0 && imgH > 0) {
             float sw = sc(w), sh = sc(h);
             float imRadii[4];
-            resolveBorderRadii(style, !m_isTransitioning, imRadii);
+            resolvedRadii(imRadii, !m_isTransitioning);
             if (maxRadius4(imRadii) > 0.0f) {
                 r.beginRoundedClip(sx, sy, sw, sh, imRadii);
             }
@@ -102,8 +103,9 @@ public:
             r.drawTexture(textureId, sx, sy, sw, sh);
 
 #ifdef MORPH_FEATURE_BORDER
-            if (style.borderWidth > 0.0f && style.borderStyle == CSS::BorderStyle::Solid) {
-                float bw = m_isTransitioning ? style.borderWidth : snapBorderWidth(style.borderWidth);
+            if (resolvedBorderWidth() > 0.0f && style.borderStyle == CSS::BorderStyle::Solid) {
+                float bw0 = resolvedBorderWidth();
+            float bw = m_isTransitioning ? bw0 : snapBorderWidth(bw0);
                 r.drawBorderRing(sx, sy, sw, sh, imRadii,
                                  bw, style.borderColor);
             }
@@ -129,8 +131,8 @@ public:
         if (r) ensureLoaded(*r);
         if (imgW > 0 && imgH > 0) {
             float aspect = (float)imgW / (float)imgH;
-            bool hasExplicitW = style.explicitWidth > 0;
-            bool hasExplicitH = style.explicitHeight > 0;
+            bool hasExplicitW = style.explicitWidth.isSet();
+            bool hasExplicitH = style.explicitHeight.isSet();
             if (hasExplicitW && !hasExplicitH) {
                 h = w / aspect;
             } else if (!hasExplicitW && hasExplicitH) {

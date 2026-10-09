@@ -29,7 +29,11 @@ static void setAnimProperty(MorphNode* node, AnimProperty prop, float val) {
         case AnimProperty::ColorG: node->style.color[1] = val; node->markDirty(PaintDirty); break;
         case AnimProperty::ColorB: node->style.color[2] = val; node->markDirty(PaintDirty); break;
         case AnimProperty::ColorA: node->style.color[3] = val; node->markDirty(PaintDirty); break;
-        case AnimProperty::BorderRadius: node->style.borderRadius = val; node->markDirty(PaintDirty); break;
+        case AnimProperty::BorderRadius:
+            node->style.borderRadius.value = val;
+            node->style.borderRadius.unit = LengthUnit::Px;
+            node->markDirty(PaintDirty);
+            break;
     }
 }
 
@@ -47,7 +51,7 @@ static float getAnimProperty(MorphNode* node, AnimProperty prop) {
         case AnimProperty::ColorG: return node->style.color[1];
         case AnimProperty::ColorB: return node->style.color[2];
         case AnimProperty::ColorA: return node->style.color[3];
-        case AnimProperty::BorderRadius: return node->style.borderRadius;
+        case AnimProperty::BorderRadius: return resolveUnits(node->style.borderRadius, node->unitEnv(node->w, nullptr));
     }
     return 0;
 }
@@ -110,29 +114,29 @@ static void applyStyleDelta(MorphStyle& target, const MorphStyle& delta) {
 #endif
     if (delta.color[0] != 0.0f || delta.color[1] != 0.0f || delta.color[2] != 0.0f || delta.color[3] != 1.0f)
         memcpy(target.color, delta.color, sizeof(float)*4);
-    if (delta.borderRadius != 0.0f) target.borderRadius = delta.borderRadius;
-    if (delta.fontSize != 16.0f)     target.fontSize = delta.fontSize;
+    if (!delta.borderRadius.isZero()) target.borderRadius = delta.borderRadius;
+    if (delta.fontSize != pxLen(16.0f)) target.fontSize = delta.fontSize;
     if (delta.fontWeight != CSS::FontWeight::Normal) target.fontWeight = delta.fontWeight;
     if (delta.textAlign != CSS::TextAlign::Left) target.textAlign = delta.textAlign;
     if (delta.display != CSS::Display::Block) target.display = delta.display;
     if (delta.overflow != CSS::Overflow::Visible)  target.overflow = delta.overflow;
     if (delta.position != CSS::Position::Static) target.position = delta.position;
     if (delta.boxSizing != CSS::BoxSizing::ContentBox) target.boxSizing = delta.boxSizing;
-    if (delta.padding[0] != 0.0f || delta.padding[1] != 0.0f || delta.padding[2] != 0.0f || delta.padding[3] != 0.0f)
-        memcpy(target.padding, delta.padding, sizeof(float)*4);
-    if (delta.margin[0] != 0.0f || delta.margin[1] != 0.0f || delta.margin[2] != 0.0f || delta.margin[3] != 0.0f)
-        memcpy(target.margin, delta.margin, sizeof(float)*4);
+    if (!delta.padding[0].isZero() || !delta.padding[1].isZero() || !delta.padding[2].isZero() || !delta.padding[3].isZero())
+        memcpy(target.padding, delta.padding, sizeof(CssLength)*4);
+    if (!delta.margin[0].isZero() || !delta.margin[1].isZero() || !delta.margin[2].isZero() || !delta.margin[3].isZero())
+        memcpy(target.margin, delta.margin, sizeof(CssLength)*4);
     if (delta.marginAuto[0] || delta.marginAuto[1] || delta.marginAuto[2] || delta.marginAuto[3])
         memcpy(target.marginAuto, delta.marginAuto, sizeof(bool)*4);
-    if (delta.explicitWidth >= 0.0f)  target.explicitWidth = delta.explicitWidth;
-    if (delta.explicitHeight >= 0.0f) target.explicitHeight = delta.explicitHeight;
-    if (delta.minWidth >= 0.0f)       target.minWidth = delta.minWidth;
-    if (delta.maxWidth >= 0.0f)       target.maxWidth = delta.maxWidth;
-    if (delta.minHeight >= 0.0f)      target.minHeight = delta.minHeight;
-    if (delta.maxHeight >= 0.0f)      target.maxHeight = delta.maxHeight;
+    if (delta.explicitWidth.isSet())  target.explicitWidth = delta.explicitWidth;
+    if (delta.explicitHeight.isSet()) target.explicitHeight = delta.explicitHeight;
+    if (delta.minWidth.isSet())       target.minWidth = delta.minWidth;
+    if (delta.maxWidth.isSet())       target.maxWidth = delta.maxWidth;
+    if (delta.minHeight.isSet())      target.minHeight = delta.minHeight;
+    if (delta.maxHeight.isSet())      target.maxHeight = delta.maxHeight;
 #ifdef MORPH_FEATURE_FLEX
     if (delta.flexDirection != CSS::FlexDirection::Row) target.flexDirection = delta.flexDirection;
-    if (delta.gap != 0.0f)             target.gap = delta.gap;
+    if (!delta.gap.isZero())             target.gap = delta.gap;
     if (delta.justifyContent != CSS::JustifyContent::FlexStart) target.justifyContent = delta.justifyContent;
     if (delta.alignItems != CSS::AlignItems::Stretch) target.alignItems = delta.alignItems;
     if (delta.alignSelf != CSS::AlignSelf::Auto) target.alignSelf = delta.alignSelf;
@@ -142,10 +146,10 @@ static void applyStyleDelta(MorphStyle& target, const MorphStyle& delta) {
     if (delta.flexBasis != "auto")     target.flexBasis = delta.flexBasis;
 #endif
 #ifdef MORPH_FEATURE_POSITION
-    if (delta.left > -1e8f)  target.left = delta.left;
-    if (delta.right > -1e8f) target.right = delta.right;
-    if (delta.top > -1e8f)   target.top = delta.top;
-    if (delta.bottom > -1e8f) target.bottom = delta.bottom;
+    if (delta.left.isSet())  target.left = delta.left;
+    if (delta.right.isSet()) target.right = delta.right;
+    if (delta.top.isSet())   target.top = delta.top;
+    if (delta.bottom.isSet()) target.bottom = delta.bottom;
 #endif
 #ifdef MORPH_FEATURE_ZINDEX
     if (delta.zIndexSet) {
@@ -160,11 +164,11 @@ static void applyStyleDelta(MorphStyle& target, const MorphStyle& delta) {
     if (delta.cursor != CSS::Cursor::Default) target.cursor = delta.cursor;
 #endif
 #ifdef MORPH_FEATURE_BORDER
-    if (delta.borderWidth > 0.0f) target.borderWidth = delta.borderWidth;
-    if (delta.borderTopWidth >= 0.0f) target.borderTopWidth = delta.borderTopWidth;
-    if (delta.borderRightWidth >= 0.0f) target.borderRightWidth = delta.borderRightWidth;
-    if (delta.borderBottomWidth >= 0.0f) target.borderBottomWidth = delta.borderBottomWidth;
-    if (delta.borderLeftWidth >= 0.0f) target.borderLeftWidth = delta.borderLeftWidth;
+    if (!delta.borderWidth.isZero()) target.borderWidth = delta.borderWidth;
+    if (delta.borderTopWidth.isSet()) target.borderTopWidth = delta.borderTopWidth;
+    if (delta.borderRightWidth.isSet()) target.borderRightWidth = delta.borderRightWidth;
+    if (delta.borderBottomWidth.isSet()) target.borderBottomWidth = delta.borderBottomWidth;
+    if (delta.borderLeftWidth.isSet()) target.borderLeftWidth = delta.borderLeftWidth;
     if (delta.borderColor[0] != 0.0f || delta.borderColor[1] != 0.0f || delta.borderColor[2] != 0.0f || delta.borderColor[3] != 1.0f)
         memcpy(target.borderColor, delta.borderColor, sizeof(float)*4);
     if (delta.borderTopColor[0] >= 0.0f)
@@ -180,10 +184,10 @@ static void applyStyleDelta(MorphStyle& target, const MorphStyle& delta) {
     if (delta.borderRightStyle != CSS::BorderStyle::None) target.borderRightStyle = delta.borderRightStyle;
     if (delta.borderBottomStyle != CSS::BorderStyle::None) target.borderBottomStyle = delta.borderBottomStyle;
     if (delta.borderLeftStyle != CSS::BorderStyle::None) target.borderLeftStyle = delta.borderLeftStyle;
-    if (delta.borderTopLeftRadius >= 0.0f) target.borderTopLeftRadius = delta.borderTopLeftRadius;
-    if (delta.borderTopRightRadius >= 0.0f) target.borderTopRightRadius = delta.borderTopRightRadius;
-    if (delta.borderBottomRightRadius >= 0.0f) target.borderBottomRightRadius = delta.borderBottomRightRadius;
-    if (delta.borderBottomLeftRadius >= 0.0f) target.borderBottomLeftRadius = delta.borderBottomLeftRadius;
+    if (delta.borderTopLeftRadius.isSet()) target.borderTopLeftRadius = delta.borderTopLeftRadius;
+    if (delta.borderTopRightRadius.isSet()) target.borderTopRightRadius = delta.borderTopRightRadius;
+    if (delta.borderBottomRightRadius.isSet()) target.borderBottomRightRadius = delta.borderBottomRightRadius;
+    if (delta.borderBottomLeftRadius.isSet()) target.borderBottomLeftRadius = delta.borderBottomLeftRadius;
     if (delta.borderImageEnabled)
     {
         target.borderImageEnabled = true;
@@ -242,6 +246,16 @@ static void buildReleaseStyle(MorphStyle& target, const MorphStyle& current,
     auto arrSame = [](const float* a, const float* b) {
         return std::memcmp(a, b, sizeof(float) * 4) == 0;
     };
+    auto lenArrDiff = [](const CssLength* a, const CssLength* b) {
+        for (int i = 0; i < 4; i++)
+            if (a[i] != b[i]) return true;
+        return false;
+    };
+    auto lenArrSame = [](const CssLength* a, const CssLength* b) {
+        for (int i = 0; i < 4; i++)
+            if (a[i] != b[i]) return false;
+        return true;
+    };
     if (arrDiff(pressStyle.bgColor, preState.bgColor) && arrSame(current.bgColor, pressStyle.bgColor))
         memcpy(target.bgColor, preState.bgColor, sizeof(float) * 4);
 #ifdef MORPH_FEATURE_GRADIENT
@@ -256,10 +270,10 @@ static void buildReleaseStyle(MorphStyle& target, const MorphStyle& current,
 #endif
     if (arrDiff(pressStyle.color, preState.color) && arrSame(current.color, pressStyle.color))
         memcpy(target.color, preState.color, sizeof(float) * 4);
-    if (arrDiff(pressStyle.padding, preState.padding) && arrSame(current.padding, pressStyle.padding))
-        memcpy(target.padding, preState.padding, sizeof(float) * 4);
-    if (arrDiff(pressStyle.margin, preState.margin) && arrSame(current.margin, pressStyle.margin))
-        memcpy(target.margin, preState.margin, sizeof(float) * 4);
+    if (lenArrDiff(pressStyle.padding, preState.padding) && lenArrSame(current.padding, pressStyle.padding))
+        memcpy(target.padding, preState.padding, sizeof(CssLength) * 4);
+    if (lenArrDiff(pressStyle.margin, preState.margin) && lenArrSame(current.margin, pressStyle.margin))
+        memcpy(target.margin, preState.margin, sizeof(CssLength) * 4);
     if (std::memcmp(pressStyle.marginAuto, preState.marginAuto, sizeof(bool) * 4) != 0
         && std::memcmp(current.marginAuto, pressStyle.marginAuto, sizeof(bool) * 4) == 0)
         memcpy(target.marginAuto, preState.marginAuto, sizeof(bool) * 4);
@@ -608,15 +622,25 @@ void MorphNode::interruptStateTransitions() {
 
 void MorphNode::interpolateStyles(MorphStyle& out, const MorphStyle& a,
                                    const MorphStyle& b, float t) {
+    // Lengths lerp when both sides use the same unit; anything unset or
+    // mixed-unit snaps to the target (calc()-style cross-unit lerp needs
+    // resolved px on both sides, which transitions don't carry).
+    auto lerpLength = [t](const CssLength& av, const CssLength& bv) {
+        if (!av.isSet() || !bv.isSet() || av.unit != bv.unit) return bv;
+        CssLength o;
+        o.value = av.value + (bv.value - av.value) * t;
+        o.unit = av.unit;
+        return o;
+    };
     for (int i = 0; i < 4; i++) {
         out.bgColor[i] = a.bgColor[i] + (b.bgColor[i] - a.bgColor[i]) * t;
         out.color[i] = a.color[i] + (b.color[i] - a.color[i]) * t;
-        out.padding[i] = a.padding[i] + (b.padding[i] - a.padding[i]) * t;
-        out.margin[i] = a.margin[i] + (b.margin[i] - a.margin[i]) * t;
+        out.padding[i] = lerpLength(a.padding[i], b.padding[i]);
+        out.margin[i] = lerpLength(a.margin[i], b.margin[i]);
         out.marginAuto[i] = b.marginAuto[i];
     }
-    out.borderRadius = a.borderRadius + (b.borderRadius - a.borderRadius) * t;
-    out.fontSize = a.fontSize + (b.fontSize - a.fontSize) * t;
+    out.borderRadius = lerpLength(a.borderRadius, b.borderRadius);
+    out.fontSize = lerpLength(a.fontSize, b.fontSize);
 
 #ifdef MORPH_FEATURE_GRADIENT
     if (a.bgGradientSet && b.bgGradientSet)
@@ -637,15 +661,12 @@ void MorphNode::interpolateStyles(MorphStyle& out, const MorphStyle& a,
     }
 #endif
 
-    auto lerpIfSet = [t](float av, float bv) {
-        return (av >= 0.0f && bv >= 0.0f) ? av + (bv - av) * t : bv;
-    };
-    out.explicitWidth = lerpIfSet(a.explicitWidth, b.explicitWidth);
-    out.explicitHeight = lerpIfSet(a.explicitHeight, b.explicitHeight);
-    out.minWidth = lerpIfSet(a.minWidth, b.minWidth);
-    out.maxWidth = lerpIfSet(a.maxWidth, b.maxWidth);
-    out.minHeight = lerpIfSet(a.minHeight, b.minHeight);
-    out.maxHeight = lerpIfSet(a.maxHeight, b.maxHeight);
+    out.explicitWidth = lerpLength(a.explicitWidth, b.explicitWidth);
+    out.explicitHeight = lerpLength(a.explicitHeight, b.explicitHeight);
+    out.minWidth = lerpLength(a.minWidth, b.minWidth);
+    out.maxWidth = lerpLength(a.maxWidth, b.maxWidth);
+    out.minHeight = lerpLength(a.minHeight, b.minHeight);
+    out.maxHeight = lerpLength(a.maxHeight, b.maxHeight);
 
     out.fontWeight = b.fontWeight;
     out.overflow = b.overflow;
@@ -655,16 +676,21 @@ void MorphNode::interpolateStyles(MorphStyle& out, const MorphStyle& a,
     out.boxSizing = b.boxSizing;
 
 #ifdef MORPH_FEATURE_BORDER
-    out.borderWidth = a.borderWidth + (b.borderWidth - a.borderWidth) * t;
+    out.borderWidth = lerpLength(a.borderWidth, b.borderWidth);
     // Per-side widths/colors and corners interpolate from their used
     // values: an unset side falls back to its shorthand, so a hover
     // that introduces a per-side override animates smoothly instead of
     // snapping. Both unset stays unset.
-    auto lerpSide = [t](float as, float bs, float ah, float bh) {
-        if (as < 0.0f && bs < 0.0f) return bs;
-        float ea = as >= 0.0f ? as : ah;
-        float eb = bs >= 0.0f ? bs : bh;
-        return ea + (eb - ea) * t;
+    auto lerpSide = [t](const CssLength& as, const CssLength& bs,
+                      const CssLength& ah, const CssLength& bh) {
+        if (!as.isSet() && !bs.isSet()) return bs;
+        const CssLength& ea = as.isSet() ? as : ah;
+        const CssLength& eb = bs.isSet() ? bs : bh;
+        if (ea.unit != eb.unit) return t < 0.5f ? ea : eb;
+        CssLength o;
+        o.value = ea.value + (eb.value - ea.value) * t;
+        o.unit = ea.unit;
+        return o;
     };
     out.borderTopWidth = lerpSide(a.borderTopWidth, b.borderTopWidth, a.borderWidth, b.borderWidth);
     out.borderRightWidth = lerpSide(a.borderRightWidth, b.borderRightWidth, a.borderWidth, b.borderWidth);
@@ -718,7 +744,7 @@ void MorphNode::interpolateStyles(MorphStyle& out, const MorphStyle& a,
 #endif
 
 #ifdef MORPH_FEATURE_FLEX
-    out.gap = a.gap + (b.gap - a.gap) * t;
+    out.gap = lerpLength(a.gap, b.gap);
     out.flexDirection = b.flexDirection;
     out.justifyContent = b.justifyContent;
     out.alignItems = b.alignItems;
@@ -727,13 +753,10 @@ void MorphNode::interpolateStyles(MorphStyle& out, const MorphStyle& a,
 #endif
 
 #ifdef MORPH_FEATURE_POSITION
-    auto lerpIfSetPos = [t](float av, float bv) {
-        return (av > -1e8f && bv > -1e8f) ? av + (bv - av) * t : bv;
-    };
-    out.left = lerpIfSetPos(a.left, b.left);
-    out.right = lerpIfSetPos(a.right, b.right);
-    out.top = lerpIfSetPos(a.top, b.top);
-    out.bottom = lerpIfSetPos(a.bottom, b.bottom);
+    out.left = lerpLength(a.left, b.left);
+    out.right = lerpLength(a.right, b.right);
+    out.top = lerpLength(a.top, b.top);
+    out.bottom = lerpLength(a.bottom, b.bottom);
 #endif
 
 #ifdef MORPH_FEATURE_ZINDEX

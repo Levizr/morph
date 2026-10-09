@@ -18,4 +18,4 @@ pub use builder::{
 pub use gradient::{GradientAxis, GradientKind, GradientPosition, GradientStop, IRGradient};
 pub use node::{IRAnimation, IRConditionalClassEffect, IREvent, IRKeyframe, IRNode, IRWindow};
 pub use serializer::IRSerializer;
-pub use style::IRStyle;
+pub use style::{IRStyle, Length};

@@ -1,6 +1,7 @@
 #pragma once
 #include <cstring>
 #include <cctype>
+#include <cstdlib>
 #include <vector>
 #include "json_parser.h"
 #include "node_registry.h"
@@ -27,7 +28,7 @@ struct StateVarInfo {
 // ── Style inheritance helpers ──────────────────────────────────
 struct InheritedStyle {
     float color[4] = {0,0,0,1};
-    float fontSize = 16.0f;
+    CssLength fontSize = pxLen(16.0f);
     CSS::FontWeight fontWeight = CSS::FontWeight::Normal;
     CSS::TextAlign textAlign = CSS::TextAlign::Left;
 };
@@ -40,7 +41,7 @@ static bool isDefaultColor(const float* c) {
 static void inheritStyle(MorphStyle& s, const InheritedStyle& parent) {
     if (isDefaultColor(s.color) && !isDefaultColor(parent.color))
         memcpy(s.color, parent.color, sizeof(float) * 4);
-    if (s.fontSize == 16.0f && parent.fontSize != 16.0f)
+    if (s.fontSize == pxLen(16.0f) && parent.fontSize != pxLen(16.0f))
         s.fontSize = parent.fontSize;
     if (s.fontWeight == CSS::FontWeight::Normal && parent.fontWeight != CSS::FontWeight::Normal)
         s.fontWeight = parent.fontWeight;
@@ -52,7 +53,7 @@ static void inheritStyle(MorphStyle& s, const InheritedStyle& parent) {
 static InheritedStyle resolvedStyle(const MorphStyle& s, const InheritedStyle& parent) {
     InheritedStyle r = parent;
     if (!isDefaultColor(s.color)) memcpy(r.color, s.color, sizeof(float) * 4);
-    if (s.fontSize != 16.0f) r.fontSize = s.fontSize;
+    if (s.fontSize != pxLen(16.0f)) r.fontSize = s.fontSize;
     if (s.fontWeight != CSS::FontWeight::Normal) r.fontWeight = s.fontWeight;
     if (s.textAlign != CSS::TextAlign::Left) r.textAlign = s.textAlign;
     return r;
@@ -188,13 +189,17 @@ static void keyframeValuesFromStyle(std::vector<KeyframeValue>& values,
         if (!fs.isNull())
             pushKeyframeValue(values, KeyframeProperty::FontSize, fs.asFloat());
         const JsonValue& w = styleVal["width"];
-        if (!w.isNull()) pushKeyframeValue(values, KeyframeProperty::Width, w.asFloat());
+        if (w.type() == JsonType::Number)
+            pushKeyframeValue(values, KeyframeProperty::Width, w.asFloat());
         const JsonValue& h = styleVal["height"];
-        if (!h.isNull()) pushKeyframeValue(values, KeyframeProperty::Height, h.asFloat());
+        if (h.type() == JsonType::Number)
+            pushKeyframeValue(values, KeyframeProperty::Height, h.asFloat());
         const JsonValue& l = styleVal["left"];
-        if (!l.isNull()) pushKeyframeValue(values, KeyframeProperty::Left, l.asFloat());
+        if (l.type() == JsonType::Number)
+            pushKeyframeValue(values, KeyframeProperty::Left, l.asFloat());
         const JsonValue& t = styleVal["top"];
-        if (!t.isNull()) pushKeyframeValue(values, KeyframeProperty::Top, t.asFloat());
+        if (t.type() == JsonType::Number)
+            pushKeyframeValue(values, KeyframeProperty::Top, t.asFloat());
     }
     // Raw (unresolved) values: transforms always; % lengths.
     if (rawVal.type() == JsonType::Object) {
@@ -283,6 +288,41 @@ static void setFloatOpt(float& dst, const JsonValue& val, float sentinel = -1.0f
     else dst = sentinel;
 }
 
+// A serialized length is either a px number or a unit string (see the
+// IR serializer: "50%", "1.5em", "10vw", ...). Null resets to unset,
+// like the float optional above.
+static void setLengthOpt(CssLength& dst, const JsonValue& val) {
+    if (val.type() == JsonType::Number) {
+        dst.value = val.asFloat();
+        dst.unit = LengthUnit::Px;
+    } else if (val.type() == JsonType::String) {
+        CssLength l;
+        if (parseCssLength(val.asString(), l)) dst = l;
+    } else {
+        dst.value = -1e9f;
+        dst.unit = LengthUnit::Px;
+    }
+}
+
+// A required length (never unset): null/missing keeps the current value.
+static void setLength(CssLength& dst, const JsonValue& val) {
+    if (val.isNull()) return;
+    setLengthOpt(dst, val);
+    if (!dst.isSet()) {
+        dst.value = 0.0f;
+        dst.unit = LengthUnit::Px;
+    }
+}
+
+// A 4-side length array (margin/padding): numbers ride as px, strings
+// carry their unit. Short arrays leave the remaining sides untouched.
+static void setLength4(CssLength* dst, const JsonValue& arr) {
+    if (arr.type() == JsonType::Array) {
+        for (size_t i = 0; i < arr.size() && i < 4; i++)
+            setLength(dst[i], arr[i]);
+    }
+}
+
 static void setFloat4(float* dst, const JsonValue& arr) {
     if (arr.type() == JsonType::Array && arr.size() >= 4) {
         dst[0] = arr[0].asFloat();
@@ -305,32 +345,26 @@ static void applyStyle(MorphStyle& s, const JsonValue& styleVal) {
     }
 #endif
 
-    setFloatOpt(s.explicitWidth, styleVal["width"]);
-    setFloatOpt(s.explicitHeight, styleVal["height"]);
-    setFloatOpt(s.minWidth, styleVal["min_width"]);
-    setFloatOpt(s.maxWidth, styleVal["max_width"]);
-    setFloatOpt(s.minHeight, styleVal["min_height"]);
-    setFloatOpt(s.maxHeight, styleVal["max_height"]);
+    setLengthOpt(s.explicitWidth, styleVal["width"]);
+    setLengthOpt(s.explicitHeight, styleVal["height"]);
+    setLengthOpt(s.minWidth, styleVal["min_width"]);
+    setLengthOpt(s.maxWidth, styleVal["max_width"]);
+    setLengthOpt(s.minHeight, styleVal["min_height"]);
+    setLengthOpt(s.maxHeight, styleVal["max_height"]);
 
-    setFloat4(s.margin, styleVal["margin"]);
+    setLength4(s.margin, styleVal["margin"]);
     if (styleVal.has("margin_auto") && styleVal["margin_auto"].type() == JsonType::Array && styleVal["margin_auto"].size() >= 4) {
         for (int i = 0; i < 4; i++)
             s.marginAuto[i] = styleVal["margin_auto"][i].asBool();
     }
-    setFloat4(s.padding, styleVal["padding"]);
+    setLength4(s.padding, styleVal["padding"]);
 
-    if (!styleVal["border_radius"].isNull())
-        s.borderRadius = styleVal["border_radius"].asFloat();
-    if (!styleVal["border_top_left_radius"].isNull())
-        s.borderTopLeftRadius = styleVal["border_top_left_radius"].asFloat();
-    if (!styleVal["border_top_right_radius"].isNull())
-        s.borderTopRightRadius = styleVal["border_top_right_radius"].asFloat();
-    if (!styleVal["border_bottom_right_radius"].isNull())
-        s.borderBottomRightRadius = styleVal["border_bottom_right_radius"].asFloat();
-    if (!styleVal["border_bottom_left_radius"].isNull())
-        s.borderBottomLeftRadius = styleVal["border_bottom_left_radius"].asFloat();
-    if (!styleVal["font_size"].isNull())
-        s.fontSize = styleVal["font_size"].asFloat();
+    setLength(s.borderRadius, styleVal["border_radius"]);
+    setLengthOpt(s.borderTopLeftRadius, styleVal["border_top_left_radius"]);
+    setLengthOpt(s.borderTopRightRadius, styleVal["border_top_right_radius"]);
+    setLengthOpt(s.borderBottomRightRadius, styleVal["border_bottom_right_radius"]);
+    setLengthOpt(s.borderBottomLeftRadius, styleVal["border_bottom_left_radius"]);
+    setLength(s.fontSize, styleVal["font_size"]);
 
     if (!styleVal["font_weight"].isNull())
         s.fontWeight = CSS::parseFontWeight(styleVal["font_weight"].asString());
@@ -389,17 +423,16 @@ static void applyStyle(MorphStyle& s, const JsonValue& styleVal) {
     if (!styleVal["flex_basis"].isNull())
         s.flexBasis = styleVal["flex_basis"].asString();
 
-    if (!styleVal["gap"].isNull())
-        s.gap = styleVal["gap"].asFloat();
+    setLength(s.gap, styleVal["gap"]);
 
     if (!styleVal["left"].isNull())
-        s.left = styleVal["left"].asFloat();
+        setLengthOpt(s.left, styleVal["left"]);
     if (!styleVal["right"].isNull())
-        s.right = styleVal["right"].asFloat();
+        setLengthOpt(s.right, styleVal["right"]);
     if (!styleVal["top"].isNull())
-        s.top = styleVal["top"].asFloat();
+        setLengthOpt(s.top, styleVal["top"]);
     if (!styleVal["bottom"].isNull())
-        s.bottom = styleVal["bottom"].asFloat();
+        setLengthOpt(s.bottom, styleVal["bottom"]);
 #ifdef MORPH_FEATURE_ZINDEX
     if (!styleVal["z_index"].isNull()) {
         s.zIndex = styleVal["z_index"].asInt();
@@ -419,19 +452,14 @@ static void applyStyle(MorphStyle& s, const JsonValue& styleVal) {
     setColorFromJson(s.scrollbarTrackColor, styleVal["scrollbar_track_color"]);
     setColorFromJson(s.scrollbarThumbColor, styleVal["scrollbar_thumb_color"]);
 
-    if (!styleVal["border_width"].isNull())
-        s.borderWidth = styleVal["border_width"].asFloat();
+    setLength(s.borderWidth, styleVal["border_width"]);
     setColorFromJson(s.borderColor, styleVal["border_color"]);
 
     // Per-side border widths
-    if (!styleVal["border_top_width"].isNull())
-        s.borderTopWidth = styleVal["border_top_width"].asFloat();
-    if (!styleVal["border_right_width"].isNull())
-        s.borderRightWidth = styleVal["border_right_width"].asFloat();
-    if (!styleVal["border_bottom_width"].isNull())
-        s.borderBottomWidth = styleVal["border_bottom_width"].asFloat();
-    if (!styleVal["border_left_width"].isNull())
-        s.borderLeftWidth = styleVal["border_left_width"].asFloat();
+    setLengthOpt(s.borderTopWidth, styleVal["border_top_width"]);
+    setLengthOpt(s.borderRightWidth, styleVal["border_right_width"]);
+    setLengthOpt(s.borderBottomWidth, styleVal["border_bottom_width"]);
+    setLengthOpt(s.borderLeftWidth, styleVal["border_left_width"]);
 
     // Per-side border colors
     setColorFromJson(s.borderTopColor, styleVal["border_top_color"]);

@@ -2,27 +2,103 @@ use serde::{Deserialize, Serialize};
 
 use crate::gradient::IRGradient;
 
+/// A CSS length with browser-style units. Absolute physical units
+/// (`in/cm/mm/q/pt/pc`) are folded to px at parse time (96dpi); everything
+/// else resolves at layout against its own base:
+/// `%` → containing block, `em/ex/ch` → element font, `rem` → root font,
+/// `vw/vh/vmin/vmax` (+ `sv*/lv*/dv*` aliases) → viewport.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum Length {
+    Px(f32),
+    Pct(f32),
+    Em(f32),
+    Rem(f32),
+    Vw(f32),
+    Vh(f32),
+    Vmin(f32),
+    Vmax(f32),
+    Ch(f32),
+    Ex(f32),
+}
+
+impl Default for Length {
+    fn default() -> Self {
+        Length::Px(0.0)
+    }
+}
+
+impl Length {
+    pub fn px(v: f32) -> Self {
+        Length::Px(v)
+    }
+    /// True only for an explicit zero (`0`, `0px`). Relative zero
+    /// (`0%`, `0em`…) still carries a unit the runtime must see, so it
+    /// is emitted rather than skipped.
+    pub fn is_zero(self) -> bool {
+        matches!(self, Length::Px(v) if v == 0.0)
+    }
+    /// Raw numeric value regardless of unit (for serialization/codegen).
+    pub fn number(self) -> f32 {
+        match self {
+            Length::Px(v)
+            | Length::Pct(v)
+            | Length::Em(v)
+            | Length::Rem(v)
+            | Length::Vw(v)
+            | Length::Vh(v)
+            | Length::Vmin(v)
+            | Length::Vmax(v)
+            | Length::Ch(v)
+            | Length::Ex(v) => v,
+        }
+    }
+    /// Canonical CSS spelling for the serializer (`50%`, `1.5em`, `10vw`).
+    /// `Px` stays a bare number so existing JSON stays byte-identical.
+    pub fn to_css(self) -> String {
+        match self {
+            Length::Px(v) => format_css_num(v),
+            Length::Pct(v) => format!("{}%", format_css_num(v)),
+            Length::Em(v) => format!("{}em", format_css_num(v)),
+            Length::Rem(v) => format!("{}rem", format_css_num(v)),
+            Length::Vw(v) => format!("{}vw", format_css_num(v)),
+            Length::Vh(v) => format!("{}vh", format_css_num(v)),
+            Length::Vmin(v) => format!("{}vmin", format_css_num(v)),
+            Length::Vmax(v) => format!("{}vmax", format_css_num(v)),
+            Length::Ch(v) => format!("{}ch", format_css_num(v)),
+            Length::Ex(v) => format!("{}ex", format_css_num(v)),
+        }
+    }
+}
+
+fn format_css_num(v: f32) -> String {
+    if v == v.trunc() && v.abs() < 1e15 {
+        format!("{}", v as i64)
+    } else {
+        format!("{v}")
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct IRStyle {
     pub bg_color: [f32; 4],
     pub bg_gradient: Option<IRGradient>,
     pub color: [f32; 4],
-    pub width: Option<f32>,
-    pub min_width: Option<f32>,
-    pub max_width: Option<f32>,
-    pub height: Option<f32>,
-    pub min_height: Option<f32>,
-    pub max_height: Option<f32>,
-    pub margin: [f32; 4],
+    pub width: Option<Length>,
+    pub min_width: Option<Length>,
+    pub max_width: Option<Length>,
+    pub height: Option<Length>,
+    pub min_height: Option<Length>,
+    pub max_height: Option<Length>,
+    pub margin: [Length; 4],
     pub margin_auto: [bool; 4],
-    pub padding: [f32; 4],
-    pub border_radius: f32,
+    pub padding: [Length; 4],
+    pub border_radius: Length,
     // Per-corner radius (longhand, clockwise from top-left)
-    pub border_top_left_radius: Option<f32>,
-    pub border_top_right_radius: Option<f32>,
-    pub border_bottom_right_radius: Option<f32>,
-    pub border_bottom_left_radius: Option<f32>,
-    pub font_size: f32,
+    pub border_top_left_radius: Option<Length>,
+    pub border_top_right_radius: Option<Length>,
+    pub border_bottom_right_radius: Option<Length>,
+    pub border_bottom_left_radius: Option<Length>,
+    pub font_size: Length,
     pub font_weight: String,
     pub text_align: String,
     pub display: String,
@@ -30,26 +106,26 @@ pub struct IRStyle {
     pub flex_grow: f32,
     pub flex_shrink: f32,
     pub flex_basis: String,
-    pub gap: f32,
+    pub gap: Length,
     pub position: String,
-    pub left: Option<f32>,
-    pub right: Option<f32>,
-    pub top: Option<f32>,
-    pub bottom: Option<f32>,
+    pub left: Option<Length>,
+    pub right: Option<Length>,
+    pub top: Option<Length>,
+    pub bottom: Option<Length>,
     pub justify_content: String,
     pub align_items: String,
     pub align_self: String,
     pub flex_wrap: String,
     pub cursor: String,
     pub overflow: String,
-    pub border_width: f32,
+    pub border_width: Length,
     pub border_color: [f32; 4],
     pub border_style: String,
     // Per-side borders (longhand)
-    pub border_top_width: Option<f32>,
-    pub border_right_width: Option<f32>,
-    pub border_bottom_width: Option<f32>,
-    pub border_left_width: Option<f32>,
+    pub border_top_width: Option<Length>,
+    pub border_right_width: Option<Length>,
+    pub border_bottom_width: Option<Length>,
+    pub border_left_width: Option<Length>,
     pub border_top_color: Option<[f32; 4]>,
     pub border_right_color: Option<[f32; 4]>,
     pub border_bottom_color: Option<[f32; 4]>,
@@ -85,7 +161,7 @@ impl IRStyle {
             border_color: [0.0, 0.0, 0.0, 1.0],
             width: None,
             height: None,
-            font_size: 16.0,
+            font_size: Length::Px(16.0),
             display: "block".to_string(),
             position: "static".to_string(),
             flex_dir: "row".to_string(),
@@ -119,7 +195,7 @@ impl IRStyle {
             && self.bg_gradient.is_none()
             && self.color == [0.0, 0.0, 0.0, 1.0]
             && self.border_color == [0.0, 0.0, 0.0, 1.0]
-            && self.border_width == 0.0
+            && self.border_width == Length::Px(0.0)
             && self.border_style == "none"
             && self.border_top_width.is_none()
             && self.border_right_width.is_none()
@@ -142,19 +218,19 @@ impl IRStyle {
             && self.max_width.is_none()
             && self.min_height.is_none()
             && self.max_height.is_none()
-            && self.padding == [0.0, 0.0, 0.0, 0.0]
-            && self.margin == [0.0, 0.0, 0.0, 0.0]
-            && self.border_radius == 0.0
+            && self.padding == [Length::Px(0.0); 4]
+            && self.margin == [Length::Px(0.0); 4]
+            && self.border_radius == Length::Px(0.0)
             && self.border_top_left_radius.is_none()
             && self.border_top_right_radius.is_none()
             && self.border_bottom_right_radius.is_none()
             && self.border_bottom_left_radius.is_none()
-            && self.font_size == 16.0
+            && self.font_size == Length::Px(16.0)
             && self.font_weight == "normal"
             && self.text_align == "left"
             && self.display == "block"
             && self.flex_dir == "row"
-            && self.gap == 0.0
+            && self.gap == Length::Px(0.0)
             && self.position == "static"
             && self.justify_content == "flex-start"
             && self.align_items == "stretch"

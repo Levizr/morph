@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+body { margin: 0; padding: 8px; background: #0b1220; color: #e2e8f0; font-family: "DejaVu Sans", sans-serif; font-size: 16px; }
+.screen { display: flex; flex-direction: column; gap: 12px; padding: 16px; }
+.relbox { background: #16213a; padding: 12px; color: #fff; }
+.relshift { position: relative; left: 10%; top: 6px; background: #22d3ee; color: #0b1220; padding: 8px; }
+.cb { position: relative; background: #16213a; height: 72px; color: #fff; }
+.anchored { position: absolute; left: 24px; top: 8px; width: 200px; background: #a855f7; padding: 8px; }
+.spacer { height: 20px; }
+.staticpos { position: absolute; width: 200px; background: #22d3ee; color: #0b1220; padding: 8px; }
+.cbwide { position: relative; background: #16213a; height: 64px; color: #fff; }
+.stretched { position: absolute; left: 16px; right: 16px; top: 8px; bottom: 8px; background: #a855f7; padding: 8px; }
+.centered { position: absolute; left: 0; right: 0; top: 50%; width: 200px; margin-left: auto; margin-right: auto; background: #22d3ee; color: #0b1220; padding: 8px; }
+.cbpct { position: relative; background: #16213a; height: 64px; color: #fff; }
+.halved { position: absolute; left: 25%; top: 8px; width: 50%; background: #a855f7; padding: 8px; }
+.scrollbox { position: relative; background: #16213a; height: 120px; overflow: auto; color: #fff; }
+.tallcontent { height: 300px; padding: 8px; }
+.pinned { position: fixed; right: 24px; bottom: 24px; background: #ff0000; color: #fff; padding: 8px; }
+.stickyhead { position: sticky; top: 0; background: #22d3ee; color: #0b1220; padding: 8px; }
+</style>
+</head>
+<body>
+<div class="screen">
+<div class="relbox"><div class="relshift">relative offset</div></div>
+<div class="cb"><div class="anchored">absolute anchored</div></div>
+<div class="cb"><div class="spacer"></div><div class="staticpos">static position</div></div>
+<div class="cbwide"><div class="stretched">stretched</div></div>
+<div class="cbwide"><div class="centered">centered</div></div>
+<div class="cbpct"><div class="halved">50% box</div></div>
+<div class="scrollbox"><div class="tallcontent">scroll</div><div class="pinned">fixed badge</div></div>
+</div>
+<div class="stickyhead">sticky header</div>
+</body>
+</html>

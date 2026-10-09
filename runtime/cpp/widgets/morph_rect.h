@@ -16,13 +16,14 @@ public:
         float sx = sc(x), sy = sc(y);
         float sw = sc(w), sh = sc(h);
         float radii[4];
-        resolveBorderRadii(style, !m_isTransitioning, radii);
+        resolvedRadii(radii, !m_isTransitioning);
 
         // Background rect + border (only rendering ops — no clip/scroll state)
         DrawOp bg;
 #ifdef MORPH_FEATURE_BORDER
-        if (style.borderWidth > 0.0f && style.borderStyle == "solid") {
-            float bw = m_isTransitioning ? style.borderWidth : snapBorderWidth(style.borderWidth);
+        if (resolvedBorderWidth() > 0.0f && style.borderStyle == "solid") {
+            float bw0 = resolvedBorderWidth();
+            float bw = m_isTransitioning ? bw0 : snapBorderWidth(bw0);
             if (style.boxSizing == "border-box") {
                 bg.setBordered(sx, sy, sw, sh, radii, style.bgColor, bw, style.borderColor);
             } else {
@@ -47,7 +48,7 @@ public:
         float sx = sc(x), sy = sc(y);
         float sw = sc(w), sh = sc(h);
         float radii[4];
-        resolveBorderRadii(style, !m_isTransitioning, radii);
+        resolvedRadii(radii, !m_isTransitioning);
 
 #ifdef MORPH_FEATURE_TRANSFORM
         bool pushedSelf = pushSelfTransform(r, sx, sy);
@@ -124,13 +125,14 @@ public:
         float sx = sc(x), sy = sc(y);
         float sw = sc(w), sh = sc(h);
         float radii[4];
-        resolveBorderRadii(style, !m_isTransitioning, radii);
+        resolvedRadii(radii, !m_isTransitioning);
 #ifdef MORPH_FEATURE_TRANSFORM
         bool pushedSelf = pushSelfTransform(r, sx, sy);
 #endif
 #ifdef MORPH_FEATURE_BORDER
-        if (style.borderWidth > 0.0f && style.borderStyle == "solid") {
-            float bw = m_isTransitioning ? style.borderWidth : snapBorderWidth(style.borderWidth);
+        if (resolvedBorderWidth() > 0.0f && style.borderStyle == "solid") {
+            float bw0 = resolvedBorderWidth();
+            float bw = m_isTransitioning ? bw0 : snapBorderWidth(bw0);
             if (style.boxSizing == "border-box") {
                 r.drawBorderedRoundedRect(sx, sy, sw, sh, radii,
                                           style.bgColor, bw, style.borderColor);

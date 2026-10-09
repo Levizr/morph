@@ -1,0 +1,36 @@
+import "./style.css"
+
+export const windowConfig = { title: "Position", width: 800, height: 600 }
+
+export default function App() {
+  return (
+    <body>
+      <div className="screen">
+        <div className="relbox">
+          <div className="relshift">relative offset</div>
+        </div>
+        <div className="cb">
+          <div className="anchored">absolute anchored</div>
+        </div>
+        <div className="cb">
+          <div className="spacer"></div>
+          <div className="staticpos">static position</div>
+        </div>
+        <div className="cbwide">
+          <div className="stretched">stretched</div>
+        </div>
+        <div className="cbwide">
+          <div className="centered">centered</div>
+        </div>
+        <div className="cbpct">
+          <div className="halved">50% box</div>
+        </div>
+        <div className="scrollbox">
+          <div className="tallcontent">scroll</div>
+          <div className="pinned">fixed badge</div>
+        </div>
+      </div>
+      <div className="stickyhead">sticky header</div>
+    </body>
+  )
+}

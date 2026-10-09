@@ -384,11 +384,11 @@ private:
 
         float ml = n->m_computedMargin[3], mr = n->m_computedMargin[1];
         float mt = n->m_computedMargin[0], mb = n->m_computedMargin[2];
-        float pl = n->style.padding[3], pr = n->style.padding[1];
-        float pt = n->style.padding[0], pb = n->style.padding[2];
+        float pl = n->m_computedPadding[3], pr = n->m_computedPadding[1];
+        float pt = n->m_computedPadding[0], pb = n->m_computedPadding[2];
         float bw = 0.0f;
 #ifdef MORPH_FEATURE_BORDER
-        bw = n->style.borderWidth;
+        bw = n->resolvedBorderWidth();
 #endif
 
         float sx = n->x, sy = screenY(n);
@@ -1360,7 +1360,8 @@ private:
                  n->m_computedMargin[2], n->m_computedMargin[3]);
         drawRow(r, px + 22, ry, "Margin", buf, valCol); ry += 17.0f;
         snprintf(buf, sizeof(buf), "T:%.0f R:%.0f B:%.0f L:%.0f",
-                 s.padding[0], s.padding[1], s.padding[2], s.padding[3]);
+                 n->m_computedPadding[0], n->m_computedPadding[1],
+                 n->m_computedPadding[2], n->m_computedPadding[3]);
         drawRow(r, px + 22, ry, "Padding", buf, valCol);
         y += cardH + 8.0f;
 
@@ -1395,7 +1396,7 @@ private:
         drawTextAt(r, buf, px + 112, ry, valCol, 11.0f, CSS::FontWeight::Normal);
         ry += 17.0f;
 
-        snprintf(buf, sizeof(buf), "%.0fpx", s.fontSize);
+        snprintf(buf, sizeof(buf), "%.0fpx", n->resolvedFontSize(nullptr));
         drawRow(r, px + 22, ry, "Font Size", buf, valCol); ry += 17.0f;
         drawRow(r, px + 22, ry, "Weight", CSS::toString(s.fontWeight), valCol); ry += 17.0f;
         drawRow(r, px + 22, ry, "Align", CSS::toString(s.textAlign), valCol);

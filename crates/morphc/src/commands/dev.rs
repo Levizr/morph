@@ -454,11 +454,7 @@ fn build_windows(cmd: &Session) -> Result<Vec<morph_ir::IRWindow>> {
     let builder = morph_ir::IRBuilder::new()
         .with_type_mode(cmd.type_mode)
         .with_project_root(cmd.cwd.clone())
-        .with_app_window(
-            cmd.app_window.0.clone(),
-            cmd.app_window.1,
-            cmd.app_window.2,
-        );
+        .with_app_window(cmd.app_window.0.clone(), cmd.app_window.1, cmd.app_window.2);
     let windows = builder.build_with_graph(&cmd.graph, &css_rules, &css_keyframes)?;
     if windows.is_empty() {
         anyhow::bail!("Build failed — no windows in {}", cmd.entry);

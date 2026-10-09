@@ -509,6 +509,9 @@ fn emit_style_effects(lines: &mut Vec<String>, node: &IRNode, maps: &AmbientMaps
         let cpp = cpp.trim().trim_end_matches(';').to_string();
         let assignment = match val_type {
             "float" => format!("n->style.{field_name} = (float)({cpp});"),
+            "length" => format!(
+                "n->style.{field_name}.value = (float)({cpp}); n->style.{field_name}.unit = LengthUnit::Px;"
+            ),
             "string" => format!("n->style.{field_name} = morph::str({cpp});"),
             "color" => format!("morph::setColor(n->style.{field_name}, morph::str({cpp}));"),
             "transform" => {
@@ -522,7 +525,7 @@ fn emit_style_effects(lines: &mut Vec<String>, node: &IRNode, maps: &AmbientMaps
         lines.push(format!("{indent}    n->interruptStateTransitions();"));
         lines.push(format!("{indent}    {assignment}"));
         lines.push(format!("{indent}    n->markDirty(PaintDirty);"));
-        if val_type == "float" {
+        if val_type == "float" || val_type == "length" {
             lines.push(format!("{indent}    n->markDirty(LayoutDirty);"));
         }
         lines.push(format!("{indent}}});"));
@@ -537,7 +540,7 @@ fn emit_font_size_effects(
     indent: &str,
 ) {
     let Some(raw_expr) = node.reactive_style.get("font-size") else { return };
-    if css_to_style_field("font-size").map(|(_, t)| t) != Some("float") {
+    if css_to_style_field("font-size").map(|(_, t)| t) != Some("length") {
         return;
     }
     let cpp = translate_expr(raw_expr, maps);
@@ -551,7 +554,8 @@ fn emit_font_size_effects(
         lines.push(format!("{indent}    auto* n = nodes.get(\"{child_id}\");"));
         lines.push(format!("{indent}    if (!n) return;"));
         lines.push(format!("{indent}    n->interruptStateTransitions();"));
-        lines.push(format!("{indent}    n->style.fontSize = (float)({cpp});"));
+        lines.push(format!("{indent}    n->style.fontSize.value = (float)({cpp});"));
+        lines.push(format!("{indent}    n->style.fontSize.unit = LengthUnit::Px;"));
         lines.push(format!("{indent}    n->markDirty(LayoutDirty);"));
         lines.push(format!("{indent}    n->markDirty(PaintDirty);"));
         lines.push(format!("{indent}}});"));

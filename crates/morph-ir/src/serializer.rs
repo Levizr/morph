@@ -10,6 +10,7 @@ use std::collections::{HashMap, HashSet};
 use serde_json::{Map, Value};
 
 use crate::gradient::{GradientAxis, GradientPosition, IRGradient};
+use crate::style::Length;
 use crate::transforms::{LengthComp, LengthUnit, TransformOp};
 use crate::{IRAnimation, IRKeyframe, IRNode, IRStyle, IRWindow};
 
@@ -168,24 +169,30 @@ impl IRSerializer {
         );
         out.insert("bg_gradient_set".to_string(), Value::from(s.bg_gradient.is_some()));
         out.insert("color".to_string(), floats(&s.color));
-        out.insert("width".to_string(), opt_num(s.width));
-        out.insert("min_width".to_string(), opt_num(s.min_width));
-        out.insert("max_width".to_string(), opt_num(s.max_width));
-        out.insert("height".to_string(), opt_num(s.height));
-        out.insert("min_height".to_string(), opt_num(s.min_height));
-        out.insert("max_height".to_string(), opt_num(s.max_height));
-        out.insert("margin".to_string(), floats(&s.margin));
+        out.insert("width".to_string(), opt_length(s.width));
+        out.insert("min_width".to_string(), opt_length(s.min_width));
+        out.insert("max_width".to_string(), opt_length(s.max_width));
+        out.insert("height".to_string(), opt_length(s.height));
+        out.insert("min_height".to_string(), opt_length(s.min_height));
+        out.insert("max_height".to_string(), opt_length(s.max_height));
+        out.insert("margin".to_string(), lengths(&s.margin));
         out.insert(
             "margin_auto".to_string(),
             Value::Array(s.margin_auto.iter().map(|b| Value::from(*b)).collect()),
         );
-        out.insert("padding".to_string(), floats(&s.padding));
-        out.insert("border_radius".to_string(), num(s.border_radius));
-        out.insert("border_top_left_radius".to_string(), opt_num(s.border_top_left_radius));
-        out.insert("border_top_right_radius".to_string(), opt_num(s.border_top_right_radius));
-        out.insert("border_bottom_right_radius".to_string(), opt_num(s.border_bottom_right_radius));
-        out.insert("border_bottom_left_radius".to_string(), opt_num(s.border_bottom_left_radius));
-        out.insert("font_size".to_string(), num(s.font_size));
+        out.insert("padding".to_string(), lengths(&s.padding));
+        out.insert("border_radius".to_string(), length(s.border_radius));
+        out.insert("border_top_left_radius".to_string(), opt_length(s.border_top_left_radius));
+        out.insert("border_top_right_radius".to_string(), opt_length(s.border_top_right_radius));
+        out.insert(
+            "border_bottom_right_radius".to_string(),
+            opt_length(s.border_bottom_right_radius),
+        );
+        out.insert(
+            "border_bottom_left_radius".to_string(),
+            opt_length(s.border_bottom_left_radius),
+        );
+        out.insert("font_size".to_string(), length(s.font_size));
         out.insert("font_weight".to_string(), Value::String(s.font_weight.clone()));
         out.insert("text_align".to_string(), Value::String(s.text_align.clone()));
         out.insert("display".to_string(), Value::String(s.display.clone()));
@@ -193,13 +200,13 @@ impl IRSerializer {
         out.insert("flex_grow".to_string(), num(s.flex_grow));
         out.insert("flex_shrink".to_string(), num(s.flex_shrink));
         out.insert("flex_basis".to_string(), Value::String(s.flex_basis.clone()));
-        out.insert("gap".to_string(), num(s.gap));
+        out.insert("gap".to_string(), length(s.gap));
         out.insert("overflow".to_string(), Value::String(s.overflow.clone()));
         out.insert("position".to_string(), Value::String(s.position.clone()));
-        out.insert("left".to_string(), opt_num(s.left));
-        out.insert("right".to_string(), opt_num(s.right));
-        out.insert("top".to_string(), opt_num(s.top));
-        out.insert("bottom".to_string(), opt_num(s.bottom));
+        out.insert("left".to_string(), opt_length(s.left));
+        out.insert("right".to_string(), opt_length(s.right));
+        out.insert("top".to_string(), opt_length(s.top));
+        out.insert("bottom".to_string(), opt_length(s.bottom));
         out.insert("justify_content".to_string(), Value::String(s.justify_content.clone()));
         out.insert("align_items".to_string(), Value::String(s.align_items.clone()));
         out.insert("align_self".to_string(), Value::String(s.align_self.clone()));
@@ -209,13 +216,13 @@ impl IRSerializer {
         out.insert("scrollbar_track_color".to_string(), floats(&s.scrollbar_track_color));
         out.insert("scrollbar_thumb_color".to_string(), floats(&s.scrollbar_thumb_color));
         out.insert("scrollbar_border_radius".to_string(), num(s.scrollbar_border_radius));
-        out.insert("border_width".to_string(), num(s.border_width));
+        out.insert("border_width".to_string(), length(s.border_width));
         out.insert("border_color".to_string(), floats(&s.border_color));
         out.insert("border_style".to_string(), Value::String(s.border_style.clone()));
-        out.insert("border_top_width".to_string(), opt_num(s.border_top_width));
-        out.insert("border_right_width".to_string(), opt_num(s.border_right_width));
-        out.insert("border_bottom_width".to_string(), opt_num(s.border_bottom_width));
-        out.insert("border_left_width".to_string(), opt_num(s.border_left_width));
+        out.insert("border_top_width".to_string(), opt_length(s.border_top_width));
+        out.insert("border_right_width".to_string(), opt_length(s.border_right_width));
+        out.insert("border_bottom_width".to_string(), opt_length(s.border_bottom_width));
+        out.insert("border_left_width".to_string(), opt_length(s.border_left_width));
         let opt_floats = |v: Option<[f32; 4]>| v.map_or(Value::Null, |c| floats(&c));
         out.insert("border_top_color".to_string(), opt_floats(s.border_top_color));
         out.insert("border_right_color".to_string(), opt_floats(s.border_right_color));
@@ -232,10 +239,7 @@ impl IRSerializer {
             "border_gradient".to_string(),
             s.border_gradient.as_ref().map_or(Value::Null, Self::gradient),
         );
-        out.insert(
-            "border_gradient_set".to_string(),
-            Value::from(s.border_gradient.is_some()),
-        );
+        out.insert("border_gradient_set".to_string(), Value::from(s.border_gradient.is_some()));
         out.insert("box_sizing".to_string(), Value::String(s.box_sizing.clone()));
         out.insert("z_index".to_string(), s.z_index.map_or(Value::Null, Value::from));
         out.insert("opacity".to_string(), num(s.opacity));
@@ -472,6 +476,26 @@ fn opt_num(v: Option<f32>) -> Value {
     v.map_or(Value::Null, num)
 }
 
+/// A length with units: px rides as a number (the pre-existing encoding),
+/// every other unit as its CSS spelling (`"50%"`, `"1.5em"`, `"10vw"`).
+fn opt_length(v: Option<Length>) -> Value {
+    match v {
+        None => Value::Null,
+        Some(l) => length(l),
+    }
+}
+
+fn length(v: Length) -> Value {
+    match v {
+        Length::Px(px) => num(px),
+        other => Value::String(other.to_css()),
+    }
+}
+
+fn lengths(values: &[Length]) -> Value {
+    Value::Array(values.iter().map(|v| length(*v)).collect())
+}
+
 fn floats(values: &[f32]) -> Value {
     Value::Array(values.iter().map(|v| num(*v)).collect())
 }
@@ -516,7 +540,7 @@ fn fallback_declared(style: &IRStyle) -> HashSet<&'static str> {
     if style.color != [0.0, 0.0, 0.0, 1.0] {
         keep.insert("color");
     }
-    if style.border_radius != 0.0 {
+    if style.border_radius != Length::Px(0.0) {
         keep.insert("border_radius");
     }
     if style.border_top_left_radius.is_some() {
@@ -531,7 +555,7 @@ fn fallback_declared(style: &IRStyle) -> HashSet<&'static str> {
     if style.border_bottom_left_radius.is_some() {
         keep.insert("border_bottom_left_radius");
     }
-    if style.font_size != 16.0 {
+    if style.font_size != Length::Px(16.0) {
         keep.insert("font_size");
     }
     if style.width.is_some() {
@@ -597,41 +621,6 @@ mod tests {
     #[test]
     fn node_shape_matches_dev_protocol() {
         let value = IRSerializer::to_dict(&[sample_window()], None);
-        let node = &value["windows"][0]["nodes"][0];
-        assert_eq!(node["id"], Value::String("node_0000".to_string()));
-        assert_eq!(node["type"], Value::String("div".to_string()));
-        assert_eq!(node["text"], Value::String("hi".to_string()));
-        assert_eq!(node["x"], Value::from(1.0f32));
-        assert_eq!(node["attrs"]["data-x"], Value::String("1".to_string()));
-        assert_eq!(
-            node["style"]["bg_color"],
-            Value::Array(vec![
-                Value::from(1.0f32),
-                Value::from(0.0f32),
-                Value::from(0.0f32),
-                Value::from(1.0f32),
-            ])
-        );
-        assert!(node.get("reactive_text").is_none());
-        assert!(node.get("hover_style").is_none());
-        assert!(node.get("animations").is_none());
-    }
-
-    #[test]
-    fn unset_optionals_serialize_as_null() {
-        let value = IRSerializer::to_dict(&[sample_window()], None);
-        let style = &value["windows"][0]["nodes"][0]["style"];
-        assert_eq!(style["width"], Value::Null);
-        assert_eq!(style["z_index"], Value::Null);
-        assert_eq!(style["transform_ops"], Value::Null);
-        assert_eq!(style["transform_matrix"], Value::Null);
-        assert_eq!(style["transform_origin"], Value::Null);
-    }
-
-    #[test]
-    fn non_finite_floats_become_null() {
-        let mut window = sample_window();
-        window.nodes[0].style.opacity = f32::INFIr::to_dict(&[sample_window()], None);
         let node = &value["windows"][0]["nodes"][0];
         assert_eq!(node["id"], Value::String("node_0000".to_string()));
         assert_eq!(node["type"], Value::String("div".to_string()));

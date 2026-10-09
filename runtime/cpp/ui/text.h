@@ -126,10 +126,12 @@ public:
         MorphNode::layout(px, py, parentW, parentH, r);
 
         if (r && w > 0.0f) {
-            // Constrain wrap width by maxWidth
+            // Constrain wrap width by maxWidth (`%` vs the CB width).
             float wrapW = w;
-            if (style.maxWidth > 0.0f && wrapW > style.maxWidth)
-                wrapW = style.maxWidth;
+            if (style.maxWidth.isSet()) {
+                float mw = resolveUnits(style.maxWidth, unitEnv(parentW, r));
+                if (mw > 0.0f && wrapW > mw) wrapW = mw;
+            }
 
             // Split by newlines first, then word-wrap each paragraph
             lines.clear();
@@ -279,7 +281,8 @@ public:
     }
 
     float contentWidth(Renderer* r) override {
-        if (style.explicitWidth >= 0.0f) return style.explicitWidth;
+        if (style.explicitWidth.isSet() && !style.explicitWidth.isPercent())
+            return resolveUnits(style.explicitWidth, unitEnv(0.0f, r));
         if (r) {
             float tw = 0.0f;
             size_t start = 0;
@@ -292,7 +295,9 @@ public:
                 if (end == text.size()) break;
                 start = end + 1;
             }
-            float pl = style.padding[3], pr = style.padding[1];
+            UnitEnv twEnv = unitEnv(0.0f, r);
+            float pl = resolveUnits(style.padding[3], twEnv);
+            float pr = resolveUnits(style.padding[1], twEnv);
             return tw + pl + pr;
         }
         return MorphNode::contentWidth(r);
@@ -300,9 +305,7 @@ public:
 
 private:
     float _effFontSize() const {
-        if (style.fontSize != 16.0f || !parent) return style.fontSize;
-        float pfs = parent->style.fontSize;
-        return (pfs != 16.0f) ? pfs : style.fontSize;
+        return resolvedFontSize(nullptr);
     }
     CSS::FontWeight _effFontWeight() const {
         if (style.fontWeight != CSS::FontWeight::Normal || !parent) return style.fontWeight;

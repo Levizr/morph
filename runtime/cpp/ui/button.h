@@ -12,9 +12,9 @@ public:
         float sx = sc(x), sy = sc(y);
         float sw = sc(w), sh = sc(h);
         float radii[4];
-        resolveControlRadii(style, !m_isTransitioning, radii);
+        resolvedControlRadii(radii, !m_isTransitioning);
 #ifdef MORPH_FEATURE_BORDER
-        recordBoxOps(m_displayList, style, sx, sy, sw, sh,
+        recordBoxOps(m_displayList, style, unitEnv(w, nullptr), sx, sy, sw, sh,
                      !m_isTransitioning, true);
 #else
         DrawOp bg;
@@ -30,7 +30,7 @@ public:
         float sx = sc(x), sy = sc(y);
         float sw = sc(w), sh = sc(h);
         float radii[4];
-        resolveBorderRadii(style, !m_isTransitioning, radii);
+        resolvedRadii(radii, !m_isTransitioning);
 
 #ifdef MORPH_FEATURE_TRANSFORM
         bool pushedSelf = pushSelfTransform(r, sx, sy);
@@ -131,12 +131,12 @@ public:
         float sx = sc(x), sy = sc(y);
         float sw = sc(w), sh = sc(h);
         float radii[4];
-        resolveControlRadii(style, !m_isTransitioning, radii);
+        resolvedControlRadii(radii, !m_isTransitioning);
 #ifdef MORPH_FEATURE_TRANSFORM
         bool pushedSelf = pushSelfTransform(r, sx, sy);
 #endif
 #ifdef MORPH_FEATURE_BORDER
-        paintBoxDirect(r, style, sx, sy, sw, sh, !m_isTransitioning,
+        paintBoxDirect(r, style, unitEnv(w, nullptr), sx, sy, sw, sh, !m_isTransitioning,
                        true);
 #else
 #ifdef MORPH_FEATURE_GRADIENT
@@ -197,7 +197,9 @@ public:
         float radius = m_isTransitioning ? style.scrollbarBorderRadius : snapRadius(style.scrollbarBorderRadius);
         if (radius > thumbH * 0.5f) radius = thumbH * 0.5f;
         if (radius < 0.5f) radius = 0.5f;
-        r.drawRoundedRect(trackX, thumbY, sbw, thumbH, radius, style.scrollbarThumbColor);
+        float sbRadii[4];
+        fillRadii(sbRadii, radius);
+        r.drawRoundedRect(trackX, thumbY, sbw, thumbH, sbRadii, style.scrollbarThumbColor);
     }
 #endif
 };

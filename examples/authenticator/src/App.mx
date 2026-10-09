@@ -1,0 +1,137 @@
+import { morphState, Window } from 'morph'
+import { theme, setTheme, codeSize, setCodeSize, prefsChanged } from './store.mx'
+import './style.css'
+
+export const windowConfig = {
+  title: "Authenticator",
+  width: 400,
+  height: 740
+}
+
+export default function App() {
+  const [q, setQ] = morphState("")
+  const [copiedId, setCopiedId] = morphState("")
+
+  // Settings writes its own copy and broadcasts; apply it to this copy.
+  prefsChanged.on((p) => { setTheme(p.theme); setCodeSize(p.codeSize) })
+
+  const tcls = theme == "dark" ? "theme-dark" : "theme-light"
+  const ccls = codeSize == "large" ? "code-large" : "code-normal"
+
+  return (
+    <body>
+      <div className={`app ${tcls} ${ccls}`} id="app">
+        <div className="topbar" id="topbar">
+          <div className="apptitle" id="apptitle">Authenticator</div>
+          <div className="avatar" id="avatar">L</div>
+        </div>
+
+        <div className="searchbar" id="searchbar">
+          <button className="iconbtn" id="btn-menu" onClick={() => { const s = new Window("/settings", { width: 400, height: 600 }) }}>≡</button>
+          <input className="search-field" id="search" placeholder="Search..."
+                 value={q} onInput={(e) => { setQ(e.value) }} />
+          <span className="cloud" id="cloud">☁</span>
+        </div>
+
+        <div className="list" id="list">
+          <div className={(q == "" || "GitHub 2 factor authentication".indexOf(q) != -1) ? "acc-wrap" : "acc-wrap hidden"}>
+            <div className="acc-row">
+              <div className="row-text">
+                <div className="acc-name">GitHub 2 factor authentication</div>
+                <div className="acc-code">130 344</div>
+              </div>
+              <button className="copybtn" onClick={() => { setCopiedId("acc1") }}>
+                {copiedId == "acc1" ? (<span className="copied">✓</span>) : (<div className="copybox"/>)}
+              </button>
+            </div>
+            <div className="divider"/>
+          </div>
+          <div className={(q == "" || "Pypi w step verification".indexOf(q) != -1) ? "acc-wrap" : "acc-wrap hidden"}>
+            <div className="acc-row">
+              <div className="row-text">
+                <div className="acc-name">Pypi w step verification</div>
+                <div className="acc-code">315 698</div>
+              </div>
+              <button className="copybtn" onClick={() => { setCopiedId("acc2") }}>
+                {copiedId == "acc2" ? (<span className="copied">✓</span>) : (<div className="copybox"/>)}
+              </button>
+            </div>
+            <div className="divider"/>
+          </div>
+          <div className={(q == "" || "minercraft638@gmail.com".indexOf(q) != -1) ? "acc-wrap" : "acc-wrap hidden"}>
+            <div className="acc-row">
+              <div className="row-text">
+                <div className="acc-name">minercraft638@gmail.com</div>
+                <div className="acc-code">839 919</div>
+              </div>
+              <button className="copybtn" onClick={() => { setCopiedId("acc3") }}>
+                {copiedId == "acc3" ? (<span className="copied">✓</span>) : (<div className="copybox"/>)}
+              </button>
+            </div>
+            <div className="divider"/>
+          </div>
+          <div className={(q == "" || "ultrawab@gmail.com".indexOf(q) != -1) ? "acc-wrap" : "acc-wrap hidden"}>
+            <div className="acc-row">
+              <div className="row-text">
+                <div className="acc-name">ultrawab@gmail.com</div>
+                <div className="acc-code">057 868</div>
+              </div>
+              <button className="copybtn" onClick={() => { setCopiedId("acc4") }}>
+                {copiedId == "acc4" ? (<span className="copied">✓</span>) : (<div className="copybox"/>)}
+              </button>
+            </div>
+            <div className="divider"/>
+          </div>
+          <div className={(q == "" || "Amazon: service.levizr@gmail.com".indexOf(q) != -1) ? "acc-wrap" : "acc-wrap hidden"}>
+            <div className="acc-row">
+              <div className="row-text">
+                <div className="acc-name">Amazon: service.levizr@gmail.com</div>
+                <div className="acc-code">679 923</div>
+              </div>
+              <button className="copybtn" onClick={() => { setCopiedId("acc5") }}>
+                {copiedId == "acc5" ? (<span className="copied">✓</span>) : (<div className="copybox"/>)}
+              </button>
+            </div>
+            <div className="divider"/>
+          </div>
+          <div className={(q == "" || "Cloudflare: ultrawab@gmail.com".indexOf(q) != -1) ? "acc-wrap" : "acc-wrap hidden"}>
+            <div className="acc-row">
+              <div className="row-text">
+                <div className="acc-name">Cloudflare: ultrawab@gmail.com</div>
+                <div className="acc-code">400 566</div>
+              </div>
+              <button className="copybtn" onClick={() => { setCopiedId("acc6") }}>
+                {copiedId == "acc6" ? (<span className="copied">✓</span>) : (<div className="copybox"/>)}
+              </button>
+            </div>
+            <div className="divider"/>
+          </div>
+          <div className={(q == "" || "Twitter: @LevizrOfficial".indexOf(q) != -1) ? "acc-wrap" : "acc-wrap hidden"}>
+            <div className="acc-row">
+              <div className="row-text">
+                <div className="acc-name">Twitter: @LevizrOfficial</div>
+                <div className="acc-code">201 445</div>
+              </div>
+              <button className="copybtn" onClick={() => { setCopiedId("acc7") }}>
+                {copiedId == "acc7" ? (<span className="copied">✓</span>) : (<div className="copybox"/>)}
+              </button>
+            </div>
+            <div className="divider"/>
+          </div>
+        </div>
+
+        <div className="fab" id="fab">
+          <div className="plus">
+            <div className="arm-v arm-top"/>
+            <div className="plus-mid">
+              <div className="arm-h arm-left"/>
+              <div className="arm-c"/>
+              <div className="arm-h arm-right"/>
+            </div>
+            <div className="arm-v arm-bot"/>
+          </div>
+        </div>
+      </div>
+    </body>
+  )
+}
