@@ -1,4 +1,5 @@
 #include "gl_renderer.h"
+#include <algorithm>
 #include <vector>
 
 #ifdef MORPH_FEATURE_IMAGE
@@ -898,9 +899,26 @@ void GLRenderer::beginClip(float x, float y, float w, float h)
     flush(m_proj);
     float cx = x + m_scrollX;
     float cy = y + m_scrollY;
+    float cw = w, ch = h;
+    // Nested overflow clips intersect like in browsers: a child box that has
+    // scrolled (partly) out of its parent must not paint over sibling boxes.
+    // Without this the inner rect replaces the outer scissor and descendants
+    // (e.g. nested scroll text) leak onto whatever is behind the scrolled box.
+    if (!m_scissorStack.empty())
+    {
+        const auto &o = m_scissorStack.back();
+        float ix = std::max(cx, o[0]);
+        float iy = std::max(cy, o[1]);
+        float ir = std::min(cx + cw, o[0] + o[2]);
+        float ib = std::min(cy + ch, o[1] + o[3]);
+        cx = ix;
+        cy = iy;
+        cw = std::max(0.0f, ir - ix);
+        ch = std::max(0.0f, ib - iy);
+    }
     glEnable(GL_SCISSOR_TEST);
-    glScissor((GLint)cx, m_fbHeight - (GLint)(cy + h), (GLsizei)w, (GLsizei)h);
-    m_scissorStack.push_back({cx, cy, w, h});
+    glScissor((GLint)cx, m_fbHeight - (GLint)(cy + ch), (GLsizei)cw, (GLsizei)ch);
+    m_scissorStack.push_back({cx, cy, cw, ch});
     m_scissorClipDepth++;
 }
 
