@@ -2,7 +2,7 @@
 
 **Severity:** error | **Blocks `morph build`:** yes
 
-> **Status:** documented rule — `morph check` does not report this code yet. The underlying problem still breaks your build or your UI; the cause and fix below apply when you hit it.
+> **Status:** reported by `morph check`. Member accesses (`Math.min`, `JSON.parse`, `console.table`) point at the full access; bare references (`const f = JSON`) point at the root. Locally shadowed names are your own and stay quiet.
 
 ## What this error means
 

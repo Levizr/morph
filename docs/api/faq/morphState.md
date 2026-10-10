@@ -47,7 +47,7 @@ No. Setters belong in event handlers, effects, and callbacks. Calling one uncond
 if (count > 10) setCount(10)
 
 // ✓ Derived during render, no setter needed
-const display = Math.min(count, 10)
+const display = count < 10 ? count : 10
 ```
 
 ## Why must hooks run in the same order every render?

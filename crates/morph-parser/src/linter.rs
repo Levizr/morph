@@ -1,9 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ast_types::{JsxNode, LintError, MxImportKind, MxSource};
+use oxc_allocator::Allocator;
 use oxc_ast::ast::*;
 use oxc_ast_visit::Visit;
-use oxc_span::GetSpan;
+use oxc_parser::Parser;
+use oxc_semantic::SemanticBuilder;
+use oxc_span::{GetSpan, LabeledSpan};
 
 #[allow(dead_code)]
 fn offset_to_line_col(source: &str, offset: u32) -> (usize, usize) {
@@ -41,12 +44,15 @@ const NATIVE_GLOBALS: &[&str] = &[
 const MORPH_BUILTINS: &[&str] =
     &["morphState", "morphEffect", "morphShared", "morphEvent", "useWindow", "Window", "CSS"];
 
-/// AST positions that are never value references: lowercase JSX tag
-/// starts (`<div>`) and type-name ranges (`x: int`, `as Foo`,
+/// AST positions that are never value references: JSX tag names
+/// (lowercase intrinsics like `<div>`, and component tags like `<Card>` —
+/// unknown components get the precise `mx-component-unknown` instead of
+/// a duplicate `mx-undefined`) and type-name ranges (`x: int`, `as Foo`,
 /// generics). A real variable sharing an intrinsic's name is still
 /// checked — only its own tag-position span is skipped.
 struct SkipSpans {
-    intrinsics: std::collections::HashSet<u32>,
+    intrinsics: HashSet<u32>,
+    tags: HashSet<u32>,
     type_ranges: Vec<(u32, u32)>,
 }
 
@@ -56,11 +62,39 @@ fn collect_skip_spans(program: &Program) -> SkipSpans {
     }
     impl<'a> Visit<'a> for Collector {
         fn visit_jsx_element_name(&mut self, name: &JSXElementName<'a>) {
-            if let JSXElementName::Identifier(id) = name {
-                let tag = id.name.as_str();
-                if tag.starts_with(|c: char| c.is_ascii_lowercase()) {
-                    self.out.intrinsics.insert(id.span.start);
+            // Lowercase tags (`<div>`) parse as `Identifier`, capitalized
+            // ones (`<Frob>`) as `IdentifierReference` — every tag position
+            // is skipped for `mx-undefined`: intrinsics never resolve, and
+            // unknown components report the precise `mx-component-unknown`.
+            match name {
+                JSXElementName::Identifier(id) => {
+                    self.out.tags.insert(id.span.start);
+                    if id.name.as_str().starts_with(|c: char| c.is_ascii_lowercase()) {
+                        self.out.intrinsics.insert(id.span.start);
+                    }
                 }
+                JSXElementName::IdentifierReference(id) => {
+                    self.out.tags.insert(id.span.start);
+                }
+                JSXElementName::NamespacedName(n) => {
+                    self.out.tags.insert(n.name.span.start);
+                }
+                JSXElementName::MemberExpression(m) => {
+                    let mut obj = &m.object;
+                    loop {
+                        match obj {
+                            JSXMemberExpressionObject::IdentifierReference(id) => {
+                                self.out.tags.insert(id.span.start);
+                                break;
+                            }
+                            JSXMemberExpressionObject::MemberExpression(inner) => {
+                                obj = &inner.object;
+                            }
+                            JSXMemberExpressionObject::ThisExpression(_) => break,
+                        }
+                    }
+                }
+                JSXElementName::ThisExpression(_) => {}
             }
             // Continue into member expressions (`<Foo.Bar>` resolves Foo).
             oxc_ast_visit::walk::walk_jsx_element_name(self, name);
@@ -72,7 +106,11 @@ fn collect_skip_spans(program: &Program) -> SkipSpans {
         }
     }
     let mut collector = Collector {
-        out: SkipSpans { intrinsics: std::collections::HashSet::new(), type_ranges: Vec::new() },
+        out: SkipSpans {
+            intrinsics: HashSet::new(),
+            tags: HashSet::new(),
+            type_ranges: Vec::new(),
+        },
     };
     collector.visit_program(program);
     collector.out
@@ -81,7 +119,7 @@ fn collect_skip_spans(program: &Program) -> SkipSpans {
 /// Lowercase JSX tag positions (`<div>`, `<span>`): intrinsic elements,
 /// never identifier references. Collected from the AST so a real
 /// variable that merely shares a name is still checked at its own spans.
-fn jsx_intrinsic_spans(program: &Program) -> std::collections::HashSet<u32> {
+fn jsx_intrinsic_spans(program: &Program) -> HashSet<u32> {
     collect_skip_spans(program).intrinsics
 }
 
@@ -91,16 +129,15 @@ fn jsx_intrinsic_spans(program: &Program) -> std::collections::HashSet<u32> {
 /// scope resolution — shadowing, params, and imports all count.
 fn check_unresolved(program: &Program, file_path: &str, offsets: &[usize]) -> Vec<LintError> {
     let mut out = Vec::new();
-    let semantic =
-        oxc_semantic::SemanticBuilder::new().with_build_nodes(true).build(program).semantic;
+    let semantic = SemanticBuilder::new().with_build_nodes(true).build(program).semantic;
     let scoping = semantic.scoping();
     let skip = collect_skip_spans(program);
     let declared: Vec<&str> = scoping.symbol_names().collect();
-    let mut seen = std::collections::HashSet::new();
-    let mut names: Vec<(&str, Vec<oxc_span::Span>)> = Vec::new();
+    let mut seen = HashSet::new();
+    let mut names: Vec<(&str, Vec<Span>)> = Vec::new();
     for (atom, refs) in scoping.root_unresolved_references() {
         let mut spans = Vec::new();
-        for ref_id in refs.iter() {
+        for ref_id in refs {
             let node_id = scoping.get_reference(*ref_id).node_id();
             spans.push(semantic.nodes().get_node(node_id).span());
         }
@@ -113,6 +150,9 @@ fn check_unresolved(program: &Program, file_path: &str, offsets: &[usize]) -> Ve
         }
         for span in spans {
             if skip.intrinsics.contains(&span.start) {
+                continue;
+            }
+            if skip.tags.contains(&span.start) {
                 continue;
             }
             if skip.type_ranges.iter().any(|(s, e)| span.start >= *s && span.end <= *e) {
@@ -137,6 +177,16 @@ fn check_unresolved(program: &Program, file_path: &str, offsets: &[usize]) -> Ve
             if NATIVE_GLOBALS.contains(&name) {
                 continue;
             }
+            // Known-but-unsupported JS builtins report `mx-js-member`
+            // (with the member when one is accessed) — never mx-undefined.
+            if UNSUPPORTED_JS_ROOTS.contains(&name) {
+                continue;
+            }
+            // Browser-only globals are owned by `mx-js-global` (span-precise
+            // AST detection) — never mx-undefined on top.
+            if UNSUPPORTED_GLOBALS.contains(&name) {
+                continue;
+            }
             let mut best: Option<(&str, f64)> = None;
             for candidate in
                 declared.iter().chain(NATIVE_GLOBALS.iter()).chain(MORPH_BUILTINS.iter())
@@ -155,6 +205,284 @@ fn check_unresolved(program: &Program, file_path: &str, offsets: &[usize]) -> Ve
                 code: "mx-undefined".into(),
                 message: format!("`{name}` is not defined here and not imported"),
                 suggestion,
+                file_path: file_path.into(),
+                line,
+                col,
+            });
+        }
+    }
+    out
+}
+
+/// Drill a member/call chain to its root identifier, through wrappers:
+/// `JSON.parse`, `JSON["parse"]`, `(JSON as any).parse`, `JSON?.parse`.
+/// Returns the root name plus the span start of the root identifier, so
+/// locally shadowed names (which resolve, unlike true globals) are skipped.
+fn member_root_name<'a>(mut cur: &'a Expression<'a>) -> Option<(&'a str, u32)> {
+    loop {
+        match cur {
+            Expression::StaticMemberExpression(s) => cur = &s.object,
+            Expression::ComputedMemberExpression(c) => cur = &c.object,
+            Expression::ChainExpression(ch) => match &ch.expression {
+                ChainElement::CallExpression(call) => cur = &call.callee,
+                ChainElement::TSNonNullExpression(n) => cur = &n.expression,
+                _ => match ch.expression.as_member_expression() {
+                    Some(MemberExpression::StaticMemberExpression(s)) => cur = &s.object,
+                    Some(MemberExpression::ComputedMemberExpression(c)) => cur = &c.object,
+                    _ => return None,
+                },
+            },
+            Expression::TSAsExpression(a) => cur = &a.expression,
+            Expression::TSNonNullExpression(n) => cur = &n.expression,
+            Expression::ParenthesizedExpression(p) => cur = &p.expression,
+            Expression::Identifier(id) => return Some((id.name.as_str(), id.span.start)),
+            _ => return None,
+        }
+    }
+}
+
+/// Property label for a member access: `min` in `Math.min` / `JSON["parse"]`.
+/// Dynamic keys (`JSON[k]`) have no label — the root alone is reported.
+fn member_prop_label(me: &MemberExpression) -> Option<String> {
+    match me {
+        MemberExpression::StaticMemberExpression(s) => Some(s.property.name.as_str().to_string()),
+        MemberExpression::ComputedMemberExpression(c) => match &c.expression {
+            Expression::StringLiteral(s) => Some(s.value.to_string()),
+            _ => None,
+        },
+        MemberExpression::PrivateFieldExpression(_) => None,
+    }
+}
+
+/// `mx-js-member`: JS builtins with no native counterpart. The translator
+/// passes them through verbatim so they fail the C++ compile; flagging
+/// them here (instead of the misleading `mx-undefined`) tells the user
+/// what is actually wrong. Member accesses report the full `Root.prop`
+/// span; bare references report the root. Locally shadowed names are the
+/// user's own and stay quiet.
+struct JsMemberVisitor {
+    unresolved: HashSet<u32>,
+    // Reported member spans, so bare references inside them stay quiet.
+    members: Vec<(u32, u32)>,
+    out: Vec<(u32, String, String)>,
+}
+impl JsMemberVisitor {
+    fn check_root(&mut self, root: Option<(&str, u32)>, span: (u32, u32), prop: Option<String>) {
+        let Some((name, start)) = root else { return };
+        if !self.unresolved.contains(&start) {
+            return;
+        }
+        if name == "console" {
+            if let Some(p) = prop {
+                if !CONSOLE_METHODS.contains(&p.as_str()) {
+                    self.members.push(span);
+                    self.out.push((span.0, "console".into(), format!("console.{p}")));
+                }
+            }
+            return;
+        }
+        if UNSUPPORTED_JS_ROOTS.contains(&name) {
+            self.members.push(span);
+            let label = prop.map_or_else(|| name.to_string(), |p| format!("{name}.{p}"));
+            self.out.push((span.0, name.to_string(), label));
+        }
+    }
+}
+impl<'a> Visit<'a> for JsMemberVisitor {
+    fn visit_static_member_expression(&mut self, e: &StaticMemberExpression<'a>) {
+        // No recursion into the object: the root chain is one access.
+        let root = member_root_name(&e.object);
+        let prop = Some(e.property.name.as_str().to_string());
+        self.check_root(root, (e.span.start, e.span.end), prop);
+    }
+    fn visit_computed_member_expression(&mut self, e: &ComputedMemberExpression<'a>) {
+        let root = member_root_name(&e.object);
+        let prop = match &e.expression {
+            Expression::StringLiteral(s) => Some(s.value.to_string()),
+            _ => None,
+        };
+        self.check_root(root, (e.span.start, e.span.end), prop);
+        self.visit_expression(&e.expression);
+    }
+    fn visit_call_expression(&mut self, e: &CallExpression<'a>) {
+        // `JSON.parse(x)`: the callee carries the member span.
+        if let Some(me) = e.callee.as_member_expression() {
+            let (root, prop) = match me {
+                MemberExpression::StaticMemberExpression(s) => {
+                    (member_root_name(&s.object), Some(s.property.name.as_str().to_string()))
+                }
+                MemberExpression::ComputedMemberExpression(c) => (
+                    member_root_name(&c.object),
+                    match &c.expression {
+                        Expression::StringLiteral(s) => Some(s.value.to_string()),
+                        _ => None,
+                    },
+                ),
+                MemberExpression::PrivateFieldExpression(_) => (None, None),
+            };
+            self.check_root(root, (me.span().start, me.span().end), prop);
+        }
+        for arg in &e.arguments {
+            self.visit_argument(arg);
+        }
+    }
+    fn visit_new_expression(&mut self, e: &NewExpression<'a>) {
+        if let Some(me) = e.callee.as_member_expression() {
+            let root = match me {
+                MemberExpression::StaticMemberExpression(s) => member_root_name(&s.object),
+                MemberExpression::ComputedMemberExpression(c) => member_root_name(&c.object),
+                MemberExpression::PrivateFieldExpression(_) => None,
+            };
+            self.check_root(root, (me.span().start, me.span().end), member_prop_label(me));
+        }
+        for arg in &e.arguments {
+            self.visit_argument(arg);
+        }
+    }
+    fn visit_chain_expression(&mut self, e: &ChainExpression<'a>) {
+        match &e.expression {
+            ChainElement::CallExpression(call) => {
+                if let Some(me) = call.callee.as_member_expression() {
+                    let root = match me {
+                        MemberExpression::StaticMemberExpression(s) => member_root_name(&s.object),
+                        MemberExpression::ComputedMemberExpression(c) => {
+                            member_root_name(&c.object)
+                        }
+                        MemberExpression::PrivateFieldExpression(_) => None,
+                    };
+                    self.check_root(root, (me.span().start, me.span().end), member_prop_label(me));
+                }
+                for arg in &call.arguments {
+                    self.visit_argument(arg);
+                }
+            }
+            _ => {
+                if let Some(me) = e.expression.as_member_expression() {
+                    let root = match me {
+                        MemberExpression::StaticMemberExpression(s) => member_root_name(&s.object),
+                        MemberExpression::ComputedMemberExpression(c) => {
+                            member_root_name(&c.object)
+                        }
+                        MemberExpression::PrivateFieldExpression(_) => None,
+                    };
+                    self.check_root(root, (e.span.start, e.span.end), member_prop_label(me));
+                }
+            }
+        }
+    }
+}
+
+fn check_js_members(program: &Program, file_path: &str, offsets: &[usize]) -> Vec<LintError> {
+    let semantic = SemanticBuilder::new().with_build_nodes(true).build(program).semantic;
+    let scoping = semantic.scoping();
+    let mut unresolved = HashSet::new();
+    let mut bare: Vec<(&str, Vec<Span>)> = Vec::new();
+    for (atom, refs) in scoping.root_unresolved_references() {
+        let mut spans = Vec::new();
+        for ref_id in refs {
+            let node_id = scoping.get_reference(*ref_id).node_id();
+            let span = semantic.nodes().get_node(node_id).span();
+            unresolved.insert(span.start);
+            spans.push(span);
+        }
+        bare.push((atom, spans));
+    }
+    let mut visitor = JsMemberVisitor { unresolved, members: Vec::new(), out: Vec::new() };
+    visitor.visit_program(program);
+    let skip = collect_skip_spans(program);
+    let mut out = Vec::new();
+    for (start, root, label) in &visitor.out {
+        let (line, col) = offset_to_line_col_fast(offsets, *start);
+        let suggestion = if root == "console" {
+            "Use console.log/warn/error/info instead".to_string()
+        } else {
+            "Replace with runtime-type methods or plain operators (docs/javascript/types.md)"
+                .to_string()
+        };
+        out.push(LintError {
+            severity: "error".into(),
+            code: "mx-js-member".into(),
+            message: format!("Unsupported member `{label}` — no native counterpart"),
+            suggestion: Some(suggestion),
+            file_path: file_path.into(),
+            line,
+            col,
+        });
+    }
+    // Bare references (`const f = JSON`): same rule, root-only label.
+    // `console` alone is fine — only unknown methods are flagged above.
+    for (name, spans) in bare {
+        if !UNSUPPORTED_JS_ROOTS.contains(&name) {
+            continue;
+        }
+        for span in spans {
+            if skip.intrinsics.contains(&span.start) {
+                continue;
+            }
+            if skip.tags.contains(&span.start) {
+                continue;
+            }
+            if skip.type_ranges.iter().any(|(s, e)| span.start >= *s && span.end <= *e) {
+                continue;
+            }
+            if visitor.members.iter().any(|(s, e)| span.start >= *s && span.end <= *e) {
+                continue;
+            }
+            let (line, col) = offset_to_line_col_fast(offsets, span.start);
+            out.push(LintError {
+                severity: "error".into(),
+                code: "mx-js-member".into(),
+                message: format!("Unsupported builtin `{name}` — no native counterpart"),
+                suggestion: Some(
+                    "Replace with runtime-type methods or plain operators (docs/javascript/types.md)"
+                        .to_string(),
+                ),
+                file_path: file_path.into(),
+                line,
+                col,
+            });
+        }
+    }
+    out
+}
+
+/// `mx-js-global`: browser-only globals with no native counterpart.
+/// Resolved from real scope references (not substring matching), so string
+/// contents, comments, JSX text and user properties (`x.document`) stay
+/// quiet while every syntactic use (`(document).title`, newlines between
+/// object and member) is caught at its exact span.
+fn check_js_globals(program: &Program, file_path: &str, offsets: &[usize]) -> Vec<LintError> {
+    let semantic = SemanticBuilder::new().with_build_nodes(true).build(program).semantic;
+    let scoping = semantic.scoping();
+    let skip = collect_skip_spans(program);
+    let mut out = Vec::new();
+    let mut names: Vec<(&str, Vec<Span>)> = Vec::new();
+    for (atom, refs) in scoping.root_unresolved_references() {
+        if !UNSUPPORTED_GLOBALS.contains(&atom.as_str()) {
+            continue;
+        }
+        let mut spans = Vec::new();
+        for ref_id in refs {
+            let node_id = scoping.get_reference(*ref_id).node_id();
+            spans.push(semantic.nodes().get_node(node_id).span());
+        }
+        names.push((atom, spans));
+    }
+    names.sort_by(|a, b| a.0.cmp(b.0));
+    for (name, spans) in names {
+        for span in spans {
+            if skip.intrinsics.contains(&span.start) || skip.tags.contains(&span.start) {
+                continue;
+            }
+            if skip.type_ranges.iter().any(|(s, e)| span.start >= *s && span.end <= *e) {
+                continue;
+            }
+            let (line, col) = offset_to_line_col_fast(offsets, span.start);
+            out.push(LintError {
+                severity: "error".into(),
+                code: "mx-js-global".into(),
+                message: format!("`{name}` is not available in native runtime"),
+                suggestion: Some(format!("Use Morph state / C++ instead of browser `{name}`")),
                 file_path: file_path.into(),
                 line,
                 col,
@@ -189,13 +517,13 @@ fn offset_to_line_col_fast(offsets: &[usize], offset: u32) -> (usize, usize) {
 /// Check a .mx file for parse + semantic errors (with caching support via caller)
 pub fn check(source: &str, file_path: &str) -> Vec<LintError> {
     let offsets = build_line_offsets(source);
-    let allocator = oxc_allocator::Allocator::default();
+    let allocator = Allocator::default();
     let source_type = SourceType::from_path("file.tsx").unwrap();
-    let ret = oxc_parser::Parser::new(&allocator, source, source_type).parse();
+    let ret = Parser::new(&allocator, source, source_type).parse();
     let mut errors = Vec::new();
 
     for diag in &ret.diagnostics {
-        let span = diag.labels.first().map_or(Span::new(0, 0), oxc_span::LabeledSpan::span);
+        let span = diag.labels.first().map_or(Span::new(0, 0), LabeledSpan::span);
         let (line, col) = offset_to_line_col_fast(&offsets, span.start);
         errors.push(LintError {
             severity: "error".into(),
@@ -228,6 +556,11 @@ pub fn check(source: &str, file_path: &str) -> Vec<LintError> {
     // the semantic builder assumes a well-formed tree.
     if ret.diagnostics.is_empty() {
         errors.extend(check_unresolved(&ret.program, file_path, &offsets));
+        // Unsupported JS builtins (member spans + bare roots): their own
+        // code, so check_unresolved stays quiet about them (see above).
+        errors.extend(check_js_members(&ret.program, file_path, &offsets));
+        // Browser-only globals, detected from scope references.
+        errors.extend(check_js_globals(&ret.program, file_path, &offsets));
     }
 
     // Walk program to build MxSource for semantic lints (even with parse errors, program is partial)
@@ -376,6 +709,50 @@ static UNSUPPORTED_GLOBALS: &[&str] = &[
     "requestAnimationFrame",
 ];
 
+/// JS builtins with no native counterpart: the translator passes them
+/// through verbatim, so they fail the C++ compile. Reported as
+/// `mx-js-member` (not the misleading `mx-undefined`) with the member
+/// when one is accessed (`JSON.parse`) or the bare root otherwise.
+static UNSUPPORTED_JS_ROOTS: &[&str] = &[
+    "Math",
+    "JSON",
+    "Date",
+    "RegExp",
+    "Object",
+    "Array",
+    "Number",
+    "String",
+    "Boolean",
+    "Symbol",
+    "BigInt",
+    "Map",
+    "Set",
+    "WeakMap",
+    "WeakSet",
+    "WeakRef",
+    "Proxy",
+    "Reflect",
+    "Intl",
+    "Atomics",
+    "DataView",
+    "ArrayBuffer",
+    "SharedArrayBuffer",
+    "Int8Array",
+    "Uint8Array",
+    "Uint8ClampedArray",
+    "Int16Array",
+    "Uint16Array",
+    "Int32Array",
+    "Uint32Array",
+    "Float32Array",
+    "Float64Array",
+    "BigInt64Array",
+    "BigUint64Array",
+];
+
+/// `console` itself is supported, but only these methods exist natively.
+static CONSOLE_METHODS: &[&str] = &["log", "warn", "error", "info"];
+
 pub fn lint(source: &MxSource, content: &str, file_path: &str) -> Vec<LintError> {
     let mut out = Vec::new();
 
@@ -463,32 +840,7 @@ pub fn lint(source: &MxSource, content: &str, file_path: &str) -> Vec<LintError>
         }
     }
 
-    // ── JS globals scan (simple substring search with line info) ──
-    for (idx, line) in content.lines().enumerate() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("//") || trimmed.starts_with("/*") {
-            continue;
-        }
-        for g in UNSUPPORTED_GLOBALS {
-            if line.contains(&format!("{g}."))
-                || line.contains(&format!("{g}["))
-                || line.contains(&format!(" {g} "))
-            {
-                let col = line.find(g).unwrap_or(0) + 1;
-                out.push(LintError {
-                    severity: "error".into(),
-                    code: "mx-js-global".into(),
-                    message: format!("`{g}` is not available in native runtime"),
-                    suggestion: Some(format!("Use Morph state / C++ instead of browser `{g}`")),
-                    file_path: file_path.into(),
-                    line: idx + 1,
-                    col,
-                });
-            }
-        }
-    }
-
-    // Deduplicate by code+line+col
+    // ── Deduplicate by code+line+col
     let mut seen = HashSet::new();
     out.retain(|e| seen.insert((e.code.clone(), e.line, e.col, e.message.clone())));
 
@@ -635,10 +987,10 @@ fn suggest_prop_for_tag(input: &str, tag: &str) -> Option<String> {
         TAG_PROPS.iter().filter(|(t, _)| *t == tag).flat_map(|(_, props)| props.iter().copied()),
     );
     for prop in candidates {
-        let dist = strsim::levenshtein(input, prop) as f64;
-        let max_len = input.len().max(prop.len()) as f64;
-        let sim = 1.0 - (dist / max_len);
-        if sim > 0.6 {
+        // Jaro-Winkler like the unresolved-name hints: transposed typos
+        // (`widht` → `width`) score high, unrelated names stay quiet.
+        let sim = strsim::jaro_winkler(input, prop);
+        if sim > 0.7 {
             if let Some((_, best_sim)) = &best {
                 if sim > *best_sim {
                     best = Some((prop.to_string(), sim));
@@ -807,10 +1159,8 @@ fn lint_state_event_scope(source: &MxSource, content: &str, file_path: &str) -> 
         components.insert("default");
     }
     let offsets = build_line_offsets(content);
-    let allocator = oxc_allocator::Allocator::default();
-    let ret =
-        oxc_parser::Parser::new(&allocator, content, SourceType::from_path("file.tsx").unwrap())
-            .parse();
+    let allocator = Allocator::default();
+    let ret = Parser::new(&allocator, content, SourceType::from_path("file.tsx").unwrap()).parse();
     if ret.panicked {
         return Vec::new();
     }
@@ -1146,6 +1496,102 @@ fn scope_stmt(
                 out,
             );
         }
+        Statement::SwitchStatement(s) => {
+            scope_expr(
+                &s.discriminant,
+                components,
+                in_component,
+                in_export,
+                func_depth,
+                offsets,
+                file_path,
+                out,
+            );
+            for c in &s.cases {
+                if let Some(t) = &c.test {
+                    scope_expr(
+                        t,
+                        components,
+                        in_component,
+                        in_export,
+                        func_depth,
+                        offsets,
+                        file_path,
+                        out,
+                    );
+                }
+                for st in &c.consequent {
+                    scope_stmt(
+                        st,
+                        components,
+                        in_component,
+                        in_export,
+                        func_depth,
+                        offsets,
+                        file_path,
+                        out,
+                    );
+                }
+            }
+        }
+        Statement::LabeledStatement(l) => {
+            scope_stmt(
+                &l.body,
+                components,
+                in_component,
+                in_export,
+                func_depth,
+                offsets,
+                file_path,
+                out,
+            );
+        }
+        Statement::ThrowStatement(t) => {
+            scope_expr(
+                &t.argument,
+                components,
+                in_component,
+                in_export,
+                func_depth,
+                offsets,
+                file_path,
+                out,
+            );
+        }
+        Statement::WithStatement(w) => {
+            scope_expr(
+                &w.object,
+                components,
+                in_component,
+                in_export,
+                func_depth,
+                offsets,
+                file_path,
+                out,
+            );
+            scope_stmt(
+                &w.body,
+                components,
+                in_component,
+                in_export,
+                func_depth,
+                offsets,
+                file_path,
+                out,
+            );
+        }
+        Statement::ClassDeclaration(c) => {
+            scope_class(
+                c,
+                components,
+                in_component,
+                in_export,
+                func_depth,
+                offsets,
+                file_path,
+                out,
+            );
+        }
         Statement::TryStatement(t) => {
             for s in &t.block.body {
                 scope_stmt(
@@ -1267,6 +1713,18 @@ fn scope_declarator(
 ) {
     let Some(init) = &decl.init else { return };
     let owned_name = binding_ident_name(&decl.id).unwrap_or_default();
+    // Destructuring defaults can hide calls (`const { a = morphState(0) } = x`)
+    // so the pattern is walked for value positions as well as bindings.
+    scope_binding_pattern(
+        &decl.id,
+        components,
+        in_component,
+        in_export,
+        func_depth,
+        offsets,
+        file_path,
+        out,
+    );
     // A component-arrow declarator gets `in_component=true` for its body
     // (morphState is legal there). Other initializers are plain expressions.
     if let Expression::ArrowFunctionExpression(a) = init {
@@ -1588,18 +2046,16 @@ fn scope_chain_element(
         ChainElement::CallExpression(call) => {
             check_scope_call(call, in_component, in_export, func_depth, offsets, file_path, out);
             for arg in &call.arguments {
-                if let Some(e) = arg.as_expression() {
-                    scope_expr(
-                        e,
-                        components,
-                        in_component,
-                        in_export,
-                        func_depth,
-                        offsets,
-                        file_path,
-                        out,
-                    );
-                }
+                scope_call_arg(
+                    arg,
+                    components,
+                    in_component,
+                    in_export,
+                    func_depth,
+                    offsets,
+                    file_path,
+                    out,
+                );
             }
             scope_expr(
                 &call.callee,
@@ -1613,18 +2069,17 @@ fn scope_chain_element(
             );
         }
         ChainElement::TSNonNullExpression(e) => {
-            if let Some(me) = e.expression.as_member_expression() {
-                scope_member(
-                    me,
-                    components,
-                    in_component,
-                    in_export,
-                    func_depth,
-                    offsets,
-                    file_path,
-                    out,
-                );
-            }
+            // Recurse generally: `(morphState(0))!` is a call, not a member.
+            scope_expr(
+                &e.expression,
+                components,
+                in_component,
+                in_export,
+                func_depth,
+                offsets,
+                file_path,
+                out,
+            );
         }
         _ => {
             if let Some(me) = el.as_member_expression() {
@@ -1643,6 +2098,517 @@ fn scope_chain_element(
     }
 }
 
+/// Walk a binding pattern's *value* positions: destructuring defaults
+/// (`const { a = morphState(0) } = x`) and computed keys (`const { [k]: v } = x`)
+/// can hide framework calls. Plain identifiers bind, they are not visited.
+fn scope_binding_pattern(
+    pat: &BindingPattern,
+    components: &HashSet<&str>,
+    in_component: bool,
+    in_export: bool,
+    func_depth: usize,
+    offsets: &[usize],
+    file_path: &str,
+    out: &mut Vec<LintError>,
+) {
+    match pat {
+        BindingPattern::BindingIdentifier(_) => {}
+        BindingPattern::ObjectPattern(o) => {
+            for p in &o.properties {
+                if let Some(e) = p.key.as_expression() {
+                    scope_expr(
+                        e,
+                        components,
+                        in_component,
+                        in_export,
+                        func_depth,
+                        offsets,
+                        file_path,
+                        out,
+                    );
+                }
+                scope_binding_pattern(
+                    &p.value,
+                    components,
+                    in_component,
+                    in_export,
+                    func_depth,
+                    offsets,
+                    file_path,
+                    out,
+                );
+            }
+            if let Some(r) = &o.rest {
+                scope_binding_pattern(
+                    &r.argument,
+                    components,
+                    in_component,
+                    in_export,
+                    func_depth,
+                    offsets,
+                    file_path,
+                    out,
+                );
+            }
+        }
+        BindingPattern::ArrayPattern(a) => {
+            for p in a.elements.iter().flatten() {
+                scope_binding_pattern(
+                    p,
+                    components,
+                    in_component,
+                    in_export,
+                    func_depth,
+                    offsets,
+                    file_path,
+                    out,
+                );
+            }
+            if let Some(r) = &a.rest {
+                scope_binding_pattern(
+                    &r.argument,
+                    components,
+                    in_component,
+                    in_export,
+                    func_depth,
+                    offsets,
+                    file_path,
+                    out,
+                );
+            }
+        }
+        BindingPattern::AssignmentPattern(a) => {
+            scope_binding_pattern(
+                &a.left,
+                components,
+                in_component,
+                in_export,
+                func_depth,
+                offsets,
+                file_path,
+                out,
+            );
+            scope_expr(
+                &a.right,
+                components,
+                in_component,
+                in_export,
+                func_depth,
+                offsets,
+                file_path,
+                out,
+            );
+        }
+    }
+}
+
+/// Walk one call argument, including spread (`f(...morphShared(0))`).
+/// `as_expression` skips spread elements, so they need their own arm.
+fn scope_call_arg(
+    arg: &Argument,
+    components: &HashSet<&str>,
+    in_component: bool,
+    in_export: bool,
+    func_depth: usize,
+    offsets: &[usize],
+    file_path: &str,
+    out: &mut Vec<LintError>,
+) {
+    match arg {
+        Argument::SpreadElement(s) => {
+            scope_expr(
+                &s.argument,
+                components,
+                in_component,
+                in_export,
+                func_depth,
+                offsets,
+                file_path,
+                out,
+            );
+        }
+        _ => {
+            if let Some(e) = arg.as_expression() {
+                scope_expr(
+                    e,
+                    components,
+                    in_component,
+                    in_export,
+                    func_depth,
+                    offsets,
+                    file_path,
+                    out,
+                );
+            }
+        }
+    }
+}
+
+/// Walk a class (declaration or expression): heritage, computed keys,
+/// decorators, method bodies, property initializers and static blocks.
+/// Methods count as function boundaries, like plain nested functions.
+fn scope_decorator(
+    d: &Decorator,
+    components: &HashSet<&str>,
+    in_component: bool,
+    in_export: bool,
+    func_depth: usize,
+    offsets: &[usize],
+    file_path: &str,
+    out: &mut Vec<LintError>,
+) {
+    scope_expr(
+        &d.expression,
+        components,
+        in_component,
+        in_export,
+        func_depth,
+        offsets,
+        file_path,
+        out,
+    );
+}
+
+/// Walk a class (declaration or expression): heritage, computed keys,
+/// decorators, method bodies, property initializers and static blocks.
+/// Methods count as function boundaries, like plain nested functions.
+fn scope_class(
+    c: &Class,
+    components: &HashSet<&str>,
+    in_component: bool,
+    in_export: bool,
+    func_depth: usize,
+    offsets: &[usize],
+    file_path: &str,
+    out: &mut Vec<LintError>,
+) {
+    for d in &c.decorators {
+        scope_decorator(
+            d,
+            components,
+            in_component,
+            in_export,
+            func_depth,
+            offsets,
+            file_path,
+            out,
+        );
+    }
+    if let Some(h) = &c.heritage {
+        scope_expr(
+            &h.expression,
+            components,
+            in_component,
+            in_export,
+            func_depth,
+            offsets,
+            file_path,
+            out,
+        );
+    }
+    for el in &c.body.body {
+        scope_class_element(
+            el,
+            components,
+            in_component,
+            in_export,
+            func_depth,
+            offsets,
+            file_path,
+            out,
+        );
+    }
+}
+
+/// One class-body element: method bodies count as function boundaries,
+/// property initializers and static blocks are value positions.
+fn scope_class_element(
+    el: &ClassElement,
+    components: &HashSet<&str>,
+    in_component: bool,
+    in_export: bool,
+    func_depth: usize,
+    offsets: &[usize],
+    file_path: &str,
+    out: &mut Vec<LintError>,
+) {
+    match el {
+        ClassElement::MethodDefinition(m) => {
+            for d in &m.decorators {
+                scope_decorator(
+                    d,
+                    components,
+                    in_component,
+                    in_export,
+                    func_depth,
+                    offsets,
+                    file_path,
+                    out,
+                );
+            }
+            if let Some(e) = m.key.as_expression() {
+                scope_expr(
+                    e,
+                    components,
+                    in_component,
+                    in_export,
+                    func_depth,
+                    offsets,
+                    file_path,
+                    out,
+                );
+            }
+            scope_function(&m.value, components, in_component, func_depth, offsets, file_path, out);
+        }
+        ClassElement::PropertyDefinition(p) => {
+            scope_class_field(
+                &p.decorators,
+                &p.key,
+                p.value.as_ref(),
+                components,
+                in_component,
+                in_export,
+                func_depth,
+                offsets,
+                file_path,
+                out,
+            );
+        }
+        ClassElement::StaticBlock(b) => {
+            for s in &b.body {
+                scope_stmt(
+                    s,
+                    components,
+                    in_component,
+                    in_export,
+                    func_depth,
+                    offsets,
+                    file_path,
+                    out,
+                );
+            }
+        }
+        // Index signatures are type-only (`[k: string]: T`) — no value positions.
+        ClassElement::TSIndexSignature(_) => {}
+        ClassElement::AccessorProperty(a) => {
+            scope_class_field(
+                &a.decorators,
+                &a.key,
+                a.value.as_ref(),
+                components,
+                in_component,
+                in_export,
+                func_depth,
+                offsets,
+                file_path,
+                out,
+            );
+        }
+    }
+}
+
+/// Shared field shape behind property and accessor definitions:
+/// decorators, a possibly-computed key and an optional initializer.
+fn scope_class_field(
+    decorators: &[Decorator],
+    key: &PropertyKey,
+    value: Option<&Expression>,
+    components: &HashSet<&str>,
+    in_component: bool,
+    in_export: bool,
+    func_depth: usize,
+    offsets: &[usize],
+    file_path: &str,
+    out: &mut Vec<LintError>,
+) {
+    for d in decorators {
+        scope_decorator(
+            d,
+            components,
+            in_component,
+            in_export,
+            func_depth,
+            offsets,
+            file_path,
+            out,
+        );
+    }
+    if let Some(e) = key.as_expression() {
+        scope_expr(e, components, in_component, in_export, func_depth, offsets, file_path, out);
+    }
+    if let Some(v) = value {
+        scope_expr(v, components, in_component, in_export, func_depth, offsets, file_path, out);
+    }
+}
+
+/// Walk JSX for framework calls in attribute values and expression
+/// containers (`onClick={() => morphState(0)}`). Tag/prop *validation*
+/// lives in `lint_jsx`; this only tracks call placement scope.
+fn scope_jsx_expression(
+    expr: &JSXExpression,
+    components: &HashSet<&str>,
+    in_component: bool,
+    in_export: bool,
+    func_depth: usize,
+    offsets: &[usize],
+    file_path: &str,
+    out: &mut Vec<LintError>,
+) {
+    if let Some(e) = expr.as_expression() {
+        scope_expr(e, components, in_component, in_export, func_depth, offsets, file_path, out);
+    }
+}
+
+fn scope_jsx_child(
+    child: &JSXChild,
+    components: &HashSet<&str>,
+    in_component: bool,
+    in_export: bool,
+    func_depth: usize,
+    offsets: &[usize],
+    file_path: &str,
+    out: &mut Vec<LintError>,
+) {
+    match child {
+        JSXChild::Element(el) => {
+            scope_jsx_element(
+                el,
+                components,
+                in_component,
+                in_export,
+                func_depth,
+                offsets,
+                file_path,
+                out,
+            );
+        }
+        JSXChild::Fragment(f) => {
+            for c in &f.children {
+                scope_jsx_child(
+                    c,
+                    components,
+                    in_component,
+                    in_export,
+                    func_depth,
+                    offsets,
+                    file_path,
+                    out,
+                );
+            }
+        }
+        JSXChild::ExpressionContainer(c) => {
+            scope_jsx_expression(
+                &c.expression,
+                components,
+                in_component,
+                in_export,
+                func_depth,
+                offsets,
+                file_path,
+                out,
+            );
+        }
+        JSXChild::Spread(s) => {
+            scope_expr(
+                &s.expression,
+                components,
+                in_component,
+                in_export,
+                func_depth,
+                offsets,
+                file_path,
+                out,
+            );
+        }
+        JSXChild::Text(_) => {}
+    }
+}
+
+fn scope_jsx_element(
+    el: &JSXElement,
+    components: &HashSet<&str>,
+    in_component: bool,
+    in_export: bool,
+    func_depth: usize,
+    offsets: &[usize],
+    file_path: &str,
+    out: &mut Vec<LintError>,
+) {
+    for attr in &el.opening_element.attributes {
+        match attr {
+            JSXAttributeItem::Attribute(a) => {
+                if let Some(v) = &a.value {
+                    match v {
+                        JSXAttributeValue::ExpressionContainer(c) => {
+                            scope_jsx_expression(
+                                &c.expression,
+                                components,
+                                in_component,
+                                in_export,
+                                func_depth,
+                                offsets,
+                                file_path,
+                                out,
+                            );
+                        }
+                        JSXAttributeValue::Element(e) => {
+                            scope_jsx_element(
+                                e,
+                                components,
+                                in_component,
+                                in_export,
+                                func_depth,
+                                offsets,
+                                file_path,
+                                out,
+                            );
+                        }
+                        JSXAttributeValue::Fragment(f) => {
+                            for c in &f.children {
+                                scope_jsx_child(
+                                    c,
+                                    components,
+                                    in_component,
+                                    in_export,
+                                    func_depth,
+                                    offsets,
+                                    file_path,
+                                    out,
+                                );
+                            }
+                        }
+                        JSXAttributeValue::StringLiteral(_) => {}
+                    }
+                }
+            }
+            JSXAttributeItem::SpreadAttribute(s) => {
+                scope_expr(
+                    &s.argument,
+                    components,
+                    in_component,
+                    in_export,
+                    func_depth,
+                    offsets,
+                    file_path,
+                    out,
+                );
+            }
+        }
+    }
+    for child in &el.children {
+        scope_jsx_child(
+            child,
+            components,
+            in_component,
+            in_export,
+            func_depth,
+            offsets,
+            file_path,
+            out,
+        );
+    }
+}
+
 fn scope_expr(
     expr: &Expression,
     components: &HashSet<&str>,
@@ -1657,18 +2623,16 @@ fn scope_expr(
         Expression::CallExpression(call) => {
             check_scope_call(call, in_component, in_export, func_depth, offsets, file_path, out);
             for arg in &call.arguments {
-                if let Some(e) = arg.as_expression() {
-                    scope_expr(
-                        e,
-                        components,
-                        in_component,
-                        in_export,
-                        func_depth,
-                        offsets,
-                        file_path,
-                        out,
-                    );
-                }
+                scope_call_arg(
+                    arg,
+                    components,
+                    in_component,
+                    in_export,
+                    func_depth,
+                    offsets,
+                    file_path,
+                    out,
+                );
             }
             scope_expr(
                 &call.callee,
@@ -1903,19 +2867,28 @@ fn scope_expr(
             }
         }
         Expression::NewExpression(ne) => {
+            // The callee is a call position too (`new (morphState(0))()`).
+            scope_expr(
+                &ne.callee,
+                components,
+                in_component,
+                in_export,
+                func_depth,
+                offsets,
+                file_path,
+                out,
+            );
             for arg in &ne.arguments {
-                if let Some(e) = arg.as_expression() {
-                    scope_expr(
-                        e,
-                        components,
-                        in_component,
-                        in_export,
-                        func_depth,
-                        offsets,
-                        file_path,
-                        out,
-                    );
-                }
+                scope_call_arg(
+                    arg,
+                    components,
+                    in_component,
+                    in_export,
+                    func_depth,
+                    offsets,
+                    file_path,
+                    out,
+                );
             }
         }
         Expression::SequenceExpression(seq) => {
@@ -1935,6 +2908,94 @@ fn scope_expr(
         Expression::ChainExpression(ch) => {
             scope_chain_element(
                 &ch.expression,
+                components,
+                in_component,
+                in_export,
+                func_depth,
+                offsets,
+                file_path,
+                out,
+            );
+        }
+        Expression::AwaitExpression(a) => {
+            scope_expr(
+                &a.argument,
+                components,
+                in_component,
+                in_export,
+                func_depth,
+                offsets,
+                file_path,
+                out,
+            );
+        }
+        Expression::YieldExpression(y) => {
+            if let Some(a) = &y.argument {
+                scope_expr(
+                    a,
+                    components,
+                    in_component,
+                    in_export,
+                    func_depth,
+                    offsets,
+                    file_path,
+                    out,
+                );
+            }
+        }
+        Expression::ImportExpression(ie) => {
+            scope_expr(
+                &ie.source,
+                components,
+                in_component,
+                in_export,
+                func_depth,
+                offsets,
+                file_path,
+                out,
+            );
+            if let Some(o) = &ie.options {
+                scope_expr(
+                    o,
+                    components,
+                    in_component,
+                    in_export,
+                    func_depth,
+                    offsets,
+                    file_path,
+                    out,
+                );
+            }
+        }
+        Expression::JSXElement(el) => {
+            scope_jsx_element(
+                el,
+                components,
+                in_component,
+                in_export,
+                func_depth,
+                offsets,
+                file_path,
+                out,
+            );
+        }
+        Expression::JSXFragment(f) => {
+            for c in &f.children {
+                scope_jsx_child(
+                    c,
+                    components,
+                    in_component,
+                    in_export,
+                    func_depth,
+                    offsets,
+                    file_path,
+                    out,
+                );
+            }
+        }
+        Expression::ClassExpression(c) => {
+            scope_class(
+                c,
                 components,
                 in_component,
                 in_export,
@@ -2261,10 +3322,9 @@ pub fn docs_url(code: &str) -> String {
 pub fn suggest_tag(input: &str) -> Option<String> {
     let mut best: Option<(String, f64)> = None;
     for tag in SUPPORTED_TAGS {
-        let dist = strsim::levenshtein(input, tag) as f64;
-        let max_len = input.len().max(tag.len()) as f64;
-        let sim = 1.0 - (dist / max_len);
-        if sim > 0.5 {
+        // Jaro-Winkler like every other hint: transpositions score high.
+        let sim = strsim::jaro_winkler(input, tag);
+        if sim > 0.7 {
             if let Some((_, bs)) = &best {
                 if sim > *bs {
                     best = Some((tag.to_string(), sim));
@@ -2422,5 +3482,92 @@ mod tests {
         let errs = lint_graph(&graph);
         assert!(codes(&errs).contains(&"mx-component-prop"));
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    const SCOPE_HDR: &str = "import { morphState } from 'morph'\nexport const windowConfig = { title: \"P\", width: 800, height: 600 }\n";
+
+    fn scope_codes(body: &str) -> Vec<String> {
+        let content = format!(
+            "{SCOPE_HDR}{body}\nexport default function App() {{ return (<div>x</div>) }}\n"
+        );
+        check(&content, "App.mx").iter().map(|e| e.code.clone()).collect()
+    }
+
+    #[test]
+    fn state_scope_reaches_switch_class_throw_await() {
+        for body in [
+            "switch (1) { case 1: { const [v] = morphState(0); break; } }",
+            "class H { m() { return morphState(0); } }",
+            "if (true) throw morphState(0);",
+            "async function boot() { const v = await morphState(0); return v; }",
+            "const { a = morphState(0) } = {};",
+            "const v = new (morphState(0))();",
+            "const v = [morphState(0)].length;",
+            "class H { static x = morphState(0); }",
+            "class H extends morphState(0) {}",
+            "top: { const [v] = morphState(0); break top; }",
+        ] {
+            let found = scope_codes(body);
+            assert!(found.contains(&"mx-state-scope".to_string()), "{body:?} got {found:?}");
+        }
+    }
+
+    #[test]
+    fn unsupported_builtin_members_report_js_member() {
+        let content = "import { morphState } from 'morph'\nexport default function App() {\n  const v = Math.min(1, 2);\n  const j = JSON.stringify({});\n  return (<div>{v}</div>)\n}\n";
+        let errs = check(content, "App.mx");
+        assert_eq!(codes(&errs).iter().filter(|c| **c == "mx-js-member").count(), 2, "{errs:?}");
+        assert!(!codes(&errs).contains(&"mx-undefined"), "{errs:?}");
+        let math = errs.iter().find(|e| e.message.contains("Math.min")).unwrap();
+        assert!(math.message.contains("no native counterpart"), "{math:?}");
+    }
+
+    #[test]
+    fn shadowed_builtin_stays_quiet() {
+        let content = "import { morphState } from 'morph'\nexport default function App() {\n  const Math = { min: (a, b) => a };\n  const v = Math.min(1, 2);\n  return (<div>{v}</div>)\n}\n";
+        let errs = check(content, "App.mx");
+        assert!(!codes(&errs).contains(&"mx-js-member"), "{errs:?}");
+        assert!(!codes(&errs).contains(&"mx-undefined"), "{errs:?}");
+    }
+
+    #[test]
+    fn console_table_flags_but_log_is_clean() {
+        let bad = "import { morphState } from 'morph'\nexport default function App() {\n  console.table([1]);\n  return (<div>x</div>)\n}\n";
+        let errs = check(bad, "App.mx");
+        assert!(codes(&errs).contains(&"mx-js-member"), "{errs:?}");
+        let good = "import { morphState } from 'morph'\nexport default function App() {\n  console.log(1);\n  return (<div>x</div>)\n}\n";
+        let errs = check(good, "App.mx");
+        assert!(!codes(&errs).contains(&"mx-js-member"), "{errs:?}");
+    }
+
+    #[test]
+    fn browser_global_in_string_and_comment_stays_quiet() {
+        let content = "import { morphState } from 'morph'\nexport default function App() {\n  const s = \"see document.body for details\"; // window.title hack\n  return (<div>{s}</div>)\n}\n";
+        let errs = check(content, "App.mx");
+        assert!(!codes(&errs).contains(&"mx-js-global"), "{errs:?}");
+    }
+
+    #[test]
+    fn real_browser_global_still_errors_once() {
+        let content = "import { morphState } from 'morph'\nexport default function App() {\n  const t = document.title;\n  return (<div>{t}</div>)\n}\n";
+        let errs = check(content, "App.mx");
+        assert!(codes(&errs).contains(&"mx-js-global"), "{errs:?}");
+        assert!(!codes(&errs).contains(&"mx-undefined"), "{errs:?}");
+    }
+
+    #[test]
+    fn unknown_component_has_no_duplicate_undefined() {
+        let content = "import { morphState } from 'morph'\nexport default function App() { return (<Frob>x</Frob>) }\n";
+        let errs = check(content, "App.mx");
+        assert!(codes(&errs).contains(&"mx-component-unknown"), "{errs:?}");
+        assert!(!codes(&errs).contains(&"mx-undefined"), "{errs:?}");
+    }
+
+    #[test]
+    fn transposed_prop_typo_suggests() {
+        let content = "import { morphState } from 'morph'\nexport default function App() { return (<div sytle=\"x\">x</div>) }\n";
+        let errs = check(content, "App.mx");
+        let err = errs.iter().find(|e| e.code == "mx-prop").expect("mx-prop fires");
+        assert!(err.suggestion.as_deref().unwrap().contains("style"), "{err:?}");
     }
 }
