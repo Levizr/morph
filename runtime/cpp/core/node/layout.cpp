@@ -1857,10 +1857,16 @@ after_children:
     if (scrollYEnabled) {
         if (scrollY > contentH - h) scrollY = contentH - h;
         if (scrollY < 0) scrollY = 0;
+        // A shrunken scroller clamps the glide target too, or the box
+        // would ease back out of bounds after layout.
+        if (scrollTargetY > contentH - h) scrollTargetY = contentH - h;
+        if (scrollTargetY < 0) scrollTargetY = 0;
     }
     if (scrollXEnabled) {
         if (scrollX > contentW - w) scrollX = contentW - w;
         if (scrollX < 0) scrollX = 0;
+        if (scrollTargetX > contentW - w) scrollTargetX = contentW - w;
+        if (scrollTargetX < 0) scrollTargetX = 0;
     }
 
     clearDirty(LayoutDirty);

@@ -100,7 +100,7 @@ Negative values work too:
 
 ### Overflow
 
-`overflow-hidden`, `overflow-auto`, `overflow-scroll`, `overflow-visible`, `overflow-x-auto`, `overflow-x-hidden`, `overflow-x-scroll`, `overflow-y-auto`, `overflow-y-hidden`, `overflow-y-scroll`
+`overflow-hidden`, `overflow-auto`, `overflow-scroll`, `overflow-visible`, `overflow-x-auto`, `overflow-x-hidden`, `overflow-x-scroll`, `overflow-y-auto`, `overflow-y-hidden`, `overflow-y-scroll`, `scroll-smooth`, `scroll-auto`
 
 ### Position
 

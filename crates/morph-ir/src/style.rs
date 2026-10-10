@@ -147,6 +147,9 @@ pub struct IRStyle {
     pub scrollbar_track_color: [f32; 4],
     pub scrollbar_thumb_color: [f32; 4],
     pub scrollbar_border_radius: f32,
+    // Wheel glide: `scroll-behavior: smooth` animates toward the target
+    // instead of jumping (default `auto` keeps the instant 40px steps).
+    pub scroll_behavior_smooth: bool,
     // ── Transform (feature: transform) ───────────────────────────────
     pub transform_ops: Option<Vec<crate::transforms::TransformOp>>,
     pub transform_matrix: Option<[f32; 16]>,
@@ -241,6 +244,7 @@ impl IRStyle {
             && self.cursor == "default"
             && self.overflow_x == "visible"
             && self.overflow_y == "visible"
+            && !self.scroll_behavior_smooth
             && self.box_sizing == "content-box"
             && self.opacity == 1.0
             && self.z_index.is_none()

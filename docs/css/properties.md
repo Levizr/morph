@@ -127,6 +127,18 @@ Rules that bite:
 
 Tailwind equivalents: `overflow-auto`, `overflow-scroll`, `overflow-hidden`, `overflow-visible`, plus `overflow-x-auto`, `overflow-x-hidden`, `overflow-x-scroll`, `overflow-y-auto`, `overflow-y-hidden`, `overflow-y-scroll`. Scrollbar appearance is styled with the [`scrollbar-*` properties](#scrollbar) below.
 
+Wheel scrolling jumps one step per notch by default. `scroll-behavior: smooth` (Tailwind: `scroll-smooth`, back to instant with `scroll-auto`) makes the wheel glide toward its target instead — notches accumulate mid-glide, and a spent scroller still chains the remainder to its parent:
+
+```css
+.feed {
+  height: 400px;
+  overflow-y: auto;
+  scroll-behavior: smooth;
+}
+```
+
+Thumb dragging and track paging stay instant (the thumb tracks the cursor 1:1).
+
 To lock page scroll (e.g. behind a modal), put `overflow: hidden` on `body` — it propagates to the viewport like in browsers:
 
 ```css

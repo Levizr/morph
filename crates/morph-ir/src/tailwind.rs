@@ -173,6 +173,8 @@ fn static_map(class: &str) -> Option<Vec<(&'static str, &'static str)>> {
         "overflow-y-hidden" => vec![("overflow-y", "hidden")],
         "overflow-y-scroll" => vec![("overflow-y", "scroll")],
         "overflow-y-visible" => vec![("overflow-y", "visible")],
+        "scroll-auto" => vec![("scroll-behavior", "auto")],
+        "scroll-smooth" => vec![("scroll-behavior", "smooth")],
         "p-0" => vec![("padding", "0px")],
         "p-1" => vec![("padding", "4px")],
         "p-10" => vec![("padding", "40px")],

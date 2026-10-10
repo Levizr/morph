@@ -5201,15 +5201,13 @@ fn apply_css_prop(style: &mut IRStyle, prop: &str, val: &str) -> Option<&'static
             style.cursor = val.to_string();
             Some("cursor")
         }
-        "scrollbar-width" => {
-            match parse_length_no_pct(val.trim()) {
-                Some(Length::Px(v)) if v >= 0.0 => {
-                    style.scrollbar_width = v;
-                    Some("scrollbar-width")
-                }
-                _ => None,
+        "scrollbar-width" => match parse_length_no_pct(val.trim()) {
+            Some(Length::Px(v)) if v >= 0.0 => {
+                style.scrollbar_width = v;
+                Some("scrollbar-width")
             }
-        }
+            _ => None,
+        },
         "scrollbar-track-color" => match parse_color(val.trim()) {
             Some(c) => {
                 style.scrollbar_track_color = c;
@@ -5224,15 +5222,13 @@ fn apply_css_prop(style: &mut IRStyle, prop: &str, val: &str) -> Option<&'static
             }
             _ => None,
         },
-        "scrollbar-border-radius" => {
-            match parse_length_no_pct(val.trim()) {
-                Some(Length::Px(v)) if v >= 0.0 => {
-                    style.scrollbar_border_radius = v;
-                    Some("scrollbar-border-radius")
-                }
-                _ => None,
+        "scrollbar-border-radius" => match parse_length_no_pct(val.trim()) {
+            Some(Length::Px(v)) if v >= 0.0 => {
+                style.scrollbar_border_radius = v;
+                Some("scrollbar-border-radius")
             }
-        }
+            _ => None,
+        },
         "scrollbar-color" => {
             // Standard shorthand: one color sets the thumb, two set
             // thumb then track. Unknown colors drop the declaration.
@@ -5258,6 +5254,19 @@ fn apply_css_prop(style: &mut IRStyle, prop: &str, val: &str) -> Option<&'static
                 None
             }
         }
+        "scroll-behavior" => match val.trim() {
+            // Only `auto` (instant steps) and `smooth` (wheel glide) exist;
+            // anything else drops the declaration like a browser.
+            "smooth" => {
+                style.scroll_behavior_smooth = true;
+                Some("scroll-behavior")
+            }
+            "auto" => {
+                style.scroll_behavior_smooth = false;
+                Some("scroll-behavior")
+            }
+            _ => None,
+        },
         "overflow" => {
             // Shorthand sets both axes (one value) or x then y (two values,
             // per spec). Unknown keywords drop the whole declaration.
@@ -6037,10 +6046,7 @@ mod tests {
     #[test]
     fn scrollbar_longhands_parse_and_validate() {
         let mut s = IRStyle::default();
-        assert_eq!(
-            apply_css_prop(&mut s, "scrollbar-width", "12px"),
-            Some("scrollbar-width")
-        );
+        assert_eq!(apply_css_prop(&mut s, "scrollbar-width", "12px"), Some("scrollbar-width"));
         assert_eq!(s.scrollbar_width, 12.0);
         assert_eq!(apply_css_prop(&mut s, "scrollbar-width", "-2px"), None);
         assert_eq!(
@@ -6049,10 +6055,7 @@ mod tests {
         );
         assert_eq!(s.scrollbar_track_color, [1.0, 1.0, 1.0, 1.0]);
         assert_eq!(apply_css_prop(&mut s, "scrollbar-thumb-color", "bogus"), None);
-        assert_eq!(
-            apply_css_prop(&mut s, "scrollbar-color", "#f00 #0f0"),
-            Some("scrollbar-color")
-        );
+        assert_eq!(apply_css_prop(&mut s, "scrollbar-color", "#f00 #0f0"), Some("scrollbar-color"));
         assert_eq!(s.scrollbar_thumb_color, [1.0, 0.0, 0.0, 1.0]);
         assert_eq!(s.scrollbar_track_color, [0.0, 1.0, 0.0, 1.0]);
         assert_eq!(
@@ -6060,6 +6063,17 @@ mod tests {
             Some("scrollbar-border-radius")
         );
         assert_eq!(s.scrollbar_border_radius, 6.0);
+    }
+
+    #[test]
+    fn scroll_behavior_parses_smooth_and_auto() {
+        let mut s = IRStyle::default();
+        assert!(!s.scroll_behavior_smooth);
+        assert_eq!(apply_css_prop(&mut s, "scroll-behavior", "smooth"), Some("scroll-behavior"));
+        assert!(s.scroll_behavior_smooth);
+        assert_eq!(apply_css_prop(&mut s, "scroll-behavior", "auto"), Some("scroll-behavior"));
+        assert!(!s.scroll_behavior_smooth);
+        assert_eq!(apply_css_prop(&mut s, "scroll-behavior", "bogus"), None);
     }
 
     #[test]

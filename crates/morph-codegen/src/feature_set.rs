@@ -147,7 +147,8 @@ impl FeatureSet {
             | "scrollbar-color"
             | "scrollbar-track-color"
             | "scrollbar-thumb-color"
-            | "scrollbar-border-radius" => vec!["scroll"],
+            | "scrollbar-border-radius"
+            | "scroll-behavior" => vec!["scroll"],
             "flex-direction" | "flex-wrap" | "flex-basis" | "flex-grow" | "flex-shrink"
             | "justify-content" | "align-items" | "align-self" | "gap" => vec!["flex"],
             "overflow" | "overflow-x" | "overflow-y" => vec!["scroll"],

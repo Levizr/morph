@@ -345,6 +345,77 @@ static void testDivWheelChainsToPage()
     CHECK(near(holder.scrollY, 40.0f), "page scrolls under visible box");
 }
 
+// `scroll-behavior: smooth` arms the glide target on wheel while the
+// rendered offset eases toward it; `auto` keeps jumping immediately.
+static void testSmoothWheelGlides()
+{
+    LayoutNode holder;
+    LayoutNode* box = makeBox(200.0f, 100.0f);
+    box->style.overflowY = CSS::Overflow::Auto;
+    box->style.scrollBehaviorSmooth = true;
+    LayoutNode* tall = makeBox(-1.0f, 300.0f);
+    attach(&holder, box);
+    attach(box, tall);
+    holder.layout(0.0f, 0.0f, 800.0f, 600.0f, nullptr);
+    MorphEvent e = wheel(0.0f, -1.0f);
+    CHECK(holder.dispatchEvent(e, box->x + 10.0f, box->y + 10.0f), "smooth wheel handled");
+    CHECK(near(box->scrollTargetY, 40.0f), "smooth wheel arms the target");
+    CHECK(near(box->scrollY, 0.0f), "smooth wheel does not jump");
+    CHECK(near(e.scroll, 0.0f), "consumed axis zeroes its delta");
+    // A second notch accumulates onto the in-flight target.
+    MorphEvent e2 = wheel(0.0f, -1.0f);
+    holder.dispatchEvent(e2, box->x + 10.0f, box->y + 10.0f);
+    CHECK(near(box->scrollTargetY, 80.0f), "notches accumulate on the target");
+    // Frames ease toward the target and snap exactly.
+    float before = box->scrollY;
+    holder.update(1.0f / 60.0f);
+    CHECK(box->scrollY > before, "first frame starts gliding");
+    CHECK(box->scrollY < box->scrollTargetY, "glide approaches, not jumps");
+    for (int i = 0; i < 600; i++) holder.update(1.0f / 60.0f);
+    CHECK(near(box->scrollY, 80.0f), "glide snaps to the target");
+    CHECK(near(box->scrollTargetY, 80.0f), "target holds after landing");
+}
+
+// Without the smooth flag the wheel still jumps one step per notch.
+static void testAutoWheelStillJumps()
+{
+    LayoutNode holder;
+    LayoutNode* box = makeBox(200.0f, 100.0f);
+    box->style.overflowY = CSS::Overflow::Auto;
+    LayoutNode* tall = makeBox(-1.0f, 300.0f);
+    attach(&holder, box);
+    attach(box, tall);
+    holder.layout(0.0f, 0.0f, 800.0f, 600.0f, nullptr);
+    MorphEvent e = wheel(0.0f, -1.0f);
+    holder.dispatchEvent(e, box->x + 10.0f, box->y + 10.0f);
+    CHECK(near(box->scrollY, 40.0f), "auto wheel jumps immediately");
+    CHECK(near(box->scrollTargetY, 40.0f), "auto wheel keeps target in sync");
+}
+
+// A smooth box exhausted to its limit hands the remainder outward.
+static void testSmoothWheelChainsAtLimit()
+{
+    LayoutNode holder;
+    LayoutNode* outer = makeBox(300.0f, 200.0f);
+    outer->style.overflowY = CSS::Overflow::Auto;
+    LayoutNode* inner = makeBox(200.0f, 100.0f);
+    inner->style.overflowY = CSS::Overflow::Auto;
+    inner->style.scrollBehaviorSmooth = true;
+    LayoutNode* tall = makeBox(-1.0f, 400.0f);
+    LayoutNode* outerTall = makeBox(-1.0f, 250.0f);
+    attach(&holder, outer);
+    attach(outer, inner);
+    attach(inner, tall);
+    attach(outer, outerTall);
+    holder.layout(0.0f, 0.0f, 800.0f, 600.0f, nullptr);
+    inner->scrollTargetY = inner->contentH - inner->h;
+    inner->scrollY = inner->scrollTargetY;
+    float px = inner->x + 10.0f, py = inner->y + 10.0f;
+    MorphEvent e = wheel(0.0f, -1.0f);
+    CHECK(holder.dispatchEvent(e, px, py), "limit wheel handled");
+    CHECK(near(outer->scrollY, 40.0f), "spent smooth box chains to outer");
+}
+
 int main()
 {
     testVerticalOnly();
@@ -362,6 +433,9 @@ int main()
     testVisibleDivOverflowsWithoutScrolling();
     testDivWheelChainsToPage();
     testThumbGeometry();
+    testSmoothWheelGlides();
+    testAutoWheelStillJumps();
+    testSmoothWheelChainsAtLimit();
     std::printf("[scroll-layout-test] %d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }

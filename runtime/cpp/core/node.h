@@ -218,6 +218,12 @@ public:
     // against contentH, horizontal uses scrollX against contentW.
     float scrollX = 0;
     float scrollY = 0;
+    // Glide targets for `scroll-behavior: smooth`: the wheel advances the
+    // target and each frame eases the rendered offset toward it. Direct
+    // manipulation (thumb drag) and layout clamps keep both in sync, so
+    // `auto` boxes never observe a stale target.
+    float scrollTargetX = 0;
+    float scrollTargetY = 0;
     float contentW = 0;
     float contentH = 0;
     bool scrollXEnabled = false;
@@ -236,6 +242,10 @@ public:
     // Wheel scroll for one chaining level: consumes scrollable axes into
     // the event, leaving the remainder for ancestors (see events.cpp).
     void scrollWheel(MorphEvent& e);
+    // Ease rendered offsets toward the smooth-scroll targets. Called every
+    // frame from update(); marks paint-dirty while gliding so frames keep
+    // coming, and goes quiet once snapped.
+    void updateSmoothScroll(float dt);
     // Scroll/clip predicates shared by the retained (window) and immediate
     // (ui/) render paths, resolved against the given box size. Unconditional:
     // the state they read costs nothing when scrolling is unused.

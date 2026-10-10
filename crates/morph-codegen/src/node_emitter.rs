@@ -1664,6 +1664,9 @@ fn set_style(
             lines
                 .push(format!("{ind}.scrollbarBorderRadius = {};", fmt(s.scrollbar_border_radius)));
         }
+        if s.scroll_behavior_smooth {
+            lines.push(format!("{ind}.scrollBehaviorSmooth = true;"));
+        }
     }
 
     let _ = prefix;
@@ -2461,6 +2464,7 @@ pub(crate) fn css_to_style_field(css_prop: &str) -> Option<(&'static str, &'stat
         "flex-shrink" => ("flexShrink", "float"),
         "scrollbar-width" => ("scrollbarWidth", "float"),
         "scrollbar-border-radius" => ("scrollbarBorderRadius", "float"),
+        "scroll-behavior" => ("scrollBehaviorSmooth", "bool"),
         "border-width" => ("borderWidth", "length"),
         "z-index" => ("zIndex", "int"),
         "opacity" => ("opacity", "float"),
@@ -2543,6 +2547,7 @@ pub(crate) fn css_field_reset(node_var: &str, field_name: &str, indent: &str) ->
         }
         "flexShrink" => vec![format!("{indent}        {prefix} = 1.0f;")],
         "scrollbarBorderRadius" => vec![format!("{indent}        {prefix} = 4.0f;")],
+        "scrollBehaviorSmooth" => vec![format!("{indent}        {prefix} = false;")],
         "opacity" => vec![format!("{indent}        {prefix} = 1.0f;")],
         "zIndex" => vec![
             format!("{indent}        {prefix} = 0;"),
@@ -2702,6 +2707,12 @@ pub(crate) fn css_val_to_cpp(
     let Some((field_name, val_type)) = css_to_style_field(css_prop) else { return vec![] };
     let prefix = format!("{node_var}->style.{field_name}");
     let out: Vec<String> = match val_type {
+        "bool" => {
+            // Keyword-gated flags: only the enabling keyword sets true.
+            let on = css_val.trim().eq_ignore_ascii_case("smooth")
+                || css_val.trim().eq_ignore_ascii_case("true");
+            vec![format!("{indent}        {prefix} = {};", if on { "true" } else { "false" })]
+        }
         "float" => {
             let v = css_val.trim();
             let num = v.trim_end_matches("px").trim();

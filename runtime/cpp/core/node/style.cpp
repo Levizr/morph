@@ -880,6 +880,9 @@ void MorphNode::update(float dt) {
     updateAncestorHoverTransition(dt);
     updateAncestorActiveTransition(dt);
     updateAnimations(dt);
+#ifdef MORPH_FEATURE_SCROLL
+    updateSmoothScroll(dt);
+#endif
 #ifdef MORPH_FEATURE_ANIMATION
     updateCssAnimations(dt);
 #endif

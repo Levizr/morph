@@ -132,6 +132,7 @@ void MorphNode::scrollDragTo(float ex, float ey)
             scrollX = scrollDragStartVal + (dx / thumbRange) * range;
             if (scrollX < 0) scrollX = 0;
             if (scrollX > range) scrollX = range;
+            scrollTargetX = scrollX;
         }
         if (scrollX != oldScrollX)
         {
@@ -154,6 +155,7 @@ void MorphNode::scrollDragTo(float ex, float ey)
         scrollY = scrollDragStartVal + (dy / thumbRange) * range;
         if (scrollY < 0) scrollY = 0;
         if (scrollY > range) scrollY = range;
+        scrollTargetY = scrollY;
     }
     if (scrollY != oldScrollY)
     {
@@ -185,27 +187,89 @@ void MorphNode::scrollWheel(MorphEvent& e)
         e.scroll = 0.0f;
     }
     bool moved = false;
+    // `scroll-behavior: smooth` advances the glide target (accumulating
+    // across notches) and lets updateSmoothScroll ease the rendered offset
+    // toward it; `auto` jumps immediately, as before.
+    bool smooth = style.scrollBehaviorSmooth;
     if (dy != 0.0f && scrollYEnabled && contentH > h) {
-        float v = scrollY - dy * 40.0f;
+        float v = (smooth ? scrollTargetY : scrollY) - dy * 40.0f;
         if (v < 0.0f) v = 0.0f;
         if (v > contentH - h) v = contentH - h;
-        if (v != scrollY) {
+        if (smooth) {
+            if (v != scrollTargetY) {
+                scrollTargetY = v;
+                e.scroll = 0.0f;
+                moved = true;
+            }
+        } else if (v != scrollY) {
             scrollY = v;
+            scrollTargetY = v;
             e.scroll = 0.0f;
             moved = true;
         }
     }
     if (dx != 0.0f && scrollXEnabled && contentW > w) {
-        float v = scrollX - dx * 40.0f;
+        float v = (smooth ? scrollTargetX : scrollX) - dx * 40.0f;
         if (v < 0.0f) v = 0.0f;
         if (v > contentW - w) v = contentW - w;
-        if (v != scrollX) {
+        if (smooth) {
+            if (v != scrollTargetX) {
+                scrollTargetX = v;
+                e.scrollX = 0.0f;
+                moved = true;
+            }
+        } else if (v != scrollX) {
             scrollX = v;
+            scrollTargetX = v;
             e.scrollX = 0.0f;
             moved = true;
         }
     }
     if (moved) {
+        markDirty(PaintDirty);
+        for (auto* c : children) c->markDirty(PaintDirty);
+#ifdef MORPH_FEATURE_POSITION
+        updateStickySubtree();
+#endif
+    }
+}
+
+// Ease rendered offsets toward the smooth-scroll targets (see node.h).
+// Exponential approach: fast start like a wheel flick, gentle landing.
+// Snaps inside half a pixel so the glide always terminates and frames
+// go quiet — the dirty mark while moving keeps pump() rendering.
+void MorphNode::updateSmoothScroll(float dt)
+{
+    if (scrollTargetX == scrollX && scrollTargetY == scrollY)
+    {
+        return;
+    }
+    float k = 1.0f - std::exp(-12.0f * dt);
+    if (k < 0.0f) k = 0.0f;
+    if (k > 1.0f) k = 1.0f;
+    bool gliding = false;
+    if (scrollTargetX != scrollX)
+    {
+        float v = scrollX + (scrollTargetX - scrollX) * k;
+        if (std::fabs(scrollTargetX - v) < 0.5f) v = scrollTargetX;
+        if (v != scrollX)
+        {
+            scrollX = v;
+            gliding = true;
+        }
+    }
+    if (scrollTargetY != scrollY)
+    {
+        float v = scrollY + (scrollTargetY - scrollY) * k;
+        if (std::fabs(scrollTargetY - v) < 0.5f) v = scrollTargetY;
+        if (v != scrollY)
+        {
+            scrollY = v;
+            gliding = true;
+        }
+    }
+    if (gliding)
+    {
         markDirty(PaintDirty);
         for (auto* c : children) c->markDirty(PaintDirty);
 #ifdef MORPH_FEATURE_POSITION
@@ -251,6 +315,7 @@ bool MorphNode::dispatchEvent(MorphEvent& e, float ex, float ey) {
                     scrollY += (ey < thumbY) ? -page : page;
                     if (scrollY < 0) scrollY = 0;
                     if (scrollY > contentH - h) scrollY = contentH - h;
+                    scrollTargetY = scrollY;
                     if (scrollY != oldScrollY) {
                         markDirty(PaintDirty);
                         for (auto* c : children) c->markDirty(PaintDirty);
@@ -289,6 +354,7 @@ bool MorphNode::dispatchEvent(MorphEvent& e, float ex, float ey) {
                     scrollX += (ex < thumbX) ? -page : page;
                     if (scrollX < 0) scrollX = 0;
                     if (scrollX > contentW - w) scrollX = contentW - w;
+                    scrollTargetX = scrollX;
                     if (scrollX != oldScrollX) {
                         markDirty(PaintDirty);
                         for (auto* c : children) c->markDirty(PaintDirty);

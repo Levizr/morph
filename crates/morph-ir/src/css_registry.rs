@@ -109,6 +109,7 @@ pub static KNOWN_PROPERTIES: &[&str] = &[
     "scrollbar-track-color",
     "scrollbar-thumb-color",
     "scrollbar-border-radius",
+    "scroll-behavior",
 ];
 
 pub static CSS_TO_IR: &[(&str, &str)] = &[
@@ -187,8 +188,12 @@ pub fn property_feature(prop: &str) -> Option<&'static str> {
         "opacity" => Some("opacity"),
         "transform" | "transform-origin" => Some("transform"),
         "animation" | "animation-duration" => Some("animation"),
-        "scrollbar-width" | "scrollbar-color" | "scrollbar-track-color"
-        | "scrollbar-thumb-color" | "scrollbar-border-radius" => Some("scrollbar"),
+        "scrollbar-width"
+        | "scrollbar-color"
+        | "scrollbar-track-color"
+        | "scrollbar-thumb-color"
+        | "scrollbar-border-radius"
+        | "scroll-behavior" => Some("scrollbar"),
         "position" | "top" | "right" | "bottom" | "left" | "z-index" => Some("positioning"),
         _ => None,
     }
