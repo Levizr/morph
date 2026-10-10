@@ -7,11 +7,11 @@ use oxc_ast::ast::*;
 use oxc_parser::Parser;
 use oxc_span::GetSpan;
 
-use crate::css_registry;
 use crate::node::{IREvent, IRNode, IRWindow};
 use crate::style::{IRStyle, Length};
 use crate::tailwind::TailwindResolver;
 use crate::transforms;
+use morph_parser::css_registry;
 
 pub struct IRBuilder {
     tailwind: TailwindResolver,

@@ -74,6 +74,7 @@ rule off or change its severity in `morph.config.json`:
 - [mx-tailwind-class](mx-tailwind-class.md) **(rule)** — unresolvable Tailwind class
 - [mx-css-prop](mx-css-prop.md) **(rule)** — unsupported CSS file property
 - [mx-css-file-missing](mx-css-file-missing.md) **(rule)** — imported CSS file not found
+- [mx-css-syntax](mx-css-syntax.md) **(rule)** — unparseable stylesheet may lose rules
 - [mx-css-load-deprecated](mx-css-load-deprecated.md) — `CSS.load()` is deprecated
 
 ### Imports and names

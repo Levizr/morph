@@ -1599,6 +1599,24 @@
         "changefreq": "monthly"
       },
       {
+        "title": "mx-css-syntax — Unparseable Stylesheet",
+        "sidebarTitle": "mx-css-syntax",
+        "slug": "errors/mx-css-syntax",
+        "file": "errors/mx-css-syntax",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-css-syntax: stylesheet syntax error that may drop rules, locating the break.",
+        "keywords": [
+          "mx-css-syntax",
+          "morph css syntax error",
+          "morph stylesheet loses rules"
+        ],
+        "lastUpdated": "2026-10-11",
+        "publishedAt": "2026-10-11",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
         "title": "mx-css-load-deprecated — CSS.load() Is Deprecated",
         "sidebarTitle": "mx-css-load-deprecated",
         "slug": "errors/mx-css-load-deprecated",

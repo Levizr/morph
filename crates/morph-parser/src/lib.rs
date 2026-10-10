@@ -2,7 +2,9 @@ use anyhow::{bail, Result};
 use std::path::Path;
 
 pub(crate) mod ast_types;
+pub mod css_lint;
 mod css_parser;
+pub mod css_registry;
 pub(crate) mod js_walker;
 pub mod linter;
 pub mod resolve;

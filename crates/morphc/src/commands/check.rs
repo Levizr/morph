@@ -10,10 +10,20 @@ fn is_source_file(path: &Path) -> bool {
     path.extension().and_then(|e| e.to_str()).is_some_and(morph_config::is_supported_source_ext)
 }
 
+/// Files `morph check` covers: modules plus plain stylesheets (unknown
+/// dropped properties warn per file). Entries and graphs stay
+/// module-only; stylesheets ride along for diagnostics.
+fn is_checkable_file(path: &Path) -> bool {
+    if is_source_file(path) {
+        return true;
+    }
+    path.extension().and_then(|e| e.to_str()).is_some_and(|e| e == "css")
+}
+
 /// Accept one explicitly selected file for checking. Unsupported extensions
 /// are hard errors rather than silently skipped or linted.
 fn push_source_file(files: &mut Vec<PathBuf>, path: PathBuf) -> Result<()> {
-    if is_source_file(&path) {
+    if is_checkable_file(&path) {
         files.push(path);
         Ok(())
     } else {
@@ -74,7 +84,7 @@ pub(crate) fn run(path: Option<&PathBuf>, entry: Option<String>, _migrate: bool)
             for e in
                 walkdir::WalkDir::new(&search_root).into_iter().filter_map(std::result::Result::ok)
             {
-                if is_source_file(e.path()) {
+                if is_checkable_file(e.path()) {
                     mx_files.push(e.path().to_path_buf());
                 }
             }
@@ -89,13 +99,15 @@ pub(crate) fn run(path: Option<&PathBuf>, entry: Option<String>, _migrate: bool)
                 for e in
                     walkdir::WalkDir::new(&src_dir).into_iter().filter_map(std::result::Result::ok)
                 {
-                    if is_source_file(e.path()) {
+                    if is_checkable_file(e.path()) {
                         mx_files.push(e.path().to_path_buf());
                     }
                 }
             }
             let entry_path = cwd.join(&entry_val);
-            if entry_path.exists() && is_source_file(&entry_path) && !mx_files.contains(&entry_path)
+            if entry_path.exists()
+                && is_checkable_file(&entry_path)
+                && !mx_files.contains(&entry_path)
             {
                 mx_files.push(entry_path);
             }
@@ -106,7 +118,7 @@ pub(crate) fn run(path: Option<&PathBuf>, entry: Option<String>, _migrate: bool)
                 for e in
                     walkdir::WalkDir::new(&src_dir).into_iter().filter_map(std::result::Result::ok)
                 {
-                    if is_source_file(e.path()) {
+                    if is_checkable_file(e.path()) {
                         mx_files.push(e.path().to_path_buf());
                     }
                 }
@@ -116,7 +128,7 @@ pub(crate) fn run(path: Option<&PathBuf>, entry: Option<String>, _migrate: bool)
                     .into_iter()
                     .filter_map(std::result::Result::ok)
                 {
-                    if is_source_file(e.path()) {
+                    if is_checkable_file(e.path()) {
                         mx_files.push(e.path().to_path_buf());
                     }
                 }
@@ -149,33 +161,76 @@ pub(crate) fn run(path: Option<&PathBuf>, entry: Option<String>, _migrate: bool)
         return Ok(());
     }
 
+    // ── Stylesheets imported by checked modules ride along, so one pass
+    // covers the whole project surface (remote URLs excluded — they are
+    // fetched at build time and may not exist statically).
+    // Declared up here: the follow-up below reports missing files into it.
+    let mut all_errors: Vec<LintError> = Vec::new();
+    {
+        let snapshot = mx_files.clone();
+        for f in &snapshot {
+            let is_mx = f.extension().and_then(|e| e.to_str()).is_some_and(|e| e == "mx");
+            if !is_mx {
+                continue;
+            }
+            let Ok(content) = std::fs::read_to_string(f) else { continue };
+            let filename =
+                f.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+            let Ok(src) = morph_parser::parse_mx_str(&content, &filename) else { continue };
+            let dir = f.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| cwd.clone());
+            for imp in &src.imports {
+                if let morph_parser::MxImportKind::CssLocal { path } = &imp.kind {
+                    for cand in [dir.join(path), cwd.join(path.clone())] {
+                        if cand.is_file() && !mx_files.contains(&cand) {
+                            mx_files.push(cand.clone());
+                        }
+                        if cand.is_file() {
+                            break;
+                        }
+                    }
+                }
+            }
+            all_errors.extend(morph_parser::css_lint::check_css_imports(f, &content, &cwd));
+        }
+    }
+
     // ── Lint cache (JSX errors) ──
     let cpath = cache_path(&cwd);
     let mut cache = load_cache(&cpath);
     let mut cache_dirty = false;
-    let mut all_errors: Vec<LintError> = Vec::new();
     let mut contents: HashMap<String, String> = HashMap::new();
     let mut ok_files = Vec::new();
 
     for f in &mx_files {
         let content = std::fs::read_to_string(f)?;
         // Bump when lint rules change so stale diagnostics are re-computed.
-        let hash = morph_cache::sha256_bytes(format!("v5:{content}").as_bytes());
+        let hash = morph_cache::sha256_bytes(format!("v6:{content}").as_bytes());
         let key = f.display().to_string();
         contents.insert(key.clone(), content.clone());
 
+        // Stylesheets get the CSS lint (unknown dropped properties);
+        // everything else goes through the module checker.
+        let is_css = f.extension().and_then(|e| e.to_str()).is_some_and(|e| e == "css");
         let errors = if let Some((cached_hash, cached_errors)) = cache.get(&key) {
             if cached_hash == &hash {
                 // cache hit — reuse
                 cached_errors.clone()
             } else {
-                let errs = morph_parser::linter::check(&content, &key);
+                let errs = if is_css {
+                    morph_parser::css_lint::check_css_file(&content, &key)
+                } else {
+                    morph_parser::linter::check(&content, &key)
+                };
                 cache.insert(key.clone(), (hash.clone(), errs.clone()));
                 cache_dirty = true;
                 errs
             }
         } else {
-            let errs = morph_parser::linter::check(&content, &key);
+            let errs = if is_css {
+                morph_parser::css_lint::check_css_file(&content, &key)
+            } else {
+                morph_parser::linter::check(&content, &key)
+            };
             cache.insert(key.clone(), (hash.clone(), errs.clone()));
             cache_dirty = true;
             errs

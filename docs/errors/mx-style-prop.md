@@ -2,7 +2,7 @@
 
 **Severity:** error | **Blocks `morph build`:** yes
 
-> **Status:** documented rule — `morph check` does not report this code yet. The underlying problem still breaks your build or your UI; the cause and fix below apply when you hit it.
+> **Status:** reported by `morph check`.
 
 ## What this error means
 

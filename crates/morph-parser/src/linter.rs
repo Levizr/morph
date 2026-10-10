@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::ast_types::{JsxNode, LintError, MxImportKind, MxSource};
+use crate::ast_types::{JsxNode, JsxPropValue, LintError, MxImportKind, MxSource};
 use oxc_allocator::Allocator;
 use oxc_ast::ast::*;
 use oxc_ast_visit::Visit;
@@ -820,6 +820,10 @@ pub fn lint(source: &MxSource, content: &str, file_path: &str) -> Vec<LintError>
     // ── Component usage checks (single-file) ──
     lint_component_usages(source, file_path, &mut out);
 
+    // ── Inline style objects: same registry as stylesheets, but an error
+    // (a layout that silently differs is worse than a dropped declaration).
+    lint_inline_styles(source, file_path, &mut out);
+
     // ── Scope + API checks (morphState/morphShared/morphEvent placement,
     //    morphOn/morphEmit removal) ──
     out.extend(lint_state_event_scope(source, content, file_path));
@@ -1041,6 +1045,60 @@ fn collect_component_uses(node: &JsxNode, out: &mut Vec<ComponentUse>) {
         }
         JsxNode::List { item_template, .. } => collect_component_uses(item_template, out),
         _ => {}
+    }
+}
+
+/// Inline `style={{...}}` validation: keys are already kebab-case (the
+/// walker normalizes them), so the stylesheet registry decides directly.
+/// Unlike stylesheets this is an error — see `mx-style-prop`.
+fn lint_inline_styles(source: &MxSource, file_path: &str, out: &mut Vec<LintError>) {
+    fn walk(node: &JsxNode, file_path: &str, out: &mut Vec<LintError>) {
+        match node {
+            JsxNode::Element { tag, props, children, line, col, .. } => {
+                if let Some(JsxPropValue::Style(map)) = props.get("style") {
+                    let mut keys: Vec<&String> = map.keys().collect();
+                    keys.sort();
+                    for key in keys {
+                        if !crate::css_registry::is_known_property(key) {
+                            out.push(LintError {
+                                severity: "error".into(),
+                                code: "mx-style-prop".into(),
+                                message: format!(
+                                    "Unsupported style property `{key}` on <{tag}>"
+                                ),
+                                suggestion: Some(
+                                    "See the supported CSS list — use Flexbox (`display: flex`) for layout"
+                                        .into(),
+                                ),
+                                file_path: file_path.into(),
+                                line: *line,
+                                col: *col,
+                            });
+                        }
+                    }
+                }
+                for child in children {
+                    walk(child, file_path, out);
+                }
+            }
+            JsxNode::Fragment { children, .. } => {
+                for child in children {
+                    walk(child, file_path, out);
+                }
+            }
+            JsxNode::Conditional { then_branch, else_branch, .. } => {
+                for c in then_branch.iter().chain(else_branch.iter()) {
+                    walk(c, file_path, out);
+                }
+            }
+            JsxNode::List { item_template, .. } => {
+                walk(item_template, file_path, out);
+            }
+            _ => {}
+        }
+    }
+    for comp in &source.components {
+        walk(&comp.jsx, file_path, out);
     }
 }
 
@@ -3569,5 +3627,22 @@ mod tests {
         let errs = check(content, "App.mx");
         let err = errs.iter().find(|e| e.code == "mx-prop").expect("mx-prop fires");
         assert!(err.suggestion.as_deref().unwrap().contains("style"), "{err:?}");
+    }
+
+    #[test]
+    fn inline_style_unknown_prop_is_an_error() {
+        let content = "import { morphState } from 'morph'\nexport default function App() { return (<div style={{ float: \"left\", color: \"red\" }}>x</div>) }\n";
+        let errs = check(content, "App.mx");
+        let err = errs.iter().find(|e| e.code == "mx-style-prop").expect("mx-style-prop fires");
+        assert_eq!(err.severity, "error");
+        assert!(err.message.contains("float"), "{err:?}");
+        assert!(err.message.contains("<div>"), "{err:?}");
+    }
+
+    #[test]
+    fn inline_style_known_props_are_quiet() {
+        let content = "import { morphState } from 'morph'\nexport default function App() { return (<div style={{ backgroundColor: \"red\", width: \"10px\" }}>x</div>) }\n";
+        let errs = check(content, "App.mx");
+        assert!(!codes(&errs).contains(&"mx-style-prop"), "{errs:?}");
     }
 }

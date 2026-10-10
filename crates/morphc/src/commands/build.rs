@@ -104,6 +104,22 @@ pub(crate) fn run(
     // Every module in the graph is checked (imports count as declared).
     {
         let mut lint_errors = 0;
+        let report = |err: &morph_parser::LintError, mod_path: &std::path::Path| {
+            crate::logger::log_error(&format!(
+                "{}: {}: {} ({}:{})",
+                err.code,
+                err.message,
+                mod_path.display(),
+                err.line,
+                err.col
+            ));
+            if let Some(hint) = &err.suggestion {
+                crate::logger::log_dim(&format!("  hint: {hint}"));
+            }
+            if err.code.starts_with("mx-") {
+                println!("  {}  {}", "Learn more:".dimmed(), morph_parser::docs_url(&err.code));
+            }
+        };
         for mod_path in graph.all_paths() {
             let content = match std::fs::read_to_string(mod_path) {
                 Ok(content) => content,
@@ -112,24 +128,15 @@ pub(crate) fn run(
             for err in morph_parser::linter::check(&content, &mod_path.display().to_string()) {
                 if err.severity == "error" {
                     lint_errors += 1;
-                    crate::logger::log_error(&format!(
-                        "{}: {}: {} ({}:{})",
-                        err.code,
-                        err.message,
-                        mod_path.display(),
-                        err.line,
-                        err.col
-                    ));
-                    if let Some(hint) = &err.suggestion {
-                        crate::logger::log_dim(&format!("  hint: {hint}"));
-                    }
-                    if err.code.starts_with("mx-") {
-                        println!(
-                            "  {}  {}",
-                            "Learn more:".dimmed(),
-                            morph_parser::docs_url(&err.code)
-                        );
-                    }
+                    report(&err, mod_path);
+                }
+            }
+            // Imported stylesheets must resolve too — a missing file ships
+            // the app unstyled, so it blocks here exactly like in check.
+            for err in morph_parser::css_lint::check_css_imports(mod_path, &content, &cwd) {
+                if err.severity == "error" {
+                    lint_errors += 1;
+                    report(&err, mod_path);
                 }
             }
         }

@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 pub mod builder;
-pub mod css_registry;
 pub mod gradient;
 pub mod node;
 pub mod serializer;
