@@ -193,9 +193,13 @@ public:
         float radius = m_isTransitioning ? style.scrollbarBorderRadius : snapRadius(style.scrollbarBorderRadius);
         float sbRadii[4];
         bool vBar = scrollsVertically(sh);
+        // Overlay style: the track paints only with an explicit track
+        // color (default transparent) — otherwise just the thumb floats.
+        bool showTrack = style.scrollbarTrackColor[3] > 0.01f;
         if (vBar) {
             float trackX = sx + sw - sbw;
-            r.drawRect(trackX, sy, sbw, sh, style.scrollbarTrackColor);
+            if (showTrack)
+                r.drawRect(trackX, sy, sbw, sh, style.scrollbarTrackColor);
             float tp, ts;
             vScrollThumb(sh, &tp, &ts);
             float thumbH = sc(ts);
@@ -211,7 +215,8 @@ public:
         if (scrollsHorizontally(sw)) {
             float trackW = sw - (vBar ? sbw : 0.0f);
             float trackY = sy + sh - sbw;
-            r.drawRect(sx, trackY, trackW, sbw, style.scrollbarTrackColor);
+            if (showTrack)
+                r.drawRect(sx, trackY, trackW, sbw, style.scrollbarTrackColor);
             float tp, ts;
             hScrollThumb(trackW, &tp, &ts);
             float thumbW = sc(ts);

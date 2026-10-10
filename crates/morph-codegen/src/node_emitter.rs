@@ -1624,7 +1624,7 @@ fn set_style(
         if s.scrollbar_width != 8.0 {
             lines.push(format!("{ind}.scrollbarWidth = {};", fmt(s.scrollbar_width)));
         }
-        if s.scrollbar_track_color != [0.85, 0.85, 0.85, 0.4] {
+        if s.scrollbar_track_color != [0.85, 0.85, 0.85, 0.0] {
             lines.push(format!(
                 "{ind}.scrollbarTrackColor[0] = {:.4}f;",
                 s.scrollbar_track_color[0]
@@ -2502,7 +2502,7 @@ pub(crate) fn css_field_reset(node_var: &str, field_name: &str, indent: &str) ->
                 .collect()
         }
         "scrollbarTrackColor" => {
-            vec!["[0] = 0.8500f;", "[1] = 0.8500f;", "[2] = 0.8500f;", "[3] = 0.4000f;"]
+            vec!["[0] = 0.8500f;", "[1] = 0.8500f;", "[2] = 0.8500f;", "[3] = 0.0000f;"]
                 .into_iter()
                 .map(|s| format!("{indent}        {prefix}{s}"))
                 .collect()

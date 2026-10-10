@@ -181,7 +181,7 @@ impl IRStyle {
             flex_basis: "auto".to_string(),
             flex_wrap: "nowrap".to_string(),
             scrollbar_width: 8.0,
-            scrollbar_track_color: [0.85, 0.85, 0.85, 0.4],
+            scrollbar_track_color: [0.85, 0.85, 0.85, 0.0],
             scrollbar_thumb_color: [0.5, 0.5, 0.5, 0.6],
             scrollbar_border_radius: 4.0,
             ..Default::default()

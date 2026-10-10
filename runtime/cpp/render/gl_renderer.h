@@ -409,7 +409,9 @@ public:
 #endif
     }
 
-#ifdef MORPH_FEATURE_RADIUS
+    // Always compiled: a renderer primitive, not a CSS feature. The
+    // RADIUS feature gates radius *styling*; scrollbar thumbs and other
+    // chrome always need rounded rects regardless of page content.
     void drawRoundedRect(float x, float y, float w, float h,
                           const float radii[4], float color[4]) override
     {
@@ -421,7 +423,6 @@ public:
         applyModel(m_batch.back());
 #endif
     }
-#endif
 
     void drawBorderedRect(float x, float y, float w, float h,
                           float color[4], float borderWidth,

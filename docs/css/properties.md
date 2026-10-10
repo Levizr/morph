@@ -145,10 +145,12 @@ Ideas and edge cases welcome at [suggestions.morph@levizr.com](mailto:suggestion
 
 ## Scrollbar
 
+Minimal overlay style like modern browsers: no track background by default, just a slim rounded thumb floating over content. Set `scrollbar-track-color` to bring back a classic track.
+
 | Property | Values | Default |
 |---|---|---|
 | `scrollbar-width` | px | `8` |
-| `scrollbar-track-color` | hex, rgb | semi-transparent gray |
+| `scrollbar-track-color` | hex, rgb | transparent (track paints only when set) |
 | `scrollbar-thumb-color` | hex, rgb | semi-transparent gray |
 | `scrollbar-border-radius` | px | `4` |
 

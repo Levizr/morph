@@ -26,7 +26,7 @@ impl FeatureSet {
             self.features.insert("scroll".into());
         }
         if s.scrollbar_width != 8.0
-            || s.scrollbar_track_color != [0.85, 0.85, 0.85, 0.4]
+            || s.scrollbar_track_color != [0.85, 0.85, 0.85, 0.0]
             || s.scrollbar_thumb_color != [0.5, 0.5, 0.5, 0.6]
             || s.scrollbar_border_radius != 4.0
         {
@@ -144,6 +144,7 @@ impl FeatureSet {
             | "border-image"
             | "border-image-slice" => vec!["border"],
             "scrollbar-width"
+            | "scrollbar-color"
             | "scrollbar-track-color"
             | "scrollbar-thumb-color"
             | "scrollbar-border-radius" => vec!["scroll"],

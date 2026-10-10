@@ -251,7 +251,7 @@ int MorphNode::flattenImpl(RenderFrame& frame, int parentId, float scrollOffset,
     fn.scrollXEnabled = scrollXEnabled;
     fn.scrollYEnabled = scrollYEnabled;
     fn.scrollbarWidth = 8.0f;
-    { float c[4] = {0.85f,0.85f,0.85f,0.4f}; memcpy(fn.scrollbarTrackColor, c, sizeof(float)*4); }
+    { float c[4] = {0.85f,0.85f,0.85f,0.0f}; memcpy(fn.scrollbarTrackColor, c, sizeof(float)*4); }
     { float c[4] = {0.5f,0.5f,0.5f,0.6f}; memcpy(fn.scrollbarThumbColor, c, sizeof(float)*4); }
     fn.scrollbarBorderRadius = 4.0f;
 #ifdef MORPH_FEATURE_SCROLL

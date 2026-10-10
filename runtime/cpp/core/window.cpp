@@ -1048,10 +1048,15 @@ void MorphWindow::drawScrollbar(GLRenderer &r, const FlatRenderNode &node,
     float sbRadii[4];
     bool vBar = node.scrollYEnabled && node.contentH > sh;
     bool hBar = node.scrollXEnabled && node.contentW > sw;
+    // Overlay style like modern browsers: the track paints only when the
+    // user set a track color (default is fully transparent) — otherwise
+    // just the thumb floats over content.
+    bool showTrack = node.scrollbarTrackColor[3] > 0.01f;
     if (vBar)
     {
         float trackX = sx + sw - sbw;
-        r.drawRect(trackX, sy, sbw, sh, (float *)node.scrollbarTrackColor);
+        if (showTrack)
+            r.drawRect(trackX, sy, sbw, sh, (float *)node.scrollbarTrackColor);
         float thumbH = (node.contentH > 0.0f) ? (sh / node.contentH) * sh : sh;
         if (thumbH > sh) thumbH = sh;
         float thumbY = sy;
@@ -1075,7 +1080,8 @@ void MorphWindow::drawScrollbar(GLRenderer &r, const FlatRenderNode &node,
         // track stops short of it, like browsers.
         float trackW = sw - (vBar ? sbw : 0.0f);
         float trackY = sy + sh - sbw;
-        r.drawRect(sx, trackY, trackW, sbw, (float *)node.scrollbarTrackColor);
+        if (showTrack)
+            r.drawRect(sx, trackY, trackW, sbw, (float *)node.scrollbarTrackColor);
         float thumbW = (node.contentW > 0.0f) ? (trackW / node.contentW) * trackW : trackW;
         if (thumbW > trackW) thumbW = trackW;
         float thumbX = sx;
