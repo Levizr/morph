@@ -7,6 +7,7 @@ use oxc_ast_visit::Visit;
 use oxc_parser::Parser;
 use oxc_semantic::SemanticBuilder;
 use oxc_span::{GetSpan, LabeledSpan};
+use oxc_syntax::scope::ScopeFlags;
 
 #[allow(dead_code)]
 fn offset_to_line_col(source: &str, offset: u32) -> (usize, usize) {
@@ -446,6 +447,485 @@ fn check_js_members(program: &Program, file_path: &str, offsets: &[usize]) -> Ve
     out
 }
 
+/// `mx-js-op`: operators the C++ translator cannot emit. Each one below
+/// was verified to produce uncompilable C++ (comment stubs like `/* pow */`
+/// or verbatim `typeof`/`delete`). `in` lowers to `js_has_property` and
+/// stays allowed; `instanceof` has no valid right-hand side today (builtin
+/// ctors don't exist, user classes aren't `JsValue`s) so it is denied too.
+fn check_js_operators(program: &Program, file_path: &str, offsets: &[usize]) -> Vec<LintError> {
+    struct Visitor<'a> {
+        // (span start, operator text, hint)
+        out: Vec<(u32, &'a str, &'static str)>,
+    }
+    impl<'a> Visit<'a> for Visitor<'a> {
+        fn visit_binary_expression(&mut self, e: &BinaryExpression<'a>) {
+            let denied = match e.operator {
+                BinaryOperator::Exponential => Some(("**", "Use repeated multiplication (`a * a`) or a `.cpp` helper")),
+                BinaryOperator::ShiftRightZeroFill => {
+                    Some((">>>", "Use `>>` for non-negative values, or a `.cpp` helper"))
+                }
+                BinaryOperator::Instanceof => Some((
+                    "instanceof",
+                    "Morph has no runtime type hierarchy — compare against a discriminant field instead",
+                )),
+                _ => None,
+            };
+            if let Some((op, hint)) = denied {
+                self.out.push((e.span.start, op, hint));
+            }
+            oxc_ast_visit::walk::walk_binary_expression(self, e);
+        }
+        fn visit_assignment_expression(&mut self, e: &AssignmentExpression<'a>) {
+            let denied = match e.operator {
+                AssignmentOperator::Exponential => {
+                    Some(("**=", "Use `x = x * x` or a `.cpp` helper"))
+                }
+                AssignmentOperator::ShiftRightZeroFill => Some((
+                    ">>>=",
+                    "Unsigned shift-assign has no counterpart — use `>>=` for non-negative values",
+                )),
+                AssignmentOperator::LogicalAnd => Some(("&&=", "Use `x = x && y`")),
+                AssignmentOperator::LogicalOr => Some(("||=", "Use `x = x || y`")),
+                AssignmentOperator::LogicalNullish => Some(("??=", "Use `x = x ?? y`")),
+                _ => None,
+            };
+            if let Some((op, hint)) = denied {
+                self.out.push((e.span.start, op, hint));
+            }
+            oxc_ast_visit::walk::walk_assignment_expression(self, e);
+        }
+        fn visit_unary_expression(&mut self, e: &UnaryExpression<'a>) {
+            let denied = match e.operator {
+                UnaryOperator::Typeof => Some((
+                    "typeof",
+                    "Morph is statically typed — branch on the declared type instead",
+                )),
+                UnaryOperator::Void => {
+                    Some(("void", "Drop `void` — the bare expression evaluates the same"))
+                }
+                UnaryOperator::Delete => {
+                    Some(("delete", "Assign `undefined` instead of deleting the property"))
+                }
+                _ => None,
+            };
+            if let Some((op, hint)) = denied {
+                self.out.push((e.span.start, op, hint));
+            }
+            oxc_ast_visit::walk::walk_unary_expression(self, e);
+        }
+    }
+    let mut visitor = Visitor { out: Vec::new() };
+    visitor.visit_program(program);
+    visitor
+        .out
+        .iter()
+        .map(|(start, op, hint)| {
+            let (line, col) = offset_to_line_col_fast(offsets, *start);
+            LintError {
+                severity: "error".into(),
+                code: "mx-js-op".into(),
+                message: format!("Operator `{op}` cannot be emitted to C++"),
+                suggestion: Some((*hint).into()),
+                file_path: file_path.into(),
+                line,
+                col,
+            }
+        })
+        .collect()
+}
+
+/// `mx-js-syntax`: syntax constructs the translator cannot handle. Every
+/// entry below was verified to produce uncompilable C++ or silently
+/// dropped code (see the translator probes, not the stale coverage doc:
+/// `?.`, destructuring, for-of/in, spreads in *arrays* and getters all
+/// lower correctly and stay allowed).
+struct JsSyntaxVisitor {
+    // (span start, construct text, hint)
+    out: Vec<(u32, &'static str, &'static str)>,
+}
+impl<'a> Visit<'a> for JsSyntaxVisitor {
+    fn visit_expression(&mut self, e: &Expression<'a>) {
+        match e {
+            Expression::YieldExpression(y) => {
+                self.out.push((
+                    y.span.start,
+                    "`yield`",
+                    "Use an explicit state machine or an array you index through",
+                ));
+            }
+            Expression::ImportMeta(m) => {
+                self.out.push((
+                    m.span.start,
+                    "`import.meta`",
+                    "Pass build-time values in through imports or constants",
+                ));
+            }
+            _ => {}
+        }
+        oxc_ast_visit::walk::walk_expression(self, e);
+    }
+    fn visit_function(&mut self, f: &Function<'a>, flags: ScopeFlags) {
+        if f.generator {
+            self.out.push((
+                f.span.start,
+                "generator function",
+                "Use an explicit state machine or an array you index through",
+            ));
+            return;
+        }
+        oxc_ast_visit::walk::walk_function(self, f, flags);
+    }
+    fn visit_with_statement(&mut self, e: &WithStatement<'a>) {
+        self.out.push((
+            e.span.start,
+            "`with` statement",
+            "Name the object explicitly instead of opening its scope",
+        ));
+    }
+    fn visit_break_statement(&mut self, e: &BreakStatement<'a>) {
+        if e.label.is_some() {
+            self.out.push((
+                e.span.start,
+                "labeled `break`",
+                "Restructure with a flag variable or an early return",
+            ));
+        }
+    }
+    fn visit_continue_statement(&mut self, e: &ContinueStatement<'a>) {
+        if e.label.is_some() {
+            self.out.push((
+                e.span.start,
+                "labeled `continue`",
+                "Restructure with a flag variable or filter the loop input",
+            ));
+        }
+    }
+    fn visit_object_expression(&mut self, e: &ObjectExpression<'a>) {
+        for prop in &e.properties {
+            if let ObjectPropertyKind::SpreadProperty(sp) = prop {
+                self.out.push((
+                    sp.span.start,
+                    "object spread",
+                    "Copy the fields explicitly — spread data is dropped",
+                ));
+            }
+        }
+        oxc_ast_visit::walk::walk_object_expression(self, e);
+    }
+    fn visit_import_expression(&mut self, e: &ImportExpression<'a>) {
+        self.out.push((
+            e.span.start,
+            "dynamic `import()`",
+            "Import statically at the top of the file instead",
+        ));
+        oxc_ast_visit::walk::walk_import_expression(self, e);
+    }
+    fn visit_decorator(&mut self, e: &Decorator<'a>) {
+        self.out.push((
+            e.span.start,
+            "decorator",
+            "Inline the decorator's effect — decorators are dropped",
+        ));
+    }
+    fn visit_declaration(&mut self, d: &Declaration<'a>) {
+        if let Declaration::TSNamespaceDeclaration(n) = d {
+            self.out.push((
+                n.span.start,
+                "`namespace` block",
+                "Export plain functions and constants instead",
+            ));
+            return;
+        }
+        oxc_ast_visit::walk::walk_declaration(self, d);
+    }
+}
+
+fn check_js_syntax(program: &Program, file_path: &str, offsets: &[usize]) -> Vec<LintError> {
+    let mut st = JsSyntaxVisitor { out: Vec::new() };
+    st.visit_program(program);
+    st.out
+        .iter()
+        .map(|(start, what, hint)| {
+            let (line, col) = offset_to_line_col_fast(offsets, *start);
+            LintError {
+                severity: "error".into(),
+                code: "mx-js-syntax".into(),
+                message: format!("{what} cannot be translated to C++"),
+                suggestion: Some((*hint).into()),
+                file_path: file_path.into(),
+                line,
+                col,
+            }
+        })
+        .collect()
+}
+/// Receiver kinds the method rule can prove: literals, and state
+/// bindings whose type argument or initializer pins them down.
+/// Anything else (params, call results, reassigned bindings) stays
+/// quiet — an unprovable receiver is never an error.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RecvKind {
+    Str,
+    Arr,
+    Obj,
+    Num,
+    Bool,
+}
+
+/// Supported methods per receiver kind, mirroring the translator:
+/// string helpers (`StringMethod`), `JsArray::{push,pop}`,
+/// `JsObject::{has,keys,get}`, numbers/booleans (`toString`).
+const fn supported_methods(kind: RecvKind) -> &'static [&'static str] {
+    match kind {
+        RecvKind::Str => &[
+            "toUpperCase",
+            "toLowerCase",
+            "charAt",
+            "indexOf",
+            "lastIndexOf",
+            "substring",
+            "substr",
+            "slice",
+            "trim",
+            "trimStart",
+            "trimEnd",
+            "replace",
+            "replaceAll",
+            "split",
+            "match",
+            "matchAll",
+            "search",
+            "padStart",
+            "padEnd",
+            "repeat",
+            "startsWith",
+            "endsWith",
+            "includes",
+            "localeCompare",
+            "normalize",
+            "toLocaleUpperCase",
+            "toLocaleLowerCase",
+            "toString",
+        ],
+        RecvKind::Arr => &["push", "pop"],
+        RecvKind::Obj => &["has", "keys", "get"],
+        RecvKind::Num | RecvKind::Bool => &["toString"],
+    }
+}
+
+const fn recv_kind_name(kind: RecvKind) -> &'static str {
+    match kind {
+        RecvKind::Str => "strings",
+        RecvKind::Arr => "arrays",
+        RecvKind::Obj => "objects",
+        RecvKind::Num => "numbers",
+        RecvKind::Bool => "booleans",
+    }
+}
+
+fn sniff_state_kind(type_arg: Option<&str>, init: &str) -> Option<RecvKind> {
+    if let Some(t) = type_arg.map(str::trim) {
+        match t {
+            "string" | "String" => return Some(RecvKind::Str),
+            "number" | "Number" => return Some(RecvKind::Num),
+            "boolean" | "Boolean" => return Some(RecvKind::Bool),
+            _ => {}
+        }
+        if t.starts_with("Array") || t.ends_with("[]") {
+            return Some(RecvKind::Arr);
+        }
+        if t.starts_with('{') || t == "object" || t == "Object" {
+            return Some(RecvKind::Obj);
+        }
+        return None;
+    }
+    let init = init.trim();
+    if init.starts_with('"') || init.starts_with('\'') || init.starts_with('`') {
+        Some(RecvKind::Str)
+    } else if init.starts_with('[') {
+        Some(RecvKind::Arr)
+    } else if init.starts_with('{') {
+        Some(RecvKind::Obj)
+    } else if init == "true" || init == "false" {
+        Some(RecvKind::Bool)
+    } else if init.parse::<f64>().is_ok() {
+        Some(RecvKind::Num)
+    } else {
+        None
+    }
+}
+
+/// `mx-js-method`: method calls on provably-typed receivers where the
+/// runtime type has no such method. Anything unprovable stays quiet;
+/// anything supported stays quiet; the rest names the exact method.
+fn check_js_method_calls(
+    program: &Program,
+    content: &str,
+    file_path: &str,
+    offsets: &[usize],
+) -> Vec<LintError> {
+    fn recv_of<'a>(
+        expr: &'a Expression<'a>,
+        states: &HashMap<String, RecvKind>,
+    ) -> Option<RecvKind> {
+        match expr {
+            Expression::StringLiteral(_) | Expression::TemplateLiteral(_) => Some(RecvKind::Str),
+            Expression::ArrayExpression(_) => Some(RecvKind::Arr),
+            Expression::ObjectExpression(_) => Some(RecvKind::Obj),
+            Expression::NumericLiteral(_) | Expression::BigIntLiteral(_) => Some(RecvKind::Num),
+            Expression::BooleanLiteral(_) => Some(RecvKind::Bool),
+            Expression::Identifier(id) => states.get(id.name.as_str()).copied(),
+            Expression::TSAsExpression(a) => recv_of(&a.expression, states),
+            Expression::TSNonNullExpression(n) => recv_of(&n.expression, states),
+            Expression::ParenthesizedExpression(p) => recv_of(&p.expression, states),
+            _ => None,
+        }
+    }
+    struct Visitor<'a> {
+        states: &'a HashMap<String, RecvKind>,
+        out: Vec<(u32, u32, String, String)>,
+    }
+    impl<'a> Visit<'a> for Visitor<'a> {
+        fn visit_call_expression(&mut self, e: &CallExpression<'a>) {
+            if let Some(me) = e.callee.as_member_expression() {
+                let (root, prop) = match me {
+                    MemberExpression::StaticMemberExpression(s) => (
+                        recv_of(&s.object, self.states),
+                        Some(s.property.name.as_str().to_string()),
+                    ),
+                    MemberExpression::ComputedMemberExpression(c) => (
+                        recv_of(&c.object, self.states),
+                        match &c.expression {
+                            Expression::StringLiteral(s) => Some(s.value.to_string()),
+                            _ => None,
+                        },
+                    ),
+                    MemberExpression::PrivateFieldExpression(_) => (None, None),
+                };
+                if let (Some(kind), Some(method)) = (root, prop) {
+                    if !supported_methods(kind).contains(&method.as_str()) {
+                        self.out.push((
+                            me.span().start,
+                            me.span().end,
+                            method,
+                            recv_kind_name(kind).to_string(),
+                        ));
+                    }
+                }
+            }
+            oxc_ast_visit::walk::walk_call_expression(self, e);
+        }
+        fn visit_chain_expression(&mut self, e: &ChainExpression<'a>) {
+            if let ChainElement::CallExpression(call) = &e.expression {
+                if let Some(me) = call.callee.as_member_expression() {
+                    let root = match me {
+                        MemberExpression::StaticMemberExpression(s) => {
+                            recv_of(&s.object, self.states)
+                        }
+                        MemberExpression::ComputedMemberExpression(c) => {
+                            recv_of(&c.object, self.states)
+                        }
+                        MemberExpression::PrivateFieldExpression(_) => None,
+                    };
+                    if let (Some(kind), Some(method)) = (root, member_prop_label(me)) {
+                        if !supported_methods(kind).contains(&method.as_str()) {
+                            self.out.push((
+                                me.span().start,
+                                me.span().end,
+                                method,
+                                recv_kind_name(kind).to_string(),
+                            ));
+                        }
+                    }
+                }
+            }
+            oxc_ast_visit::walk::walk_chain_expression(self, e);
+        }
+    }
+    let states = collect_state_kinds(program, content);
+    let mut visitor = Visitor { states: &states, out: Vec::new() };
+    visitor.visit_program(program);
+    let mut out = Vec::new();
+    for (start, _end, method, kind) in &visitor.out {
+        let (line, col) = offset_to_line_col_fast(offsets, *start);
+        let suggestion = if method == "length" {
+            "Did you mean the `length` property (no call)?".to_string()
+        } else {
+            "Check the runtime type docs for supported methods, or use a `.cpp` helper".to_string()
+        };
+        out.push(LintError {
+            severity: "error".into(),
+            code: "mx-js-method".into(),
+            message: format!("Method `.{method}()` is not implemented for {kind}"),
+            suggestion: Some(suggestion),
+            file_path: file_path.into(),
+            line,
+            col,
+        });
+    }
+    out
+}
+
+/// State bindings pinned to receiver kinds, collected check-locally:
+/// `const [v, setV] = morphState("ada")`, single-element patterns and
+/// nested positions all count. The IR walker's `state_vars` only covers
+/// top-level pairs (codegen relies on that shape), so the checker reads
+/// call sites itself instead of widening walker output.
+fn collect_state_kinds(program: &Program, content: &str) -> HashMap<String, RecvKind> {
+    fn span_text<'s>(content: &'s str, start: u32, end: u32) -> &'s str {
+        content.get(start as usize..end as usize).unwrap_or("")
+    }
+    fn first_binding_ident(pat: &BindingPattern) -> Option<String> {
+        match pat {
+            BindingPattern::BindingIdentifier(id) => Some(id.name.to_string()),
+            BindingPattern::ArrayPattern(a) => {
+                for e in a.elements.iter().flatten() {
+                    if let Some(name) = first_binding_ident(e) {
+                        return Some(name);
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+    struct Collector<'s> {
+        content: &'s str,
+        out: HashMap<String, RecvKind>,
+    }
+    impl<'a> Visit<'a> for Collector<'_> {
+        fn visit_variable_declarator(&mut self, d: &VariableDeclarator<'a>) {
+            if let Some(Expression::CallExpression(call)) = &d.init {
+                if let Expression::Identifier(id) = &call.callee {
+                    let name = id.name.as_str();
+                    if name == "morphState" || name == "morphShared" {
+                        let type_arg = call
+                            .type_arguments
+                            .as_ref()
+                            .and_then(|t| t.params.first())
+                            .map(|p| span_text(self.content, p.span().start, p.span().end));
+                        let init = call
+                            .arguments
+                            .first()
+                            .and_then(|a| a.as_expression())
+                            .map(|e| span_text(self.content, e.span().start, e.span().end))
+                            .unwrap_or("");
+                        if let (Some(getter), Some(kind)) =
+                            (first_binding_ident(&d.id), sniff_state_kind(type_arg, init))
+                        {
+                            self.out.insert(getter, kind);
+                        }
+                    }
+                }
+            }
+            oxc_ast_visit::walk::walk_variable_declarator(self, d);
+        }
+    }
+    let mut collector = Collector { content, out: HashMap::new() };
+    collector.visit_program(program);
+    collector.out
+}
+
 /// `mx-js-global`: browser-only globals with no native counterpart.
 /// Resolved from real scope references (not substring matching), so string
 /// contents, comments, JSX text and user properties (`x.document`) stay
@@ -561,6 +1041,12 @@ pub fn check(source: &str, file_path: &str) -> Vec<LintError> {
         errors.extend(check_js_members(&ret.program, file_path, &offsets));
         // Browser-only globals, detected from scope references.
         errors.extend(check_js_globals(&ret.program, file_path, &offsets));
+        // Unemittable operators (`**`, `typeof`, `delete`, ...).
+        errors.extend(check_js_operators(&ret.program, file_path, &offsets));
+        // Unhandleable syntax (generators, `with`, object spread, ...).
+        errors.extend(check_js_syntax(&ret.program, file_path, &offsets));
+        // Unimplemented methods on provably-typed receivers.
+        errors.extend(check_js_method_calls(&ret.program, source, file_path, &offsets));
     }
 
     // Walk program to build MxSource for semantic lints (even with parse errors, program is partial)
@@ -3614,6 +4100,76 @@ mod tests {
     }
 
     #[test]
+    fn unemittable_operators_error_with_fixes() {
+        let cases = [
+            ("a ** 2", "**", "repeated multiplication"),
+            ("a >>> 1", ">>>", "non-negative"),
+            ("typeof a", "typeof", "statically typed"),
+            ("void a", "void", "Drop `void`"),
+            ("delete a.x", "delete", "undefined"),
+            ("a instanceof B", "instanceof", "discriminant"),
+            ("n **= 2", "**=", "x * x"),
+            ("n >>>= 1", ">>>=", "non-negative"),
+            ("n &&= 2", "&&=", "x && y"),
+            ("n ||= 2", "||=", "x || y"),
+            ("n ??= 2", "??=", "x ?? y"),
+        ];
+        for (expr, op, hint) in cases {
+            let content = format!(
+                "import {{ morphState }} from 'morph'\nconst a = 1; let n = 1; const B = 1; const v = {expr};\nexport default function App() {{ return (<div>{{v}}</div>) }}\n"
+            );
+            let errs = check(&content, "App.mx");
+            let err = errs
+                .iter()
+                .find(|e| e.code == "mx-js-op")
+                .unwrap_or_else(|| panic!("{expr} fires mx-js-op, got {errs:?}"));
+            assert_eq!(err.severity, "error");
+            assert!(err.message.contains(&format!("Operator `{op}`")), "{err:?}");
+            assert!(err.suggestion.as_deref().unwrap().contains(hint), "{err:?}");
+        }
+    }
+
+    #[test]
+    fn emittable_operators_stay_quiet() {
+        let content = "import { morphState } from 'morph'\nconst a = {}; let n = 1; n += 1; n >>= 1; n |= 1;\nconst k = \"x\" in a;\nexport default function App() { return (<div>{k}</div>) }\n";
+        let errs = check(content, "App.mx");
+        assert!(!codes(&errs).contains(&"mx-js-op"), "{errs:?}");
+    }
+
+    #[test]
+    fn untranslatable_syntax_errors_with_fixes() {
+        let cases = [
+            ("function* gen() { yield 1; }", "generator function", "state machine"),
+            ("with (x) { y = 1; }", "`with` statement", "explicitly"),
+            ("top: { break top; }", "labeled `break`", "early return"),
+            ("const m = import.meta.url;", "`import.meta`", "imports or constants"),
+            ("const m = import(\"./x.ts\");", "dynamic `import()`", "statically"),
+            ("const o = { ...x, z: 1 };", "object spread", "explicitly"),
+            ("namespace N { export const x = 1; }", "`namespace` block", "plain functions"),
+        ];
+        for (stmt, what, hint) in cases {
+            let content = format!(
+                "import {{ morphState }} from 'morph'\nconst x = {{}};\n{stmt}\nexport default function App() {{ return (<div>x</div>) }}\n"
+            );
+            let errs = check(&content, "App.mx");
+            let err = errs
+                .iter()
+                .find(|e| e.code == "mx-js-syntax")
+                .unwrap_or_else(|| panic!("{stmt} fires mx-js-syntax, got {errs:?}"));
+            assert_eq!(err.severity, "error");
+            assert!(err.message.contains(what), "{err:?}");
+            assert!(err.suggestion.as_deref().unwrap().contains(hint), "{err:?}");
+        }
+    }
+
+    #[test]
+    fn translatable_syntax_stays_quiet() {
+        let content = "import { morphState } from 'morph'\nclass A { greet(): any { return 1; } }\nclass B extends A { m(): any { return super.greet(); } }\nexport default function App() {\n  const u = { name: \"x\" };\n  const [a, b] = [1, 2];\n  const arr = [...[1]];\n  for (let i = 0; i < 2; i++) { if (i) { break; } }\n  return (<div>{u?.name}{a}{b}{arr.length}</div>)\n}\n";
+        let errs = check(content, "App.mx");
+        assert!(!codes(&errs).contains(&"mx-js-syntax"), "{errs:?}");
+    }
+
+    #[test]
     fn unknown_component_has_no_duplicate_undefined() {
         let content = "import { morphState } from 'morph'\nexport default function App() { return (<Frob>x</Frob>) }\n";
         let errs = check(content, "App.mx");
@@ -3644,5 +4200,46 @@ mod tests {
         let content = "import { morphState } from 'morph'\nexport default function App() { return (<div style={{ backgroundColor: \"red\", width: \"10px\" }}>x</div>) }\n";
         let errs = check(content, "App.mx");
         assert!(!codes(&errs).contains(&"mx-style-prop"), "{errs:?}");
+    }
+
+    #[test]
+    fn unimplemented_methods_error_with_receiver() {
+        let cases = [
+            (
+                "const [name] = morphState(\"ada\");\n  const v = name.toFancyCase();",
+                "toFancyCase",
+                "strings",
+            ),
+            (
+                "const [items] = morphState([1, 2]);\n  const v = items.map(x => x);",
+                "map",
+                "arrays",
+            ),
+            ("const [n] = morphState<number>(0);\n  const v = n.toFixed(2);", "toFixed", "numbers"),
+            ("const v = \"abc\".length();", "length", "strings"),
+        ];
+        for (body, method, kind) in cases {
+            let content = format!(
+                "import {{ morphState }} from 'morph'\nexport default function App() {{\n  {body}\n  return (<div>{{v}}</div>)\n}}\n"
+            );
+            let errs = check(&content, "App.mx");
+            let err = errs
+                .iter()
+                .find(|e| e.code == "mx-js-method")
+                .unwrap_or_else(|| panic!(".{method} fires mx-js-method, got {errs:?}"));
+            assert_eq!(err.severity, "error");
+            assert!(err.message.contains(&format!(".{method}()")), "{err:?}");
+            assert!(err.message.contains(kind), "{err:?}");
+        }
+    }
+
+    #[test]
+    fn implemented_methods_and_unknown_receivers_stay_quiet() {
+        let content = "import { morphState } from 'morph'\nexport default function App() {\n  const [name] = morphState(\"ada\");\n  const [items] = morphState([1, 2]);\n  items.push(3);\n  const v = name.toUpperCase();\n  return (<div>{v}{items.length}</div>)\n}\n";
+        let errs = check(content, "App.mx");
+        assert!(!codes(&errs).contains(&"mx-js-method"), "{errs:?}");
+        let unknown = "import { morphState } from 'morph'\nexport default function App({ data }: any) {\n  const v = data.anything.deeper();\n  return (<div>{v}</div>)\n}\n";
+        let errs = check(unknown, "App.mx");
+        assert!(!codes(&errs).contains(&"mx-js-method"), "{errs:?}");
     }
 }

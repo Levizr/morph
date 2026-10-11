@@ -1503,6 +1503,7 @@ dependencies = [
  "oxc_parser",
  "oxc_semantic",
  "oxc_span 0.147.0",
+ "oxc_syntax 0.147.0",
  "serde",
  "serde_json",
  "strsim",

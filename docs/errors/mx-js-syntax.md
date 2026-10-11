@@ -2,30 +2,35 @@
 
 **Severity:** error | **Blocks `morph build`:** yes
 
-> **Status:** documented rule — `morph check` does not report this code yet. The underlying problem still breaks your build or your UI; the cause and fix below apply when you hit it.
+> **Status:** reported by `morph check`. Only probe-verified breakage is
+> rejected — `?.`, destructuring, `for...in/of`, array spread and getters
+> lower correctly and stay allowed.
 
 ## What this error means
 
-Your code uses a syntax construct the translator cannot handle: `?.`
-(optional chaining), destructuring (outside the `morphState` pair pattern),
-generators / `yield`, `for...in` / `for...of`, object spread, spread in call
-arguments, or object methods/getters:
+Your code uses a syntax construct the translator cannot handle:
+generators / `yield`, the `with` statement, labeled `break`/`continue`,
+`import.meta`, dynamic `import()`, object spread, `namespace` blocks, or
+decorators:
 
 ```
-error : mx-js-syntax : `?.` optional chaining cannot be translated — use an explicit check
-  hint: Write `user ? user.name : ""` instead of `user?.name`
+error : mx-js-syntax : generator function cannot be translated to C++
+  hint: Use an explicit state machine or an array you index through
   Learn more: https://morph.levizr.com/docs/errors/mx-js-syntax
 ```
 
+Stays allowed because it lowers correctly: `?.` / `??`, destructuring,
+`for...in` / `for...of`, array spread, `super`, getters/setters, enums.
+
 ## Why Morph raises it
 
-Each of these constructs needs hidden runtime machinery Morph omits on
-purpose: `?.` needs short-circuit control flow the expression emitter does not
-build; destructuring needs binding analysis beyond the state-pair pattern;
-generators need resumable frames; `for...in/of` need iterators with JS
-enumeration semantics; spreads need reflective copies; getters need hidden
-call sites. Supporting any of them approximately would change program meaning
-— so each is rejected with its explicit rewrite. See
+Each rejected construct needs hidden runtime machinery Morph omits on
+purpose: generators need resumable frames; `with` needs dynamic scope;
+labeled jumps have no C++ equivalent; `import.meta` / dynamic `import()`
+need a module loader; object spread needs reflective copies; namespaces
+and decorators vanish in translation. Supporting any of them approximately
+would change program meaning — so each is rejected with its explicit
+rewrite. See
 [translator coverage](../future/javascript/coverage.md) for what is planned.
 
 ## Examples that trigger it
@@ -48,11 +53,12 @@ export default function App() {
 ```
 
 ```tsx
-// ❌ for...of — mx-js-syntax
+// ❌ Labeled break — mx-js-syntax
 export default function App() {
   let total = 0;
-  for (const n of [1, 2, 3]) {
-    total += n;
+  top: {
+    total = 1;
+    break top;
   }
   return <div>{total}</div>;
 }
@@ -62,32 +68,20 @@ export default function App() {
 
 | Instead of | Write |
 |---|---|
-| `a?.b` / `a?.()` | `a ? a.b : fallback` |
-| `const {x} = obj` | `const x = obj.x` |
 | `{...o, k: v}` | explicit object literal |
-| `f(...args)` | pass arguments explicitly |
-| `for...in` / `for...of` | indexed `for` / `.map()` rendering |
 | generator / `yield` | state machine with `morphState` |
-| object method/getter | plain function property or helper |
+| `with (o) { ... }` | explicit `o.` qualification |
+| labeled `break`/`continue` | flag variable or early return |
+| `import.meta` / `import()` | static imports and constants |
+| `namespace N { ... }` | exported functions and constants |
+| decorators | inline the decorator's effect |
 
 ```tsx
-// ✅ Explicit checks and access
+// ✅ State machine instead of a generator
 export default function App() {
-  const user = { name: "Ada" };
-  const name = user ? user.name : "";
-  return <div>{name}</div>;
-}
-```
-
-```tsx
-// ✅ Indexed loop instead of for...of
-export default function App() {
-  const nums = [1, 2, 3];
-  let total = 0;
-  for (let i = 0; i < nums.length; i++) {
-    total += nums[i];
-  }
-  return <div>{total}</div>;
+  const [step, setStep] = morphState(0);
+  const next = step + 1;
+  return <div onClick={() => setStep(next)}>{next}</div>;
 }
 ```
 

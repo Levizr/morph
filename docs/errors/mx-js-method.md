@@ -2,18 +2,28 @@
 
 **Severity:** error | **Blocks `morph build`:** yes
 
-> **Status:** documented rule — `morph check` does not report this code yet. The underlying problem still breaks your build or your UI; the cause and fix below apply when you hit it.
+> **Status:** reported by `morph check`, but only for provably-typed
+> receivers (literals and state with a pinned type). Anything unprovable
+> stays quiet — an unprovable receiver is never an error.
 
 ## What this error means
 
-You call a method the runtime types do not implement — for example `.map()` /
-`.split()` / `.toUpperCase()` in a position or on a value kind without support:
+You call a method the runtime types do not implement, on a value whose
+type the checker can prove (a literal, or state with a type argument or
+literal initializer):
 
 ```
-error : mx-js-method : Method `.toUpperCase()` is not implemented for this value
+error : mx-js-method : Method `.map()` is not implemented for arrays
   hint: Check the runtime type docs for supported methods, or use a `.cpp` helper
   Learn more: https://morph.levizr.com/docs/errors/mx-js-method
 ```
+
+Supported today: strings (`toUpperCase`, `toLowerCase`, `charAt`,
+`indexOf`, `substring`, `slice`, `trim`, `replace`, `split`, `includes`,
+`startsWith`, `padStart`, `repeat`, `match`, … — the full translator
+table), arrays (`push`, `pop`), objects (`has`, `keys`, `get`),
+numbers/booleans (`toString`). Everything else on a proven receiver
+errors; unprovable receivers (params, call results, `any`) stay quiet.
 
 ## Why Morph raises it
 

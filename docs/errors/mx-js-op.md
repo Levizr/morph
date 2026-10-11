@@ -2,12 +2,13 @@
 
 **Severity:** error | **Blocks `morph build`:** yes
 
-> **Status:** documented rule — `morph check` does not report this code yet. The underlying problem still breaks your build or your UI; the cause and fix below apply when you hit it.
+> **Status:** reported by `morph check`. `in` lowers to a runtime helper and stays allowed; every other operator below errors.
 
 ## What this error means
 
 Your code uses an operator the C++ translator cannot emit: `typeof`, `**`,
-`instanceof`, `in`, `delete`, `??=`, `&&=`, `||=`, `>>>`, or `void`:
+`instanceof`, `delete`, `??=`, `&&=`, `||=`, `**=`, `>>>=`, `>>>`, or `void`
+(`in` lowers correctly and stays allowed):
 
 ```
 error : mx-js-op : Operator `typeof` cannot be emitted to C++
@@ -20,9 +21,10 @@ error : mx-js-op : Operator `typeof` cannot be emitted to C++
 Each operator needs a native lowering with **identical** semantics, and these
 do not have one:
 
-- `typeof`, `instanceof`, `in` need runtime type reflection Morph's
+- `typeof` and `instanceof` need runtime type reflection Morph's
   zero-overhead types deliberately omit (see
-  [intent-based codegen](../guides/intent-based-codegen.md)).
+  [intent-based codegen](../guides/intent-based-codegen.md)). `in`
+  lowers to a key check and is allowed.
 - `delete` assumes garbage-collected object graphs; Morph uses explicit
   ownership.
 - `**`, `>>>`, `??=`, `&&=`, `||=` have no single C++ token with matching
@@ -57,7 +59,6 @@ export default function App() {
 | `typeof x` | track the type explicitly (state, union flag, TS annotation) |
 | `a ** b` | repeated multiplication or a `.cpp` `pow` helper |
 | `x instanceof Y` | a discriminant field / explicit kind flag |
-| `k in obj` | explicit key check against known keys |
 | `delete obj.k` | set to a default / restructure state |
 | `??=`, `&&=`, `\|\|=` | explicit `if` assignment |
 | `>>>` | explicit unsigned arithmetic in `.cpp` |
