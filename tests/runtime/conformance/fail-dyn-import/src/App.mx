@@ -1,0 +1,10 @@
+export const windowConfig = { title: "fail-dyn-import", width: 800, height: 600 }
+
+export default function App() {
+  const m = import("./x.ts");
+  return (
+    <body>
+      <div>ok</div>
+    </body>
+  )
+}

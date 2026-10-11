@@ -1,0 +1,13 @@
+import { morphState } from 'morph'
+
+export const windowConfig = { title: "fail-destructuring", width: 800, height: 600 }
+
+export default function App() {
+  const [count, setCount] = morphState(0)
+  const [first, second] = [1, 2]
+  return (
+    <body>
+      <div>{first} {count}</div>
+    </body>
+  )
+}

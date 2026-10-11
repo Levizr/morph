@@ -1,0 +1,10 @@
+export const windowConfig = { title: "fail-str-method", width: 800, height: 600 }
+
+export default function App() {
+  const v = "abc".repeat2(2);
+  return (
+    <body>
+      <div>ok</div>
+    </body>
+  )
+}

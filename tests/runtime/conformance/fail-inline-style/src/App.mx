@@ -1,0 +1,10 @@
+export const windowConfig = { title: "fail-inline-style", width: 800, height: 600 }
+
+export default function App() {
+  const v = 1;
+  return (
+    <body>
+      <div style={{ float: "left" }}>ok</div>
+    </body>
+  )
+}

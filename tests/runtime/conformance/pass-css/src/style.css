@@ -1,0 +1,11 @@
+body { margin: 0; }
+.screen { display: flex; padding: 16px; }
+@media (min-width: 100px) {
+  a:hover { color: red; }
+  .box { color: red; }
+}
+@keyframes fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.box { color: red; animation: fade 1s; }

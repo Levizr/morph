@@ -1,0 +1,10 @@
+export const windowConfig = { title: "fail-obj-spread", width: 800, height: 600 }
+
+export default function App() {
+  const o = { ...{}, z: 1 };
+  return (
+    <body>
+      <div>ok</div>
+    </body>
+  )
+}

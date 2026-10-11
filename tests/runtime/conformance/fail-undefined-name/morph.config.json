@@ -1,0 +1,7 @@
+{
+  "name": "fail-undefined-name",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "fail-undefined-name" },
+  "dependencies": {},
+  "cpp_sources": []
+}

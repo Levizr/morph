@@ -1,0 +1,10 @@
+export const windowConfig = { title: "fail-array-map", width: 800, height: 600 }
+
+export default function App() {
+  const m = [1, 2].map((x) => x);
+  return (
+    <body>
+      <div>ok</div>
+    </body>
+  )
+}

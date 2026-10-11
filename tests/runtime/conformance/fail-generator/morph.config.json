@@ -1,0 +1,7 @@
+{
+  "name": "fail-generator",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "fail-generator" },
+  "dependencies": {},
+  "cpp_sources": []
+}

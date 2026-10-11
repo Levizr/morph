@@ -1,0 +1,7 @@
+{
+  "name": "fail-str-method",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "fail-str-method" },
+  "dependencies": {},
+  "cpp_sources": []
+}

@@ -1,0 +1,7 @@
+{
+  "name": "fail-array-map",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "fail-array-map" },
+  "dependencies": {},
+  "cpp_sources": []
+}

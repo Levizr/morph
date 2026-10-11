@@ -1,0 +1,7 @@
+{
+  "name": "fail-destructuring",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "fail-destructuring" },
+  "dependencies": {},
+  "cpp_sources": []
+}

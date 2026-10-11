@@ -1,0 +1,7 @@
+{
+  "name": "fail-with-stmt",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "fail-with-stmt" },
+  "dependencies": {},
+  "cpp_sources": []
+}

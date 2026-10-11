@@ -1,0 +1,4 @@
+body { margin: 0; background: #0b1220; color: #e2e8f0; }
+.screen { display: flex; flex-direction: column; gap: 12px; padding: 16px; }
+.panel { background: #16213a; padding: 8px; }
+.feed { background: #16213a; height: 140px; overflow-y: auto; scrollbar-width: 8px; scroll-behavior: smooth; }

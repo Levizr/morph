@@ -1,0 +1,7 @@
+{
+  "name": "fail-dyn-import",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "fail-dyn-import" },
+  "dependencies": {},
+  "cpp_sources": []
+}

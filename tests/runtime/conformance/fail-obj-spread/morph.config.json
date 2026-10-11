@@ -1,0 +1,7 @@
+{
+  "name": "fail-obj-spread",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "fail-obj-spread" },
+  "dependencies": {},
+  "cpp_sources": []
+}

@@ -1,0 +1,7 @@
+{
+  "name": "fail-math-member",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "fail-math-member" },
+  "dependencies": {},
+  "cpp_sources": []
+}

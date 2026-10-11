@@ -1,0 +1,10 @@
+export const windowConfig = { title: "fail-namespace", width: 800, height: 600 }
+
+export default function App() {
+  namespace N { export const x = 1; }
+  return (
+    <body>
+      <div>ok</div>
+    </body>
+  )
+}

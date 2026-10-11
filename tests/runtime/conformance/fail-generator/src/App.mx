@@ -1,0 +1,10 @@
+export const windowConfig = { title: "fail-generator", width: 800, height: 600 }
+
+export default function App() {
+  function* g() { yield 1; }
+  return (
+    <body>
+      <div>ok</div>
+    </body>
+  )
+}

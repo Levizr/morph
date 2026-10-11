@@ -1,0 +1,10 @@
+export const windowConfig = { title: "fail-typeof-op", width: 800, height: 600 }
+
+export default function App() {
+  const v = typeof 1;
+  return (
+    <body>
+      <div>ok</div>
+    </body>
+  )
+}

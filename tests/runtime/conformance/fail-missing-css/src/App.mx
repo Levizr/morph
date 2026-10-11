@@ -1,0 +1,13 @@
+import "./nope.css"
+import { morphState } from 'morph'
+
+export const windowConfig = { title: "fail-missing-css", width: 800, height: 600 }
+
+export default function App() {
+  const [v] = morphState(0);
+  return (
+    <body>
+      <div>ok</div>
+    </body>
+  )
+}

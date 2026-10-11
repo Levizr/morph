@@ -1,0 +1,10 @@
+export const windowConfig = { title: "fail-math-member", width: 800, height: 600 }
+
+export default function App() {
+  const v = Math.min(1, 2);
+  return (
+    <body>
+      <div>ok</div>
+    </body>
+  )
+}

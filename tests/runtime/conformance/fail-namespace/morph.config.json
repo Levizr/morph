@@ -1,0 +1,7 @@
+{
+  "name": "fail-namespace",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "fail-namespace" },
+  "dependencies": {},
+  "cpp_sources": []
+}

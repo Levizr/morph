@@ -1,0 +1,7 @@
+{
+  "name": "pass-full",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "PassFull" },
+  "dependencies": {},
+  "cpp_sources": []
+}

@@ -1,0 +1,10 @@
+export const windowConfig = { title: "fail-labeled-break", width: 800, height: 600 }
+
+export default function App() {
+  top: { break top; }
+  return (
+    <body>
+      <div>ok</div>
+    </body>
+  )
+}

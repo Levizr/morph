@@ -1,0 +1,10 @@
+export const windowConfig = { title: "fail-with-stmt", width: 800, height: 600 }
+
+export default function App() {
+  const o = {}; with (o) { blurp = 1; }
+  return (
+    <body>
+      <div>ok</div>
+    </body>
+  )
+}

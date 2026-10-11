@@ -1,0 +1,10 @@
+export const windowConfig = { title: "fail-undefined-name", width: 800, height: 600 }
+
+export default function App() {
+  const v = frobnicate(1);
+  return (
+    <body>
+      <div>ok</div>
+    </body>
+  )
+}

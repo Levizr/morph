@@ -783,10 +783,80 @@ fn check_js_method_calls(
     }
     struct Visitor<'a> {
         states: &'a HashMap<String, RecvKind>,
+        /// Spans of `.map` calls that are direct JSX children (list
+        /// position): the only place list rendering lowers them.
+        list_maps: HashSet<u32>,
         out: Vec<(u32, u32, String, String)>,
     }
+    /// `arr.map(item => <jsx/>)` directly inside JSX children lowers
+    /// through the list machinery (see the walker's `try_list_from_map`),
+    /// so it is exempt — but only there. The same call anywhere else
+    /// (attributes, logic, conditions) breaks and still errors.
+    fn is_list_map_call(call: &CallExpression) -> bool {
+        let Some(me) = call.callee.as_member_expression() else { return false };
+        let MemberExpression::StaticMemberExpression(s) = me else { return false };
+        if s.property.name.as_str() != "map" {
+            return false;
+        }
+        let Some(arg) = call.arguments.first().and_then(|a| a.as_expression()) else {
+            return false;
+        };
+        let Expression::ArrowFunctionExpression(arrow) = arg else { return false };
+        let Some(body) = arrow.body.as_expression() else { return false };
+        // Mirror try_jsx_from_expr: JSX, fragments, parenthesized.
+        let mut cur = body;
+        loop {
+            match cur {
+                Expression::JSXElement(_) | Expression::JSXFragment(_) => return true,
+                Expression::ParenthesizedExpression(p) => cur = &p.expression,
+                _ => return false,
+            }
+        }
+    }
+    impl<'a> Visitor<'a> {
+        /// Record direct-child list calls before descending: the walker
+        /// only list-lowers `.map` in exactly this position.
+        fn note_list_children(&mut self, children: &[JSXChild<'a>]) {
+            for child in children {
+                if let JSXChild::ExpressionContainer(c) = child {
+                    if let Some(Expression::CallExpression(call)) = c.expression.as_expression() {
+                        if is_list_map_call(call) {
+                            self.list_maps.insert(call.span.start);
+                        }
+                    }
+                }
+            }
+        }
+    }
     impl<'a> Visit<'a> for Visitor<'a> {
+        fn visit_jsx_element(&mut self, e: &JSXElement<'a>) {
+            self.note_list_children(&e.children);
+            oxc_ast_visit::walk::walk_jsx_element(self, e);
+        }
+        fn visit_jsx_fragment(&mut self, e: &JSXFragment<'a>) {
+            self.note_list_children(&e.children);
+            oxc_ast_visit::walk::walk_jsx_fragment(self, e);
+        }
         fn visit_call_expression(&mut self, e: &CallExpression<'a>) {
+            if self.list_maps.contains(&e.span.start) {
+                // List rendering: walk the template for nested violations
+                // but never flag the `.map` itself.
+                if let Some(me) = e.callee.as_member_expression() {
+                    match me {
+                        MemberExpression::StaticMemberExpression(s) => {
+                            self.visit_expression(&s.object);
+                        }
+                        MemberExpression::ComputedMemberExpression(c) => {
+                            self.visit_expression(&c.object);
+                        }
+                        MemberExpression::PrivateFieldExpression(_) => {}
+                    }
+                }
+                for arg in &e.arguments {
+                    self.visit_argument(arg);
+                }
+                return;
+            }
             if let Some(me) = e.callee.as_member_expression() {
                 let (root, prop) = match me {
                     MemberExpression::StaticMemberExpression(s) => (
@@ -843,7 +913,7 @@ fn check_js_method_calls(
         }
     }
     let states = collect_state_kinds(program, content);
-    let mut visitor = Visitor { states: &states, out: Vec::new() };
+    let mut visitor = Visitor { states: &states, list_maps: HashSet::new(), out: Vec::new() };
     visitor.visit_program(program);
     let mut out = Vec::new();
     for (start, _end, method, kind) in &visitor.out {
@@ -1710,9 +1780,100 @@ fn lint_state_event_scope(source: &MxSource, content: &str, file_path: &str) -> 
     }
     let mut out = Vec::new();
     for stmt in &ret.program.body {
-        scope_stmt(stmt, &components, false, false, 0, &offsets, file_path, &mut out);
+        scope_stmt(stmt, &components, false, false, 0, false, &offsets, file_path, &mut out);
     }
     out
+}
+
+/// State initializer shapes the signal emitter implements: plain data
+/// literals only. Anything else becomes `Signal<auto>` (or references
+/// names invisible in component scope) and fails C++ compile.
+fn is_plain_state_init(expr: &Expression) -> bool {
+    match expr {
+        Expression::StringLiteral(_)
+        | Expression::NumericLiteral(_)
+        | Expression::BooleanLiteral(_) => true,
+        Expression::ArrayExpression(arr) => arr.elements.iter().all(|e| match e.as_expression() {
+            Some(inner) => is_plain_state_init(inner),
+            // Holes and spreads have no literal initializer form.
+            None => false,
+        }),
+        // Negative integer literals (`-5`); anything else unary breaks.
+        Expression::UnaryExpression(u) => {
+            matches!(u.operator, UnaryOperator::UnaryNegation)
+                && matches!(&u.argument, Expression::NumericLiteral(_))
+        }
+        _ => false,
+    }
+}
+
+/// Shared shape check for `morphState`/`morphShared` initializers.
+/// Returns silently when there is nothing to check (arity errors are
+/// reported by the caller's own rule).
+fn check_state_init(
+    call: &CallExpression,
+    file_path: &str,
+    offsets: &[usize],
+    out: &mut Vec<LintError>,
+) {
+    let Some(arg) = call.arguments.first().and_then(|a| a.as_expression()) else {
+        return;
+    };
+    if is_plain_state_init(arg) {
+        return;
+    }
+    let (hint, what) = match arg {
+        Expression::ObjectExpression(_) => {
+            ("use one morphState per field instead of an object", "object state initializers")
+        }
+        Expression::Identifier(id) => {
+            ("initialize with a literal value instead of a variable", "variable state initializers")
+        }
+        _ => (
+            "initialize with a plain literal (string, number, boolean, or array of literals)",
+            "non-literal state initializers",
+        ),
+    };
+    scope_error(
+        "mx-state-init",
+        format!("{what} cannot be translated to C++"),
+        hint.into(),
+        file_path,
+        offsets,
+        arg.span().start,
+        out,
+    );
+}
+
+/// Initializer shapes the component-const pipeline drops: only plain
+/// top-level statements become reactive lambdas, and only for value
+/// initializers. Arrows, function/class expressions and object literals
+/// vanish — each verified to break the C++ compile.
+const fn unlowerable_const_init(init: &Expression) -> Option<(&'static str, &'static str)> {
+    match init {
+        Expression::ArrowFunctionExpression(_) | Expression::FunctionExpression(_) => {
+            Some(("function expressions assigned to consts", "use a function declaration instead"))
+        }
+        Expression::ObjectExpression(_) => {
+            Some(("object literals in component consts", "declare each field with its own const"))
+        }
+        Expression::ClassExpression(_) => {
+            Some(("class expressions assigned to consts", "use a class declaration instead"))
+        }
+        _ => None,
+    }
+}
+
+/// `const [value, setValue] = morphState(...)`: array pattern, at least
+/// two plain identifier elements. Anything else on a state call breaks
+/// the syntactic wiring codegen depends on.
+fn is_state_pair(pat: &BindingPattern) -> bool {
+    if let BindingPattern::ArrayPattern(a) = pat {
+        a.elements.len() >= 2
+            && a.elements.iter().all(|e| matches!(e, Some(BindingPattern::BindingIdentifier(_))))
+    } else {
+        false
+    }
 }
 
 /// Name of a simple identifier binding, if the pattern is a plain identifier.
@@ -1751,6 +1912,7 @@ fn scope_stmt(
     in_component: bool,
     in_export: bool,
     func_depth: usize,
+    body_top: bool,
     offsets: &[usize],
     file_path: &str,
     out: &mut Vec<LintError>,
@@ -1765,13 +1927,23 @@ fn scope_stmt(
                         components,
                         decl_in_comp,
                         func_depth,
+                        decl_in_comp,
                         offsets,
                         file_path,
                         out,
                     );
                 }
                 ExportDefaultDeclarationKind::ArrowFunctionExpression(a) => {
-                    scope_arrow(a, components, decl_in_comp, func_depth, offsets, file_path, out);
+                    scope_arrow(
+                        a,
+                        components,
+                        decl_in_comp,
+                        func_depth,
+                        decl_in_comp,
+                        offsets,
+                        file_path,
+                        out,
+                    );
                 }
                 _ => {}
             }
@@ -1782,6 +1954,7 @@ fn scope_stmt(
             in_component,
             true,
             func_depth,
+            false,
             offsets,
             file_path,
             out,
@@ -1793,6 +1966,7 @@ fn scope_stmt(
                 components,
                 in_component || is_comp,
                 func_depth,
+                is_comp,
                 offsets,
                 file_path,
                 out,
@@ -1806,6 +1980,7 @@ fn scope_stmt(
                     in_component,
                     in_export,
                     func_depth,
+                    body_top,
                     offsets,
                     file_path,
                     out,
@@ -1844,6 +2019,7 @@ fn scope_stmt(
                     in_component,
                     in_export,
                     func_depth,
+                    false,
                     offsets,
                     file_path,
                     out,
@@ -1867,6 +2043,7 @@ fn scope_stmt(
                 in_component,
                 in_export,
                 func_depth,
+                false,
                 offsets,
                 file_path,
                 out,
@@ -1878,6 +2055,7 @@ fn scope_stmt(
                     in_component,
                     in_export,
                     func_depth,
+                    false,
                     offsets,
                     file_path,
                     out,
@@ -1927,6 +2105,7 @@ fn scope_stmt(
                 in_component,
                 in_export,
                 func_depth,
+                false,
                 offsets,
                 file_path,
                 out,
@@ -1959,6 +2138,7 @@ fn scope_stmt(
                 in_component,
                 in_export,
                 func_depth,
+                false,
                 offsets,
                 file_path,
                 out,
@@ -1991,6 +2171,7 @@ fn scope_stmt(
                 in_component,
                 in_export,
                 func_depth,
+                false,
                 offsets,
                 file_path,
                 out,
@@ -2013,6 +2194,7 @@ fn scope_stmt(
                 in_component,
                 in_export,
                 func_depth,
+                false,
                 offsets,
                 file_path,
                 out,
@@ -2025,6 +2207,7 @@ fn scope_stmt(
                 in_component,
                 in_export,
                 func_depth,
+                false,
                 offsets,
                 file_path,
                 out,
@@ -2071,6 +2254,7 @@ fn scope_stmt(
                         in_component,
                         in_export,
                         func_depth,
+                        false,
                         offsets,
                         file_path,
                         out,
@@ -2085,6 +2269,7 @@ fn scope_stmt(
                 in_component,
                 in_export,
                 func_depth,
+                false,
                 offsets,
                 file_path,
                 out,
@@ -2119,6 +2304,7 @@ fn scope_stmt(
                 in_component,
                 in_export,
                 func_depth,
+                false,
                 offsets,
                 file_path,
                 out,
@@ -2144,6 +2330,7 @@ fn scope_stmt(
                     in_component,
                     in_export,
                     func_depth,
+                    false,
                     offsets,
                     file_path,
                     out,
@@ -2157,6 +2344,7 @@ fn scope_stmt(
                         in_component,
                         in_export,
                         func_depth,
+                        false,
                         offsets,
                         file_path,
                         out,
@@ -2171,6 +2359,7 @@ fn scope_stmt(
                         in_component,
                         in_export,
                         func_depth,
+                        false,
                         offsets,
                         file_path,
                         out,
@@ -2188,6 +2377,7 @@ fn walk_declaration(
     in_component: bool,
     in_export: bool,
     func_depth: usize,
+    body_top: bool,
     offsets: &[usize],
     file_path: &str,
     out: &mut Vec<LintError>,
@@ -2198,6 +2388,7 @@ fn walk_declaration(
         in_component,
         in_export,
         func_depth,
+        body_top,
         offsets,
         file_path,
         out,
@@ -2210,6 +2401,7 @@ fn scope_declaration(
     in_component: bool,
     in_export: bool,
     func_depth: usize,
+    body_top: bool,
     offsets: &[usize],
     file_path: &str,
     out: &mut Vec<LintError>,
@@ -2222,6 +2414,7 @@ fn scope_declaration(
                 components,
                 in_component || is_comp,
                 func_depth,
+                is_comp,
                 offsets,
                 file_path,
                 out,
@@ -2235,6 +2428,7 @@ fn scope_declaration(
                     in_component,
                     in_export,
                     func_depth,
+                    body_top,
                     offsets,
                     file_path,
                     out,
@@ -2251,12 +2445,64 @@ fn scope_declarator(
     in_component: bool,
     in_export: bool,
     func_depth: usize,
+    body_top: bool,
     offsets: &[usize],
     file_path: &str,
     out: &mut Vec<LintError>,
 ) {
     let Some(init) = &decl.init else { return };
     let owned_name = binding_ident_name(&decl.id).unwrap_or_default();
+    // Destructuring at the top of a component body never reaches codegen:
+    // only plain-identifier consts become reactive lambdas (and the
+    // two-name morphState pair becomes a signal). Anything else drops its
+    // bindings — flag it where it stands. Loop heads and nested blocks
+    // translate wholesale and stay quiet.
+    if body_top && in_component {
+        // State calls have their own pair-shape rule; everything else
+        // with a pattern never reaches codegen.
+        let mut is_state_call = false;
+        if let Expression::CallExpression(call) = init {
+            if let Expression::Identifier(id) = &call.callee {
+                let n = id.name.as_str();
+                is_state_call = n == "morphState" || n == "morphShared" || n == "morphEvent";
+            }
+        }
+        if is_state_call {
+            // State calls must be `[value, setValue]` pairs: whole-tuple,
+            // single, spread and object shapes all break the wiring.
+            if !is_state_pair(&decl.id) {
+                scope_error(
+                    "mx-state-pattern",
+                    "`morphState` must be destructured as `const [value, setValue] = morphState(...)`".into(),
+                    "Use array destructuring with exactly two bindings".into(),
+                    file_path,
+                    offsets,
+                    decl.span.start,
+                    out,
+                );
+            }
+        } else if binding_ident_name(&decl.id).is_none() {
+            scope_error(
+                "mx-js-syntax",
+                "destructuring in component bodies cannot be translated to C++".into(),
+                "Declare each binding with its own const (only `const [value, setValue] = morphState(...)` pairs lower)".into(),
+                file_path,
+                offsets,
+                decl.span.start,
+                out,
+            );
+        } else if let Some((what, hint)) = unlowerable_const_init(init) {
+            scope_error(
+                "mx-js-syntax",
+                format!("{what} cannot be translated to C++"),
+                hint.into(),
+                file_path,
+                offsets,
+                decl.span.start,
+                out,
+            );
+        }
+    }
     // Destructuring defaults can hide calls (`const { a = morphState(0) } = x`)
     // so the pattern is walked for value positions as well as bindings.
     scope_binding_pattern(
@@ -2278,6 +2524,7 @@ fn scope_declarator(
             components,
             in_component || is_arrow_comp,
             func_depth,
+            is_arrow_comp,
             offsets,
             file_path,
             out,
@@ -2292,13 +2539,24 @@ fn scope_function(
     components: &HashSet<&str>,
     in_component: bool,
     func_depth: usize,
+    body_top: bool,
     offsets: &[usize],
     file_path: &str,
     out: &mut Vec<LintError>,
 ) {
     if let Some(body) = &f.body {
         for s in &body.statements {
-            scope_stmt(s, components, in_component, false, func_depth + 1, offsets, file_path, out);
+            scope_stmt(
+                s,
+                components,
+                in_component,
+                false,
+                func_depth + 1,
+                body_top,
+                offsets,
+                file_path,
+                out,
+            );
         }
     }
 }
@@ -2308,13 +2566,24 @@ fn scope_arrow(
     components: &HashSet<&str>,
     in_component: bool,
     func_depth: usize,
+    body_top: bool,
     offsets: &[usize],
     file_path: &str,
     out: &mut Vec<LintError>,
 ) {
     if let Some(body) = a.body.as_function_body() {
         for s in &body.statements {
-            scope_stmt(s, components, in_component, false, func_depth + 1, offsets, file_path, out);
+            scope_stmt(
+                s,
+                components,
+                in_component,
+                false,
+                func_depth + 1,
+                body_top,
+                offsets,
+                file_path,
+                out,
+            );
         }
     } else if let Some(expr) = a.body.as_expression() {
         scope_expr(expr, components, in_component, false, func_depth + 1, offsets, file_path, out);
@@ -2340,6 +2609,7 @@ fn scope_for_init(
                     in_component,
                     in_export,
                     func_depth,
+                    false,
                     offsets,
                     file_path,
                     out,
@@ -2382,6 +2652,7 @@ fn scope_for_left(
                     in_component,
                     in_export,
                     func_depth,
+                    false,
                     offsets,
                     file_path,
                     out,
@@ -2902,7 +3173,16 @@ fn scope_class_element(
                     out,
                 );
             }
-            scope_function(&m.value, components, in_component, func_depth, offsets, file_path, out);
+            scope_function(
+                &m.value,
+                components,
+                in_component,
+                func_depth,
+                false,
+                offsets,
+                file_path,
+                out,
+            );
         }
         ClassElement::PropertyDefinition(p) => {
             scope_class_field(
@@ -2926,6 +3206,7 @@ fn scope_class_element(
                     in_component,
                     in_export,
                     func_depth,
+                    false,
                     offsets,
                     file_path,
                     out,
@@ -3190,10 +3471,10 @@ fn scope_expr(
             );
         }
         Expression::ArrowFunctionExpression(a) => {
-            scope_arrow(a, components, in_component, func_depth, offsets, file_path, out);
+            scope_arrow(a, components, in_component, func_depth, false, offsets, file_path, out);
         }
         Expression::FunctionExpression(f) => {
-            scope_function(f, components, in_component, func_depth, offsets, file_path, out);
+            scope_function(f, components, in_component, func_depth, false, offsets, file_path, out);
         }
         Expression::ParenthesizedExpression(pe) => {
             scope_expr(
@@ -3651,6 +3932,7 @@ fn check_scope_call(
                     file_path, offsets, start, out,
                 );
             }
+            check_state_init(call, file_path, offsets, out);
         }
         "morphShared" => {
             if call.arguments.len() != 1 {
@@ -3678,6 +3960,8 @@ fn check_scope_call(
                     start,
                     out,
                 );
+            } else {
+                check_state_init(call, file_path, offsets, out);
             }
         }
         "morphEvent" => {
@@ -4164,7 +4448,7 @@ mod tests {
 
     #[test]
     fn translatable_syntax_stays_quiet() {
-        let content = "import { morphState } from 'morph'\nclass A { greet(): any { return 1; } }\nclass B extends A { m(): any { return super.greet(); } }\nexport default function App() {\n  const u = { name: \"x\" };\n  const [a, b] = [1, 2];\n  const arr = [...[1]];\n  for (let i = 0; i < 2; i++) { if (i) { break; } }\n  return (<div>{u?.name}{a}{b}{arr.length}</div>)\n}\n";
+        let content = "import { morphState } from 'morph'\nclass A { greet(): any { return 1; } }\nclass B extends A { m(): any { return super.greet(); } }\nexport default function App() {\n  const arr = [...[1]];\n  for (let i = 0; i < 2; i++) { if (i) { break; } }\n  return (<div>{arr.length}</div>)\n}\n";
         let errs = check(content, "App.mx");
         assert!(!codes(&errs).contains(&"mx-js-syntax"), "{errs:?}");
     }
@@ -4241,5 +4525,116 @@ mod tests {
         let unknown = "import { morphState } from 'morph'\nexport default function App({ data }: any) {\n  const v = data.anything.deeper();\n  return (<div>{v}</div>)\n}\n";
         let errs = check(unknown, "App.mx");
         assert!(!codes(&errs).contains(&"mx-js-method"), "{errs:?}");
+    }
+
+    #[test]
+    fn component_destructuring_errors_but_nested_and_loops_stay_quiet() {
+        let bad = "import { morphState } from 'morph'\nexport default function App() {\n  const [a, b] = [1, 2];\n  return (<div>{a}</div>)\n}\n";
+        let errs = check(bad, "App.mx");
+        let err = errs
+            .iter()
+            .find(|e| e.code == "mx-js-syntax" && e.message.contains("destructuring"))
+            .expect("destructuring fires");
+        assert_eq!(err.severity, "error");
+        let obj = "import { morphState } from 'morph'\nexport default function App() {\n  const { x } = { x: 1 };\n  return (<div>{x}</div>)\n}\n";
+        let errs = check(obj, "App.mx");
+        assert!(
+            errs.iter().any(|e| e.code == "mx-js-syntax" && e.message.contains("destructuring")),
+            "{errs:?}"
+        );
+        // Nested blocks and loop heads translate wholesale.
+        let ok = "import { morphState } from 'morph'\nexport default function App() {\n  const [c, setC] = morphState(0);\n  let out = 0;\n  if (c > 0) {\n    const [a] = [1];\n    out = a;\n  }\n  for (const [k, v] of [[1, 2]]) {\n    out = k;\n  }\n  return (<div>{out}</div>)\n}\n";
+        let errs = check(ok, "App.mx");
+        assert!(
+            !errs.iter().any(|e| e.code == "mx-js-syntax" && e.message.contains("destructuring")),
+            "{errs:?}"
+        );
+    }
+
+    #[test]
+    fn state_pair_pattern_stays_quiet() {
+        let content = "import { morphState } from 'morph'\nexport default function App() {\n  const [v, setV] = morphState(0);\n  return (<div>{v}</div>)\n}\n";
+        let errs = check(content, "App.mx");
+        assert!(
+            !errs.iter().any(|e| e.code == "mx-js-syntax" && e.message.contains("destructuring")),
+            "{errs:?}"
+        );
+        assert!(!codes(&errs).contains(&"mx-state-init"), "{errs:?}");
+    }
+
+    #[test]
+    fn non_literal_state_init_errors() {
+        for (init, hint) in [
+            ("{ name: \"Ada\" }", "per field"),
+            ("base", "literal value"),
+            ("base + 1", "plain literal"),
+            ("`tpl${1}`", "plain literal"),
+            ("null", "plain literal"),
+        ] {
+            let content = format!(
+                "import {{ morphState }} from 'morph'\nconst base = 5;\nexport default function App() {{\n  const [v, setV] = morphState({init});\n  return (<div>{{v}}</div>)\n}}\n"
+            );
+            let errs = check(&content, "App.mx");
+            let err = errs
+                .iter()
+                .find(|e| e.code == "mx-state-init")
+                .unwrap_or_else(|| panic!("{init} fires mx-state-init, got {errs:?}"));
+            assert_eq!(err.severity, "error");
+            assert!(err.suggestion.as_deref().unwrap().contains(hint), "{err:?}");
+        }
+    }
+
+    #[test]
+    fn state_non_pair_patterns_error() {
+        for decl in [
+            "const count = morphState(0);",
+            "const [v] = morphState(0);",
+            "const { v } = morphState(0);",
+        ] {
+            let content = format!(
+                "import {{ morphState }} from 'morph'\nexport default function App() {{\n  {decl}\n  return (<div>x</div>)\n}}\n"
+            );
+            let errs = check(&content, "App.mx");
+            assert!(codes(&errs).contains(&"mx-state-pattern"), "{decl}: {errs:?}");
+        }
+    }
+
+    #[test]
+    fn unlowerable_const_inits_error() {
+        for (init, what) in [
+            ("() => 1", "function expressions assigned to consts"),
+            ("function() { return 1; }", "function expressions assigned to consts"),
+            ("{ tag: \"x\" }", "object literals in component consts"),
+            ("class { m() { return 1; } }", "class expressions assigned to consts"),
+        ] {
+            let content = format!(
+                "import {{ morphState }} from 'morph'\nexport default function App() {{\n  const h = {init};\n  return (<div>{{h()}}</div>)\n}}\n"
+            );
+            let errs = check(&content, "App.mx");
+            let err = errs
+                .iter()
+                .find(|e| e.code == "mx-js-syntax")
+                .unwrap_or_else(|| panic!("{init} fires mx-js-syntax, got {errs:?}"));
+            assert!(err.message.contains(what), "{err:?}");
+        }
+    }
+
+    #[test]
+    fn plain_consts_and_declarations_stay_quiet() {
+        let content = "import { morphState } from 'morph'\nexport default function App() {\n  const [c, setC] = morphState(0);\n  const t = 1;\n  function h() { return t; }\n  class K { m() { return 1; } }\n  return (<div>{h()}{t}</div>)\n}\n";
+        let errs = check(content, "App.mx");
+        assert!(
+            !errs.iter().any(|e| e.code == "mx-js-syntax"
+                && (e.message.contains("component bodies")
+                    || e.message.contains("component consts"))),
+            "{errs:?}"
+        );
+    }
+
+    #[test]
+    fn literal_state_inits_stay_quiet() {
+        let content = "import { morphState } from 'morph'\nexport default function App() {\n  const [a, sa] = morphState(\"x\");\n  const [b, sb] = morphState(5);\n  const [c, sc] = morphState(true);\n  const [d, sd] = morphState([1, \"a\"]);\n  const [e, se] = morphState(-5);\n  return (<div>{a}</div>)\n}\n";
+        let errs = check(content, "App.mx");
+        assert!(!codes(&errs).contains(&"mx-state-init"), "{errs:?}");
     }
 }

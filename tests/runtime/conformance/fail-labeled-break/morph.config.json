@@ -1,0 +1,7 @@
+{
+  "name": "fail-labeled-break",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "fail-labeled-break" },
+  "dependencies": {},
+  "cpp_sources": []
+}

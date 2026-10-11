@@ -10,17 +10,19 @@
 
 Your code uses a syntax construct the translator cannot handle:
 generators / `yield`, the `with` statement, labeled `break`/`continue`,
-`import.meta`, dynamic `import()`, object spread, `namespace` blocks, or
-decorators:
+`import.meta`, dynamic `import()`, object spread, `namespace` blocks,
+decorators, destructuring in component bodies, or arrow / function /
+class / object const initializers at the top of a component body:
 
 ```
-error : mx-js-syntax : generator function cannot be translated to C++
-  hint: Use an explicit state machine or an array you index through
+error : mx-js-syntax : destructuring in component bodies cannot be translated to C++
+  hint: Declare each binding with its own const (only `const [value, setValue] = morphState(...)` pairs lower)
   Learn more: https://morph.levizr.com/docs/errors/mx-js-syntax
 ```
 
-Stays allowed because it lowers correctly: `?.` / `??`, destructuring,
-`for...in` / `for...of`, array spread, `super`, getters/setters, enums.
+Stays allowed because it lowers correctly: `?.` / `??`, plain-TS
+destructuring, `for...in` / `for...of`, array spread, `super`,
+getters/setters, enums, nested-block declarations.
 
 ## Why Morph raises it
 
@@ -69,6 +71,8 @@ export default function App() {
 | Instead of | Write |
 |---|---|
 | `{...o, k: v}` | explicit object literal |
+| destructuring in component bodies | one const per binding (`const [v, setV]` pairs only) |
+| arrow/function/class/object const inits | function/class declarations, per-field consts |
 | generator / `yield` | state machine with `morphState` |
 | `with (o) { ... }` | explicit `o.` qualification |
 | labeled `break`/`continue` | flag variable or early return |

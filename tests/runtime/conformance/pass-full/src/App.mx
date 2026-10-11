@@ -1,0 +1,39 @@
+import "./style.css"
+import { morphState, morphEffect } from 'morph'
+
+export const windowConfig = { title: "PassFull", width: 800, height: 600 }
+
+export default function App() {
+  const [count, setCount] = morphState(0)
+  const [items, setItems] = morphState(["a", "b"])
+  const [userName, setUserName] = morphState("Ada")
+  morphEffect(() => {
+    console.log(count)
+  })
+  const label = `count is ${count}`
+  const shown = count > 10 ? "many" : label
+  const nick = userName ?? "anon"
+  const pair = [1, 2]
+  const doubled = [...items, "c"]
+  items.push("d")
+  const upper = nick.toUpperCase()
+  const hasA = nick.includes("a")
+  let total = 0
+  for (const n of [1, 2, 3]) {
+    total += n
+  }
+  const wide = "x" in { x: 1 }
+  return (
+    <body>
+      <div className="screen">
+        <div className="panel" style={{ color: "red", backgroundColor: "#16213a" }}>
+          {shown} {upper} {nick} {pair[0]} {pair[1]} {total} {wide ? "y" : "n"}
+        </div>
+        <div className="feed">
+          {doubled.map((d) => (<span key={d}>{d}</span>))}
+        </div>
+        <button onClick={() => setCount(count + 1)}>more</button>
+      </div>
+    </body>
+  )
+}

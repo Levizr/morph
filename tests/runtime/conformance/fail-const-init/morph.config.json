@@ -1,0 +1,7 @@
+{
+  "name": "fail-const-init",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "fail-const-init" },
+  "dependencies": {},
+  "cpp_sources": []
+}

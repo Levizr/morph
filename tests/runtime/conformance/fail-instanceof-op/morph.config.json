@@ -1,0 +1,7 @@
+{
+  "name": "fail-instanceof-op",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "fail-instanceof-op" },
+  "dependencies": {},
+  "cpp_sources": []
+}

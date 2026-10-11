@@ -1,0 +1,10 @@
+export const windowConfig = { title: "fail-document-global", width: 800, height: 600 }
+
+export default function App() {
+  const t = document.title;
+  return (
+    <body>
+      <div>ok</div>
+    </body>
+  )
+}
