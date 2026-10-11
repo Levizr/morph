@@ -254,13 +254,16 @@ pub(crate) fn run(path: Option<&PathBuf>, entry: Option<String>, _migrate: bool)
         if let Ok(graph) = morph_parser::resolve_graph(&entry_path, &cwd) {
             // Only the entry module renders as a window; component files
             // must not carry `windowConfig`, so drop that hint for them.
+            // Anything outside the graph (routes, route-only components)
+            // mounts inside the entry window too: keep the hint for the
+            // entry alone.
             all_errors.retain(|e| {
                 if e.code != "mx-window-missing" {
                     return true;
                 }
                 let canon = std::fs::canonicalize(&e.file_path)
                     .unwrap_or_else(|_| PathBuf::from(&e.file_path));
-                !graph.all_paths().any(|p| *p == canon && *p != graph.entry)
+                canon == graph.entry
             });
             for err in morph_parser::linter::lint_graph(&graph) {
                 let duplicate = all_errors.iter().any(|e| {
