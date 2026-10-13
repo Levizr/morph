@@ -84,9 +84,23 @@ impl FeatureSet {
         }
         // Any border member access needs the mixin — including a lone
         // border-color (e.g. hover-only), which carries no width/style.
+        // Per-side fields count too: a lone `border-top` must switch the
+        // whole border pipeline on.
         if !s.border_width.is_zero()
             || (!s.border_style.is_empty() && s.border_style != "none")
             || s.border_color != [0.0, 0.0, 0.0, 1.0]
+            || s.border_top_width.is_some()
+            || s.border_right_width.is_some()
+            || s.border_bottom_width.is_some()
+            || s.border_left_width.is_some()
+            || s.border_top_color.is_some()
+            || s.border_right_color.is_some()
+            || s.border_bottom_color.is_some()
+            || s.border_left_color.is_some()
+            || s.border_top_style.is_some()
+            || s.border_right_style.is_some()
+            || s.border_bottom_style.is_some()
+            || s.border_left_style.is_some()
         {
             self.features.insert("border".into());
         }
@@ -129,6 +143,10 @@ impl FeatureSet {
             "border-width"
             | "border-style"
             | "border-color"
+            | "border-top"
+            | "border-right"
+            | "border-bottom"
+            | "border-left"
             | "border-top-width"
             | "border-right-width"
             | "border-bottom-width"

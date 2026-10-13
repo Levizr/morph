@@ -831,6 +831,10 @@ bool GLRenderer::ensureReady()
     m_gradUOffsets = glGetUniformLocation(m_gradShader, "uGradOffsets");
     m_gradURepeating = glGetUniformLocation(m_gradShader, "uGradRepeating");
     m_gradUPeriod = glGetUniformLocation(m_gradShader, "uGradPeriod");
+    m_gradUKind = glGetUniformLocation(m_gradShader, "uGradKind");
+    m_gradUCenter = glGetUniformLocation(m_gradShader, "uGradCenter");
+    m_gradURadius = glGetUniformLocation(m_gradShader, "uGradRadius");
+    m_gradUFrom = glGetUniformLocation(m_gradShader, "uGradFrom");
     m_gradURadii = glGetUniformLocation(m_gradShader, "uRadii");
     m_gradUBorderWidth = glGetUniformLocation(m_gradShader, "uBorderWidth");
     m_gradUBorderColor = glGetUniformLocation(m_gradShader, "uBorderColor");
@@ -840,6 +844,12 @@ bool GLRenderer::ensureReady()
     m_gradUBorderOffsets = glGetUniformLocation(m_gradShader, "uBorderOffsets");
     m_gradUBorderRepeating = glGetUniformLocation(m_gradShader, "uBorderRepeating");
     m_gradUBorderPeriod = glGetUniformLocation(m_gradShader, "uBorderPeriod");
+    m_gradUBorderKind = glGetUniformLocation(m_gradShader, "uBorderKind");
+    m_gradUBorderCenter = glGetUniformLocation(m_gradShader, "uBorderCenter");
+    m_gradUBorderRadius = glGetUniformLocation(m_gradShader, "uBorderRadius");
+    m_gradUBorderFrom = glGetUniformLocation(m_gradShader, "uBorderFrom");
+    m_gradUBorderDir = glGetUniformLocation(m_gradShader, "uBorderDir");
+    m_gradUBorderProjLen = glGetUniformLocation(m_gradShader, "uBorderProjLen");
     createGradBuffers();
 #endif
 
@@ -1280,8 +1290,28 @@ void GLRenderer::drawGradRect(float x, float y, float w, float h,
     dx /= len;
     dy /= len;
     float projLen = std::fabs(w * dx) + std::fabs(h * dy);
+    // Kind-space geometry (pure CPU): center in UV, radii in px.
+    // Radial/conic stop offsets resolve against the ending radius
+    // (circle) or the larger axis (ellipse); conic dial stops are
+    // already 0..1 fractions.
+    float gcX = grad->centerXPx ? grad->centerX / w : grad->centerX / 100.0f;
+    float gcY = grad->centerYPx ? grad->centerY / h : grad->centerY / 100.0f;
+    float grX = 0.0f, grY = 0.0f;
+    if (grad->kind == 1)
+    {
+        morph::resolveRadialRadii(*grad, w, h, gcX * w, gcY * h, grX, grY);
+    }
+    float gradLineLen = projLen;
+    if (grad->kind == 1)
+    {
+        gradLineLen = (grad->radialShape == 0) ? grX : ((grX > grY) ? grX : grY);
+    }
+    else if (grad->kind == 2)
+    {
+        gradLineLen = 1.0f;
+    }
     float offsets[MORPH_GRADIENT_MAX_STOPS] = {0};
-    morph::resolveGradientOffsets(*grad, projLen, offsets);    // CSS fixup: ill-ordered positions clamp to the previous one.
+    morph::resolveGradientOffsets(*grad, gradLineLen, offsets);    // CSS fixup: ill-ordered positions clamp to the previous one.
     for (int i = 1; i < grad->stopCount; i++)
     {
         if (offsets[i] < offsets[i - 1])
@@ -1315,6 +1345,12 @@ void GLRenderer::drawGradRect(float x, float y, float w, float h,
     glUniform4fv(m_gradURect, 1, rect);
     float dir[2] = {dx, dy};
     glUniform2fv(m_gradUDir, 1, dir);
+    // Kind uniforms ride with the rest: uploads only land on the bound
+    // program, so everything lives past glUseProgram above.
+    glUniform1i(m_gradUKind, grad->kind);
+    glUniform2f(m_gradUCenter, gcX, gcY);
+    glUniform2f(m_gradURadius, grX, grY);
+    glUniform1f(m_gradUFrom, grad->conicFrom * 3.14159265f / 180.0f);
     glUniform1i(m_gradUCount, grad->stopCount);
     glUniform4fv(m_gradUColors, grad->stopCount, &colors[0][0]);
     glUniform1fv(m_gradUOffsets, grad->stopCount, offsets);
@@ -1340,13 +1376,57 @@ void GLRenderer::drawGradRect(float x, float y, float w, float h,
     // Border gradient
     if (borderGrad != nullptr && borderGrad->enabled && borderGrad->stopCount >= 2)
     {
+        float bcx = borderGrad->centerXPx ? borderGrad->centerX / w : borderGrad->centerX / 100.0f;
+        float bcy = borderGrad->centerYPx ? borderGrad->centerY / h : borderGrad->centerY / 100.0f;
+        float brx = 0.0f, bry = 0.0f;
+        if (borderGrad->kind == 1)
+        {
+            morph::resolveRadialRadii(*borderGrad, w, h, bcx * w, bcy * h, brx, bry);
+        }
+        glUniform1i(m_gradUBorderKind, borderGrad->kind);
+        glUniform2f(m_gradUBorderCenter, bcx, bcy);
+        glUniform2f(m_gradUBorderRadius, brx, bry);
+        glUniform1f(m_gradUBorderFrom, borderGrad->conicFrom * 3.14159265f / 180.0f);
+        // Border linear axis resolves from its own angle — never the
+        // fill's (mixed fill/border angles are legal CSS).
+        float bdx = 0.0f, bdy = 1.0f;
+        if (borderGrad->isCorner)
+        {
+            bdx = borderGrad->cornerX * w;
+            bdy = borderGrad->cornerY * h;
+        }
+        else
+        {
+            float brad = borderGrad->angleDeg * 3.14159265f / 180.0f;
+            bdx = std::sin(brad);
+            bdy = -std::cos(brad);
+        }
+        float blen = std::sqrt(bdx * bdx + bdy * bdy);
+        if (blen > 1e-6f)
+        {
+            bdx /= blen;
+            bdy /= blen;
+        }
+        glUniform2f(m_gradUBorderDir, bdx, bdy);
+        glUniform1f(m_gradUBorderProjLen, std::fabs(w * bdx) + std::fabs(h * bdy));
         float bcolors[MORPH_GRADIENT_MAX_STOPS][4] = {{0}};
         for (int i = 0; i < borderGrad->stopCount; i++)
         {
             std::memcpy(bcolors[i], borderGrad->stops[i].color, sizeof(float) * 4);
         }
         float boffsets[MORPH_GRADIENT_MAX_STOPS] = {0};
-        morph::resolveGradientOffsets(*borderGrad, projLen, boffsets);
+        float borderLineLen = std::fabs(w * bdx) + std::fabs(h * bdy);
+        if (borderGrad->kind == 1)
+        {
+            borderLineLen = (borderGrad->radialShape == 0)
+                ? brx
+                : ((brx > bry) ? brx : bry);
+        }
+        else if (borderGrad->kind == 2)
+        {
+            borderLineLen = 1.0f;
+        }
+        morph::resolveGradientOffsets(*borderGrad, borderLineLen, boffsets);
         for (int i = 1; i < borderGrad->stopCount; i++)
         {
             if (boffsets[i] < boffsets[i - 1])

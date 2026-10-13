@@ -294,9 +294,12 @@ private:
     GLint m_gradUDir = -1, m_gradUCount = -1, m_gradUColors = -1;
     GLint m_gradUOffsets = -1, m_gradURepeating = -1, m_gradURadii = -1;
     GLint m_gradUPeriod = -1;
+    GLint m_gradUKind = -1, m_gradUCenter = -1, m_gradURadius = -1, m_gradUFrom = -1;
     GLint m_gradUBorderWidth = -1, m_gradUBorderColor = -1, m_gradUStencil = -1;
     GLint m_gradUBorderCount = -1, m_gradUBorderColors = -1, m_gradUBorderOffsets = -1;
     GLint m_gradUBorderRepeating = -1, m_gradUBorderPeriod = -1;
+    GLint m_gradUBorderKind = -1, m_gradUBorderCenter = -1, m_gradUBorderRadius = -1, m_gradUBorderFrom = -1;
+    GLint m_gradUBorderDir = -1, m_gradUBorderProjLen = -1;
     void createGradBuffers();
 #endif
 

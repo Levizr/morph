@@ -656,6 +656,16 @@ uniform vec4 uBorderColors[8];
 uniform float uBorderOffsets[8];
 uniform int uBorderRepeating;
 uniform float uBorderPeriod;
+uniform int uBorderKind;
+uniform vec2 uBorderCenter;
+uniform vec2 uBorderRadius;
+uniform float uBorderFrom;
+uniform vec2 uBorderDir;
+uniform float uBorderProjLen;
+uniform int uGradKind;
+uniform vec2 uGradCenter;
+uniform vec2 uGradRadius;
+uniform float uGradFrom;
 out vec4 FragColor;
 
 float sdRoundedBox(vec2 p, vec2 b, float r) {
@@ -687,6 +697,28 @@ float gradStopF(float t, float prevO, float curO) {
                           : clamp((t - prevO) / span, 0.0, 1.0);
 }
 
+// Gradient parameter 0..1 for one pixel. kind 0 = linear (axis dir),
+// 1 = radial (distance from center in units of the ending radii),
+// 2 = conic (dial fraction: 0 at the top, clockwise in y-down space).
+// Linear and radial share the stop machinery; only this differs.
+float gradParam(vec2 uv, vec2 size, int kind, vec2 center, vec2 radii,
+                float from, vec2 dir, float projLen) {
+    if (kind == 1) {
+        vec2 delta = (uv - center) * size;
+        vec2 rr = max(radii, vec2(1e-4, 1e-4));
+        return length(delta / rr);
+    }
+    if (kind == 2) {
+        // Aspect-correct before atan: UV space is non-square, so an
+        // unscaled delta skews the dial (cardinals right, diagonals off).
+        vec2 delta = (uv - center) * size;
+        float ang = atan(delta.y, delta.x);
+        return fract((ang - (from - 1.5707963)) / 6.2831853);
+    }
+    vec2 p = uv * size - size * 0.5;
+    return dot(p, dir) / max(projLen, 1e-4) + 0.5;
+}
+
 void main() {
     vec2 halfSize = vSize * 0.5;
     vec2 p = vUV * vSize - halfSize;
@@ -711,7 +743,8 @@ void main() {
     // Gradient position along the axis, 0..1 across the gradient line.
     float projLen = abs(vSize.x * uGradDir.x) + abs(vSize.y * uGradDir.y);
     projLen = max(projLen, 1e-4);
-    float t = dot(p, uGradDir) / projLen + 0.5;
+    float t = gradParam(vUV, vSize, uGradKind, uGradCenter, uGradRadius,
+                        uGradFrom, uGradDir, projLen);
 
     if (uGradRepeating > 0 && uGradCount >= 2) {
         float o0 = uGradOffsets[0];
@@ -755,22 +788,34 @@ void main() {
         // uniform arrays miscompiles on some drivers.
         vec4 borderColorVal;
         if (uBorderCount > 0) {
-            // Evaluate border gradient at same parameter t
+            // Border gradients evaluate in their own kind's parameter
+            // space (a radial border over a linear fill, or vice versa).
+            float bt = gradParam(vUV, vSize, uBorderKind, uBorderCenter,
+                                 uBorderRadius, uBorderFrom, uBorderDir, uBorderProjLen);
+            if (uBorderRepeating > 0 && uBorderCount >= 2) {
+                float bo0 = uBorderOffsets[0];
+                if (uBorderPeriod > 1e-6) {
+                    float brel = (bt - bo0) / uBorderPeriod;
+                    bt = bo0 + (brel - floor(brel)) * uBorderPeriod;
+                } else {
+                    bt = bo0;
+                }
+            }
             vec4 bg = uBorderColors[0];
             if (uBorderCount > 1)
-                bg = mix(bg, uBorderColors[1], gradStopF(t, uBorderOffsets[0], uBorderOffsets[1]));
+                bg = mix(bg, uBorderColors[1], gradStopF(bt, uBorderOffsets[0], uBorderOffsets[1]));
             if (uBorderCount > 2)
-                bg = mix(bg, uBorderColors[2], gradStopF(t, uBorderOffsets[1], uBorderOffsets[2]));
+                bg = mix(bg, uBorderColors[2], gradStopF(bt, uBorderOffsets[1], uBorderOffsets[2]));
             if (uBorderCount > 3)
-                bg = mix(bg, uBorderColors[3], gradStopF(t, uBorderOffsets[2], uBorderOffsets[3]));
+                bg = mix(bg, uBorderColors[3], gradStopF(bt, uBorderOffsets[2], uBorderOffsets[3]));
             if (uBorderCount > 4)
-                bg = mix(bg, uBorderColors[4], gradStopF(t, uBorderOffsets[3], uBorderOffsets[4]));
+                bg = mix(bg, uBorderColors[4], gradStopF(bt, uBorderOffsets[3], uBorderOffsets[4]));
             if (uBorderCount > 5)
-                bg = mix(bg, uBorderColors[5], gradStopF(t, uBorderOffsets[4], uBorderOffsets[5]));
+                bg = mix(bg, uBorderColors[5], gradStopF(bt, uBorderOffsets[4], uBorderOffsets[5]));
             if (uBorderCount > 6)
-                bg = mix(bg, uBorderColors[6], gradStopF(t, uBorderOffsets[5], uBorderOffsets[6]));
+                bg = mix(bg, uBorderColors[6], gradStopF(bt, uBorderOffsets[5], uBorderOffsets[6]));
             if (uBorderCount > 7)
-                bg = mix(bg, uBorderColors[7], gradStopF(t, uBorderOffsets[6], uBorderOffsets[7]));
+                bg = mix(bg, uBorderColors[7], gradStopF(bt, uBorderOffsets[6], uBorderOffsets[7]));
             borderColorVal = bg;
         } else {
             borderColorVal = uBorderColor;

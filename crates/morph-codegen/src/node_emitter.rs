@@ -292,10 +292,18 @@ fn emit_css_length(target: &str, indent: &str, css_val: &str) -> Vec<String> {
 }
 
 fn emit_gradient(access: &str, g: &morph_ir::IRGradient) -> Vec<String> {
-    use morph_ir::{GradientAxis, GradientPosition};
+    use morph_ir::{CenterCoord, GradientAxis, GradientKind, GradientPosition, RadialShape};
     let mut o = Vec::new();
     o.push(format!("{access}enabled = true;"));
     o.push(format!("{access}repeating = {};", if g.repeating { "true" } else { "false" }));
+    o.push(format!(
+        "{access}kind = {};",
+        match g.kind {
+            GradientKind::Linear => 0,
+            GradientKind::Radial => 1,
+            GradientKind::Conic => 2,
+        }
+    ));
     match g.axis {
         GradientAxis::Bottom => {
             o.push(format!("{access}angleDeg = 180.0f;"));
@@ -311,6 +319,55 @@ fn emit_gradient(access: &str, g: &morph_ir::IRGradient) -> Vec<String> {
             o.push(format!("{access}cornerY = {};", fmt(y)));
         }
     }
+    // Center (radial/conic): raw value plus unit flag, resolved at draw.
+    let (cx, cx_px) = match g.center.0 {
+        CenterCoord::Center => (50.0, false),
+        CenterCoord::Percent(p) => (p, false),
+        CenterCoord::Px(v) => (v, true),
+    };
+    let (cy, cy_px) = match g.center.1 {
+        CenterCoord::Center => (50.0, false),
+        CenterCoord::Percent(p) => (p, false),
+        CenterCoord::Px(v) => (v, true),
+    };
+    o.push(format!("{access}centerX = {};", fmt(cx)));
+    o.push(format!("{access}centerY = {};", fmt(cy)));
+    o.push(format!("{access}centerXPx = {};", if cx_px { "true" } else { "false" }));
+    o.push(format!("{access}centerYPx = {};", if cy_px { "true" } else { "false" }));
+    o.push(format!(
+        "{access}radialShape = {};",
+        match g.radial_shape {
+            RadialShape::Circle => 0,
+            RadialShape::Ellipse => 1,
+        }
+    ));
+    match g.radial_size {
+        morph_ir::RadialSize::ClosestSide => o.push(format!("{access}radialSize = 0;")),
+        morph_ir::RadialSize::ClosestCorner => o.push(format!("{access}radialSize = 1;")),
+        morph_ir::RadialSize::FarthestSide => o.push(format!("{access}radialSize = 2;")),
+        morph_ir::RadialSize::FarthestCorner => o.push(format!("{access}radialSize = 3;")),
+        morph_ir::RadialSize::Explicit { x, y } => {
+            o.push(format!("{access}radialSize = 4;"));
+            o.push(format!("{access}radialExplicit = true;"));
+            let (rx, rx_pct) = match x {
+                GradientPosition::Percent(p) => (p, true),
+                GradientPosition::Px(v) => (v, false),
+            };
+            let (ry, ry_pct) = match y {
+                Some(GradientPosition::Percent(p)) => (p, true),
+                Some(GradientPosition::Px(v)) => (v, false),
+                None => (rx, rx_pct),
+            };
+            o.push(format!("{access}radialRX = {};", fmt(rx)));
+            o.push(format!("{access}radialRY = {};", fmt(ry)));
+            o.push(format!("{access}radialRXPct = {};", if rx_pct { "true" } else { "false" }));
+            o.push(format!("{access}radialRYPct = {};", if ry_pct { "true" } else { "false" }));
+        }
+    }
+    if !matches!(g.radial_size, morph_ir::RadialSize::Explicit { .. }) {
+        o.push(format!("{access}radialExplicit = false;"));
+    }
+    o.push(format!("{access}conicFrom = {};", fmt(g.conic_from)));
     o.push(format!("{access}stopCount = {};", g.stops.len()));
     for (i, s) in g.stops.iter().enumerate() {
         o.push(format!("{access}stops[{i}].color[0] = {:.4}f;", s.color[0]));

@@ -5117,6 +5117,22 @@ fn apply_css_prop(style: &mut IRStyle, prop: &str, val: &str) -> Option<&'static
             parse_border_shorthand(&mut *style, val);
             Some("border")
         }
+        "border-top" => {
+            parse_border_side_shorthand(&mut *style, 0, val);
+            Some("border_top_width")
+        }
+        "border-right" => {
+            parse_border_side_shorthand(&mut *style, 1, val);
+            Some("border_right_width")
+        }
+        "border-bottom" => {
+            parse_border_side_shorthand(&mut *style, 2, val);
+            Some("border_bottom_width")
+        }
+        "border-left" => {
+            parse_border_side_shorthand(&mut *style, 3, val);
+            Some("border_left_width")
+        }
         "margin-top" => {
             if val.trim().eq_ignore_ascii_case("auto") {
                 style.margin[0] = Length::Px(0.0);
@@ -5530,14 +5546,45 @@ fn parse_flex_shorthand(style: &mut IRStyle, val: &str) {
 /// width/style/color. Mirrors Python's `_css_to_ir_kw` branch.
 fn parse_border_shorthand(style: &mut IRStyle, val: &str) {
     for part in val.split_whitespace() {
-        if matches!(part, "solid" | "dashed" | "dotted" | "none") {
+        if matches!(part, "solid" | "dashed" | "dotted" | "double" | "none") {
             style.border_style = part.to_string();
-        } else if part.starts_with('#') || part.starts_with("rgb") || part == "transparent" {
-            if let Some(c) = parse_color(part) {
-                style.border_color = c;
-            }
         } else if let Some(w) = parse_length_no_pct(part) {
             style.border_width = w;
+        } else if let Some(c) = parse_color(part) {
+            style.border_color = c;
+        }
+    }
+}
+
+/// Parse a per-side border shorthand (`border-top: 1px dashed red`):
+/// same parts as `border`, applied to one side's width/style/color.
+/// Unknown parts are ignored like the all-side shorthand.
+fn parse_border_side_shorthand(style: &mut IRStyle, side: usize, val: &str) {
+    let (width, color, bstyle) = match side {
+        0 => (&mut style.border_top_width, &mut style.border_top_color, &mut style.border_top_style),
+        1 => (
+            &mut style.border_right_width,
+            &mut style.border_right_color,
+            &mut style.border_right_style,
+        ),
+        2 => (
+            &mut style.border_bottom_width,
+            &mut style.border_bottom_color,
+            &mut style.border_bottom_style,
+        ),
+        _ => (
+            &mut style.border_left_width,
+            &mut style.border_left_color,
+            &mut style.border_left_style,
+        ),
+    };
+    for part in val.split_whitespace() {
+        if matches!(part, "solid" | "dashed" | "dotted" | "double" | "none") {
+            *bstyle = Some(part.to_string());
+        } else if let Some(w) = parse_length_no_pct(part) {
+            *width = Some(w);
+        } else if let Some(c) = parse_color(part) {
+            *color = Some(c);
         }
     }
 }
@@ -6370,8 +6417,7 @@ mod tests {
         apply_css_prop(&mut style, "border", "1px solid #232b3d");
         assert_eq!(style.border_width, Length::Px(1.0));
         assert_eq!(style.border_style, "solid");
-        assert!(style.border_color[0] > 0.1 && style.border_color[0] < 0.2);
-        apply_css_prop(&mut style, "margin-top", "50px");
+        assert!(style.border_color[0] > 0.1 && style.border_color[0] < 0.2);        apply_css_prop(&mut style, "margin-top", "50px");
         apply_css_prop(&mut style, "padding-left", "6px");
         assert_eq!(style.margin[0], Length::Px(50.0));
         assert_eq!(style.padding[3], Length::Px(6.0));
@@ -6389,6 +6435,33 @@ mod tests {
         apply_css_prop(&mut style, "border-width", "50%");
         assert_eq!(style.border_width, Length::Px(1.0));
         let _ = builder;
+    }
+
+    #[test]
+    fn border_side_shorthands_map() {
+        let mut style = IRStyle::default();
+        assert_eq!(
+            apply_css_prop(&mut style, "border-top", "1px dashed #1c2942"),
+            Some("border_top_width")
+        );
+        assert_eq!(style.border_top_width, Some(Length::Px(1.0)));
+        assert_eq!(style.border_top_style.as_deref(), Some("dashed"));
+        assert!(style.border_top_color.is_some());
+        // Other sides untouched.
+        assert!(style.border_right_width.is_none());
+        assert!(style.border_bottom_width.is_none());
+        assert!(style.border_left_width.is_none());
+        // Parts in any order, partial declarations keep the rest.
+        assert_eq!(
+            apply_css_prop(&mut style, "border-bottom", "red 2px"),
+            Some("border_bottom_width")
+        );
+        assert_eq!(style.border_bottom_width, Some(Length::Px(2.0)));
+        assert_eq!(style.border_bottom_color, Some([1.0, 0.0, 0.0, 1.0]));
+        assert!(style.border_bottom_style.is_none());
+        apply_css_prop(&mut style, "border-left", "solid");
+        assert_eq!(style.border_left_style.as_deref(), Some("solid"));
+        assert!(style.border_left_width.is_none());
     }
 
     #[test]

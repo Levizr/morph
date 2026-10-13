@@ -14,7 +14,10 @@ pub mod transforms;
 pub use builder::{
     binding_ident, is_instance_slot, qualified_binding_ref, IRBuilder, MODULE_NS_ROOT,
 };
-pub use gradient::{GradientAxis, GradientKind, GradientPosition, GradientStop, IRGradient};
+pub use gradient::{
+    CenterCoord, GradientAxis, GradientKind, GradientPosition, GradientStop, IRGradient,
+    RadialShape, RadialSize,
+};
 pub use node::{IRAnimation, IRConditionalClassEffect, IREvent, IRKeyframe, IRNode, IRWindow};
 pub use serializer::IRSerializer;
 pub use style::{IRStyle, Length};

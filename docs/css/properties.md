@@ -40,6 +40,8 @@ Lengths accept: `px`, bare numbers (treated as px), `%`, `em`, `rem` (1rem = 16p
 | Property | Values | Default | Notes |
 |---|---|---|---|
 | `background-color` | hex, rgb, named | `transparent` | Transparent by default (no white background). |
+| `background`, `background-image` | gradients | — | `linear-gradient()`, `radial-gradient()`, `conic-gradient()` and their `repeating-*` variants, with full stop/hint/position syntax. Verified against Chrome (≤5/255 per channel). |
+| `border-image` | gradient + slice | — | Gradient border-images evaluate directly in border space; the slice value is accepted but does not change rendering. Linear gradients match Chrome; radial/conic ring evaluation is Morph's simplification of slice-and-stretch. |
 | `color` | hex, rgb, named | `#000000` | Text color. Inherits from parent. |
 | `border-radius` | px | `0` | Clamped to `[0, 100]` in the SDF shader. |
 | `opacity` | 0–1 | `1` | Multiplies with parent opacity. |
@@ -49,9 +51,10 @@ Lengths accept: `px`, bare numbers (treated as px), `%`, `em`, `rem` (1rem = 16p
 | Property | Values | Default | Notes |
 |---|---|---|---|
 | `border` | shorthand | — | `border: 2px solid #fff` expands to width/style/color. |
+| `border-top`, `border-right`, `border-bottom`, `border-left` | shorthand | — | `border-top: 1px dashed red` sets one side's width/style/color. |
 | `border-width` | px | `0` | |
 | `border-color` | hex, rgb | `#000000` | |
-| `border-style` | `none`, `solid`, `dashed`, `dotted`, `double`, `groove`, `ridge`, `inset`, `outset`, `hidden` | `none` | Only `solid` renders a border — other values are accepted by the linter but draw nothing. |
+| `border-style` | `none`, `solid`, `dashed`, `dotted`, `double`, `groove`, `ridge`, `inset`, `outset`, `hidden` | `none` | `solid` and `dashed` render (dashed verified pixel-level); other values are accepted but may draw as solid. |
 
 ## Typography
 
