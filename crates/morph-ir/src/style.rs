@@ -139,6 +139,8 @@ pub struct IRStyle {
     pub border_image: Option<String>,
     pub border_image_slice: Option<f32>,
     pub border_gradient: Option<IRGradient>,
+    // box-shadow layers (`None` = unmentioned; `Some([])` = explicit `none`).
+    pub box_shadows: Option<Vec<crate::shadow::IRBoxShadow>>,
     pub box_sizing: String,
     pub z_index: Option<i32>,
     pub opacity: f32,
@@ -217,6 +219,7 @@ impl IRStyle {
             && self.border_image.is_none()
             && self.border_image_slice.is_none()
             && self.border_gradient.is_none()
+            && self.box_shadows.is_none()
             && self.width.is_none()
             && self.height.is_none()
             && self.min_width.is_none()

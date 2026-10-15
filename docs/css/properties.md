@@ -42,6 +42,7 @@ Lengths accept: `px`, bare numbers (treated as px), `%`, `em`, `rem` (1rem = 16p
 | `background-color` | hex, rgb, named | `transparent` | Transparent by default (no white background). |
 | `background`, `background-image` | gradients | — | `linear-gradient()`, `radial-gradient()`, `conic-gradient()` and their `repeating-*` variants, with full stop/hint/position syntax. Verified against Chrome (≤5/255 per channel). |
 | `border-image` | gradient + slice | — | Gradient border-images evaluate directly in border space; the slice value is accepted but does not change rendering. Linear gradients match Chrome; radial/conic ring evaluation is Morph's simplification of slice-and-stretch. |
+| `box-shadow` | shadow list | `none` | `offset-x offset-y blur spread color` + `inset`, comma-separated, up to 4 layers. Verified against Chrome (≤2/255 per channel). |
 | `color` | hex, rgb, named | `#000000` | Text color. Inherits from parent. |
 | `border-radius` | px | `0` | Clamped to `[0, 100]` in the SDF shader. |
 | `opacity` | 0–1 | `1` | Multiplies with parent opacity. |

@@ -281,6 +281,13 @@ inline void restoreProp(MorphNode* node, KeyframeProperty prop,
             node->markDirty(PaintDirty);
             break;
 #endif
+#ifdef MORPH_FEATURE_SHADOW
+        case KeyframeProperty::BoxShadow:
+            static_cast<ShadowStyle&>(node->style) =
+                static_cast<const ShadowStyle&>(base);
+            node->markDirty(PaintDirty);
+            break;
+#endif
         case KeyframeProperty::FontSize:
             node->style.fontSize = base.fontSize;
             node->markDirty(LayoutDirty);
@@ -323,7 +330,7 @@ inline void restoreProp(MorphNode* node, KeyframeProperty prop,
 // Restore every property in the mask (KeyframeProperty bit indices).
 inline void restoreProps(MorphNode* node, const MorphStyle& base,
                          uint32_t mask) {
-    for (int p = 0; p <= (int)KeyframeProperty::BorderGradient; p++)
+    for (int p = 0; p <= (int)KeyframeProperty::BoxShadow; p++)
         if (mask & ((uint32_t)1 << p))
             restoreProp(node, (KeyframeProperty)p, base);
 }
@@ -397,7 +404,8 @@ void MorphNode::updateCssAnimations(float dt) {
                      KeyframeProperty::Height, KeyframeProperty::Left,
                      KeyframeProperty::Top, KeyframeProperty::Transform,
                      KeyframeProperty::BgGradient, KeyframeProperty::BorderColor,
-                     KeyframeProperty::BorderWidth, KeyframeProperty::BorderGradient}) {
+                     KeyframeProperty::BorderWidth, KeyframeProperty::BorderGradient,
+                     KeyframeProperty::BoxShadow}) {
                 auto sv = morph_anim_detail::sampleProperty(kfs, prop, te);
                 if (!sv.applies) continue;
 
@@ -482,6 +490,29 @@ void MorphNode::updateCssAnimations(float dt) {
                     if (sampled.enabled && sampled.stopCount > 0)
                         std::memcpy(style.borderColor, sampled.stops[0].color,
                                     sizeof(float) * 4);
+                    markDirty(PaintDirty);
+                    continue;
+                }
+#endif
+#ifdef MORPH_FEATURE_SHADOW
+                if (prop == KeyframeProperty::BoxShadow) {
+                    ShadowStyle ga;
+                    ga.boxShadowSet = false;
+                    if (!morph::parseShadowCss(sv.left->css, ga))
+                        continue;              // invalid → underlying
+                    ShadowStyle sampled = ga;
+                    if (sv.right) {
+                        ShadowStyle gb;
+                        gb.boxShadowSet = false;
+                        if (morph::parseShadowCss(sv.right->css, gb)) {
+                            if (morph::shadowsCompatible(ga, gb)) {
+                                morph::lerpShadow(sampled, ga, gb, sv.f);
+                            } else if (sv.f >= 0.5f) {
+                                sampled = gb;  // discrete flip, like browsers
+                            }
+                        }
+                    }
+                    static_cast<ShadowStyle&>(style) = sampled;
                     markDirty(PaintDirty);
                     continue;
                 }

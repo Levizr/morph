@@ -203,6 +203,10 @@ int MorphNode::flattenImpl(RenderFrame& frame, int parentId, float scrollOffset,
     }
 #endif
 #endif
+#ifdef MORPH_FEATURE_SHADOW
+    fn.boxShadowSet = style.boxShadowSet;
+    fn.boxShadowCount = morph::resolveBoxShadows(style, flatEnv, fn.boxShadows);
+#endif
 
     // ── Opacity: multiply every paint color by the accumulated opacity ──
     // (this node's opacity × each ancestor's). This is the lightweight
@@ -229,6 +233,12 @@ int MorphNode::flattenImpl(RenderFrame& frame, int parentId, float scrollOffset,
         for (int i = 0; i < fn.borderGrad.stopCount; i++)
         {
             fn.borderGrad.stops[i].color[3] *= opac;
+        }
+#endif
+#ifdef MORPH_FEATURE_SHADOW
+        for (int i = 0; i < fn.boxShadowCount; i++)
+        {
+            fn.boxShadows[i].color[3] *= opac;
         }
 #endif
     }

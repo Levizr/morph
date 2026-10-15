@@ -113,6 +113,9 @@ impl FeatureSet {
         if s.border_gradient.is_some() {
             self.features.insert("gradient".into());
         }
+        if s.box_shadows.is_some() {
+            self.features.insert("shadow".into());
+        }
     }
 
     fn scan_reactive(&mut self, reactive_style: &std::collections::HashMap<String, String>) {
@@ -202,6 +205,11 @@ impl FeatureSet {
             }
             if prop == "border-image" && val.contains("gradient(") {
                 self.features.insert("gradient".into());
+            }
+            // Any real shadow list needs the shadow pipeline; `none`
+            // clears without emitting anything.
+            if prop == "box-shadow" && !val.trim().eq_ignore_ascii_case("none") {
+                self.features.insert("shadow".into());
             }
             if prop == "display" && val.trim() == "none" {
                 self.features.insert("display_none".into());
@@ -313,6 +321,9 @@ impl FeatureSet {
                     }
                     if kf.raw.keys().any(|p| p == "border-image") {
                         self.features.insert("gradient".into());
+                    }
+                    if kf.raw.keys().any(|p| p == "box-shadow") {
+                        self.features.insert("shadow".into());
                     }
                 }
             }
@@ -573,6 +584,9 @@ impl FeatureSet {
         }
         if self.features.contains("gradient") {
             d.push("MORPH_FEATURE_GRADIENT".into());
+        }
+        if self.features.contains("shadow") {
+            d.push("MORPH_FEATURE_SHADOW".into());
         }
         if self.features.contains("animation") {
             d.push("MORPH_FEATURE_ANIMATION".into());

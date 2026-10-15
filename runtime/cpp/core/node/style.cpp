@@ -112,6 +112,12 @@ static void applyStyleDelta(MorphStyle& target, const MorphStyle& delta) {
         target.bgGradientSet = true;
     }
 #endif
+#ifdef MORPH_FEATURE_SHADOW
+    if (delta.boxShadowSet)
+    {
+        static_cast<ShadowStyle&>(target) = static_cast<const ShadowStyle&>(delta);
+    }
+#endif
     if (delta.color[0] != 0.0f || delta.color[1] != 0.0f || delta.color[2] != 0.0f || delta.color[3] != 1.0f)
         memcpy(target.color, delta.color, sizeof(float)*4);
     if (!delta.borderRadius.isZero()) target.borderRadius = delta.borderRadius;
@@ -259,6 +265,15 @@ static void buildReleaseStyle(MorphStyle& target, const MorphStyle& current,
     };
     if (arrDiff(pressStyle.bgColor, preState.bgColor) && arrSame(current.bgColor, pressStyle.bgColor))
         memcpy(target.bgColor, preState.bgColor, sizeof(float) * 4);
+#ifdef MORPH_FEATURE_SHADOW
+    if ((pressStyle.boxShadowSet != preState.boxShadowSet ||
+         !morph::shadowsEqual(pressStyle, preState)) &&
+        current.boxShadowSet == pressStyle.boxShadowSet &&
+        morph::shadowsEqual(current, pressStyle))
+    {
+        static_cast<ShadowStyle&>(target) = static_cast<const ShadowStyle&>(preState);
+    }
+#endif
 #ifdef MORPH_FEATURE_GRADIENT
     if ((pressStyle.bgGradientSet != preState.bgGradientSet ||
          !morph::gradientsEqual(pressStyle.bgGradient, preState.bgGradient)) &&
@@ -743,6 +758,25 @@ void MorphNode::interpolateStyles(MorphStyle& out, const MorphStyle& a,
     {
         out.borderGradient = b.borderGradient;
         out.borderGradientSet = b.borderGradientSet;
+    }
+#endif
+#ifdef MORPH_FEATURE_SHADOW
+    if (a.boxShadowSet && b.boxShadowSet)
+    {
+        ShadowStyle sa = static_cast<const ShadowStyle&>(a);
+        ShadowStyle sb = static_cast<const ShadowStyle&>(b);
+        ShadowStyle so;
+        morph::lerpShadow(so, sa, sb, t);
+        static_cast<ShadowStyle&>(out) = so;
+    }
+    else if (t < 0.5f)
+    {
+        // Discrete flip toward/away from "no shadow", like browsers.
+        static_cast<ShadowStyle&>(out) = static_cast<const ShadowStyle&>(a);
+    }
+    else
+    {
+        static_cast<ShadowStyle&>(out) = static_cast<const ShadowStyle&>(b);
     }
 #endif
 

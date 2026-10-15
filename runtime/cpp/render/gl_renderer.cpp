@@ -750,7 +750,7 @@ void GLRenderer::shutdown()
     if (m_shader)
         glDeleteProgram(m_shader);
     m_shader = 0;
-#ifdef MORPH_FEATURE_GRADIENT
+#if defined(MORPH_FEATURE_GRADIENT) || defined(MORPH_FEATURE_SHADOW)
     if (m_gradVAO)
         glDeleteVertexArrays(1, &m_gradVAO);
     m_gradVAO = 0;
@@ -821,7 +821,7 @@ bool GLRenderer::ensureReady()
     m_uStencilMode = glGetUniformLocation(m_shader, "uStencilMode");
     createQuadBuffers();
 
-#ifdef MORPH_FEATURE_GRADIENT
+#if defined(MORPH_FEATURE_GRADIENT) || defined(MORPH_FEATURE_SHADOW)
     createProgram(kGradQuadVertSrc, kGradQuadFragSrc, m_gradShader, m_gradUProj);
     m_gradUModel = glGetUniformLocation(m_gradShader, "uModel");
     m_gradURect = glGetUniformLocation(m_gradShader, "uRect");
@@ -850,6 +850,14 @@ bool GLRenderer::ensureReady()
     m_gradUBorderFrom = glGetUniformLocation(m_gradShader, "uBorderFrom");
     m_gradUBorderDir = glGetUniformLocation(m_gradShader, "uBorderDir");
     m_gradUBorderProjLen = glGetUniformLocation(m_gradShader, "uBorderProjLen");
+#ifdef MORPH_FEATURE_SHADOW
+    m_shadowUMode = glGetUniformLocation(m_gradShader, "uShadowMode");
+    m_shadowUCount = glGetUniformLocation(m_gradShader, "uShadowCount");
+    m_shadowUGeom = glGetUniformLocation(m_gradShader, "uShadowGeom");
+    m_shadowUColor = glGetUniformLocation(m_gradShader, "uShadowColor");
+    m_shadowUBox = glGetUniformLocation(m_gradShader, "uShadowBox");
+    m_shadowURadii = glGetUniformLocation(m_gradShader, "uShadowRadii");
+#endif
     createGradBuffers();
 #endif
 
@@ -1216,7 +1224,7 @@ void GLRenderer::flush(const float proj[16])
 #endif
 }
 
-#ifdef MORPH_FEATURE_GRADIENT
+#if defined(MORPH_FEATURE_GRADIENT) || defined(MORPH_FEATURE_SHADOW)
 void GLRenderer::createGradBuffers()
 {
     glGenVertexArrays(1, &m_gradVAO);
@@ -1231,7 +1239,9 @@ void GLRenderer::createGradBuffers()
 
     glBindVertexArray(0);
 }
+#endif
 
+#ifdef MORPH_FEATURE_GRADIENT
 void GLRenderer::drawGradRect(float x, float y, float w, float h,
                               const float radii[4], float color[4],
                               const BgGradient* grad, float borderWidth,
@@ -1454,5 +1464,72 @@ void GLRenderer::drawGradRect(float x, float y, float w, float h,
     glBindVertexArray(m_gradVAO);
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, (void *)0);
     glBindVertexArray(0);
+}
+#endif
+#ifdef MORPH_FEATURE_SHADOW
+void GLRenderer::drawBoxShadow(float x, float y, float w, float h,
+                               const float shapeXY[2], const float shapeWH[2],
+                               const float radii[4],
+                               const BoxShadow* shadows, int count, bool inset)
+{
+    if (shadows == nullptr || count <= 0 || w <= 0.0f || h <= 0.0f)
+    {
+        return;
+    }
+    if (count > MORPH_SHADOW_MAX)
+    {
+        count = MORPH_SHADOW_MAX;
+    }
+    // Ordering with the batched quads matters — flush first like clips do.
+    flush(m_proj);
+    if (!ensureReady())
+    {
+        return;
+    }
+    float model[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+#ifdef MORPH_FEATURE_TRANSFORM
+    if (m_transformDepth > 0)
+    {
+        // Mirror applyModel(): baked coords already include the scroll
+        // offset, so cancel anchor + scroll exactly like instances do.
+        float t[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+        t[12] = -(m_anchorX + m_scrollX);
+        t[13] = -(m_anchorY + m_scrollY);
+        morph::mat4Multiply(model, m_model, t);
+    }
+#endif
+
+    glUseProgram(m_gradShader);
+    glUniformMatrix4fv(m_gradUProj, 1, GL_FALSE, m_proj);
+    glUniformMatrix4fv(m_gradUModel, 1, GL_FALSE, model);
+    float rect[4] = {x + m_scrollX, y + m_scrollY, w, h};
+    glUniform4fv(m_gradURect, 1, rect);
+    glUniform1i(m_gradUStencil, 0);
+    // The shader branch keys off the mode; gradient/border state is
+    // untouched (shadow draws never interleave mid-rect).
+    glUniform1i(m_shadowUMode, inset ? 2 : 1);
+    glUniform1i(m_shadowUCount, count);
+    float geom[MORPH_SHADOW_MAX][4] = {{0}};
+    float cols[MORPH_SHADOW_MAX][4] = {{0}};
+    for (int i = 0; i < count; i++)
+    {
+        geom[i][0] = shadows[i].offsetX.value;
+        geom[i][1] = shadows[i].offsetY.value;
+        geom[i][2] = shadows[i].blur.value;
+        geom[i][3] = shadows[i].spread.value;
+        std::memcpy(cols[i], shadows[i].color, sizeof(float) * 4);
+    }
+    glUniform4fv(m_shadowUGeom, count, &geom[0][0]);
+    glUniform4fv(m_shadowUColor, count, &cols[0][0]);
+    // Shape box in drawn-quad px (drawn origin already scroll-baked).
+    float sbox[4] = {shapeXY[0] - x, shapeXY[1] - y, shapeWH[0], shapeWH[1]};
+    glUniform4fv(m_shadowUBox, 1, sbox);
+    glUniform4f(m_shadowURadii, radii[0], radii[1], radii[2], radii[3]);
+    glBindVertexArray(m_gradVAO);
+    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, (void *)0);
+    glBindVertexArray(0);
+    // Reset after the draw so later gradient fills using this program
+    // never take the shadow branch on a stale mode.
+    glUniform1i(m_shadowUMode, 0);
 }
 #endif

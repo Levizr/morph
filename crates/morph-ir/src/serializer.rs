@@ -241,6 +241,26 @@ impl IRSerializer {
             s.border_gradient.as_ref().map_or(Value::Null, Self::gradient),
         );
         out.insert("border_gradient_set".to_string(), Value::from(s.border_gradient.is_some()));
+        out.insert(
+            "box_shadows".to_string(),
+            s.box_shadows.as_ref().map_or(Value::Null, |list| {
+                Value::Array(
+                    list.iter()
+                        .map(|sh| {
+                            let mut m = Map::new();
+                            m.insert("offset_x".to_string(), length(sh.offset_x));
+                            m.insert("offset_y".to_string(), length(sh.offset_y));
+                            m.insert("blur".to_string(), length(sh.blur));
+                            m.insert("spread".to_string(), length(sh.spread));
+                            m.insert("color".to_string(), floats(&sh.color));
+                            m.insert("inset".to_string(), Value::from(sh.inset));
+                            Value::Object(m)
+                        })
+                        .collect(),
+                )
+            }),
+        );
+        out.insert("box_shadow_set".to_string(), Value::from(s.box_shadows.is_some()));
         out.insert("box_sizing".to_string(), Value::String(s.box_sizing.clone()));
         out.insert("z_index".to_string(), s.z_index.map_or(Value::Null, Value::from));
         out.insert("opacity".to_string(), num(s.opacity));

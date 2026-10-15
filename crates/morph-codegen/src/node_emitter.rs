@@ -394,6 +394,32 @@ fn emit_gradient(access: &str, g: &morph_ir::IRGradient) -> Vec<String> {
     o
 }
 
+/// Emit `box-shadow` layers into a fixed-size struct array. `None` clears
+/// (explicit `box-shadow: none`); the caller gates on the shadow feature.
+fn emit_box_shadows(access: &str, shadows: &Option<Vec<morph_ir::IRBoxShadow>>) -> Vec<String> {
+    use morph_ir::IRBoxShadow;
+    let mut o = Vec::new();
+    let list: &[IRBoxShadow] = shadows.as_ref().map_or(&[], Vec::as_slice);
+    o.push(format!("{access}boxShadowSet = true;"));
+    o.push(format!("{access}boxShadowCount = {};", list.len()));
+    for (i, s) in list.iter().enumerate() {
+        let base = format!("{access}boxShadows[{i}]");
+        o.extend(emit_length(&format!("{base}.offsetX"), s.offset_x));
+        o.extend(emit_length(&format!("{base}.offsetY"), s.offset_y));
+        o.extend(emit_length(&format!("{base}.blur"), s.blur));
+        o.extend(emit_length(&format!("{base}.spread"), s.spread));
+        o.push(format!("{base}.color[0] = {:.4}f;", s.color[0]));
+        o.push(format!("{base}.color[1] = {:.4}f;", s.color[1]));
+        o.push(format!("{base}.color[2] = {:.4}f;", s.color[2]));
+        o.push(format!("{base}.color[3] = {:.4}f;", s.color[3]));
+        o.push(format!(
+            "{base}.inset = {};",
+            if s.inset { "true" } else { "false" }
+        ));
+    }
+    o
+}
+
 pub(crate) fn translate_js<S: std::hash::BuildHasher>(
     js: &str,
     state_map: &std::collections::HashMap<String, String, S>,
@@ -1366,6 +1392,11 @@ fn set_style(
             lines.extend(emit_gradient(&format!("{ind}.borderGradient."), g));
         }
     }
+    if features.contains("shadow") {
+        if s.box_shadows.is_some() {
+            lines.extend(emit_box_shadows(&format!("{ind}."), &s.box_shadows));
+        }
+    }
     if !s.border_radius.is_zero() {
         lines.extend(emit_length(&format!("{ind}.borderRadius"), s.border_radius));
     }
@@ -1808,6 +1839,9 @@ fn emit_hover_style(
             None => o.push(format!("{hv}->bgGradient.enabled = false;")),
         }
     }
+    if features.contains("shadow") && s.box_shadows != base.box_shadows {
+        o.extend(emit_box_shadows(&format!("{hv}->"), &s.box_shadows));
+    }
     if s.color != [0.0, 0.0, 0.0, 1.0] && s.color != base.color {
         o.push(format!("{hv}->color[0] = {:.4}f;", s.color[0]));
         o.push(format!("{hv}->color[1] = {:.4}f;", s.color[1]));
@@ -2146,6 +2180,9 @@ fn emit_active_style(
             Some(g) => o.extend(emit_gradient(&format!("{hv}->bgGradient."), g)),
             None => o.push(format!("{hv}->bgGradient.enabled = false;")),
         }
+    }
+    if features.contains("shadow") && s.box_shadows != base.box_shadows {
+        o.extend(emit_box_shadows(&format!("{hv}->"), &s.box_shadows));
     }
     if s.color != [0.0, 0.0, 0.0, 1.0] && s.color != base.color {
         o.push(format!("{hv}->color[0] = {:.4}f;", s.color[0]));
@@ -3087,6 +3124,10 @@ pub fn keyframe_registration_code(
                     {
                         continue;
                     }
+                    // Same gate for shadows: no shadow runtime, no keyframes.
+                    if enum_name == "BoxShadow" && !features.contains("shadow") {
+                        continue;
+                    }
                     let escaped = css.replace('\\', "\\\\").replace('"', "\\\"");
                     lines.push(format!(
                         "    {{KeyframeProperty::{enum_name}, {{}}, \"{escaped}\"}},"
@@ -3143,6 +3184,7 @@ fn raw_prop_to_enum(prop: &str) -> Option<&'static str> {
         "background-color" => Some("BgColor"),
         "background-image" => Some("BgGradient"),
         "border-image" => Some("BorderGradient"),
+        "box-shadow" => Some("BoxShadow"),
         "color" => Some("Color"),
         "border-radius" => Some("BorderRadius"),
         "font-size" => Some("FontSize"),

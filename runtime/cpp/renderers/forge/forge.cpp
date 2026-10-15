@@ -320,6 +320,29 @@ static float screenYOf(MorphNode* node)
 // Screen-space box of a node (no ancestor expansion).
 static DamageRect nodeScreenBox(MorphNode* node)
 {
+#ifdef MORPH_FEATURE_SHADOW
+    if (node->style.boxShadowSet && node->style.boxShadowCount > 0)
+    {
+        // Outset shadows paint past the border box: widen damage so partial
+        // repaints never leave stale shadow pixels. Lengths resolve here
+        // like flatten (font/viewport units without a renderer fall back
+        // to their raw value — same convention as the paint path).
+        UnitEnv env;
+        env.fontSize = node->m_computedFontSize >= 0.0f
+            ? node->m_computedFontSize
+            : node->parentFontSize();
+        env.rootFont = node->rootFontSize();
+        BoxShadow tmp[MORPH_SHADOW_MAX];
+        int n = morph::resolveBoxShadows(node->style, env, tmp);
+        float l, t, r, b;
+        morph::shadowOutsetExtent(tmp, n, l, t, r, b);
+        int x0 = static_cast<int>(screenXOf(node) - l);
+        int y0 = static_cast<int>(screenYOf(node) - t);
+        int x1 = static_cast<int>(screenXOf(node) + node->w + r);
+        int y1 = static_cast<int>(screenYOf(node) + node->h + b);
+        return {x0, y0, x1 - x0, y1 - y0};
+    }
+#endif
     return {static_cast<int>(screenXOf(node)), static_cast<int>(screenYOf(node)),
             static_cast<int>(node->w), static_cast<int>(node->h)};
 }

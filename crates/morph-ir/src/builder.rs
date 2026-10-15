@@ -2934,6 +2934,12 @@ impl IRBuilder {
                         raw.insert("border-image".to_string(), val.clone());
                         continue;
                     }
+                    // Shadows ride the css-string path too: the runtime
+                    // parses and interpolates them (parseShadowCss).
+                    if prop == "box-shadow" {
+                        raw.insert("box-shadow".to_string(), val.clone());
+                        continue;
+                    }
                     if prop == "transform" || needs_layout(val) {
                         raw.insert(prop.clone(), val.clone());
                         continue;
@@ -4058,6 +4064,7 @@ fn is_animatable(prop: &str) -> bool {
             | "border-color"
             | "border-width"
             | "border-image"
+            | "box-shadow"
             | "border-radius"
             | "font-size"
             | "width"
@@ -5489,6 +5496,15 @@ fn apply_css_prop(style: &mut IRStyle, prop: &str, val: &str) -> Option<&'static
                 None
             }
         }
+        // box-shadow: `none` clears; otherwise a comma-separated layer list.
+        "box-shadow" => {
+            if let Some(shadows) = crate::shadow::parse_box_shadow(val) {
+                style.box_shadows = Some(shadows);
+                Some("box_shadow")
+            } else {
+                None
+            }
+        }
         _ => None,
     }
 }
@@ -5947,7 +5963,7 @@ fn parse_length(s: &str) -> Option<Length> {
 
 /// Parse a length for properties where `%` is invalid CSS (`border-width`).
 /// Relative font/viewport units stay; percentages drop the declaration.
-fn parse_length_no_pct(s: &str) -> Option<Length> {
+pub(crate) fn parse_length_no_pct(s: &str) -> Option<Length> {
     match parse_length(s)? {
         Length::Pct(_) => None,
         v => Some(v),

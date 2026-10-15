@@ -6,6 +6,9 @@
 // visible side, or one full-ring op when every side matches).
 #include "../core/node.h"
 #include "radius.h"
+#ifdef MORPH_FEATURE_SHADOW
+#include "shadow_paint.h"
+#endif
 
 #ifdef MORPH_FEATURE_BORDER
 // A border-image gradient overrides the border color source. Ring ops
@@ -275,6 +278,39 @@ inline void paintBoxDirect(Renderer& r, MorphStyle& style, const UnitEnv& env,
     bool uniformSolid = !imgGrad && visible > 0 &&
         borderSidesUniform(widths, colors, modes) &&
         getBorderStyle(style, 0) == CSS::BorderStyle::Solid;
+#ifdef MORPH_FEATURE_SHADOW
+    // Box-shadow geometry: the incoming rect is the padding box under
+    // content-box sizing, the border box under border-box sizing.
+    BoxShadow shTmp[MORPH_SHADOW_MAX];
+    int shN = style.boxShadowSet ? morph::resolveBoxShadows(style, env, shTmp) : 0;
+    float bbx = sx, bby = sy, bbw = sw, bbh = sh;
+    if (style.boxSizing != CSS::BoxSizing::BorderBox)
+    {
+        bbx -= widths[3];
+        bby -= widths[0];
+        bbw += widths[1] + widths[3];
+        bbh += widths[0] + widths[2];
+    }
+    float pbx = bbx + widths[3], pby = bby + widths[0];
+    float pbw = bbw - widths[1] - widths[3], pbh = bbh - widths[0] - widths[2];
+    float irad[4] = {
+        radii[0] - (widths[0] < widths[3] ? widths[0] : widths[3]),
+        radii[1] - (widths[0] < widths[1] ? widths[0] : widths[1]),
+        radii[2] - (widths[2] < widths[1] ? widths[2] : widths[1]),
+        radii[3] - (widths[2] < widths[3] ? widths[2] : widths[3]),
+    };
+    for (int i = 0; i < 4; i++)
+    {
+        if (irad[i] < 0.0f)
+        {
+            irad[i] = 0.0f;
+        }
+    }
+    if (shN > 0)
+    {
+        shadow_paint::paintOutset(r, bbx, bby, bbw, bbh, radii, shTmp, shN);
+    }
+#endif
 #ifdef MORPH_FEATURE_GRADIENT
     if (style.bgGradient.enabled)
     {
@@ -299,6 +335,12 @@ inline void paintBoxDirect(Renderer& r, MorphStyle& style, const UnitEnv& env,
         {
             paintBoxRings(r, style, env, sx, sy, sw, sh, snap);
         }
+#ifdef MORPH_FEATURE_SHADOW
+        if (shN > 0)
+        {
+            shadow_paint::paintInset(r, pbx, pby, pbw, pbh, irad, shTmp, shN);
+        }
+#endif
         return;
     }
 #endif
@@ -318,6 +360,12 @@ inline void paintBoxDirect(Renderer& r, MorphStyle& style, const UnitEnv& env,
                                       sh + 2.0f * bw, radii, style.bgColor, bw,
                                       bc);
         }
+#ifdef MORPH_FEATURE_SHADOW
+        if (shN > 0)
+        {
+            shadow_paint::paintInset(r, pbx, pby, pbw, pbh, irad, shTmp, shN);
+        }
+#endif
         return;
     }
     if (plainRounded || maxRadius4(radii) > 0.0f)
@@ -332,6 +380,12 @@ inline void paintBoxDirect(Renderer& r, MorphStyle& style, const UnitEnv& env,
     {
         paintBoxRings(r, style, env, sx, sy, sw, sh, snap);
     }
+#ifdef MORPH_FEATURE_SHADOW
+    if (shN > 0)
+    {
+        shadow_paint::paintInset(r, pbx, pby, pbw, pbh, irad, shTmp, shN);
+    }
+#endif
 }
 
 // Execute a recorded BorderRing op: forwards the packed side/style mode

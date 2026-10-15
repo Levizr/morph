@@ -285,9 +285,10 @@ private:
     void createImageBuffers();
 #endif
 
-#ifdef MORPH_FEATURE_GRADIENT
+#if defined(MORPH_FEATURE_GRADIENT) || defined(MORPH_FEATURE_SHADOW)
     // Immediate-mode gradient quad: rare enough that one draw call per box
     // beats carrying 8 stops through the 16-slot instanced pipeline.
+    // Shadow-only builds reuse the program for box-shadow passes.
     GLuint m_gradVAO = 0;
     GLuint m_gradShader = 0;
     GLint m_gradUProj = -1, m_gradUModel = -1, m_gradURect = -1;
@@ -300,6 +301,10 @@ private:
     GLint m_gradUBorderRepeating = -1, m_gradUBorderPeriod = -1;
     GLint m_gradUBorderKind = -1, m_gradUBorderCenter = -1, m_gradUBorderRadius = -1, m_gradUBorderFrom = -1;
     GLint m_gradUBorderDir = -1, m_gradUBorderProjLen = -1;
+#ifdef MORPH_FEATURE_SHADOW
+    GLint m_shadowUMode = -1, m_shadowUCount = -1, m_shadowUBox = -1, m_shadowURadii = -1;
+    GLint m_shadowUGeom = -1, m_shadowUColor = -1;
+#endif
     void createGradBuffers();
 #endif
 
@@ -495,6 +500,12 @@ public:
                       float color[4], const BgGradient* grad,
                       float borderWidth, const float borderColor[4],
                       const BgGradient* borderGrad = nullptr) override;
+#endif
+#ifdef MORPH_FEATURE_SHADOW
+    void drawBoxShadow(float x, float y, float w, float h,
+                       const float shapeXY[2], const float shapeWH[2],
+                       const float radii[4], const BoxShadow* shadows,
+                       int count, bool inset) override;
 #endif
 
 #ifdef MORPH_FEATURE_TEXT

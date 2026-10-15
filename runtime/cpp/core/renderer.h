@@ -5,6 +5,9 @@
 #ifdef MORPH_FEATURE_GRADIENT
 #include "../style/features/gradient.h"
 #endif
+#ifdef MORPH_FEATURE_SHADOW
+#include "../style/features/shadow.h"
+#endif
 
 enum class TextAlign { Left, Center, Right };
 
@@ -75,6 +78,26 @@ public:
         (void)borderColor;
         (void)borderGrad;
         drawRect(x, y, w, h, color);
+    }
+#endif
+#ifdef MORPH_FEATURE_SHADOW
+    // Box-shadow pass (outset xor inset subset per call). Renderers
+    // without shadow support draw nothing; the box still paints.
+    virtual void drawBoxShadow(float x, float y, float w, float h,
+                               const float shapeXY[2], const float shapeWH[2],
+                               const float radii[4],
+                               const BoxShadow* shadows, int count, bool inset)
+    {
+        (void)x;
+        (void)y;
+        (void)w;
+        (void)h;
+        (void)shapeXY;
+        (void)shapeWH;
+        (void)radii;
+        (void)shadows;
+        (void)count;
+        (void)inset;
     }
 #endif
     virtual unsigned int loadTexture(const std::string& path,

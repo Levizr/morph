@@ -69,6 +69,39 @@ static void setColorFromJson(float* dst, const JsonValue& arr) {
     }
 }
 
+#ifdef MORPH_FEATURE_SHADOW
+// Mirror of the Rust serializer's `box_shadows` encoding: lengths ride as
+// px numbers or unit strings (same `setLengthOpt` convention as radii).
+static void setShadowsFromJson(MorphStyle& s, const JsonValue& arr) {
+    if (arr.type() != JsonType::Array) {
+        return;
+    }
+    s.boxShadowCount = 0;
+    for (size_t i = 0; i < arr.size() && s.boxShadowCount < MORPH_SHADOW_MAX; i++) {
+        const JsonValue& sh = arr[i];
+        if (sh.type() != JsonType::Object) {
+            continue;
+        }
+        BoxShadow& dst = s.boxShadows[s.boxShadowCount];
+        dst.offsetX.value = 0.0f;
+        dst.offsetX.unit = LengthUnit::Px;
+        dst.offsetY.value = 0.0f;
+        dst.offsetY.unit = LengthUnit::Px;
+        dst.blur.value = 0.0f;
+        dst.blur.unit = LengthUnit::Px;
+        dst.spread.value = 0.0f;
+        dst.spread.unit = LengthUnit::Px;
+        if (!sh["offset_x"].isNull()) setLengthOpt(dst.offsetX, sh["offset_x"]);
+        if (!sh["offset_y"].isNull()) setLengthOpt(dst.offsetY, sh["offset_y"]);
+        if (!sh["blur"].isNull()) setLengthOpt(dst.blur, sh["blur"]);
+        if (!sh["spread"].isNull()) setLengthOpt(dst.spread, sh["spread"]);
+        setColorFromJson(dst.color, sh["color"]);
+        dst.inset = !sh["inset"].isNull() && sh["inset"].asBool();
+        s.boxShadowCount++;
+    }
+}
+#endif
+
 #ifdef MORPH_FEATURE_GRADIENT
 // Shape mirrors the Rust serializer (`serializer.rs::gradient`): angle xor
 // corner, stops with [kind, value] positions and nullable hints.
@@ -512,6 +545,13 @@ static void applyStyle(MorphStyle& s, const JsonValue& styleVal) {
                 {
                     setGradientFromJson(s.borderGradient, styleVal["border_gradient"]);
                     s.borderGradientSet = true;
+                }
+#endif
+#ifdef MORPH_FEATURE_SHADOW
+                if (styleVal.has("box_shadows") && !styleVal["box_shadows"].isNull())
+                {
+                    setShadowsFromJson(s, styleVal["box_shadows"]);
+                    s.boxShadowSet = true;
                 }
 #endif
             }

@@ -58,6 +58,7 @@ These properties interpolate smoothly (numbers lerp, colors blend):
 - `width`, `height` — interpolated when both values are explicit
 - `opacity` — numeric interpolation
 - `left`, `right`, `top`, `bottom` — numeric interpolation
+- `background-image` (gradient-to-gradient), `border-image`, `box-shadow` — interpolated layer-by-layer when both sides share structure (same kind / same stop or shadow count, same units); mismatched structures flip discretely at the midpoint, like browsers
 
 These properties **snap instantly** (no interpolation):
 

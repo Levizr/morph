@@ -11,6 +11,9 @@
 #ifdef MORPH_FEATURE_GRADIENT
 #include "../style/features/gradient.h"
 #endif
+#ifdef MORPH_FEATURE_SHADOW
+#include "../style/features/shadow.h"
+#endif
 
 enum class Easing : uint8_t {
     Linear,
@@ -65,6 +68,13 @@ struct FlatRenderNode {
     // Baked border-image gradient (empty unless the border image is a
     // gradient; evaluated in the border box like the background one).
     BgGradient borderGrad;
+#endif
+#ifdef MORPH_FEATURE_SHADOW
+    // Baked box-shadows (lengths resolved to px at flatten time; color
+    // alphas pre-multiplied by opacity like bgColor).
+    BoxShadow boxShadows[MORPH_SHADOW_MAX];
+    int boxShadowCount = 0;
+    bool boxShadowSet = false;
 #endif
 
     CSS::Overflow overflowX = CSS::Overflow::Visible;

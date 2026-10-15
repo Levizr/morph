@@ -2,6 +2,9 @@
 #include "../core/node.h"
 #include "radius.h"
 #include "border_paint.h"
+#ifdef MORPH_FEATURE_SHADOW
+#include "shadow_paint.h"
+#endif
 
 class RectNode : public MorphNode {
 public:
@@ -49,44 +52,127 @@ public:
 #endif
 
         // 1. Render self (background rect — from display list)
+#ifdef MORPH_FEATURE_SHADOW
+        shadow_paint::ShadowExec shE;
+#endif
         for (auto& op : m_displayList) {
             switch (op.type) {
                 case DrawOp::Rect:
+#ifdef MORPH_FEATURE_SHADOW
+                    shadow_paint::shadowPre(r, style, unitEnv(w, nullptr), op.x, op.y, op.w, op.h, kSharpRadii, shE);
+#endif
 #ifdef MORPH_FEATURE_GRADIENT
                     if (style.bgGradient.enabled) {
                         r.drawGradRect(op.x, op.y, op.w, op.h, kSharpRadii, &op.r,
                                        &style.bgGradient, 0.0f, nullptr, nullptr);
+#ifdef MORPH_FEATURE_SHADOW
+                    shadow_paint::shadowPost(r, op.x, op.y, op.w, op.h, kSharpRadii, shE);
+#endif
                         break;
                     }
 #endif
-                    r.drawRect(op.x, op.y, op.w, op.h, &op.r); break;
+                    r.drawRect(op.x, op.y, op.w, op.h, &op.r);
+                    #ifdef MORPH_FEATURE_SHADOW
+                        shadow_paint::shadowPost(r, op.x, op.y, op.w, op.h, kSharpRadii, shE);
+                    #endif
+                    break;
                 case DrawOp::RoundedRect:
+#ifdef MORPH_FEATURE_SHADOW
+                    shadow_paint::shadowPre(r, style, unitEnv(w, nullptr), op.x, op.y, op.w, op.h, op.radii, shE);
+#endif
 #ifdef MORPH_FEATURE_GRADIENT
                     if (style.bgGradient.enabled) {
                         r.drawGradRect(op.x, op.y, op.w, op.h, op.radii, &op.r,
                                        &style.bgGradient, 0.0f, nullptr, nullptr);
+#ifdef MORPH_FEATURE_SHADOW
+                    shadow_paint::shadowPost(r, op.x, op.y, op.w, op.h, op.radii, shE);
+#endif
                         break;
                     }
 #endif
-                    r.drawRoundedRect(op.x, op.y, op.w, op.h, op.radii, &op.r); break;
+                    r.drawRoundedRect(op.x, op.y, op.w, op.h, op.radii, &op.r);
+                    #ifdef MORPH_FEATURE_SHADOW
+                        shadow_paint::shadowPost(r, op.x, op.y, op.w, op.h, op.radii, shE);
+                    #endif
+                    break;
                 case DrawOp::BorderedRect:
+#ifdef MORPH_FEATURE_SHADOW
+                    shadow_paint::shadowPre(r, style, unitEnv(w, nullptr), op.x, op.y, op.w, op.h, kSharpRadii, shE);
+#endif
 #ifdef MORPH_FEATURE_GRADIENT
                     if (style.bgGradient.enabled) {
                         r.drawGradRect(op.x, op.y, op.w, op.h, kSharpRadii, &op.r,
                                        &style.bgGradient, op.data[1], &op.br, nullptr);
+#ifdef MORPH_FEATURE_SHADOW
+                    {
+                        float shBw = op.data[1];
+                        float shR[4] = {
+                            op.radii[0] > shBw ? op.radii[0] - shBw : 0.0f,
+                            op.radii[1] > shBw ? op.radii[1] - shBw : 0.0f,
+                            op.radii[2] > shBw ? op.radii[2] - shBw : 0.0f,
+                            op.radii[3] > shBw ? op.radii[3] - shBw : 0.0f,
+                        };
+                        shadow_paint::shadowPost(r, op.x + shBw, op.y + shBw,
+                                                 op.w - 2.0f * shBw, op.h - 2.0f * shBw, shR, shE);
+                    }
+#endif
                         break;
                     }
 #endif
-                    r.drawBorderedRect(op.x, op.y, op.w, op.h, &op.r, op.data[1], &op.br); break;
+                    r.drawBorderedRect(op.x, op.y, op.w, op.h, &op.r, op.data[1], &op.br);
+                    #ifdef MORPH_FEATURE_SHADOW
+                                        {
+                                            float shBw = op.data[1];
+                                            float shR[4] = {
+                                                op.radii[0] > shBw ? op.radii[0] - shBw : 0.0f,
+                                                op.radii[1] > shBw ? op.radii[1] - shBw : 0.0f,
+                                                op.radii[2] > shBw ? op.radii[2] - shBw : 0.0f,
+                                                op.radii[3] > shBw ? op.radii[3] - shBw : 0.0f,
+                                            };
+                        shadow_paint::shadowPost(r, op.x + shBw, op.y + shBw,
+                                                                     op.w - 2.0f * shBw, op.h - 2.0f * shBw, shR, shE);
+                                        }
+                    #endif
+                    break;
                 case DrawOp::BorderedRoundedRect:
+#ifdef MORPH_FEATURE_SHADOW
+                    shadow_paint::shadowPre(r, style, unitEnv(w, nullptr), op.x, op.y, op.w, op.h, op.radii, shE);
+#endif
 #ifdef MORPH_FEATURE_GRADIENT
                     if (style.bgGradient.enabled) {
                         r.drawGradRect(op.x, op.y, op.w, op.h, op.radii, &op.r,
                                        &style.bgGradient, op.data[1], &op.br, nullptr);
+#ifdef MORPH_FEATURE_SHADOW
+                    {
+                        float shBw = op.data[1];
+                        float shR[4] = {
+                            op.radii[0] > shBw ? op.radii[0] - shBw : 0.0f,
+                            op.radii[1] > shBw ? op.radii[1] - shBw : 0.0f,
+                            op.radii[2] > shBw ? op.radii[2] - shBw : 0.0f,
+                            op.radii[3] > shBw ? op.radii[3] - shBw : 0.0f,
+                        };
+                        shadow_paint::shadowPost(r, op.x + shBw, op.y + shBw,
+                                                 op.w - 2.0f * shBw, op.h - 2.0f * shBw, shR, shE);
+                    }
+#endif
                         break;
                     }
 #endif
-                    r.drawBorderedRoundedRect(op.x, op.y, op.w, op.h, op.radii, &op.r, op.data[1], &op.br); break;
+                    r.drawBorderedRoundedRect(op.x, op.y, op.w, op.h, op.radii, &op.r, op.data[1], &op.br);
+                    #ifdef MORPH_FEATURE_SHADOW
+                                        {
+                                            float shBw = op.data[1];
+                                            float shR[4] = {
+                                                op.radii[0] > shBw ? op.radii[0] - shBw : 0.0f,
+                                                op.radii[1] > shBw ? op.radii[1] - shBw : 0.0f,
+                                                op.radii[2] > shBw ? op.radii[2] - shBw : 0.0f,
+                                                op.radii[3] > shBw ? op.radii[3] - shBw : 0.0f,
+                                            };
+                        shadow_paint::shadowPost(r, op.x + shBw, op.y + shBw,
+                                                                     op.w - 2.0f * shBw, op.h - 2.0f * shBw, shR, shE);
+                                        }
+                    #endif
+                    break;
                 case DrawOp::BorderRing:
 #ifdef MORPH_FEATURE_BORDER
                     execBorderRingOp(r, op, style); break;

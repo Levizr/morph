@@ -32,6 +32,7 @@ enum class KeyframeProperty : uint8_t {
     BorderColor,
     BorderWidth,
     BorderGradient,
+    BoxShadow,
 };
 
 // One typed value inside a keyframe.

@@ -30,6 +30,9 @@
 #ifdef MORPH_FEATURE_GRADIENT
 #include "features/gradient.h"
 #endif
+#ifdef MORPH_FEATURE_SHADOW
+#include "features/shadow.h"
+#endif
 
 struct MorphStyle : StyleBase
 #ifdef MORPH_FEATURE_FLEX
@@ -61,6 +64,9 @@ struct MorphStyle : StyleBase
 #endif
 #ifdef MORPH_FEATURE_GRADIENT
     , GradientStyle
+#endif
+#ifdef MORPH_FEATURE_SHADOW
+    , ShadowStyle
 #endif
 {};
 

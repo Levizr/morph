@@ -7,6 +7,7 @@ pub mod builder;
 pub mod gradient;
 pub mod node;
 pub mod serializer;
+pub mod shadow;
 pub mod style;
 pub mod tailwind;
 pub mod transforms;
@@ -20,4 +21,5 @@ pub use gradient::{
 };
 pub use node::{IRAnimation, IRConditionalClassEffect, IREvent, IRKeyframe, IRNode, IRWindow};
 pub use serializer::IRSerializer;
+pub use shadow::{IRBoxShadow, MAX_BOX_SHADOWS};
 pub use style::{IRStyle, Length};

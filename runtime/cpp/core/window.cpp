@@ -6,6 +6,9 @@
 #ifdef MORPH_FEATURE_INPUT
 #include "../ui/input.h"
 #endif
+#ifdef MORPH_FEATURE_SHADOW
+#include "../ui/shadow_paint.h"
+#endif
 #include <GLFW/glfw3.h>
 // Pointer grab for scrollbar thumb drags (devtools-style: the drag
 // keeps tracking past the window edge with the cursor visible).
@@ -954,49 +957,141 @@ void MorphWindow::drawOpsForNode(GLRenderer &r, const RenderFrame *frame, int no
         switch (op.type)
         {
         case DrawOp::Rect:
+#ifdef MORPH_FEATURE_SHADOW
+            if (node.boxShadowSet && node.boxShadowCount > 0)
+                shadow_paint::paintOutset(r, px, py, op.w, op.h, kSharpRadii, node.boxShadows, node.boxShadowCount);
+#endif
 #ifdef MORPH_FEATURE_GRADIENT
             if (node.grad.enabled)
             {
                 r.drawGradRect(px, py, op.w, op.h, kSharpRadii, (float *)&op.r,
                                &node.grad, 0.0f, nullptr, nullptr);
+                #ifdef MORPH_FEATURE_SHADOW
+                            if (node.boxShadowSet && node.boxShadowCount > 0)
+                                shadow_paint::paintInset(r, px, py, op.w, op.h, kSharpRadii, node.boxShadows, node.boxShadowCount);
+                #endif
                 break;
             }
 #endif
             r.drawRect(px, py, op.w, op.h, (float *)&op.r);
+            #ifdef MORPH_FEATURE_SHADOW
+                        if (node.boxShadowSet && node.boxShadowCount > 0)
+                            shadow_paint::paintInset(r, px, py, op.w, op.h, kSharpRadii, node.boxShadows, node.boxShadowCount);
+            #endif
             break;
         case DrawOp::RoundedRect:
+#ifdef MORPH_FEATURE_SHADOW
+            if (node.boxShadowSet && node.boxShadowCount > 0)
+                shadow_paint::paintOutset(r, px, py, op.w, op.h, op.radii, node.boxShadows, node.boxShadowCount);
+#endif
 #ifdef MORPH_FEATURE_GRADIENT
             if (node.grad.enabled)
             {
                 r.drawGradRect(px, py, op.w, op.h, op.radii, (float *)&op.r,
                                &node.grad, 0.0f, nullptr, nullptr);
+                #ifdef MORPH_FEATURE_SHADOW
+                            if (node.boxShadowSet && node.boxShadowCount > 0)
+                                shadow_paint::paintInset(r, px, py, op.w, op.h, op.radii, node.boxShadows, node.boxShadowCount);
+                #endif
                 break;
             }
 #endif
             r.drawRoundedRect(px, py, op.w, op.h, op.radii, (float *)&op.r);
+            #ifdef MORPH_FEATURE_SHADOW
+                        if (node.boxShadowSet && node.boxShadowCount > 0)
+                            shadow_paint::paintInset(r, px, py, op.w, op.h, op.radii, node.boxShadows, node.boxShadowCount);
+            #endif
             break;
         case DrawOp::BorderedRect:
+#ifdef MORPH_FEATURE_SHADOW
+            if (node.boxShadowSet && node.boxShadowCount > 0)
+                shadow_paint::paintOutset(r, px, py, op.w, op.h, op.radii, node.boxShadows, node.boxShadowCount);
+#endif
 #ifdef MORPH_FEATURE_GRADIENT
             if (node.grad.enabled)
             {
                 r.drawGradRect(px, py, op.w, op.h, op.radii, (float *)&op.r,
                                &node.grad, op.data[1], (float *)&op.br, nullptr);
+                #ifdef MORPH_FEATURE_SHADOW
+                            if (node.boxShadowSet && node.boxShadowCount > 0)
+                            {
+                                float shBw = op.data[1];
+                                float shR[4] = {
+                                    op.radii[0] > shBw ? op.radii[0] - shBw : 0.0f,
+                                    op.radii[1] > shBw ? op.radii[1] - shBw : 0.0f,
+                                    op.radii[2] > shBw ? op.radii[2] - shBw : 0.0f,
+                                    op.radii[3] > shBw ? op.radii[3] - shBw : 0.0f,
+                                };
+                                shadow_paint::paintInset(r, px + shBw, py + shBw,
+                                                         op.w - 2.0f * shBw, op.h - 2.0f * shBw, shR,
+                                                         node.boxShadows, node.boxShadowCount);
+                            }
+                #endif
                 break;
             }
 #endif
             r.drawBorderedRect(px, py, op.w, op.h, (float *)&op.r, op.data[1], (float *)&op.br);
+            #ifdef MORPH_FEATURE_SHADOW
+                        if (node.boxShadowSet && node.boxShadowCount > 0)
+                        {
+                            float shBw = op.data[1];
+                            float shR[4] = {
+                                op.radii[0] > shBw ? op.radii[0] - shBw : 0.0f,
+                                op.radii[1] > shBw ? op.radii[1] - shBw : 0.0f,
+                                op.radii[2] > shBw ? op.radii[2] - shBw : 0.0f,
+                                op.radii[3] > shBw ? op.radii[3] - shBw : 0.0f,
+                            };
+                            shadow_paint::paintInset(r, px + shBw, py + shBw,
+                                                     op.w - 2.0f * shBw, op.h - 2.0f * shBw, shR,
+                                                     node.boxShadows, node.boxShadowCount);
+                        }
+            #endif
             break;
         case DrawOp::BorderedRoundedRect:
+#ifdef MORPH_FEATURE_SHADOW
+            if (node.boxShadowSet && node.boxShadowCount > 0)
+                shadow_paint::paintOutset(r, px, py, op.w, op.h, op.radii, node.boxShadows, node.boxShadowCount);
+#endif
 #ifdef MORPH_FEATURE_GRADIENT
             if (node.grad.enabled)
             {
                 r.drawGradRect(px, py, op.w, op.h, op.radii, (float *)&op.r,
                                &node.grad, op.data[1], (float *)&op.br, nullptr);
+                #ifdef MORPH_FEATURE_SHADOW
+                            if (node.boxShadowSet && node.boxShadowCount > 0)
+                            {
+                                float shBw = op.data[1];
+                                float shR[4] = {
+                                    op.radii[0] > shBw ? op.radii[0] - shBw : 0.0f,
+                                    op.radii[1] > shBw ? op.radii[1] - shBw : 0.0f,
+                                    op.radii[2] > shBw ? op.radii[2] - shBw : 0.0f,
+                                    op.radii[3] > shBw ? op.radii[3] - shBw : 0.0f,
+                                };
+                                shadow_paint::paintInset(r, px + shBw, py + shBw,
+                                                         op.w - 2.0f * shBw, op.h - 2.0f * shBw, shR,
+                                                         node.boxShadows, node.boxShadowCount);
+                            }
+                #endif
                 break;
             }
 #endif
             r.drawBorderedRoundedRect(px, py, op.w, op.h, op.radii, (float *)&op.r,
                                       op.data[1], (float *)&op.br);
+            #ifdef MORPH_FEATURE_SHADOW
+                        if (node.boxShadowSet && node.boxShadowCount > 0)
+                        {
+                            float shBw = op.data[1];
+                            float shR[4] = {
+                                op.radii[0] > shBw ? op.radii[0] - shBw : 0.0f,
+                                op.radii[1] > shBw ? op.radii[1] - shBw : 0.0f,
+                                op.radii[2] > shBw ? op.radii[2] - shBw : 0.0f,
+                                op.radii[3] > shBw ? op.radii[3] - shBw : 0.0f,
+                            };
+                            shadow_paint::paintInset(r, px + shBw, py + shBw,
+                                                     op.w - 2.0f * shBw, op.h - 2.0f * shBw, shR,
+                                                     node.boxShadows, node.boxShadowCount);
+                        }
+            #endif
             break;
         case DrawOp::BorderRing:
 #ifdef MORPH_FEATURE_GRADIENT

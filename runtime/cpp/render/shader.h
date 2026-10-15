@@ -613,7 +613,7 @@ void main() {
 )glsl";
 #endif
 
-#ifdef MORPH_FEATURE_GRADIENT
+#if defined(MORPH_FEATURE_GRADIENT) || defined(MORPH_FEATURE_SHADOW)
 // ── Gradient fill quad (immediate mode) ──────────────────────
 // Same rounded-box SDF as the batched quad shader, but the fill color is
 // evaluated per-pixel from linear-gradient stops passed as uniforms (stop
@@ -666,6 +666,14 @@ uniform int uGradKind;
 uniform vec2 uGradCenter;
 uniform vec2 uGradRadius;
 uniform float uGradFrom;
+// Box-shadow pass (drawBoxShadow): shape box + radii in drawn-quad px,
+// one subset (outset xor inset) per draw, unrolled like gradients.
+uniform int uShadowMode;
+uniform int uShadowCount;
+uniform vec4 uShadowGeom[4];
+uniform vec4 uShadowColor[4];
+uniform vec4 uShadowBox;
+uniform vec4 uShadowRadii;
 out vec4 FragColor;
 
 float sdRoundedBox(vec2 p, vec2 b, float r) {
@@ -735,6 +743,121 @@ void main() {
     if (uStencilMode) {
         if (alpha_outer < 0.5) discard;
         FragColor = vec4(1.0);
+        return;
+    }
+
+    // Box-shadow pass: outset and inset shadows evaluate in the shape's
+    // own space (uShadowBox in drawn-quad px). One subset per draw, so no
+    // inset flag rides along — the CPU splits the list. Unrolled with
+    // constant indices like the gradient stops above.
+    if (uShadowMode > 0) {
+        vec2 sp = vUV * vSize;
+        vec2 sbox = uShadowBox.zw;
+        vec2 sctr = uShadowBox.xy + sbox * 0.5;
+        vec4 sc = vec4(0.0);
+        {
+            vec4 gg = uShadowGeom[0];
+            vec4 gc = uShadowColor[0];
+            if (uShadowCount > 0) {
+                vec2 c = sctr + gg.xy;
+                vec2 hsz = sbox * 0.5 + vec2(gg.w);
+                vec2 q = sp - c;
+                vec4 fitR = fitRadii(uShadowRadii + vec4(gg.w), hsz);
+                float d = sdRoundedBox(q, hsz, pickRadius(q, fitR));
+                float bl = max(gg.z, 1e-4);
+                float a;
+                if (uShadowMode == 1) {
+                    a = gc.a * (1.0 - smoothstep(-bl, bl, d));
+                } else {
+                    // Inset = the offset shape's outside, clipped to the
+                    // (unshifted) padding box: dark band on the far side
+                    // of the offset, softening symmetrically like outset.
+                    float dc = sdRoundedBox(sp - sctr, sbox * 0.5,
+                                            pickRadius(sp - sctr, fitRadii(uShadowRadii, sbox * 0.5)));
+                    a = gc.a * smoothstep(-bl, bl, d)
+                        * (1.0 - smoothstep(-edgeSoftness, edgeSoftness, dc));
+                }
+                a = clamp(a, 0.0, 1.0);
+                float oa = a + sc.a * (1.0 - a);
+                sc = vec4((gc.rgb * a + sc.rgb * sc.a * (1.0 - a)) / max(oa, 1e-4), oa);
+            }
+            gg = uShadowGeom[1];
+            gc = uShadowColor[1];
+            if (uShadowCount > 1) {
+                vec2 c = sctr + gg.xy;
+                vec2 hsz = sbox * 0.5 + vec2(gg.w);
+                vec2 q = sp - c;
+                vec4 fitR = fitRadii(uShadowRadii + vec4(gg.w), hsz);
+                float d = sdRoundedBox(q, hsz, pickRadius(q, fitR));
+                float bl = max(gg.z, 1e-4);
+                float a;
+                if (uShadowMode == 1) {
+                    a = gc.a * (1.0 - smoothstep(-bl, bl, d));
+                } else {
+                    // Inset = the offset shape's outside, clipped to the
+                    // (unshifted) padding box: dark band on the far side
+                    // of the offset, softening symmetrically like outset.
+                    float dc = sdRoundedBox(sp - sctr, sbox * 0.5,
+                                            pickRadius(sp - sctr, fitRadii(uShadowRadii, sbox * 0.5)));
+                    a = gc.a * smoothstep(-bl, bl, d)
+                        * (1.0 - smoothstep(-edgeSoftness, edgeSoftness, dc));
+                }
+                a = clamp(a, 0.0, 1.0);
+                float oa = a + sc.a * (1.0 - a);
+                sc = vec4((gc.rgb * a + sc.rgb * sc.a * (1.0 - a)) / max(oa, 1e-4), oa);
+            }
+            gg = uShadowGeom[2];
+            gc = uShadowColor[2];
+            if (uShadowCount > 2) {
+                vec2 c = sctr + gg.xy;
+                vec2 hsz = sbox * 0.5 + vec2(gg.w);
+                vec2 q = sp - c;
+                vec4 fitR = fitRadii(uShadowRadii + vec4(gg.w), hsz);
+                float d = sdRoundedBox(q, hsz, pickRadius(q, fitR));
+                float bl = max(gg.z, 1e-4);
+                float a;
+                if (uShadowMode == 1) {
+                    a = gc.a * (1.0 - smoothstep(-bl, bl, d));
+                } else {
+                    // Inset = the offset shape's outside, clipped to the
+                    // (unshifted) padding box: dark band on the far side
+                    // of the offset, softening symmetrically like outset.
+                    float dc = sdRoundedBox(sp - sctr, sbox * 0.5,
+                                            pickRadius(sp - sctr, fitRadii(uShadowRadii, sbox * 0.5)));
+                    a = gc.a * smoothstep(-bl, bl, d)
+                        * (1.0 - smoothstep(-edgeSoftness, edgeSoftness, dc));
+                }
+                a = clamp(a, 0.0, 1.0);
+                float oa = a + sc.a * (1.0 - a);
+                sc = vec4((gc.rgb * a + sc.rgb * sc.a * (1.0 - a)) / max(oa, 1e-4), oa);
+            }
+            gg = uShadowGeom[3];
+            gc = uShadowColor[3];
+            if (uShadowCount > 3) {
+                vec2 c = sctr + gg.xy;
+                vec2 hsz = sbox * 0.5 + vec2(gg.w);
+                vec2 q = sp - c;
+                vec4 fitR = fitRadii(uShadowRadii + vec4(gg.w), hsz);
+                float d = sdRoundedBox(q, hsz, pickRadius(q, fitR));
+                float bl = max(gg.z, 1e-4);
+                float a;
+                if (uShadowMode == 1) {
+                    a = gc.a * (1.0 - smoothstep(-bl, bl, d));
+                } else {
+                    // Inset = the offset shape's outside, clipped to the
+                    // (unshifted) padding box: dark band on the far side
+                    // of the offset, softening symmetrically like outset.
+                    float dc = sdRoundedBox(sp - sctr, sbox * 0.5,
+                                            pickRadius(sp - sctr, fitRadii(uShadowRadii, sbox * 0.5)));
+                    a = gc.a * smoothstep(-bl, bl, d)
+                        * (1.0 - smoothstep(-edgeSoftness, edgeSoftness, dc));
+                }
+                a = clamp(a, 0.0, 1.0);
+                float oa = a + sc.a * (1.0 - a);
+                sc = vec4((gc.rgb * a + sc.rgb * sc.a * (1.0 - a)) / max(oa, 1e-4), oa);
+            }
+        }
+        FragColor = sc;
         return;
     }
 
