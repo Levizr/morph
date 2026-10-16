@@ -1252,8 +1252,17 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
             if (currentInline.empty()) return;
 
 #ifdef MORPH_FEATURE_MARGIN_COLLAPSE
-            if (!firstBlockChild) inlineBeforeFirstBlock = true;
-            else inlineAfterLastBlock = true;
+            // Whitespace-only runs generate no boxes and must not block
+            // parent–child margin collapse (JSX newlines between blocks
+            // would otherwise kill every through-margin).
+            bool hasContent = false;
+            for (auto* c : currentInline) {
+                if (!c->isWhitespaceOnly()) { hasContent = true; break; }
+            }
+            if (hasContent) {
+                if (!firstBlockChild) inlineBeforeFirstBlock = true;
+                else inlineAfterLastBlock = true;
+            }
 #endif
             std::vector<InlineItem> items;
             for (auto* c : currentInline) {
@@ -1292,9 +1301,8 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                 }
                 currentInline.clear();
                 unwrappedInline.clear();
-#ifdef MORPH_FEATURE_MARGIN_COLLAPSE
-                prevMb = 0.0f;
-#endif
+                // Whitespace-only: no line box is generated, so a pending
+                // sibling margin survives (only real line boxes consume it).
                 return;
             }
             for (size_t i = 0; i < (size_t)firstVis; i++) {

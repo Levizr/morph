@@ -39,6 +39,14 @@ struct LayoutNode : MorphNode
     }
 };
 
+// Whitespace text node (JSX newlines between blocks): must not block
+// parent–child margin collapse (it generates no boxes).
+struct WsNode : LayoutNode
+{
+    WsNode() { type = NodeType::Text; }
+    bool isWhitespaceOnly() const override { return true; }
+};
+
 static LayoutNode* makeBox(float w, float h)
 {
     LayoutNode* n = new LayoutNode();
@@ -57,6 +65,43 @@ static void attach(MorphNode* parent, MorphNode* child)
 {
     child->parent = parent;
     parent->children.push_back(child);
+}
+
+// Whitespace text runs (JSX newlines) generate no boxes: a trailing one
+// inside a boundary-less parent must not block the last child's bottom
+// margin collapsing through, and a leading one must not block the top.
+static void testWhitespaceCollapse()
+{
+#ifdef MORPH_FEATURE_MARGIN_COLLAPSE
+    LayoutNode holder;
+    LayoutNode* parent = makeBox(-1.0f, -1.0f);
+    LayoutNode* first = makeBox(-1.0f, 30.0f);
+    first->style.margin[0].value = 20.0f;
+    first->style.margin[2].value = 20.0f;
+    LayoutNode* last = makeBox(-1.0f, 30.0f);
+    last->style.margin[0].value = 30.0f;
+    last->style.margin[2].value = 10.0f;
+    LayoutNode* after = makeBox(-1.0f, 40.0f);
+    after->style.margin[0].value = 8.0f;
+    attach(&holder, parent);
+    attach(parent, new WsNode());
+    attach(parent, first);
+    attach(parent, new WsNode());
+    attach(parent, last);
+    attach(parent, new WsNode());
+    attach(&holder, new WsNode());
+    attach(&holder, after);
+    holder.layout(0.0f, 0.0f, 800.0f, 0.0f, nullptr);
+    // First child's 20 collapses through the top (parent starts at 0,
+    // child sits at 0 with the margin passed up).
+    CHECK(near(first->y, 0.0f), "leading ws keeps top through-collapse");
+    // Sibling margins collapse across the whitespace run (no line box).
+    CHECK(near(last->y, 60.0f), "ws run keeps sibling collapse");
+    // Last child's 10 collapses through the bottom and with `after`'s 8.
+    CHECK(near(after->y, parent->y + parent->h + 10.0f), "trailing ws keeps bottom through-collapse");
+#else
+    (void)near;
+#endif
 }
 
 // Absolute anchored offsets place against the containing block.
@@ -337,6 +382,7 @@ static void testLengthLerp()
 
 int main()
 {
+    testWhitespaceCollapse();
     testAbsAnchored();
     testAbsStatic();
     testAbsOverConstrained();

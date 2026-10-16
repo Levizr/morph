@@ -341,6 +341,57 @@ static void testFitContent()
     CHECK(near(rest->w, 500.0f), "fit-content sibling fills");
 }
 
+// auto-fit collapses empty tracks; the items share the whole width.
+static void testAutoFitCollapse()
+{
+    LayoutNode* g = makeGrid("repeat(auto-fit, minmax(100, 1fr))", "", 8.0f);
+    LayoutNode* items[2];
+    for (int i = 0; i < 2; i++)
+    {
+        items[i] = makeItem();
+        attach(g, items[i]);
+    }
+    layoutRoot(g, 350.0f);
+    // 3 repetitions fit (350+8)/(100+8), one collapses: (350-8)/2 each.
+    CHECK(near(items[0]->w, 171.0f), "autofit collapse w");
+    CHECK(near(items[1]->x, 179.0f), "autofit collapse second x");
+    CHECK(near(items[1]->w, 171.0f), "autofit collapse second w");
+}
+
+// auto-fill keeps empty tracks (unlike auto-fit).
+static void testAutoFillKeepsEmpty()
+{
+    LayoutNode* g = makeGrid("repeat(auto-fill, minmax(100, 1fr))", "", 8.0f);
+    LayoutNode* items[2];
+    for (int i = 0; i < 2; i++)
+    {
+        items[i] = makeItem();
+        attach(g, items[i]);
+    }
+    layoutRoot(g, 350.0f);
+    // 3 tracks kept: (350-16)/3 each.
+    float w = (350.0f - 16.0f) / 3.0f;
+    CHECK(near(items[0]->w, w), "autofill keeps empty w");
+    CHECK(near(items[1]->x, w + 8.0f), "autofill keeps empty second x");
+}
+
+// space-between spreads free space into the gaps.
+static void testSpaceBetween()
+{
+    LayoutNode* g = makeGrid("100 100 100", "", 0.0f);
+    g->style.justifyContent = CSS::JustifyContent::SpaceBetween;
+    LayoutNode* items[3];
+    for (int i = 0; i < 3; i++)
+    {
+        items[i] = makeItem();
+        attach(g, items[i]);
+    }
+    layoutRoot(g);
+    CHECK(near(items[0]->x, 0.0f), "space-between first x");
+    CHECK(near(items[1]->x, 250.0f), "space-between middle x");
+    CHECK(near(items[2]->x, 500.0f), "space-between last x");
+}
+
 int main()
 {
     testFrTracks();
@@ -357,6 +408,9 @@ int main()
     testDenseFlow();
     testSplitGapsPercent();
     testFitContent();
+    testAutoFitCollapse();
+    testAutoFillKeepsEmpty();
+    testSpaceBetween();
     if (failures == 0)
     {
         std::printf("grid-layout-test: %d checks passed\n", checks);

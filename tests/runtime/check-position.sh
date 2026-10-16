@@ -23,6 +23,9 @@ R="$ROOT/runtime/cpp"
     -DMORPH_FEATURE_CURSOR \
     -DMORPH_FEATURE_ZINDEX \
     -DMORPH_FEATURE_MIN_MAX \
+    -DMORPH_FEATURE_MARGIN_COLLAPSE \
+    -DMORPH_FEATURE_INLINE \
+    -DMORPH_FEATURE_DISPLAY_NONE \
     "$R/core/tests/position_layout_test.cpp" \
     "$R/core/node/node.cpp" \
     "$R/core/node/style.cpp" \

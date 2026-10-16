@@ -455,12 +455,21 @@ static void layoutGridContainer(MorphNode* self, const std::vector<MorphNode*>& 
 
     // auto-fill/fit expansion needs the inner width: expand repeats in the
     // column list (rows rarely repeat-auto; same helper both axes).
+    struct RepeatRange
+    {
+        bool isRow = false;
+        int at = 0;
+        int count = 0;
+        bool fill = true;
+    };
+    std::vector<RepeatRange> repeatRanges;
     auto expandRepeats = [&](GridTrackList& list, float inner, bool isRowAxis,
                              const std::vector<WorkItem>& its) {
         if (list.repeats.empty() || inner <= 0.0f)
         {
             return;
         }
+        int inserted = 0;
         // Only auto-fill/fit survive Rust (fixed counts expand there).
         for (auto& rep : list.repeats)
         {
@@ -541,7 +550,16 @@ static void layoutGridContainer(MorphNode* self, const std::vector<MorphNode*>& 
             // Splice the repetitions into the track list.
             std::vector<GridTrackSize> expanded;
             expanded.reserve(list.tracks.size() + rep.inner.size() * (size_t)n);
-            for (int i = 0; i < rep.at && i < (int)list.tracks.size(); i++)
+            int actualAt = rep.at + inserted;
+            if (actualAt < 0)
+            {
+                actualAt = 0;
+            }
+            if (actualAt > (int)list.tracks.size())
+            {
+                actualAt = (int)list.tracks.size();
+            }
+            for (int i = 0; i < actualAt && i < (int)list.tracks.size(); i++)
             {
                 expanded.push_back(list.tracks[i]);
             }
@@ -552,7 +570,7 @@ static void layoutGridContainer(MorphNode* self, const std::vector<MorphNode*>& 
                     expanded.push_back(t);
                 }
             }
-            for (int i = rep.at; i < (int)list.tracks.size(); i++)
+            for (int i = actualAt; i < (int)list.tracks.size(); i++)
             {
                 expanded.push_back(list.tracks[i]);
             }
@@ -561,7 +579,7 @@ static void layoutGridContainer(MorphNode* self, const std::vector<MorphNode*>& 
             // none (Rust drops them), so pad empties.
             std::vector<std::vector<std::string>> newNames;
             newNames.reserve(list.tracks.size() + 1);
-            for (int i = 0; i < rep.at && i < (int)list.lineNames.size(); i++)
+            for (int i = 0; i < actualAt && i < (int)list.lineNames.size(); i++)
             {
                 newNames.push_back(list.lineNames[i]);
             }
@@ -569,11 +587,13 @@ static void layoutGridContainer(MorphNode* self, const std::vector<MorphNode*>& 
             {
                 newNames.emplace_back();
             }
-            for (int i = rep.at; i < (int)list.lineNames.size(); i++)
+            for (int i = actualAt; i < (int)list.lineNames.size(); i++)
             {
                 newNames.push_back(list.lineNames[i]);
             }
             list.lineNames.swap(newNames);
+            repeatRanges.push_back({isRowAxis, actualAt, n * (int)rep.inner.size(), rep.fill});
+            inserted += n * (int)rep.inner.size();
         }
         list.repeats.clear();
         explicitCols = (int)colList.tracks.size();
@@ -888,6 +908,90 @@ static void layoutGridContainer(MorphNode* self, const std::vector<MorphNode*>& 
         nRows = 1;
     }
 
+    // auto-fit collapses empty tracks (CSS grid §7.2.3.2): unoccupied
+    // tracks inside an auto-fit expansion take no space (auto-fill keeps
+    // them). Collapsed tracks size to 0 with no surrounding gaps.
+    std::vector<char> colCollapsed(nCols, 0), rowCollapsed(nRows, 0);
+    for (auto& range : repeatRanges)
+    {
+        if (range.fill)
+        {
+            continue;
+        }
+        for (int k = 0; k < range.count; k++)
+        {
+            int t = range.at + k;
+            bool occ = false;
+            for (auto& it : items)
+            {
+                int s = range.isRow ? it.r0 : it.c0;
+                int e = range.isRow ? it.r1 : it.c1;
+                if (s >= 0 && t >= s && t < e)
+                {
+                    occ = true;
+                    break;
+                }
+            }
+            if (!occ)
+            {
+                if (range.isRow && t >= 0 && t < nRows)
+                {
+                    rowCollapsed[t] = 1;
+                }
+                if (!range.isRow && t >= 0 && t < nCols)
+                {
+                    colCollapsed[t] = 1;
+                }
+            }
+        }
+    }
+
+    // Starts with collapsed-aware gaps: space lands only between two
+    // adjacent visible tracks.
+    auto computeStarts = [&](std::vector<float>& starts, const std::vector<float>& sizes,
+                             const std::vector<char>& collapsed, int n, float gap,
+                             float leading, float extra) {
+        std::vector<int> vis;
+        for (int i = 0; i < n; i++)
+        {
+            if (!collapsed[i])
+            {
+                vis.push_back(i);
+            }
+        }
+        float acc = leading;
+        for (size_t k = 0; k < vis.size(); k++)
+        {
+            int i = vis[k];
+            starts[i] = acc;
+            acc += sizes[i];
+            if (k + 1 < vis.size())
+            {
+                acc += gap + extra;
+            }
+        }
+        for (int i = 0; i < n; i++)
+        {
+            if (collapsed[i])
+            {
+                starts[i] = acc;
+            }
+        }
+    };
+    auto gapsBetween = [&](const std::vector<char>& collapsed, int n, float gap) {
+        // Matches computeStarts: one gap between consecutive visible
+        // tracks, none around collapsed ones.
+        int v = 0;
+        for (int i = 0; i < n; i++)
+        {
+            if (!collapsed[i])
+            {
+                v++;
+            }
+        }
+        return gap * (float)(v > 0 ? v - 1 : 0);
+    };
+
     // ── Track sizing ──
     // Implicit track sizes cycle the auto lists (default [auto]).
     GridTrackList impCols, impRows;
@@ -923,6 +1027,11 @@ static void layoutGridContainer(MorphNode* self, const std::vector<MorphNode*>& 
     bool widthDefinite = cw > 0.0f;
     for (int i = 0; i < nCols; i++)
     {
+        if (colCollapsed[i])
+        {
+            colSizes[i] = 0.0f;
+            continue;
+        }
         GridTrackSize t = trackAt(colList, impCols, i);
         float b = trackBaseSize(t, trackEnv, cw, widthDefinite);
         colSizes[i] = b;
@@ -931,6 +1040,11 @@ static void layoutGridContainer(MorphNode* self, const std::vector<MorphNode*>& 
     rowEnv.pctBase = heightDefinite ? ch : 0.0f;
     for (int i = 0; i < nRows; i++)
     {
+        if (rowCollapsed[i])
+        {
+            rowSizes[i] = 0.0f;
+            continue;
+        }
         GridTrackSize t = trackAt(rowList, impRows, i);
         float b = trackBaseSize(t, rowEnv, ch, heightDefinite);
         rowSizes[i] = b;
@@ -961,6 +1075,7 @@ static void layoutGridContainer(MorphNode* self, const std::vector<MorphNode*>& 
         float gap = isCol ? colGap : rowGap;
         int n = isCol ? nCols : nRows;
         std::vector<float>& sizes = isCol ? colSizes : rowSizes;
+        const std::vector<char>& collapsed = isCol ? colCollapsed : rowCollapsed;
         for (int pass = 0; pass < 2; pass++)
         {
             for (auto& it : items)
@@ -976,6 +1091,10 @@ static void layoutGridContainer(MorphNode* self, const std::vector<MorphNode*>& 
                 // to border-box contributions; margins handled at place.
                 if (pass == 0 && e - s == 1)
                 {
+                    if (collapsed[s])
+                    {
+                        continue; // auto-fit collapsed: stays 0
+                    }
                     if (sizes[s] < 0.0f || contrib > sizes[s])
                     {
                         // Only grow content-sized tracks (fixed/%/fr keep
@@ -1034,8 +1153,13 @@ static void layoutGridContainer(MorphNode* self, const std::vector<MorphNode*>& 
     // content-sized above, matching Chrome).
     auto distributeFr = [&](std::vector<float>& sizes, int n,
                             const GridTrackList& expl, const GridTrackList& imp,
-                            const UnitEnv& tenv, float inner, float gap) {
+                            const UnitEnv& tenv, float inner, float gap,
+                            const std::vector<char>& collapsed) {
         auto isFrTrack = [&](int i, float& f, float& floor) -> bool {
+            if (collapsed[i])
+            {
+                return false; // auto-fit collapsed: out of the fr pool
+            }
             GridTrackSize t = trackAt(expl, imp, i);
             bool isFr = (t.kind == GridTrackSize::Flex) ||
                         (t.kind == GridTrackSize::MinMax && t.maxKind == GridTrackSize::Flex);
@@ -1061,10 +1185,7 @@ static void layoutGridContainer(MorphNode* self, const std::vector<MorphNode*>& 
                 used += sizes[i];
             }
         }
-        if (n > 1)
-        {
-            used += gap * (float)(n - 1);
-        }
+        used += gapsBetween(collapsed, n, gap);
         float free = inner - used;
         if (free <= 0.0f)
         {
@@ -1129,7 +1250,7 @@ static void layoutGridContainer(MorphNode* self, const std::vector<MorphNode*>& 
             colSizes[i] = 0.0f;
         }
     }
-    distributeFr(colSizes, nCols, colList, impCols, trackEnv, cw, colGap);
+    distributeFr(colSizes, nCols, colList, impCols, trackEnv, cw, colGap, colCollapsed);
     // Column widths are final: re-measure row contributions at their
     // real constraint (text wraps to the column, changing heights).
     {
@@ -1167,43 +1288,25 @@ static void layoutGridContainer(MorphNode* self, const std::vector<MorphNode*>& 
     }
     if (heightDefinite)
     {
-        distributeFr(rowSizes, nRows, rowList, impRows, rowEnv, ch, rowGap);
+        distributeFr(rowSizes, nRows, rowList, impRows, rowEnv, ch, rowGap, rowCollapsed);
     }
     // Track starts (content-box relative) + content distribution.
     std::vector<float> colStarts(nCols, 0.0f), rowStarts(nRows, 0.0f);
-    {
-        float acc = 0.0f;
-        for (int i = 0; i < nCols; i++)
-        {
-            colStarts[i] = acc;
-            acc += colSizes[i] + colGap;
-        }
-    }
-    float rowsTotal = 0.0f;
-    for (int i = 0; i < nRows; i++)
-    {
-        rowsTotal += rowSizes[i];
-    }
-    if (nRows > 1)
-    {
-        rowsTotal += rowGap * (float)(nRows - 1);
-    }
+    computeStarts(colStarts, colSizes, colCollapsed, nCols, colGap, 0.0f, 0.0f);
     // Align-content/justify-content: free space distribution. `stretch`
     // grows auto-sized tracks (verified vs Chrome); fixed-only grids
     // pack like `start`.
     auto distributeContent = [&](std::vector<float>& sizes, std::vector<float>& starts, int n,
                                  const GridTrackList& expl, const GridTrackList& imp,
                                  float inner, float gap, int contentMode /*0 justify,1 align*/,
+                                 const std::vector<char>& collapsed,
                                  float& leading) {
         float total = 0.0f;
         for (int i = 0; i < n; i++)
         {
             total += sizes[i];
         }
-        if (n > 1)
-        {
-            total += gap * (float)(n - 1);
-        }
+        total += gapsBetween(collapsed, n, gap);
         float free = inner - total;
         leading = 0.0f;
         if (free <= 0.0f)
@@ -1238,6 +1341,10 @@ static void layoutGridContainer(MorphNode* self, const std::vector<MorphNode*>& 
                 int autos = 0;
                 for (int i = 0; i < n; i++)
                 {
+                    if (collapsed[i])
+                    {
+                        continue;
+                    }
                     GridTrackSize t = trackAt(expl, imp, i);
                     if (t.kind == GridTrackSize::Auto)
                     {
@@ -1276,6 +1383,10 @@ static void layoutGridContainer(MorphNode* self, const std::vector<MorphNode*>& 
                 int autos = 0;
                 for (int i = 0; i < n; i++)
                 {
+                    if (collapsed[i])
+                    {
+                        continue;
+                    }
                     GridTrackSize t = trackAt(expl, imp, i);
                     if (t.kind == GridTrackSize::Auto)
                     {
@@ -1303,6 +1414,10 @@ static void layoutGridContainer(MorphNode* self, const std::vector<MorphNode*>& 
             int autos = 0;
             for (int i = 0; i < n; i++)
             {
+                if (collapsed[i])
+                {
+                    continue;
+                }
                 GridTrackSize t = trackAt(expl, imp, i);
                 if (t.kind == GridTrackSize::Auto)
                 {
@@ -1314,6 +1429,10 @@ static void layoutGridContainer(MorphNode* self, const std::vector<MorphNode*>& 
                 float add = free / (float)autos;
                 for (int i = 0; i < n; i++)
                 {
+                    if (collapsed[i])
+                    {
+                        continue;
+                    }
                     GridTrackSize t = trackAt(expl, imp, i);
                     if (t.kind == GridTrackSize::Auto)
                     {
@@ -1322,31 +1441,43 @@ static void layoutGridContainer(MorphNode* self, const std::vector<MorphNode*>& 
                 }
             }
         }
-        // Recompute starts (space-* adjust gaps, handled at place time
-        // via effective gap — return free for the caller).
-        float acc = leading;
+        // space-* spreads the free space into the visible gaps.
+        int vis = 0;
         for (int i = 0; i < n; i++)
         {
-            starts[i] = acc;
-            acc += sizes[i] + gap;
+            if (!collapsed[i])
+            {
+                vis++;
+            }
         }
+        float extra = 0.0f;
+        if (mode == 3 && vis > 1)
+        {
+            extra = free / (float)(vis - 1);
+        }
+        else if (mode == 4 && vis > 0)
+        {
+            extra = free / (float)vis;
+            leading += extra * 0.5f;
+        }
+        else if (mode == 5 && vis > 0)
+        {
+            extra = free / (float)(vis + 1);
+            leading += extra;
+        }
+        computeStarts(starts, sizes, collapsed, n, gap, leading, extra);
         return free;
     };
     float leadX = 0.0f, leadY = 0.0f;
-    float freeX = distributeContent(colSizes, colStarts, nCols, colList, impCols, cw, colGap, 0, leadX);
+    float freeX = distributeContent(colSizes, colStarts, nCols, colList, impCols, cw, colGap, 0, colCollapsed, leadX);
     float freeY = 0.0f;
     if (heightDefinite)
     {
-        freeY = distributeContent(rowSizes, rowStarts, nRows, rowList, impRows, ch, rowGap, 1, leadY);
+        freeY = distributeContent(rowSizes, rowStarts, nRows, rowList, impRows, ch, rowGap, 1, rowCollapsed, leadY);
     }
     else
     {
-        float acc = 0.0f;
-        for (int i = 0; i < nRows; i++)
-        {
-            rowStarts[i] = acc;
-            acc += rowSizes[i] + rowGap;
-        }
+        computeStarts(rowStarts, rowSizes, rowCollapsed, nRows, rowGap, 0.0f, 0.0f);
     }
     (void)freeX;
     (void)freeY;
