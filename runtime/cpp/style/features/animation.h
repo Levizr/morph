@@ -33,6 +33,24 @@ enum class KeyframeProperty : uint8_t {
     BorderWidth,
     BorderGradient,
     BoxShadow,
+#ifdef MORPH_FEATURE_GRID
+    // Grid keyframes ride raw CSS and flip discretely at the midpoint
+    // (like browsers). Gated like the render paths.
+    GridTemplateColumns,
+    GridTemplateRows,
+    GridAutoColumns,
+    GridAutoRows,
+    GridAutoFlow,
+    GridTemplateAreas,
+    GridArea,
+    GridColumn,
+    GridRow,
+    AlignContent,
+    JustifyItems,
+    JustifySelf,
+    RowGap,
+    ColumnGap,
+#endif
 };
 
 // One typed value inside a keyframe.

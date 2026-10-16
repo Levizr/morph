@@ -1,5 +1,8 @@
 #include "../node.h"
 #include "../renderer.h"
+#ifdef MORPH_FEATURE_GRID
+#include "grid_layout.h"
+#endif
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -1211,6 +1214,24 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
             }
 
             cursorCross += lineCross + gapCross;
+        }
+        goto after_children;
+    }
+#endif
+
+#ifdef MORPH_FEATURE_GRID
+    if (style.display == CSS::Display::Grid) {
+        // Grid containers lay out every in-flow child (items are
+        // blockified, like flex). Definite height only when explicitly
+        // set against a positive content size.
+        bool gridHeightDefinite =
+            style.explicitHeight.isSet() && ch > 0.0f;
+        grid_layout::layoutGridContainer(this, normal, cx, cy, cw, ch,
+                                         gridHeightDefinite, env, r,
+                                         maxBottom, maxRight);
+        if (!style.explicitWidth.isSet() && maxRight > cx + cw) {
+            float autoW = maxRight - x + pr + bwR;
+            if (autoW > w) w = autoW;
         }
         goto after_children;
     }

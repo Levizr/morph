@@ -231,6 +231,235 @@ inline void applyValue(MorphNode* node, KeyframeProperty prop, const float* v) {
     }
 }
 
+#ifdef MORPH_FEATURE_GRID
+namespace morph_grid_anim {
+
+// Discrete grid keyframe application: validates raw CSS with the same
+// parsers layout uses, then stores it. Returns false on invalid CSS
+// (caller keeps the underlying value).
+inline std::string trimGrid(std::string s)
+{
+    size_t p = 0;
+    while (p < s.size() && (s[p] == ' ' || s[p] == '\t' || s[p] == '\n' || s[p] == '\r'))
+    {
+        p++;
+    }
+    size_t q = s.size();
+    while (q > p && (s[q - 1] == ' ' || s[q - 1] == '\t' || s[q - 1] == '\n' || s[q - 1] == '\r'))
+    {
+        q--;
+    }
+    return s.substr(p, q - p);
+}
+
+inline bool validGridLine(const std::string& s)
+{
+    std::string t = trimGrid(s);
+    if (t.empty())
+    {
+        return true; // omitted side = auto
+    }
+    GridLine l;
+    return morph::parseGridLine(t, l);
+}
+
+inline bool validGridKeyword(const std::string& s, const char* const* words, int n)
+{
+    std::string t = trimGrid(s);
+    for (char& ch : t)
+    {
+        ch = (char)std::tolower((unsigned char)ch);
+    }
+    for (int i = 0; i < n; i++)
+    {
+        if (t == words[i])
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+inline bool applyGridKeyframe(MorphStyle& style, KeyframeProperty prop,
+                             const std::string& css)
+{
+    switch (prop)
+    {
+    case KeyframeProperty::GridTemplateColumns:
+    case KeyframeProperty::GridTemplateRows:
+    case KeyframeProperty::GridAutoColumns:
+    case KeyframeProperty::GridAutoRows:
+    {
+        GridTrackList list;
+        if (!morph::parseGridTrackList(css, list))
+        {
+            return false;
+        }
+        if (prop == KeyframeProperty::GridTemplateColumns)
+        {
+            style.gridTemplateColumns = css;
+        }
+        else if (prop == KeyframeProperty::GridTemplateRows)
+        {
+            style.gridTemplateRows = css;
+        }
+        else if (prop == KeyframeProperty::GridAutoColumns)
+        {
+            style.gridAutoColumns = css;
+        }
+        else
+        {
+            style.gridAutoRows = css;
+        }
+        return true;
+    }
+    case KeyframeProperty::GridAutoFlow:
+    {
+        static const char* kFlow[] = {"row", "column", "dense", "row dense",
+                                      "dense row", "column dense", "dense column"};
+        if (!validGridKeyword(css, kFlow, 7))
+        {
+            return false;
+        }
+        style.gridAutoFlow = CSS::parseGridAutoFlow(css);
+        return true;
+    }
+    case KeyframeProperty::GridTemplateAreas:
+    {
+        std::vector<GridAreaRect> areas;
+        int nc = 0, nr = 0;
+        if (!morph::parseGridAreas(css, areas, nc, nr))
+        {
+            return false;
+        }
+        style.gridTemplateAreas = css;
+        return true;
+    }
+    case KeyframeProperty::GridColumn:
+    case KeyframeProperty::GridRow:
+    {
+        size_t slash = css.find('/');
+        std::string l = (slash == std::string::npos) ? css : css.substr(0, slash);
+        std::string r = (slash == std::string::npos) ? "" : css.substr(slash + 1);
+        if (!validGridLine(l) || !validGridLine(r))
+        {
+            return false;
+        }
+        if (prop == KeyframeProperty::GridColumn)
+        {
+            style.gridColumn = css;
+        }
+        else
+        {
+            style.gridRow = css;
+        }
+        style.gridArea.clear();
+        return true;
+    }
+    case KeyframeProperty::GridArea:
+    {
+        if (css.find('/') == std::string::npos)
+        {
+            std::string t = trimGrid(css);
+            if (t.empty())
+            {
+                return false;
+            }
+            style.gridArea = t;
+            return true;
+        }
+        // Four-line form: row-start / column-start / row-end / column-end.
+        std::vector<std::string> parts;
+        size_t start = 0;
+        for (int i = 0; i < 4; i++)
+        {
+            size_t slash = css.find('/', start);
+            std::string part = (slash == std::string::npos) ? css.substr(start)
+                                                            : css.substr(start, slash - start);
+            if (!validGridLine(part))
+            {
+                return false;
+            }
+            parts.push_back(trimGrid(part).empty() ? "auto" : trimGrid(part));
+            if (slash == std::string::npos)
+            {
+                if (i != 3)
+                {
+                    return false;
+                }
+                break;
+            }
+            start = slash + 1;
+        }
+        style.gridRow = parts[0] + " / " + parts[2];
+        style.gridColumn = parts[1] + " / " + parts[3];
+        style.gridArea.clear();
+        return true;
+    }
+    case KeyframeProperty::AlignContent:
+    {
+        static const char* kAlign[] = {"start", "left", "end", "right", "center",
+                                       "stretch", "normal", "space-between", "space-around",
+                                       "space-evenly", "flex-start", "flex-end"};
+        if (!validGridKeyword(css, kAlign, 12))
+        {
+            return false;
+        }
+        style.alignContent = CSS::parseAlignContent(css);
+        return true;
+    }
+    case KeyframeProperty::JustifyItems:
+    {
+        static const char* kItems[] = {"normal", "stretch", "start", "end", "left",
+                                       "right", "center", "self-start", "self-end",
+                                       "flex-start", "flex-end", "baseline",
+                                       "first baseline", "last baseline"};
+        if (!validGridKeyword(css, kItems, 14))
+        {
+            return false;
+        }
+        style.justifyItems = CSS::parseGridJustify(css);
+        return true;
+    }
+    case KeyframeProperty::JustifySelf:
+    {
+        static const char* kSelf[] = {"auto", "normal", "stretch", "start", "end",
+                                      "left", "right", "center"};
+        if (!validGridKeyword(css, kSelf, 8))
+        {
+            return false;
+        }
+        style.justifySelf = CSS::parseJustifySelf(css);
+        return true;
+    }
+    case KeyframeProperty::RowGap:
+    case KeyframeProperty::ColumnGap:
+    {
+        CssLength l;
+        if (!parseCssLength(css, l))
+        {
+            return false;
+        }
+        if (prop == KeyframeProperty::RowGap)
+        {
+            style.rowGap = l;
+            style.rowGapSet = true;
+        }
+        else
+        {
+            style.columnGap = l;
+            style.columnGapSet = true;
+        }
+        return true;
+    }
+    default:
+        return false;
+    }
+}
+
+} // namespace morph_grid_anim
+#endif
+
 // Restore one property from a pre-animation style snapshot.
 inline void restoreProp(MorphNode* node, KeyframeProperty prop,
                         const MorphStyle& base) {
@@ -288,6 +517,29 @@ inline void restoreProp(MorphNode* node, KeyframeProperty prop,
             node->markDirty(PaintDirty);
             break;
 #endif
+#ifdef MORPH_FEATURE_GRID
+        // Grid restores the whole grid sub-style (discrete properties
+        // have no partial application to unwind).
+        case KeyframeProperty::GridTemplateColumns:
+        case KeyframeProperty::GridTemplateRows:
+        case KeyframeProperty::GridAutoColumns:
+        case KeyframeProperty::GridAutoRows:
+        case KeyframeProperty::GridAutoFlow:
+        case KeyframeProperty::GridTemplateAreas:
+        case KeyframeProperty::GridArea:
+        case KeyframeProperty::GridColumn:
+        case KeyframeProperty::GridRow:
+        case KeyframeProperty::AlignContent:
+        case KeyframeProperty::JustifyItems:
+        case KeyframeProperty::JustifySelf:
+        case KeyframeProperty::RowGap:
+        case KeyframeProperty::ColumnGap:
+            static_cast<GridStyle&>(node->style) =
+                static_cast<const GridStyle&>(base);
+            node->markDirty(LayoutDirty);
+            node->markDirty(PaintDirty);
+            break;
+#endif
         case KeyframeProperty::FontSize:
             node->style.fontSize = base.fontSize;
             node->markDirty(LayoutDirty);
@@ -330,7 +582,11 @@ inline void restoreProp(MorphNode* node, KeyframeProperty prop,
 // Restore every property in the mask (KeyframeProperty bit indices).
 inline void restoreProps(MorphNode* node, const MorphStyle& base,
                          uint32_t mask) {
+#ifdef MORPH_FEATURE_GRID
+    for (int p = 0; p <= (int)KeyframeProperty::ColumnGap; p++)
+#else
     for (int p = 0; p <= (int)KeyframeProperty::BoxShadow; p++)
+#endif
         if (mask & ((uint32_t)1 << p))
             restoreProp(node, (KeyframeProperty)p, base);
 }
@@ -405,7 +661,24 @@ void MorphNode::updateCssAnimations(float dt) {
                      KeyframeProperty::Top, KeyframeProperty::Transform,
                      KeyframeProperty::BgGradient, KeyframeProperty::BorderColor,
                      KeyframeProperty::BorderWidth, KeyframeProperty::BorderGradient,
-                     KeyframeProperty::BoxShadow}) {
+                     KeyframeProperty::BoxShadow
+#ifdef MORPH_FEATURE_GRID
+                     , KeyframeProperty::GridTemplateColumns,
+                     KeyframeProperty::GridTemplateRows,
+                     KeyframeProperty::GridAutoColumns,
+                     KeyframeProperty::GridAutoRows,
+                     KeyframeProperty::GridAutoFlow,
+                     KeyframeProperty::GridTemplateAreas,
+                     KeyframeProperty::GridArea,
+                     KeyframeProperty::GridColumn,
+                     KeyframeProperty::GridRow,
+                     KeyframeProperty::AlignContent,
+                     KeyframeProperty::JustifyItems,
+                     KeyframeProperty::JustifySelf,
+                     KeyframeProperty::RowGap,
+                     KeyframeProperty::ColumnGap
+#endif
+            }) {
                 auto sv = morph_anim_detail::sampleProperty(kfs, prop, te);
                 if (!sv.applies) continue;
 
@@ -514,6 +787,35 @@ void MorphNode::updateCssAnimations(float dt) {
                     }
                     static_cast<ShadowStyle&>(style) = sampled;
                     markDirty(PaintDirty);
+                    continue;
+                }
+#endif
+
+#ifdef MORPH_FEATURE_GRID
+                // Grid properties are discrete: flip at the midpoint like
+                // browsers. Invalid CSS keeps the underlying value.
+                if (prop == KeyframeProperty::GridTemplateColumns ||
+                    prop == KeyframeProperty::GridTemplateRows ||
+                    prop == KeyframeProperty::GridAutoColumns ||
+                    prop == KeyframeProperty::GridAutoRows ||
+                    prop == KeyframeProperty::GridAutoFlow ||
+                    prop == KeyframeProperty::GridTemplateAreas ||
+                    prop == KeyframeProperty::GridArea ||
+                    prop == KeyframeProperty::GridColumn ||
+                    prop == KeyframeProperty::GridRow ||
+                    prop == KeyframeProperty::AlignContent ||
+                    prop == KeyframeProperty::JustifyItems ||
+                    prop == KeyframeProperty::JustifySelf ||
+                    prop == KeyframeProperty::RowGap ||
+                    prop == KeyframeProperty::ColumnGap) {
+                    const std::string* use = &sv.left->css;
+                    if (sv.right && sv.f >= 0.5f && !sv.right->css.empty())
+                        use = &sv.right->css;
+                    if (!use->empty() &&
+                        morph_anim_detail::morph_grid_anim::applyGridKeyframe(style, prop, *use)) {
+                        markDirty(LayoutDirty);
+                        markDirty(PaintDirty);
+                    }
                     continue;
                 }
 #endif

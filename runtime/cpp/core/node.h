@@ -110,6 +110,13 @@ public:
 
     float x = 0, y = 0, w = 0, h = 0;
     MorphStyle style;
+    // Grid stretch injection: layoutGridContainer persists stretched item
+    // sizes into explicitWidth/Height (so later standalone relayouts
+    // recompute them instead of collapsing to content). The flags mark
+    // injected values so the next grid pass clears them before measuring
+    // true content — author-declared sizes are never touched.
+    bool m_gridStretchW = false;
+    bool m_gridStretchH = false;
     float m_computedMargin[4] = {0}; // resolved margins after latest layout()
     // Resolved box metrics after latest layout(): font size, padding and
     // the last relative offset. Relative/font/viewport units in the style

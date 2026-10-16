@@ -71,7 +71,7 @@ Style inheritance: `color`, `font-size`, `font-weight`, and `text-align` cascade
 
 | Property | Values | Default | Notes |
 |---|---|---|---|
-| `display` | `block`, `inline`, `inline-block`, `flex`, `hidden`, `none` | `block` | `none` removes the element from layout and rendering. |
+| `display` | `block`, `inline`, `inline-block`, `flex`, `grid`, `hidden`, `none` | `block` | `none` removes the element from layout and rendering. |
 | `overflow` | `visible`, `hidden`, `scroll`, `auto` | `visible` | `auto`/`scroll` enable scroll containers. |
 | `position` | `static`, `absolute`, `relative`, `fixed` | `static` | `relative`/`fixed` in progress. |
 | `left` | px | — | |
@@ -95,6 +95,32 @@ Style inheritance: `color`, `font-size`, `font-weight`, and `text-align` cascade
 | `gap` | px | `0` | |
 
 See [Flexbox](flexbox.md) for a deep-dive.
+
+## Grid
+
+| Property | Values | Default | Notes |
+|---|---|---|---|
+| `grid-template-columns` | track list | `none` | `100px 1fr 2fr`, `repeat(3, 1fr)`, `repeat(auto-fill, minmax(100px, 1fr))`, `[a] 100px [b]` line names |
+| `grid-template-rows` | track list | `none` | same track syntax as columns |
+| `grid-auto-columns` | track list | `auto` | implicit column size |
+| `grid-auto-rows` | track list | `auto` | implicit row size |
+| `grid-auto-flow` | `row`, `column`, `dense`, `row dense`, `column dense` | `row` | `dense` backfills holes |
+| `grid-template-areas` | `"a a" "b c"` | `none` | named rectangles; non-rectangular areas are dropped |
+| `grid-area` | name or `row / col / row / col` | `auto` | places by named area |
+| `grid-column` | `start / end` | `auto` | line numbers (negative counts back), `span n`, named lines |
+| `grid-row` | `start / end` | `auto` | same line syntax as columns |
+| `grid-column-start`, `grid-column-end` | line | `auto` | single-side placement |
+| `grid-row-start`, `grid-row-end` | line | `auto` | single-side placement |
+| `align-content` | `start`, `center`, `end`, `stretch`, `space-between`, `space-around`, `space-evenly`, `normal` | `normal` | distributes free space; `stretch` grows `auto` tracks |
+| `justify-content` | grid values + flex values | `flex-start` | same distribution on the inline axis |
+| `justify-items` | `start`, `center`, `end`, `stretch`, `normal` | `normal` | default item alignment (`stretch` fills the area) |
+| `justify-self` | `auto`, `start`, `center`, `end`, `stretch` | `auto` | per-item override (`auto` inherits) |
+| `align-items`, `align-self` | shared with flexbox | — | `start`/`end` map onto the flex values |
+| `row-gap`, `column-gap` | length | `0` | per-axis gaps; `gap` shorthand applies to both |
+| `minmax()` | `minmax(min, max)` | — | min: fixed/`auto`/content keywords; max adds `fr` |
+| `fit-content()` | `fit-content(limit)` | — | caps content sizing at the limit |
+
+Track sizes: fixed lengths, `%`, `fr`, `auto`, `min-content`, `max-content`. Stretch items fill their area even with an explicit size (verified against Chrome); definite sizes overflow smaller tracks instead of shrinking. `subgrid` is not supported (declaration dropped). `order` has no effect (DOM order). `justify-content`/`align-items`/`align-self` in `@keyframes` are not supported — use `justify-items`/`justify-self`/`align-content`.
 
 ## Cursor
 

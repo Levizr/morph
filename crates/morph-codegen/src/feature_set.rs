@@ -66,6 +66,20 @@ impl FeatureSet {
         if s.display == "flex" {
             self.features.insert("flex".into());
         }
+        if s.display == "grid" || s.display == "inline-grid" {
+            self.features.insert("grid".into());
+        }
+        if s.grid_template_columns.is_some()
+            || s.grid_template_rows.is_some()
+            || s.grid_auto_columns.is_some()
+            || s.grid_auto_rows.is_some()
+            || s.grid_template_areas.is_some()
+            || s.grid_area.is_some()
+            || s.row_gap.is_some()
+            || s.column_gap.is_some()
+        {
+            self.features.insert("grid".into());
+        }
         if !s.gap.is_zero() {
             self.features.insert("flex".into());
         }
@@ -171,9 +185,27 @@ impl FeatureSet {
             | "scrollbar-border-radius"
             | "scroll-behavior" => vec!["scroll"],
             "flex-direction" | "flex-wrap" | "flex-basis" | "flex-grow" | "flex-shrink"
-            | "justify-content" | "align-items" | "align-self" | "gap" => vec!["flex"],
+            | "justify-content" | "align-items" | "align-self" | "gap" => vec!["flex", "grid"],
+            "grid-template-columns"
+            | "grid-template-rows"
+            | "grid-auto-columns"
+            | "grid-auto-rows"
+            | "grid-auto-flow"
+            | "grid-template-areas"
+            | "grid-area"
+            | "grid-column"
+            | "grid-column-start"
+            | "grid-column-end"
+            | "grid-row"
+            | "grid-row-start"
+            | "grid-row-end"
+            | "align-content"
+            | "justify-items"
+            | "justify-self"
+            | "row-gap"
+            | "column-gap" => vec!["grid"],
             "overflow" | "overflow-x" | "overflow-y" => vec!["scroll"],
-            "display" => vec!["flex", "display_none", "inline"],
+            "display" => vec!["flex", "grid", "display_none", "inline"],
             "font-weight" => vec!["bold"],
             "border-radius" => vec!["radius"],
             "min-width" | "max-width" | "min-height" | "max-height" => vec!["min_max"],
@@ -238,6 +270,26 @@ impl FeatureSet {
                 | "border-image"
                 | "border-image-slice" => {
                     self.features.insert("border".into());
+                }
+                "grid-template-columns"
+                | "grid-template-rows"
+                | "grid-auto-columns"
+                | "grid-auto-rows"
+                | "grid-auto-flow"
+                | "grid-template-areas"
+                | "grid-area"
+                | "grid-column"
+                | "grid-column-start"
+                | "grid-column-end"
+                | "grid-row"
+                | "grid-row-start"
+                | "grid-row-end"
+                | "align-content"
+                | "justify-items"
+                | "justify-self"
+                | "row-gap"
+                | "column-gap" => {
+                    self.features.insert("grid".into());
                 }
                 "overflow-x" | "overflow-y" => {
                     self.features.insert("scroll".into());
@@ -584,6 +636,9 @@ impl FeatureSet {
         }
         if self.features.contains("gradient") {
             d.push("MORPH_FEATURE_GRADIENT".into());
+        }
+        if self.features.contains("grid") {
+            d.push("MORPH_FEATURE_GRID".into());
         }
         if self.features.contains("shadow") {
             d.push("MORPH_FEATURE_SHADOW".into());

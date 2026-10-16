@@ -9,3 +9,12 @@ body { margin: 0; }
   to { opacity: 1; }
 }
 .box { color: red; animation: fade 1s; }
+.grid { display: grid; grid-template-columns: 100px 1fr; grid-template-rows: 40px auto; grid-auto-flow: row dense; gap: 8px; row-gap: 4px; align-content: start; justify-items: stretch; }
+.cell-a { grid-column: 1 / -1; justify-self: center; }
+.cell-b { grid-row: 2 / span 1; }
+.cell-b:hover { grid-column: 1 / span 2; }
+@keyframes shift {
+  0% { grid-template-columns: 100px 1fr; }
+  100% { grid-template-columns: 1fr 2fr; }
+}
+.cell-c { animation: shift 2s infinite; }

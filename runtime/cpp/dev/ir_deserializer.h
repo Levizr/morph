@@ -444,10 +444,16 @@ static void applyStyle(MorphStyle& s, const JsonValue& styleVal) {
 
     if (!styleVal["flex_dir"].isNull())
         s.flexDirection = CSS::parseFlexDirection(styleVal["flex_dir"].asString());
+    bool isGridDisplay =
+        s.display == CSS::Display::Grid;
     if (!styleVal["justify_content"].isNull())
-        s.justifyContent = CSS::parseJustifyContent(styleVal["justify_content"].asString());
+        s.justifyContent = isGridDisplay
+            ? CSS::parseGridJustify(styleVal["justify_content"].asString())
+            : CSS::parseJustifyContent(styleVal["justify_content"].asString());
     if (!styleVal["align_items"].isNull())
-        s.alignItems = CSS::parseAlignItems(styleVal["align_items"].asString());
+        s.alignItems = isGridDisplay
+            ? CSS::parseGridAlignItems(styleVal["align_items"].asString())
+            : CSS::parseAlignItems(styleVal["align_items"].asString());
     if (!styleVal["align_self"].isNull())
         s.alignSelf = CSS::parseAlignSelf(styleVal["align_self"].asString());
 
@@ -459,6 +465,40 @@ static void applyStyle(MorphStyle& s, const JsonValue& styleVal) {
         s.flexBasis = styleVal["flex_basis"].asString();
 
     setLength(s.gap, styleVal["gap"]);
+#ifdef MORPH_FEATURE_GRID
+    if (!styleVal["grid_template_columns"].isNull())
+        s.gridTemplateColumns = styleVal["grid_template_columns"].asString();
+    if (!styleVal["grid_template_rows"].isNull())
+        s.gridTemplateRows = styleVal["grid_template_rows"].asString();
+    if (!styleVal["grid_auto_columns"].isNull())
+        s.gridAutoColumns = styleVal["grid_auto_columns"].asString();
+    if (!styleVal["grid_auto_rows"].isNull())
+        s.gridAutoRows = styleVal["grid_auto_rows"].asString();
+    if (!styleVal["grid_auto_flow"].isNull())
+        s.gridAutoFlow = CSS::parseGridAutoFlow(styleVal["grid_auto_flow"].asString());
+    if (!styleVal["grid_template_areas"].isNull())
+        s.gridTemplateAreas = styleVal["grid_template_areas"].asString();
+    if (!styleVal["grid_column"].isNull())
+        s.gridColumn = styleVal["grid_column"].asString();
+    if (!styleVal["grid_row"].isNull())
+        s.gridRow = styleVal["grid_row"].asString();
+    if (!styleVal["grid_area"].isNull())
+        s.gridArea = styleVal["grid_area"].asString();
+    if (!styleVal["align_content"].isNull())
+        s.alignContent = CSS::parseAlignContent(styleVal["align_content"].asString());
+    if (!styleVal["justify_items"].isNull())
+        s.justifyItems = CSS::parseGridJustify(styleVal["justify_items"].asString());
+    if (!styleVal["justify_self"].isNull())
+        s.justifySelf = CSS::parseJustifySelf(styleVal["justify_self"].asString());
+    if (!styleVal["row_gap"].isNull()) {
+        setLengthOpt(s.rowGap, styleVal["row_gap"]);
+        s.rowGapSet = true;
+    }
+    if (!styleVal["column_gap"].isNull()) {
+        setLengthOpt(s.columnGap, styleVal["column_gap"]);
+        s.columnGapSet = true;
+    }
+#endif
 
     if (!styleVal["left"].isNull())
         setLengthOpt(s.left, styleVal["left"]);

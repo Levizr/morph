@@ -242,6 +242,73 @@ impl IRSerializer {
         );
         out.insert("border_gradient_set".to_string(), Value::from(s.border_gradient.is_some()));
         out.insert(
+            "grid_template_columns".to_string(),
+            s.grid_template_columns.as_ref().map_or(Value::Null, |l| {
+                Value::String(crate::grid::track_list_to_css(l))
+            }),
+        );
+        out.insert(
+            "grid_template_rows".to_string(),
+            s.grid_template_rows.as_ref().map_or(Value::Null, |l| {
+                Value::String(crate::grid::track_list_to_css(l))
+            }),
+        );
+        out.insert(
+            "grid_auto_columns".to_string(),
+            s.grid_auto_columns.as_ref().map_or(Value::Null, |l| {
+                Value::String(crate::grid::track_list_to_css(l))
+            }),
+        );
+        out.insert(
+            "grid_auto_rows".to_string(),
+            s.grid_auto_rows.as_ref().map_or(Value::Null, |l| {
+                Value::String(crate::grid::track_list_to_css(l))
+            }),
+        );
+        out.insert(
+            "grid_auto_flow".to_string(),
+            Value::String(
+                match s.grid_auto_flow {
+                    crate::grid::GridAutoFlow::Row => "row",
+                    crate::grid::GridAutoFlow::Column => "column",
+                    crate::grid::GridAutoFlow::RowDense => "row dense",
+                    crate::grid::GridAutoFlow::ColumnDense => "column dense",
+                }
+                .to_string(),
+            ),
+        );
+        out.insert(
+            "grid_template_areas".to_string(),
+            s.grid_template_areas.as_ref().map_or(Value::Null, |a| {
+                Value::String(crate::grid::grid_areas_to_css(a, s.grid_area_cols, s.grid_area_rows))
+            }),
+        );
+        out.insert(
+            "grid_column".to_string(),
+            Value::String(format!(
+                "{} / {}",
+                crate::grid::grid_line_to_css(&s.grid_col_start),
+                crate::grid::grid_line_to_css(&s.grid_col_end)
+            )),
+        );
+        out.insert(
+            "grid_row".to_string(),
+            Value::String(format!(
+                "{} / {}",
+                crate::grid::grid_line_to_css(&s.grid_row_start),
+                crate::grid::grid_line_to_css(&s.grid_row_end)
+            )),
+        );
+        out.insert(
+            "grid_area".to_string(),
+            s.grid_area.as_ref().map_or(Value::Null, |a| Value::String(a.clone())),
+        );
+        out.insert("align_content".to_string(), Value::String(s.align_content.clone()));
+        out.insert("justify_items".to_string(), Value::String(s.justify_items.clone()));
+        out.insert("justify_self".to_string(), Value::String(s.justify_self.clone()));
+        out.insert("row_gap".to_string(), s.row_gap.map_or(Value::Null, length));
+        out.insert("column_gap".to_string(), s.column_gap.map_or(Value::Null, length));
+        out.insert(
             "box_shadows".to_string(),
             s.box_shadows.as_ref().map_or(Value::Null, |list| {
                 Value::Array(

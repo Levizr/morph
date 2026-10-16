@@ -157,6 +157,25 @@ pub struct IRStyle {
     pub transform_matrix: Option<[f32; 16]>,
     pub transform_origin: Option<((f32, bool), (f32, bool))>,
     pub transform_origin_resolved: Option<(f32, f32)>,
+    // ── Grid (feature: grid) ─────────────────────────────────────────
+    pub grid_template_columns: Option<crate::grid::GridTrackList>,
+    pub grid_template_rows: Option<crate::grid::GridTrackList>,
+    pub grid_auto_columns: Option<crate::grid::GridTrackList>,
+    pub grid_auto_rows: Option<crate::grid::GridTrackList>,
+    pub grid_auto_flow: crate::grid::GridAutoFlow,
+    pub grid_template_areas: Option<Vec<crate::grid::GridArea>>,
+    pub grid_area_cols: usize,
+    pub grid_area_rows: usize,
+    pub grid_col_start: crate::grid::GridLine,
+    pub grid_col_end: crate::grid::GridLine,
+    pub grid_row_start: crate::grid::GridLine,
+    pub grid_row_end: crate::grid::GridLine,
+    pub grid_area: Option<String>,
+    pub align_content: String,
+    pub justify_items: String,
+    pub justify_self: String,
+    pub row_gap: Option<Length>,
+    pub column_gap: Option<Length>,
 }
 
 impl IRStyle {
@@ -185,6 +204,9 @@ impl IRStyle {
             text_align: "left".to_string(),
             flex_basis: "auto".to_string(),
             flex_wrap: "nowrap".to_string(),
+            align_content: "normal".to_string(),
+            justify_items: "normal".to_string(),
+            justify_self: "auto".to_string(),
             scrollbar_width: 8.0,
             scrollbar_track_color: [0.85, 0.85, 0.85, 0.0],
             scrollbar_thumb_color: [0.5, 0.5, 0.5, 0.6],
@@ -220,6 +242,14 @@ impl IRStyle {
             && self.border_image_slice.is_none()
             && self.border_gradient.is_none()
             && self.box_shadows.is_none()
+            && self.grid_template_columns.is_none()
+            && self.grid_template_rows.is_none()
+            && self.grid_auto_columns.is_none()
+            && self.grid_auto_rows.is_none()
+            && self.grid_template_areas.is_none()
+            && self.grid_area.is_none()
+            && self.row_gap.is_none()
+            && self.column_gap.is_none()
             && self.width.is_none()
             && self.height.is_none()
             && self.min_width.is_none()

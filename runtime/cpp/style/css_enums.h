@@ -15,7 +15,8 @@ enum class Display : uint8_t
     Flex,
     None,
     Inline,
-    InlineBlock
+    InlineBlock,
+    Grid
 };
 
 enum class Position : uint8_t
@@ -34,6 +35,8 @@ inline Display parseDisplay(std::string_view s)
 {
     if (s == "flex")
         return Display::Flex;
+    if (s == "grid" || s == "inline-grid")
+        return Display::Grid;
     if (s == "none")
         return Display::None;
     if (s == "inline")
@@ -68,6 +71,8 @@ inline const char* toString(Display d)
         return "inline";
     case Display::InlineBlock:
         return "inline-block";
+    case Display::Grid:
+        return "grid";
     default:
         return "block";
     }
@@ -118,7 +123,12 @@ enum class JustifyContent : uint8_t
     Center,
     FlexEnd,
     SpaceBetween,
-    SpaceAround
+    SpaceAround,
+    // Grid content/items values (`justify-content`, `justify-items`).
+    Start,
+    End,
+    Stretch,
+    SpaceEvenly
 };
 
 enum class AlignItems : uint8_t
@@ -147,6 +157,39 @@ enum class FlexWrap : uint8_t
     Nowrap,
     Wrap,
     WrapReverse
+};
+
+// Grid free-space distribution (`align-content`). `normal` computes to
+// `stretch`, matching browsers.
+enum class AlignContent : uint8_t
+{
+    Start,
+    Center,
+    End,
+    Stretch,
+    SpaceBetween,
+    SpaceAround,
+    SpaceEvenly
+};
+
+// Per-item inline-axis override (`justify-self`). `auto` inherits the
+// container's `justify-items`.
+enum class JustifySelf : uint8_t
+{
+    Auto,
+    Start,
+    Center,
+    End,
+    Stretch
+};
+
+// Grid auto-placement flow (`grid-auto-flow`).
+enum class GridAutoFlow : uint8_t
+{
+    Row,
+    Column,
+    RowDense,
+    ColumnDense
 };
 
 enum class Cursor : uint8_t
@@ -271,6 +314,82 @@ inline FlexWrap parseFlexWrap(std::string_view s)
     if (s == "wrap-reverse")
         return FlexWrap::WrapReverse;
     return FlexWrap::Nowrap;
+}
+
+// Grid tables (mirrors the emitter's `style_enum_literal` hyphenated
+// arms; flex spellings keep their own parsers above).
+inline JustifyContent parseGridJustify(std::string_view s)
+{
+    if (s == "start" || s == "left" || s == "self-start")
+        return JustifyContent::Start;
+    if (s == "end" || s == "right" || s == "self-end")
+        return JustifyContent::End;
+    if (s == "center")
+        return JustifyContent::Center;
+    if (s == "stretch" || s == "normal")
+        return JustifyContent::Stretch;
+    if (s == "space-between")
+        return JustifyContent::SpaceBetween;
+    if (s == "space-around")
+        return JustifyContent::SpaceAround;
+    if (s == "space-evenly")
+        return JustifyContent::SpaceEvenly;
+    if (s == "flex-end")
+        return JustifyContent::FlexEnd;
+    return JustifyContent::FlexStart;
+}
+
+inline AlignContent parseAlignContent(std::string_view s)
+{
+    if (s == "start" || s == "left" || s == "flex-start")
+        return AlignContent::Start;
+    if (s == "end" || s == "right" || s == "flex-end")
+        return AlignContent::End;
+    if (s == "center")
+        return AlignContent::Center;
+    if (s == "space-between")
+        return AlignContent::SpaceBetween;
+    if (s == "space-around")
+        return AlignContent::SpaceAround;
+    if (s == "space-evenly")
+        return AlignContent::SpaceEvenly;
+    // `stretch` and `normal` both distribute to auto tracks.
+    return AlignContent::Stretch;
+}
+
+inline AlignItems parseGridAlignItems(std::string_view s)
+{
+    if (s == "start" || s == "self-start" || s == "flex-start")
+        return AlignItems::FlexStart;
+    if (s == "end" || s == "self-end" || s == "flex-end")
+        return AlignItems::FlexEnd;
+    if (s == "center")
+        return AlignItems::Center;
+    return AlignItems::Stretch;
+}
+
+inline JustifySelf parseJustifySelf(std::string_view s)
+{
+    if (s == "start" || s == "left")
+        return JustifySelf::Start;
+    if (s == "end" || s == "right")
+        return JustifySelf::End;
+    if (s == "center")
+        return JustifySelf::Center;
+    if (s == "stretch" || s == "normal")
+        return JustifySelf::Stretch;
+    return JustifySelf::Auto;
+}
+
+inline GridAutoFlow parseGridAutoFlow(std::string_view s)
+{
+    if (s == "column")
+        return GridAutoFlow::Column;
+    if (s == "row dense" || s == "dense")
+        return GridAutoFlow::RowDense;
+    if (s == "column dense")
+        return GridAutoFlow::ColumnDense;
+    return GridAutoFlow::Row;
 }
 
 inline Cursor parseCursor(std::string_view s)

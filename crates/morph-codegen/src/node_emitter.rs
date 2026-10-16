@@ -42,6 +42,8 @@ pub(crate) fn style_enum_literal(prop: &str, value: &str) -> Option<&'static str
     match (prop, value) {
         ("display", "block") => Some("CSS::Display::Block"),
         ("display", "flex") => Some("CSS::Display::Flex"),
+        ("display", "grid") => Some("CSS::Display::Grid"),
+        ("display", "inline-grid") => Some("CSS::Display::Grid"),
         ("display", "none") => Some("CSS::Display::None"),
         ("display", "inline") => Some("CSS::Display::Inline"),
         ("display", "inline-block") => Some("CSS::Display::InlineBlock"),
@@ -69,6 +71,90 @@ pub(crate) fn style_enum_literal(prop: &str, value: &str) -> Option<&'static str
         ("justifyContent", "space-between") => Some("CSS::JustifyContent::SpaceBetween"),
         ("justifyContent", "space-around") => Some("CSS::JustifyContent::SpaceAround"),
         ("justifyContent", "flex-start") => Some("CSS::JustifyContent::FlexStart"),
+        // Grid content/items/self tables (hyphenated props keep flex
+        // mappings untouched; display:grid selects these at emit time).
+        ("justify-content", "start") | ("justify-content", "left") => {
+            Some("CSS::JustifyContent::Start")
+        }
+        ("justify-content", "end") | ("justify-content", "right") => {
+            Some("CSS::JustifyContent::End")
+        }
+        ("justify-content", "center") => Some("CSS::JustifyContent::Center"),
+        ("justify-content", "stretch") | ("justify-content", "normal") => {
+            Some("CSS::JustifyContent::Stretch")
+        }
+        ("justify-content", "space-between") => Some("CSS::JustifyContent::SpaceBetween"),
+        ("justify-content", "space-around") => Some("CSS::JustifyContent::SpaceAround"),
+        ("justify-content", "space-evenly") => Some("CSS::JustifyContent::SpaceEvenly"),
+        ("justify-content", "flex-start") => Some("CSS::JustifyContent::FlexStart"),
+        ("justify-content", "flex-end") => Some("CSS::JustifyContent::FlexEnd"),
+        ("align-content", "start") | ("align-content", "left") => {
+            Some("CSS::AlignContent::Start")
+        }
+        ("align-content", "end") | ("align-content", "right") => {
+            Some("CSS::AlignContent::End")
+        }
+        ("align-content", "center") => Some("CSS::AlignContent::Center"),
+        ("align-content", "stretch") | ("align-content", "normal") => {
+            Some("CSS::AlignContent::Stretch")
+        }
+        ("align-content", "space-between") => Some("CSS::AlignContent::SpaceBetween"),
+        ("align-content", "space-around") => Some("CSS::AlignContent::SpaceAround"),
+        ("align-content", "space-evenly") => Some("CSS::AlignContent::SpaceEvenly"),
+        ("align-content", "flex-start") => Some("CSS::AlignContent::Start"),
+        ("align-content", "flex-end") => Some("CSS::AlignContent::End"),
+        ("justify-items", "start")
+        | ("justify-items", "left")
+        | ("justify-items", "self-start") => Some("CSS::JustifyContent::Start"),
+        ("justify-items", "end")
+        | ("justify-items", "right")
+        | ("justify-items", "self-end") => Some("CSS::JustifyContent::End"),
+        ("justify-items", "center") => Some("CSS::JustifyContent::Center"),
+        ("justify-items", "stretch")
+        | ("justify-items", "normal")
+        | ("justify-items", "baseline")
+        | ("justify-items", "first baseline")
+        | ("justify-items", "last baseline") => Some("CSS::JustifyContent::Stretch"),
+        ("justify-items", "flex-start") => Some("CSS::JustifyContent::FlexStart"),
+        ("justify-items", "flex-end") => Some("CSS::JustifyContent::FlexEnd"),
+        ("align-items", "start")
+        | ("align-items", "self-start")
+        | ("align-items", "flex-start") => Some("CSS::AlignItems::FlexStart"),
+        ("align-items", "end")
+        | ("align-items", "self-end")
+        | ("align-items", "flex-end") => Some("CSS::AlignItems::FlexEnd"),
+        ("align-items", "center") => Some("CSS::AlignItems::Center"),
+        ("align-items", "stretch")
+        | ("align-items", "normal")
+        | ("align-items", "baseline")
+        | ("align-items", "first baseline")
+        | ("align-items", "last baseline") => Some("CSS::AlignItems::Stretch"),
+        ("justify-self", "auto") => Some("CSS::JustifySelf::Auto"),
+        ("justify-self", "start") | ("justify-self", "left") => Some("CSS::JustifySelf::Start"),
+        ("justify-self", "end") | ("justify-self", "right") => Some("CSS::JustifySelf::End"),
+        ("justify-self", "center") => Some("CSS::JustifySelf::Center"),
+        ("justify-self", "stretch") | ("justify-self", "normal") => {
+            Some("CSS::JustifySelf::Stretch")
+        }
+        ("align-self", "auto") => Some("CSS::AlignSelf::Auto"),
+        ("align-self", "start") | ("align-self", "self-start") => {
+            Some("CSS::AlignSelf::FlexStart")
+        }
+        ("align-self", "end") | ("align-self", "self-end") => Some("CSS::AlignSelf::FlexEnd"),
+        ("align-self", "center") => Some("CSS::AlignSelf::Center"),
+        ("align-self", "stretch")
+        | ("align-self", "normal")
+        | ("align-self", "baseline")
+        | ("align-self", "first baseline")
+        | ("align-self", "last baseline") => Some("CSS::AlignSelf::Stretch"),
+        ("align-self", "flex-start") => Some("CSS::AlignSelf::FlexStart"),
+        ("align-self", "flex-end") => Some("CSS::AlignSelf::FlexEnd"),
+        ("grid-auto-flow", "row") => Some("CSS::GridAutoFlow::Row"),
+        ("grid-auto-flow", "column") => Some("CSS::GridAutoFlow::Column"),
+        ("grid-auto-flow", "row dense") | ("grid-auto-flow", "dense") => {
+            Some("CSS::GridAutoFlow::RowDense")
+        }
+        ("grid-auto-flow", "column dense") => Some("CSS::GridAutoFlow::ColumnDense"),
         ("alignItems", "center") => Some("CSS::AlignItems::Center"),
         ("alignItems", "flex-end") => Some("CSS::AlignItems::FlexEnd"),
         ("alignItems", "stretch") => Some("CSS::AlignItems::Stretch"),
@@ -123,6 +209,10 @@ fn keyword_literal(field: &str, value: &str) -> Option<&'static str> {
         // Garbage flex-direction takes the column path (only "row" sets isRow).
         "flexDirection" => ("flexDirection", "CSS::FlexDirection::Column"),
         "justifyContent" => ("justifyContent", "CSS::JustifyContent::FlexStart"),
+        "gridAutoFlow" => ("grid-auto-flow", "CSS::GridAutoFlow::Row"),
+        "alignContent" => ("align-content", "CSS::AlignContent::Start"),
+        "justifyItems" => ("justify-items", "CSS::JustifyContent::Stretch"),
+        "justifySelf" => ("justify-self", "CSS::JustifySelf::Auto"),
         // Garbage align-items takes the else-branches, like flex-start.
         "alignItems" => ("alignItems", "CSS::AlignItems::FlexStart"),
         // Garbage align-self is dropped like a browser (computes to auto).
@@ -1537,6 +1627,7 @@ fn set_style(
 
     // ── FLEX ──
     if features.contains("flex") {
+        let is_grid_display = s.display == "grid" || s.display == "inline-grid";
         if s.display == "flex" && s.flex_dir != "row" {
             let lit = keyword_literal("flexDirection", &s.flex_dir).unwrap();
             lines.push(format!("{ind}.flexDirection = {lit};"));
@@ -1544,15 +1635,15 @@ fn set_style(
         if !s.gap.is_zero() {
             lines.extend(emit_length(&format!("{ind}.gap"), s.gap));
         }
-        if s.justify_content != "flex-start" {
+        if !is_grid_display && s.justify_content != "flex-start" {
             let lit = keyword_literal("justifyContent", &s.justify_content).unwrap();
             lines.push(format!("{ind}.justifyContent = {lit};"));
         }
-        if s.align_items != "stretch" {
+        if !is_grid_display && s.align_items != "stretch" {
             let lit = keyword_literal("alignItems", &s.align_items).unwrap();
             lines.push(format!("{ind}.alignItems = {lit};"));
         }
-        if s.align_self != "auto" {
+        if !is_grid_display && s.align_self != "auto" {
             let lit = keyword_literal("alignSelf", &s.align_self).unwrap();
             lines.push(format!("{ind}.alignSelf = {lit};"));
         }
@@ -1568,6 +1659,111 @@ fn set_style(
         }
         if s.flex_basis != "auto" {
             lines.push(format!("{ind}.flexBasis = \"{}\";", s.flex_basis));
+        }
+    }
+
+    // ── GRID ──
+    if features.contains("grid") {
+        use morph_ir::{grid_areas_to_css, grid_line_to_css, track_list_to_css};
+        let is_grid = s.display == "grid" || s.display == "inline-grid";
+        if let Some(list) = &s.grid_template_columns {
+            lines.push(format!(
+                "{ind}.gridTemplateColumns = \"{}\";",
+                track_list_to_css(list).replace('"', "\\\"")
+            ));
+        }
+        if let Some(list) = &s.grid_template_rows {
+            lines.push(format!(
+                "{ind}.gridTemplateRows = \"{}\";",
+                track_list_to_css(list).replace('"', "\\\"")
+            ));
+        }
+        if let Some(list) = &s.grid_auto_columns {
+            lines.push(format!(
+                "{ind}.gridAutoColumns = \"{}\";",
+                track_list_to_css(list).replace('"', "\\\"")
+            ));
+        }
+        if let Some(list) = &s.grid_auto_rows {
+            lines.push(format!(
+                "{ind}.gridAutoRows = \"{}\";",
+                track_list_to_css(list).replace('"', "\\\"")
+            ));
+        }
+        if s.grid_auto_flow != morph_ir::GridAutoFlow::Row {
+            let lit = match s.grid_auto_flow {
+                morph_ir::GridAutoFlow::Column => "CSS::GridAutoFlow::Column",
+                morph_ir::GridAutoFlow::RowDense => "CSS::GridAutoFlow::RowDense",
+                morph_ir::GridAutoFlow::ColumnDense => "CSS::GridAutoFlow::ColumnDense",
+                morph_ir::GridAutoFlow::Row => "CSS::GridAutoFlow::Row",
+            };
+            lines.push(format!("{ind}.gridAutoFlow = {lit};"));
+        }
+        if let Some(areas) = &s.grid_template_areas {
+            lines.push(format!(
+                "{ind}.gridTemplateAreas = \"{}\";",
+                grid_areas_to_css(areas, s.grid_area_cols, s.grid_area_rows).replace('"', "\\\"")
+            ));
+        }
+        if is_grid {
+            if s.justify_content != "flex-start" {
+                let lit = style_enum_literal("justify-content", &s.justify_content)
+                    .unwrap_or("CSS::JustifyContent::FlexStart");
+                lines.push(format!("{ind}.justifyContent = {lit};"));
+            }
+            if s.align_items != "stretch" {
+                let lit = style_enum_literal("align-items", &s.align_items)
+                    .unwrap_or("CSS::AlignItems::Stretch");
+                lines.push(format!("{ind}.alignItems = {lit};"));
+            }
+            if s.align_content != "normal" {
+                let lit = keyword_literal("alignContent", &s.align_content).unwrap();
+                lines.push(format!("{ind}.alignContent = {lit};"));
+            }
+            if s.justify_items != "normal" {
+                let lit = keyword_literal("justifyItems", &s.justify_items).unwrap();
+                lines.push(format!("{ind}.justifyItems = {lit};"));
+            }
+        }
+        if s.justify_self != "auto" {
+            let lit = keyword_literal("justifySelf", &s.justify_self).unwrap();
+            lines.push(format!("{ind}.justifySelf = {lit};"));
+        }
+        if s.align_self != "auto" {
+            if is_grid {
+                if let Some(lit) = style_enum_literal("align-self", &s.align_self) {
+                    lines.push(format!("{ind}.alignSelf = {lit};"));
+                }
+            } else if let Some(lit) = keyword_literal("alignSelf", &s.align_self) {
+                lines.push(format!("{ind}.alignSelf = {lit};"));
+            }
+        }
+        if s.grid_col_start != morph_ir::GridLine::Auto
+            || s.grid_col_end != morph_ir::GridLine::Auto
+        {
+            lines.push(format!(
+                "{ind}.gridColumn = \"{} / {}\";",
+                grid_line_to_css(&s.grid_col_start),
+                grid_line_to_css(&s.grid_col_end)
+            ));
+        }
+        if s.grid_row_start != morph_ir::GridLine::Auto
+            || s.grid_row_end != morph_ir::GridLine::Auto
+        {
+            lines.push(format!(
+                "{ind}.gridRow = \"{} / {}\";",
+                grid_line_to_css(&s.grid_row_start),
+                grid_line_to_css(&s.grid_row_end)
+            ));
+        }
+        if let Some(area) = &s.grid_area {
+            lines.push(format!("{ind}.gridArea = \"{}\";", area.replace('"', "\\\"")));
+        }
+        if let Some(g) = s.row_gap {
+            lines.extend(emit_length(&format!("{ind}.rowGap"), g));
+        }
+        if let Some(g) = s.column_gap {
+            lines.extend(emit_length(&format!("{ind}.columnGap"), g));
         }
     }
 
@@ -1814,6 +2010,121 @@ fn emit_border_image_delta(hv: &str, s: &IRStyle, base: &IRStyle, gradient: bool
 
 /// Emit `node->hoverStyle = new MorphStyle(); ...` delta overrides.
 /// Returns "" when there is no hover_style.
+/// Grid delta overrides for `:hover` / `:active` (snap semantics: grid
+/// tracks re-resolve discretely like `display`/`position`).
+fn emit_grid_delta(
+    hv: &str,
+    s: &IRStyle,
+    base: &IRStyle,
+    features: &std::collections::HashSet<String>,
+) -> Vec<String> {
+    use morph_ir::{grid_areas_to_css, grid_line_to_css, track_list_to_css};
+    let mut o: Vec<String> = Vec::new();
+    if !features.contains("grid") {
+        return o;
+    }
+    let css = |list: &Option<morph_ir::GridTrackList>| -> String {
+        list.as_ref().map_or(String::new(), |l| {
+            track_list_to_css(l).replace('"', "\\\"")
+        })
+    };
+    if css(&s.grid_template_columns) != css(&base.grid_template_columns)
+        && s.grid_template_columns.is_some()
+    {
+        o.push(format!(
+            "{hv}->gridTemplateColumns = \"{}\";",
+            css(&s.grid_template_columns)
+        ));
+    }
+    if css(&s.grid_template_rows) != css(&base.grid_template_rows)
+        && s.grid_template_rows.is_some()
+    {
+        o.push(format!(
+            "{hv}->gridTemplateRows = \"{}\";",
+            css(&s.grid_template_rows)
+        ));
+    }
+    if css(&s.grid_auto_columns) != css(&base.grid_auto_columns)
+        && s.grid_auto_columns.is_some()
+    {
+        o.push(format!(
+            "{hv}->gridAutoColumns = \"{}\";",
+            css(&s.grid_auto_columns)
+        ));
+    }
+    if css(&s.grid_auto_rows) != css(&base.grid_auto_rows)
+        && s.grid_auto_rows.is_some()
+    {
+        o.push(format!(
+            "{hv}->gridAutoRows = \"{}\";",
+            css(&s.grid_auto_rows)
+        ));
+    }
+    if s.grid_auto_flow != base.grid_auto_flow {        let lit = match s.grid_auto_flow {
+            morph_ir::GridAutoFlow::Row => "CSS::GridAutoFlow::Row",
+            morph_ir::GridAutoFlow::Column => "CSS::GridAutoFlow::Column",
+            morph_ir::GridAutoFlow::RowDense => "CSS::GridAutoFlow::RowDense",
+            morph_ir::GridAutoFlow::ColumnDense => "CSS::GridAutoFlow::ColumnDense",
+        };
+        o.push(format!("{hv}->gridAutoFlow = {lit};"));
+    }
+    let areas_css = |a: &Option<Vec<morph_ir::GridArea>>, c: usize, r: usize| -> String {
+        a.as_ref().map_or(String::new(), |list| {
+            grid_areas_to_css(list, c, r).replace('"', "\\\"")
+        })
+    };
+    if areas_css(&s.grid_template_areas, s.grid_area_cols, s.grid_area_rows)
+        != areas_css(&base.grid_template_areas, base.grid_area_cols, base.grid_area_rows)
+        && s.grid_template_areas.is_some()
+    {
+        o.push(format!(
+            "{hv}->gridTemplateAreas = \"{}\";",
+            areas_css(&s.grid_template_areas, s.grid_area_cols, s.grid_area_rows)
+        ));
+    }
+    if (s.grid_col_start != base.grid_col_start || s.grid_col_end != base.grid_col_end)
+        && (s.grid_col_start != morph_ir::GridLine::Auto
+            || s.grid_col_end != morph_ir::GridLine::Auto)
+    {
+        o.push(format!(
+            "{hv}->gridColumn = \"{} / {}\";",
+            grid_line_to_css(&s.grid_col_start),
+            grid_line_to_css(&s.grid_col_end)
+        ));
+    }
+    if (s.grid_row_start != base.grid_row_start || s.grid_row_end != base.grid_row_end)
+        && (s.grid_row_start != morph_ir::GridLine::Auto
+            || s.grid_row_end != morph_ir::GridLine::Auto)
+    {
+        o.push(format!(
+            "{hv}->gridRow = \"{} / {}\";",
+            grid_line_to_css(&s.grid_row_start),
+            grid_line_to_css(&s.grid_row_end)
+        ));
+    }
+    if s.grid_area != base.grid_area {
+        if let Some(area) = &s.grid_area {
+            o.push(format!("{hv}->gridArea = \"{}\";", area.replace('"', "\\\"")));
+        }
+    }
+    if s.align_content != base.align_content && s.align_content != "normal" {
+        if let Some(lit) = style_enum_literal("align-content", &s.align_content) {
+            o.push(format!("{hv}->alignContent = {lit};"));
+        }
+    }
+    if s.justify_items != base.justify_items && s.justify_items != "normal" {
+        if let Some(lit) = style_enum_literal("justify-items", &s.justify_items) {
+            o.push(format!("{hv}->justifyItems = {lit};"));
+        }
+    }
+    if s.justify_self != base.justify_self && s.justify_self != "auto" {
+        if let Some(lit) = style_enum_literal("justify-self", &s.justify_self) {
+            o.push(format!("{hv}->justifySelf = {lit};"));
+        }
+    }
+    o
+}
+
 fn emit_hover_style(
     node: &IRNode,
     indent: &str,
@@ -1826,6 +2137,7 @@ fn emit_hover_style(
     let base = &node.style;
     let hv = format!("{}->hoverStyle", node.node_id);
     let mut o: Vec<String> = Vec::new();
+    o.extend(emit_grid_delta(&hv, s, base, features));
     if s.bg_color != [0.0, 0.0, 0.0, 0.0] && s.bg_color != base.bg_color {
         o.push(format!("{hv}->bgColor[0] = {:.4}f;", s.bg_color[0]));
         o.push(format!("{hv}->bgColor[1] = {:.4}f;", s.bg_color[1]));
@@ -2168,6 +2480,7 @@ fn emit_active_style(
     let base = &node.style;
     let hv = format!("{}->activeStyle", node.node_id);
     let mut o: Vec<String> = Vec::new();
+    o.extend(emit_grid_delta(&hv, s, base, features));
     if s.bg_color != [0.0, 0.0, 0.0, 0.0] && s.bg_color != base.bg_color {
         o.push(format!("{hv}->bgColor[0] = {:.4}f;", s.bg_color[0]));
         o.push(format!("{hv}->bgColor[1] = {:.4}f;", s.bg_color[1]));
@@ -3128,6 +3441,27 @@ pub fn keyframe_registration_code(
                     if enum_name == "BoxShadow" && !features.contains("shadow") {
                         continue;
                     }
+                    // Same gate for grid: no grid runtime, no keyframes.
+                    if matches!(
+                        enum_name,
+                        "GridTemplateColumns"
+                            | "GridTemplateRows"
+                            | "GridAutoColumns"
+                            | "GridAutoRows"
+                            | "GridAutoFlow"
+                            | "GridTemplateAreas"
+                            | "GridArea"
+                            | "GridColumn"
+                            | "GridRow"
+                            | "AlignContent"
+                            | "JustifyItems"
+                            | "JustifySelf"
+                            | "RowGap"
+                            | "ColumnGap"
+                    ) && !features.contains("grid")
+                    {
+                        continue;
+                    }
                     let escaped = css.replace('\\', "\\\\").replace('"', "\\\"");
                     lines.push(format!(
                         "    {{KeyframeProperty::{enum_name}, {{}}, \"{escaped}\"}},"
@@ -3193,6 +3527,26 @@ fn raw_prop_to_enum(prop: &str) -> Option<&'static str> {
         "left" => Some("Left"),
         "top" => Some("Top"),
         "transform" => Some("Transform"),
+        // Grid keyframes ride raw CSS and flip discretely at the
+        // midpoint (like browsers); gated on the grid runtime below.
+        "grid-template-columns" => Some("GridTemplateColumns"),
+        "grid-template-rows" => Some("GridTemplateRows"),
+        "grid-auto-columns" => Some("GridAutoColumns"),
+        "grid-auto-rows" => Some("GridAutoRows"),
+        "grid-auto-flow" => Some("GridAutoFlow"),
+        "grid-template-areas" => Some("GridTemplateAreas"),
+        "grid-area" => Some("GridArea"),
+        "grid-column" => Some("GridColumn"),
+        "grid-column-start" => Some("GridColumn"),
+        "grid-column-end" => Some("GridColumn"),
+        "grid-row" => Some("GridRow"),
+        "grid-row-start" => Some("GridRow"),
+        "grid-row-end" => Some("GridRow"),
+        "align-content" => Some("AlignContent"),
+        "justify-items" => Some("JustifyItems"),
+        "justify-self" => Some("JustifySelf"),
+        "row-gap" => Some("RowGap"),
+        "column-gap" => Some("ColumnGap"),
         _ => None,
     }
 }

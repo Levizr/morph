@@ -152,6 +152,24 @@ static void applyStyleDelta(MorphStyle& target, const MorphStyle& delta) {
     if (delta.flexShrink != 1.0f)      target.flexShrink = delta.flexShrink;
     if (delta.flexBasis != "auto")     target.flexBasis = delta.flexBasis;
 #endif
+#ifdef MORPH_FEATURE_GRID
+    // Grid hover/active deltas snap discretely (like display): only
+    // non-default fields ride the delta.
+    if (!delta.gridTemplateColumns.empty()) target.gridTemplateColumns = delta.gridTemplateColumns;
+    if (!delta.gridTemplateRows.empty()) target.gridTemplateRows = delta.gridTemplateRows;
+    if (delta.gridAutoColumns != "auto") target.gridAutoColumns = delta.gridAutoColumns;
+    if (delta.gridAutoRows != "auto") target.gridAutoRows = delta.gridAutoRows;
+    if (delta.gridAutoFlow != CSS::GridAutoFlow::Row) target.gridAutoFlow = delta.gridAutoFlow;
+    if (!delta.gridTemplateAreas.empty()) target.gridTemplateAreas = delta.gridTemplateAreas;
+    if (delta.gridColumn != "auto / auto") target.gridColumn = delta.gridColumn;
+    if (delta.gridRow != "auto / auto") target.gridRow = delta.gridRow;
+    if (!delta.gridArea.empty()) target.gridArea = delta.gridArea;
+    if (delta.alignContent != CSS::AlignContent::Stretch) target.alignContent = delta.alignContent;
+    if (delta.justifyItems != CSS::JustifyContent::Stretch) target.justifyItems = delta.justifyItems;
+    if (delta.justifySelf != CSS::JustifySelf::Auto) target.justifySelf = delta.justifySelf;
+    if (delta.rowGapSet) { target.rowGap = delta.rowGap; target.rowGapSet = true; }
+    if (delta.columnGapSet) { target.columnGap = delta.columnGap; target.columnGapSet = true; }
+#endif
 #ifdef MORPH_FEATURE_POSITION
     if (delta.left.isSet())  target.left = delta.left;
     if (delta.right.isSet()) target.right = delta.right;
@@ -366,6 +384,24 @@ static void buildReleaseStyle(MorphStyle& target, const MorphStyle& current,
     SCALAR_REVERT(right);
     SCALAR_REVERT(top);
     SCALAR_REVERT(bottom);
+#endif
+#ifdef MORPH_FEATURE_GRID
+    SCALAR_REVERT(gridTemplateColumns);
+    SCALAR_REVERT(gridTemplateRows);
+    SCALAR_REVERT(gridAutoColumns);
+    SCALAR_REVERT(gridAutoRows);
+    SCALAR_REVERT(gridAutoFlow);
+    SCALAR_REVERT(gridTemplateAreas);
+    SCALAR_REVERT(gridColumn);
+    SCALAR_REVERT(gridRow);
+    SCALAR_REVERT(gridArea);
+    SCALAR_REVERT(alignContent);
+    SCALAR_REVERT(justifyItems);
+    SCALAR_REVERT(justifySelf);
+    SCALAR_REVERT(rowGap);
+    SCALAR_REVERT(rowGapSet);
+    SCALAR_REVERT(columnGap);
+    SCALAR_REVERT(columnGapSet);
 #endif
 #ifdef MORPH_FEATURE_ZINDEX
     SCALAR_REVERT(zIndex);
@@ -689,6 +725,18 @@ void MorphNode::interpolateStyles(MorphStyle& out, const MorphStyle& a,
     out.overflowX = b.overflowX;
     out.overflowY = b.overflowY;
     out.display = b.display;
+#ifdef MORPH_FEATURE_GRID
+    // Grid transitions flip discretely at the midpoint, like browsers
+    // (no track interpolation).
+    if (t < 0.5f)
+    {
+        static_cast<GridStyle&>(out) = static_cast<const GridStyle&>(a);
+    }
+    else
+    {
+        static_cast<GridStyle&>(out) = static_cast<const GridStyle&>(b);
+    }
+#endif
     out.position = b.position;
     out.textAlign = b.textAlign;
     out.boxSizing = b.boxSizing;

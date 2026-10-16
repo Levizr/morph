@@ -65,6 +65,7 @@ These properties **snap instantly** (no interpolation):
 - `display`, `position`, `flex-direction`, `font-weight`
 - `overflow`, `text-align`, `box-sizing`, `border-style`
 - `cursor`, `margin-auto`
+- grid tracks, placement and alignment (`grid-template-*`, `grid-auto-*`, `grid-column`/`grid-row`, `grid-area`, `align-content`, `justify-items`, `justify-self`, `row-gap`, `column-gap`) — flip discretely at the midpoint in `@keyframes`, like browsers
 
 ## Example: Hover Button
 

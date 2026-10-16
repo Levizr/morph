@@ -2940,6 +2940,21 @@ impl IRBuilder {
                         raw.insert("box-shadow".to_string(), val.clone());
                         continue;
                     }
+                    // Grid rides the css-string path like transforms: the
+                    // runtime parses and discretely flips it (midpoint).
+                    if prop.starts_with("grid-")
+                        || prop == "grid-area"
+                        || prop == "grid-column"
+                        || prop == "grid-row"
+                        || prop == "align-content"
+                        || prop == "justify-items"
+                        || prop == "justify-self"
+                        || prop == "row-gap"
+                        || prop == "column-gap"
+                    {
+                        raw.insert(prop.clone(), val.clone());
+                        continue;
+                    }
                     if prop == "transform" || needs_layout(val) {
                         raw.insert(prop.clone(), val.clone());
                         continue;
@@ -3091,6 +3106,25 @@ pub fn is_instance_slot(slot: &HashMap<String, String>) -> bool {
 
 fn is_custom_tag(tag: &str) -> bool {
     tag.chars().next().is_some_and(char::is_uppercase)
+}
+
+/// Split a `grid-template-areas` value into its quoted rows
+/// (`"a a" "b b"` → `["a a", "b b"]`). Unquoted garbage yields nothing.
+fn split_quoted_rows(s: &str) -> Vec<String> {
+    let mut rows = Vec::new();
+    let mut cur: Option<String> = None;
+    for c in s.chars() {
+        match (cur.is_some(), c) {
+            (false, '"' | '\'') => cur = Some(String::new()),
+            (true, '"' | '\'') => {
+                rows.push(cur.take().unwrap());
+            }
+            (true, _) => cur.as_mut().unwrap().push(c),
+            (false, _) if c.is_whitespace() => {}
+            (false, _) => return Vec::new(),
+        }
+    }
+    rows
 }
 
 /// Resolve `<Tag />` used in `module` to (owning module, component).
@@ -4072,6 +4106,27 @@ fn is_animatable(prop: &str) -> bool {
             | "left"
             | "top"
             | "transform"
+            // Grid tracks/placement/alignment are discretely animatable
+            // (flip at the midpoint, like browsers): keyframes carry them
+            // as raw CSS, the runtime snaps them.
+            | "grid-template-columns"
+            | "grid-template-rows"
+            | "grid-auto-columns"
+            | "grid-auto-rows"
+            | "grid-auto-flow"
+            | "grid-template-areas"
+            | "grid-area"
+            | "grid-column"
+            | "grid-column-start"
+            | "grid-column-end"
+            | "grid-row"
+            | "grid-row-start"
+            | "grid-row-end"
+            | "align-content"
+            | "justify-items"
+            | "justify-self"
+            | "row-gap"
+            | "column-gap"
     )
 }
 
@@ -5505,6 +5560,176 @@ fn apply_css_prop(style: &mut IRStyle, prop: &str, val: &str) -> Option<&'static
                 None
             }
         }
+        // ── Grid ──
+        "grid-template-columns" => {
+            if let Some(list) = crate::grid::parse_track_list(val) {
+                style.grid_template_columns = Some(list);
+                Some("grid_template_columns")
+            } else {
+                None
+            }
+        }
+        "grid-template-rows" => {
+            if let Some(list) = crate::grid::parse_track_list(val) {
+                style.grid_template_rows = Some(list);
+                Some("grid_template_rows")
+            } else {
+                None
+            }
+        }
+        "grid-auto-columns" => {
+            if let Some(list) = crate::grid::parse_track_list(val) {
+                style.grid_auto_columns = Some(list);
+                Some("grid_auto_columns")
+            } else {
+                None
+            }
+        }
+        "grid-auto-rows" => {
+            if let Some(list) = crate::grid::parse_track_list(val) {
+                style.grid_auto_rows = Some(list);
+                Some("grid_auto_rows")
+            } else {
+                None
+            }
+        }
+        "grid-auto-flow" => {
+            let flow = match val.trim().to_ascii_lowercase().as_str() {
+                "row" => crate::grid::GridAutoFlow::Row,
+                "column" => crate::grid::GridAutoFlow::Column,
+                "row dense" | "dense row" => crate::grid::GridAutoFlow::RowDense,
+                "column dense" | "dense column" => crate::grid::GridAutoFlow::ColumnDense,
+                "dense" => crate::grid::GridAutoFlow::RowDense,
+                _ => return None,
+            };
+            style.grid_auto_flow = flow;
+            Some("grid_auto_flow")
+        }
+        "grid-template-areas" => {
+            // Rows arrive like `"a a" "b b"` (quoted strings).
+            let rows: Vec<String> = split_quoted_rows(val);
+            if rows.is_empty() {
+                // `none` clears any areas.
+                if val.trim().eq_ignore_ascii_case("none") {
+                    style.grid_template_areas = None;
+                    style.grid_area_cols = 0;
+                    style.grid_area_rows = 0;
+                    Some("grid_template_areas")
+                } else {
+                    None
+                }
+            } else if let Some((areas, ncols, nrows)) = crate::grid::parse_grid_areas(&rows) {
+                style.grid_template_areas = if areas.is_empty() { None } else { Some(areas) };
+                style.grid_area_cols = ncols;
+                style.grid_area_rows = nrows;
+                Some("grid_template_areas")
+            } else {
+                None
+            }
+        }
+        "grid-area" => {
+            if let Some(area) = crate::grid::parse_grid_area(val) {
+                match area {
+                    crate::grid::GridAreaValue::Named(name) => {
+                        style.grid_area = Some(name);
+                    }
+                    crate::grid::GridAreaValue::Lines(rs, cs, re, ce) => {
+                        style.grid_area = None;
+                        style.grid_row_start = rs;
+                        style.grid_col_start = cs;
+                        style.grid_row_end = re;
+                        style.grid_col_end = ce;
+                    }
+                }
+                Some("grid_area")
+            } else {
+                None
+            }
+        }
+        "grid-column-start" => {
+            if let Some(l) = crate::grid::parse_grid_line(val) {
+                style.grid_col_start = l;
+                style.grid_area = None;
+                Some("grid_col_start")
+            } else {
+                None
+            }
+        }
+        "grid-column-end" => {
+            if let Some(l) = crate::grid::parse_grid_line(val) {
+                style.grid_col_end = l;
+                style.grid_area = None;
+                Some("grid_col_end")
+            } else {
+                None
+            }
+        }
+        "grid-row-start" => {
+            if let Some(l) = crate::grid::parse_grid_line(val) {
+                style.grid_row_start = l;
+                style.grid_area = None;
+                Some("grid_row_start")
+            } else {
+                None
+            }
+        }
+        "grid-row-end" => {
+            if let Some(l) = crate::grid::parse_grid_line(val) {
+                style.grid_row_end = l;
+                style.grid_area = None;
+                Some("grid_row_end")
+            } else {
+                None
+            }
+        }
+        "grid-column" => {
+            if let Some((s, e)) = crate::grid::parse_grid_placement(val) {
+                style.grid_col_start = s;
+                style.grid_col_end = e;
+                style.grid_area = None;
+                Some("grid_col_start")
+            } else {
+                None
+            }
+        }
+        "grid-row" => {
+            if let Some((s, e)) = crate::grid::parse_grid_placement(val) {
+                style.grid_row_start = s;
+                style.grid_row_end = e;
+                style.grid_area = None;
+                Some("grid_row_start")
+            } else {
+                None
+            }
+        }
+        "align-content" => {
+            style.align_content = val.trim().to_ascii_lowercase();
+            Some("align_content")
+        }
+        "justify-items" => {
+            style.justify_items = val.trim().to_ascii_lowercase();
+            Some("justify_items")
+        }
+        "justify-self" => {
+            style.justify_self = val.trim().to_ascii_lowercase();
+            Some("justify_self")
+        }
+        "row-gap" => {
+            if let Some(l) = parse_length(val) {
+                style.row_gap = Some(l);
+                Some("row_gap")
+            } else {
+                None
+            }
+        }
+        "column-gap" => {
+            if let Some(l) = parse_length(val) {
+                style.column_gap = Some(l);
+                Some("column_gap")
+            } else {
+                None
+            }
+        }
         _ => None,
     }
 }
@@ -5906,7 +6131,7 @@ fn parse_animations(merged: &HashMap<String, String>) -> Vec<crate::node::IRAnim
 /// units fold to px at 96dpi (`in/cm/mm/q/pt/pc`).
 /// Returns `None` for anything else (keywords like `auto` are handled by
 /// the callers, so the declaration is dropped like browsers do).
-fn parse_length(s: &str) -> Option<Length> {
+pub(crate) fn parse_length(s: &str) -> Option<Length> {
     let t = s.trim();
     if t.is_empty() {
         return None;
