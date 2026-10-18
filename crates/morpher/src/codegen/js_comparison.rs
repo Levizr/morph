@@ -1331,9 +1331,10 @@ MORPH_JS_CMP_INLINE bool is_truthy(const JsValue& value) noexcept
     return value.truthy();
 }
 
-MORPH_JS_CMP_INLINE bool is_truthy(const JsArray& value) noexcept
+MORPH_JS_CMP_INLINE bool is_truthy(const JsArray&) noexcept
 {
-    return value.length() > 0;
+    // All arrays (empty included) are truthy in JS.
+    return true;
 }
 
 MORPH_JS_CMP_INLINE bool is_truthy(const JsObject&) noexcept

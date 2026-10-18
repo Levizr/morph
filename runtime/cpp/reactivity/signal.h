@@ -216,6 +216,8 @@ inline std::string str(float v) { return fmt_double((double)v); }
 inline std::string str(double v) { return fmt_double(v); }
 inline std::string str(JsValue v) { return v.toString().to_std_string(); }
 inline std::string str(JsString v) { return v.value; }
+inline std::string str(JsNumber v) { return v.as_string(); }
+inline std::string str(JsBoolean v) { return v.value ? "true" : "false"; }
 inline std::string str(const char* s) { return std::string(s); }
 inline std::string str(bool v) { return v ? "true" : "false"; }
 template<typename T> std::string str(T v) { return std::to_string(v); }

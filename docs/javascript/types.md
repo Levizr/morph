@@ -32,7 +32,7 @@ typeof(true)       → "boolean"
 
 ### Truthiness
 
-Same rules as JavaScript, with one exception: `0`, `""`, `null`, `undefined`, `false` are falsy and everything else is truthy — except an **empty array is falsy** in Morph (JavaScript treats it as truthy). See [How JavaScript Comparisons Work in Morph](./js-comparisons.md) for the full truthiness table.
+Same rules as JavaScript: `false`, `0`, `NaN`, `""`, `null`, and `undefined` are falsy; everything else — arrays (empty ones included) and objects — is truthy. See [How JavaScript Comparisons Work in Morph](./js-comparisons.md) for the full truthiness table.
 
 ### Equality
 
@@ -49,6 +49,17 @@ JsNumber("12345678901234567890")  // big string
 ```
 
 Arithmetic operators (`+`, `-`, `*`, `/`) work with proper coercion. Number formatting renders cleanly — `8` not `8.0`, `2.5` not `2.500000`, `"Error"` not `nan`/`inf`.
+
+### Number Formatting
+
+| Method | Description |
+|---|---|
+| `toString()` | Shortest round-tripping decimal — `0.1`, `1e+21`, `NaN`, `Infinity`, `-0` → `"0"` |
+| `toFixed(digits)` | Fixed-point string, 0–100 digits; ties round away from zero (`(2.5).toFixed(0)` → `"3"`) |
+| `toPrecision(sig)` | 1–100 significant digits; switches to exponential when the exponent exceeds `sig` |
+| `toExponential(frac)` | Exponential notation, 0–100 fraction digits; no argument gives the shortest mantissa |
+
+Out-of-range digits throw a catchable `RangeError` like V8 (detectable with `try`/`catch`).
 
 ## JsString
 
@@ -74,19 +85,57 @@ Array backed by `shared_ptr<vector<JsValue>>`:
 
 | Method | Description |
 |---|---|
-| `push(value)` | Append to end |
-| `pop()` | Remove from end |
+| `push(value)` / `pop()` | Append / remove at end |
+| `join(sep?)` | Join elements into a string (default `,`); `null`/`undefined` elements join empty |
+| `slice(start, end?)` | Copy a subarray; negative indices count from the end |
+| `concat(x, …)` | Concatenate values or arrays into a new array (one level deep) |
+| `includes(v, from?)` | Strict-equality membership |
+| `indexOf(v, from?)` / `lastIndexOf(v, from?)` | Strict-equality search |
+| `at(i)` | Index access with JS negative indexing; out of range → `undefined` |
+| `reverse()` | Reverse in place, returns the array |
+| `toString()` | Same as `join()` |
 | `index(i)` | Access by index |
+
+`Array.isArray(x)` answers `true` for arrays however they are bound — literal `JsArray`, `JsValue`, or a mutated `shared_ptr<JsArray>` local.
 
 ## JsObject
 
-Object backed by `shared_ptr<map<string, JsValue>>`:
+Object backed by `shared_ptr<unordered_map<string, JsValue>>`:
 
 | Method | Description |
 |---|---|
 | `has(key)` | Check if key exists |
-| `keys()` | Get all keys |
+| `keys()` / `values()` / `entries()` | Enumerate properties |
 | `index(key)` | Access by key (also `obj["key"]`) |
+
+Object enumeration — `Object.keys`/`values`/`entries` and `JSON.stringify` — walks keys in **sorted order**, not JavaScript insertion order. This is a deliberate trade-off of the unordered-map runtime (O(1) point lookups, see [`docs/future/shipped/kill-runtime-strings.md`](../future/shipped/kill-runtime-strings.md)); output is deterministic, but don't rely on insertion order.
+
+## Conversions
+
+`String(x)`, `Number(x)`, and `Boolean(x)` coerce with JavaScript rules:
+
+| Call | Notes |
+|---|---|
+| `String(x)` | Arrays join with `,` — `String([1,[2,3]])` → `"1,2,3"` |
+| `Number(x)` | `""`/`null`/`[]` → `0`, `[5]` → `5`, `[[5]]` → `5`, garbage → `NaN`; parses `0x`/`0b`/`0o` prefixes |
+| `Boolean(x)` | The falsy set above; arrays and objects are always truthy |
+| `parseInt(s, radix?)` | Optional sign, stops at the first invalid character; `parseInt("08")` is `8` |
+| `parseFloat(s)` | Like `parseInt` but accepts decimals/exponents; `"Infinity"` works |
+| `Number.isFinite(x)` / `isNaN(x)` / `isInteger(x)` | No coercion — `Number.isFinite("1")` is `false` |
+
+## Math
+
+`Math.min`/`max` (variadic, and `...spread` over arrays), `abs`, `floor`, `ceil`, `round`, `pow`, `sqrt`. Arguments coerce through `Number()`; `round` rounds half toward +∞ (`Math.round(-2.5)` → `-2`); empty `min`/`max` return `Infinity`/`-Infinity`.
+
+## JSON
+
+`JSON.parse(text)` and `JSON.stringify(value)`:
+
+- `parse` is strict JSON — no trailing garbage or comments — depth-capped at 100, and throws a catchable `SyntaxError` on bad input.
+- `stringify` follows JS: `undefined` array elements become `null`, object properties with `undefined` values are omitted, top-level `undefined` returns `undefined`. No reviver or replacer.
+- Key order is sorted (see the JsObject note), not insertion order.
+
+Everything on this page is checker-gated: unsupported globals, members, or methods stay a hard `morph check` error rather than compiling to something surprising.
 
 ## JsBoolean
 

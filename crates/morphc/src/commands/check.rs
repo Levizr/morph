@@ -204,7 +204,7 @@ pub(crate) fn run(path: Option<&PathBuf>, entry: Option<String>, _migrate: bool)
     for f in &mx_files {
         let content = std::fs::read_to_string(f)?;
         // Bump when lint rules change so stale diagnostics are re-computed.
-        let hash = morph_cache::sha256_bytes(format!("v6:{content}").as_bytes());
+        let hash = morph_cache::sha256_bytes(format!("v7:{content}").as_bytes());
         let key = f.display().to_string();
         contents.insert(key.clone(), content.clone());
 

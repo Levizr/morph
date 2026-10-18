@@ -49,8 +49,7 @@ Same-class pairs keep direct operators (`int64_t == int64_t`, `std::string < std
 | `false`, `0`, `0.0`, `NaN` | Falsy |
 | `""` (empty string) | Falsy |
 | `null`, `undefined` | Falsy |
-| Empty array | Falsy |
-| Everything else (non-empty strings, non-zero numbers, objects, functions) | Truthy |
+| Everything else (non-empty strings, non-zero numbers, arrays — empty ones included — objects, functions) | Truthy |
 
 ```tsx
 let label: string = "";
@@ -59,8 +58,6 @@ if (label) {
 }
 console.log(!label);   // true
 ```
-
-One deliberate difference from JavaScript: an **empty array is falsy** in Morph (`[].length > 0` is false), while JavaScript treats it as truthy.
 
 ## Loose Equality (`==`, `!=`)
 

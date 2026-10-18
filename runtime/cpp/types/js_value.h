@@ -2,6 +2,9 @@
 #include <variant>
 #include <string>
 #include <cstdint>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <algorithm>
 #include "js_number.h"
 #include "js_boolean.h"
@@ -109,10 +112,12 @@ struct JsValue {
             auto& n = std::get<JsNumber>(inner);
             if (n.is_int()) return std::get<int64_t>(n.value) != 0;
             if (n.is_big()) return true;  // big non-zero string = truthy
-            return n.as_double() != 0.0;
+            double d = n.as_double();
+            return d != 0.0 && d == d;  // NaN is falsy
         }
         if (is_string()) return !std::get<JsString>(inner).empty();
-        if (is_array()) return std::get<JsArray>(inner).length() > 0;
+        // Objects are always truthy in JS, empty arrays included.
+        if (is_array()) return true;
         if (is_object()) return true;
         if (is_function()) return true;
         return false;
@@ -328,6 +333,36 @@ struct JsValue {
         if (is_array()) return std::get<JsArray>(inner).pop();
         return JsValue(JsUndefined{});
     }
+    JsString join() const;
+    JsString join(const JsValue& sep) const;
+    JsArray concat(std::initializer_list<JsValue> items) const;
+    JsArray concat(const JsArray& other) const;
+    JsArray concat(const std::shared_ptr<JsArray>& other) const;
+    bool includes(const JsValue& item, int64_t from = 0) const;
+    bool includes(const JsValue& item, const JsValue& from) const;
+    int64_t indexOf(const JsValue& item, int64_t from = 0) const;
+    int64_t indexOf(const JsValue& item, const JsValue& from) const;
+    int64_t lastIndexOf(const JsValue& item) const;
+    int64_t lastIndexOf(const JsValue& item, int64_t from) const;
+    int64_t lastIndexOf(const JsValue& item, const JsValue& from) const;
+    JsValue at(int64_t idx) const;
+    JsValue at(const JsValue& idx) const;
+    JsValue at() const;
+    JsString toFixed(int64_t digits = 0) const;
+    JsString toFixed(const JsValue& digits) const;
+    JsString toPrecision() const;
+    JsString toPrecision(int64_t sig) const;
+    JsString toPrecision(const JsValue& sig) const;
+    JsString toExponential() const;
+    JsString toExponential(int64_t frac) const;
+    JsString toExponential(const JsValue& frac) const;
+    JsValue reverse() {
+        if (is_array()) {
+            std::get<JsArray>(inner).reverse();
+            return *this;
+        }
+        return JsValue(JsUndefined{});
+    }
 
     // ── Object method forwarding ──
 
@@ -339,6 +374,8 @@ struct JsValue {
         if (is_object()) return std::get<JsObject>(inner).keys();
         return {};
     }
+    JsArray values() const;
+    JsArray entries() const;
 
 private:
     static JsValue& get_mutable_dummy() {
@@ -369,19 +406,135 @@ inline std::vector<JsString> JsString::split(const JsString& delim) const {
 }
 
 inline JsString::JsString(const JsNumber& num) {
-    if (num.is_int()) {
-        value = std::to_string(std::get<int64_t>(num.value));
-    } else if (num.is_big()) {
-        value = std::get<std::string>(num.value);
-    } else {
-        value = std::to_string(std::get<double>(num.value));
-        auto dot = value.find('.');
-        if (dot != std::string::npos) {
-            auto last = value.find_last_not_of('0');
-            if (last > dot) value = value.substr(0, last + 1);
-            else value = value.substr(0, dot);
-        }
+    value = num.as_string();
+}
+
+// Throw a catchable RangeError (the translator lowers try/catch to
+// catch (JsValue&), so fixtures can assert the error name). Apps that
+// call throwing helpers get -fexceptions via the build scan; under
+// -fno-exceptions this still compiles (that configuration never calls it).
+[[noreturn]] inline void throw_range_error(const char* what) {
+#ifdef __cpp_exceptions
+    throw JsValue(JsObject{{"name", JsValue("RangeError")}, {"message", JsValue(what)}});
+#else
+    (void)what;
+    std::abort();
+#endif
+}
+
+
+inline JsString JsNumber::toFixed(int64_t digits) const {
+    if (digits < 0 || digits > 100) throw_range_error("toFixed() digits out of range");
+    double d = as_double();
+    if (!std::isfinite(d) || std::fabs(d) >= 1e21) return as_string();
+    return JsString(js_format_fixed(d, (int)digits));
+}
+
+inline JsString JsNumber::toPrecision() const { return as_string(); }
+
+inline JsString JsNumber::toPrecision(int64_t sig) const {
+    if (sig < 1 || sig > 100) throw_range_error("toPrecision() precision out of range");
+    double d = as_double();
+    if (!std::isfinite(d)) return as_string();
+    if (d == 0.0) {
+        if (sig == 1) return JsString("0");
+        return JsString("0." + std::string((size_t)sig - 1, '0'));
     }
+    bool neg = d < 0;
+    double mag = neg ? -d : d;
+    int p = (int)sig;
+    int64_t e = js_exp10(mag);
+    std::string digits;
+    if (p <= 18) {
+        int64_t ee = e;
+        unsigned long long s = js_significand(mag, p, ee);
+        e = ee;
+        digits = std::to_string(s);
+        while ((int)digits.size() < p) digits = "0" + digits;
+    } else {
+        // Beyond double precision: shortest digits, zero-padded.
+        std::string sd;
+        int ex = 0;
+        js_shortest(mag, sd, ex);
+        e = ex;
+        digits = sd;
+        while ((int)digits.size() < p) digits += '0';
+    }
+    std::string out = neg ? "-" : "";
+    if (e < -6 || e >= sig) {
+        out += digits[0];
+        if (p > 1) {
+            out += '.';
+            out += digits.substr(1);
+        }
+        out += 'e';
+        out += e < 0 ? "-" : "+";
+        out += std::to_string(e < 0 ? -e : e);
+        return JsString(out);
+    }
+    if (e >= 0) {
+        std::string head = digits.substr(0, (size_t)e + 1);
+        std::string tail = digits.size() > (size_t)e + 1 ? digits.substr((size_t)e + 1) : "";
+        out += head;
+        if (!tail.empty()) {
+            out += '.';
+            out += tail;
+        }
+        return JsString(out);
+    }
+    out += "0.";
+    out += std::string((size_t)(-e - 1), '0');
+    out += digits;
+    return JsString(out);
+}
+
+inline JsString JsNumber::toExponential() const {
+    double d = as_double();
+    if (!std::isfinite(d)) return as_string();
+    bool neg = d < 0;
+    double mag = neg ? -d : d;
+    if (mag == 0.0) return JsString("0e+0");
+    // Shortest mantissa that round-trips.
+    std::string digits;
+    int exp10 = 0;
+    js_shortest(mag, digits, exp10);
+    std::string out = neg ? "-" : "";
+    out += digits[0];
+    if (digits.size() > 1) {
+        out += '.';
+        out += digits.substr(1);
+    }
+    out += 'e';
+    out += exp10 < 0 ? "-" : "+";
+    out += std::to_string(exp10 < 0 ? -exp10 : exp10);
+    return JsString(out);
+}
+
+inline JsString JsNumber::toExponential(int64_t frac) const {
+    if (frac < 0 || frac > 100) throw_range_error("toExponential() fraction digits out of range");
+    double d = as_double();
+    if (!std::isfinite(d)) return as_string();
+    bool neg = d < 0;
+    double mag = neg ? -d : d;
+    if (mag == 0.0) {
+        std::string m = frac > 0 ? "0." + std::string((size_t)frac, '0') : "0";
+        return JsString(std::string(neg ? "-" : "") + m + "e+0");
+    }
+    int64_t e = js_exp10(mag);
+    std::string m = js_format_fixed(mag / std::pow(10.0, (double)e), (int)frac);
+    if (m.size() > 2 && m[0] == '1' && m[1] == '0' && m[2] == '.') {
+        m = "1." + std::string((size_t)frac, '0');
+        ++e;
+    } else if (m == "10") {
+        m = "1";
+        ++e;
+    }
+    std::string out = neg ? "-" : "";
+    out += m;
+    out += 'e';
+    out += e < 0 ? "-" : "+";
+    out += std::to_string(e < 0 ? -e : e);
+    return JsString(out);
 }
 
 // ── JsNumber assignment/construction from JsValue ──
@@ -428,6 +581,115 @@ inline JsValue JsArray::pop() {
     elements->pop_back();
     return back;
 }
+
+// Recursive join element: null/undefined → "", nested arrays join with
+// ",", everything else uses JS string coercion. Mirrors String() on arrays.
+static std::string js_join_element(const JsValue& v);
+
+inline JsString JsArray::join(const JsValue& sep) const {
+    std::string s = sep.as_string();
+    std::string out;
+    for (size_t i = 0; i < elements->size(); ++i) {
+        if (i > 0) out += s;
+        out += js_join_element((*elements)[i]);
+    }
+    return JsString(out);
+}
+
+inline JsString JsArray::join() const { return join(JsValue(",")); }
+
+inline JsArray JsArray::concat(std::initializer_list<JsValue> items) const {
+    JsArray out;
+    for (const auto& e : *elements) out.elements->push_back(e);
+    for (const auto& item : items) {
+        if (item.is_array()) {
+            for (const auto& e : *std::get<JsArray>(item.inner).elements)
+                out.elements->push_back(e);
+        } else {
+            out.elements->push_back(item);
+        }
+    }
+    return out;
+}
+
+inline JsArray JsArray::concat(const JsArray& other) const {
+    JsArray out;
+    for (const auto& e : *elements) out.elements->push_back(e);
+    for (const auto& e : *other.elements) out.elements->push_back(e);
+    return out;
+}
+
+inline JsArray JsArray::concat(const std::shared_ptr<JsArray>& other) const {
+    if (!other) {
+        JsArray out;
+        for (const auto& e : *elements) out.elements->push_back(e);
+        return out;
+    }
+    return concat(*other);
+}
+
+// SameValueZero: strict equal, or both NaN.
+static bool js_same_value_zero(const JsValue& a, const JsValue& b) {
+    if (a == b) return true;
+    if (a.is_number() && b.is_number()) {
+        double x = std::get<JsNumber>(a.inner).as_double();
+        double y = std::get<JsNumber>(b.inner).as_double();
+        return x != x && y != y;
+    }
+    return false;
+}
+
+inline bool JsArray::includes(const JsValue& item, int64_t from) const {
+    int64_t len = (int64_t)elements->size();
+    int64_t start = from < 0 ? std::max<int64_t>(len + from, 0) : std::min<int64_t>(from, len);
+    for (int64_t i = start; i < len; ++i) {
+        if (js_same_value_zero((*elements)[(size_t)i], item)) return true;
+    }
+    return false;
+}
+
+inline int64_t JsArray::indexOf(const JsValue& item, int64_t from) const {
+    int64_t len = (int64_t)elements->size();
+    int64_t start = from < 0 ? std::max<int64_t>(len + from, 0) : std::min<int64_t>(from, len);
+    for (int64_t i = start; i < len; ++i) {
+        if ((*elements)[(size_t)i] == item) return i;
+    }
+    return -1;
+}
+
+inline int64_t JsArray::lastIndexOf(const JsValue& item) const {
+    return lastIndexOf(item, (int64_t)elements->size() - 1);
+}
+
+inline int64_t JsArray::lastIndexOf(const JsValue& item, int64_t from) const {
+    int64_t len = (int64_t)elements->size();
+    if (len == 0) return -1;
+    int64_t start = from < 0 ? std::max<int64_t>(len + from, 0) : std::min<int64_t>(from, len - 1);
+    for (int64_t i = start; i >= 0; --i) {
+        if ((*elements)[(size_t)i] == item) return i;
+    }
+    return -1;
+}
+
+inline JsValue JsArray::at(int64_t idx) const {
+    int64_t len = (int64_t)elements->size();
+    if (idx < 0) idx = len + idx;
+    if (idx < 0 || idx >= len) return JsValue(JsUndefined{});
+    return (*elements)[(size_t)idx];
+}
+
+inline JsArray& JsArray::reverse() {
+    std::reverse(elements->begin(), elements->end());
+    return *this;
+}
+
+inline JsString JsArray::toString() const { return join(JsValue(",")); }
+
+namespace morph::strutil {
+inline std::string to_string(const JsArray& a) {
+    return a.join(JsValue(",")).value;
+}
+} // namespace morph::strutil
 
 inline void JsArray::clear() { elements->clear(); }
 
@@ -541,6 +803,104 @@ inline std::vector<std::string> JsObject::sorted_keys() const {
     return k;
 }
 
+inline JsArray JsObject::values() const {
+    // Sorted key order (see sorted_keys): deterministic enumeration.
+    JsArray out;
+    for (const auto& key : sorted_keys()) out.elements->push_back(get(key));
+    return out;
+}
+
+inline JsArray JsObject::entries() const {
+    JsArray out;
+    for (const auto& key : sorted_keys()) {
+        JsArray pair;
+        pair.elements->push_back(JsValue(key));
+        pair.elements->push_back(get(key));
+        out.elements->push_back(JsValue(pair));
+    }
+    return out;
+}
+
+// ── JsValue array/object forwarding (defined after JsArray/JsObject) ──
+
+inline JsString JsValue::join() const {
+    if (is_array()) return std::get<JsArray>(inner).join();
+    return JsString();
+}
+
+inline JsString JsValue::join(const JsValue& sep) const {
+    if (is_array()) return std::get<JsArray>(inner).join(sep);
+    return JsString();
+}
+
+inline JsArray JsValue::concat(std::initializer_list<JsValue> items) const {
+    if (is_array()) return std::get<JsArray>(inner).concat(items);
+    JsArray out;
+    out.elements->push_back(*this);
+    return out.concat(items);
+}
+
+inline JsArray JsValue::concat(const JsArray& other) const {
+    if (is_array()) return std::get<JsArray>(inner).concat(other);
+    JsArray out;
+    out.elements->push_back(*this);
+    for (const auto& e : other) out.elements->push_back(e);
+    return out;
+}
+
+inline JsArray JsValue::concat(const std::shared_ptr<JsArray>& other) const {
+    if (is_array()) return std::get<JsArray>(inner).concat(other);
+    JsArray out;
+    out.elements->push_back(*this);
+    if (other) {
+        for (const auto& e : *other) out.elements->push_back(e);
+    }
+    return out;
+}
+
+inline bool JsValue::includes(const JsValue& item, int64_t from) const {
+    if (is_array()) return std::get<JsArray>(inner).includes(item, from);
+    if (is_string()) {
+        if (!item.is_string()) return false;
+        const auto& s = std::get<JsString>(inner).value;
+        const auto& sub = std::get<JsString>(item.inner).value;
+        if (from < 0) from = 0;
+        if ((size_t)from > s.size()) return false;
+        return s.find(sub, (size_t)from) != std::string::npos;
+    }
+    return false;
+}
+
+inline int64_t JsValue::indexOf(const JsValue& item, int64_t from) const {
+    if (is_array()) return std::get<JsArray>(inner).indexOf(item, from);
+    return -1;
+}
+
+inline int64_t JsValue::lastIndexOf(const JsValue& item) const {
+    if (is_array()) return std::get<JsArray>(inner).lastIndexOf(item);
+    return -1;
+}
+
+inline int64_t JsValue::lastIndexOf(const JsValue& item, int64_t from) const {
+    if (is_array()) return std::get<JsArray>(inner).lastIndexOf(item, from);
+    return -1;
+}
+
+inline JsValue JsValue::at(int64_t idx) const {
+    if (is_array()) return std::get<JsArray>(inner).at(idx);
+    return JsValue(JsUndefined{});
+}
+
+inline JsArray JsValue::values() const {
+    if (is_object()) return std::get<JsObject>(inner).values();
+    return JsArray{};
+}
+
+inline JsArray JsValue::entries() const {
+    if (is_object()) return std::get<JsObject>(inner).entries();
+    return JsArray{};
+}
+
 // ── Helper: convert any JsValue to its JS string representation ──
 
 static std::string _js_to_string(const JsValue& v) {
@@ -553,6 +913,22 @@ static std::string _js_to_string(const JsValue& v) {
     if (v.is_object()) return "[object Object]";
     if (v.is_function()) return "function";
     return "undefined";
+}
+
+// Recursive join element for Array join/String(array): null/undefined
+// vanish, nested arrays join with ",", everything else coerces.
+static std::string js_join_element(const JsValue& v) {
+    if (v.is_undefined() || v.is_null()) return "";
+    if (v.is_array()) {
+        const auto& arr = std::get<JsArray>(v.inner);
+        std::string out;
+        for (size_t i = 0; i < arr.length(); ++i) {
+            if (i > 0) out += ",";
+            out += js_join_element(arr[(int64_t)i]);
+        }
+        return out;
+    }
+    return _js_to_string(v);
 }
 
 inline JsValue::operator std::string() const {

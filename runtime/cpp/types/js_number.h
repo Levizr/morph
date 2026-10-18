@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <string>
 #include <cstring>
+#include <cstdio>
 #include <type_traits>
 #include "js_string.h"
 #include <charconv>
@@ -149,9 +150,171 @@ struct JsNumber {
         return old;
     }
 
+// Shortest round-trip digits for a finite nonzero double: digits holds
+// the significant digits (no dot, no trailing zeros) and exp10 is the
+// decimal exponent of the first digit. Tries increasing %g precision
+// and keeps the first that parses back bitwise-identically.
+static void js_shortest(double d, std::string& digits, int& exp10) {
+    for (int prec = 1; prec <= 17; ++prec) {
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "%.*g", prec, d);
+        std::string orig(buf);
+        std::string s = orig;
+        int ex = 0;
+        auto epos = s.find('e');
+        if (epos != std::string::npos) {
+            ex = std::stoi(s.substr(epos + 1));
+            s = s.substr(0, epos);
+        }
+        auto dot = s.find('.');
+        int intlen = dot == std::string::npos ? (int)s.size() : (int)dot;
+        std::string all;
+        for (char c : s) {
+            if (c != '.') all += c;
+        }
+        while (all.size() > 1 && all.back() == '0') all.pop_back();
+        size_t lead = 0;
+        while (lead + 1 < all.size() && all[lead] == '0') ++lead;
+        if (lead > 0) {
+            all = all.substr(lead);
+            intlen -= (int)lead;
+        }
+        // Parse the full text back (exponent included) to check round-trip.
+        char* end = nullptr;
+        double back = std::strtod(orig.c_str(), &end);
+        (void)end;
+        if (back == d) {
+            digits = all;
+            exp10 = intlen - 1 + ex;
+            return;
+        }
+    }
+    digits = "0";
+    exp10 = 0;
+}
+
+// JS Number.prototype.toString for doubles: plain notation for
+// 10^-6 ≤ |d| < 10^21, exponential shortest otherwise.
+static std::string js_double_string(double d) {
+    std::string digits;
+    int exp10 = 0;
+    js_shortest(d < 0 ? -d : d, digits, exp10);
+    std::string out = d < 0 ? "-" : "";
+    if (exp10 >= -6 && exp10 < 21) {
+        if (exp10 >= 0) {
+            if ((int)digits.size() <= exp10 + 1) {
+                out += digits + std::string((size_t)(exp10 + 1) - digits.size(), '0');
+            } else {
+                out += digits.substr(0, (size_t)exp10 + 1);
+                out += '.';
+                out += digits.substr((size_t)exp10 + 1);
+            }
+        } else {
+            out += "0.";
+            out += std::string((size_t)(-exp10 - 1), '0');
+            out += digits;
+        }
+        return out;
+    }
+    out += digits[0];
+    if (digits.size() > 1) {
+        out += '.';
+        out += digits.substr(1);
+    }
+    out += 'e';
+    out += exp10 < 0 ? "-" : "+";
+    out += std::to_string(exp10 < 0 ? -exp10 : exp10);
+    return out;
+}
+
+// Fixed-decimal formatting with JS tie-breaking (ties round away from
+// zero, matching V8). Exact while the scaled magnitude fits int64;
+// huge magnitudes cannot tie (those doubles are integral) so printf
+// is exact there too. Zero keeps the input sign only for d < 0.
+static std::string js_format_fixed(double d, int frac) {
+    if (d == 0.0) {
+        std::string zero = (d < 0) ? "-0" : "0";
+        if (frac <= 0) return zero;
+        return zero + "." + std::string((size_t)frac, '0');
+    }
+    bool neg = d < 0;
+    long double scaled = neg ? -(long double)d : (long double)d;
+    for (int i = 0; i < frac; ++i) scaled *= 10.0L;
+    int64_t r = 0;
+    std::string digs;
+    if (scaled < 4503599627370496.0L) {
+        r = (int64_t)std::floor(scaled + 0.5L);
+        digs = std::to_string(r);
+        while (digs.size() <= (size_t)frac) digs = "0" + digs;
+    } else {
+        char buf[400];
+        std::snprintf(buf, sizeof(buf), "%.*f", frac, neg ? -d : d);
+        digs = buf;
+        auto dot = digs.find('.');
+        if (dot != std::string::npos) digs.erase(dot, 1);
+        while (digs.size() > 1 && digs[0] == '0') digs.erase(digs.begin());
+    }
+    std::string out = neg ? "-" : "";
+    if (frac <= 0) {
+        out += digs;
+    } else {
+        out += digs.substr(0, digs.size() - (size_t)frac);
+        out += '.';
+        out += digs.substr(digs.size() - (size_t)frac);
+    }
+    return out;
+}
+
+// Decimal exponent of a positive finite double, adjusted so that
+// 10^e ≤ mag < 10^(e+1) (log10 alone mis-rounds near powers of 10).
+static int64_t js_exp10(double mag) {
+    int64_t e = (int64_t)std::floor(std::log10(mag));
+    while (e < 308 && std::pow(10.0, (double)(e + 1)) <= mag) ++e;
+    while (e > -324 && std::pow(10.0, (double)e) > mag) --e;
+    return e;
+}
+
+// Round to p significant digits (ties away from zero): returns the
+// significand with exactly p digits and sets exp so that
+// value = 0.significand × 10^(exp+1)... i.e. significand × 10^(exp-p+1).
+static unsigned long long js_significand(double d, int p, int64_t& exp) {
+    double mag = d < 0 ? -d : d;
+    exp = js_exp10(mag);
+    while (exp < 308 && std::pow(10.0, (double)(exp + 1)) <= mag) ++exp;
+    while (exp > -324 && std::pow(10.0, (double)exp) > mag) --exp;
+    int shift = (int)(exp - p + 1);
+    long double m = (long double)mag;
+    if (shift >= 0) {
+        for (int i = 0; i < shift; ++i) m /= 10.0L;
+    } else {
+        for (int i = 0; i < -shift; ++i) m *= 10.0L;
+    }
+    unsigned long long sig = (unsigned long long)std::floor(m + 0.5L);
+    unsigned long long cap = 1;
+    for (int i = 0; i < p; ++i) cap *= 10ULL;
+    if (sig >= cap) {
+        sig /= 10ULL;
+        ++exp;
+    }
+    return sig;
+}
+
     // ── Conversion ──
     std::string as_string() const;
     JsString toString() const { return as_string(); }
+
+    // ── JS Number formatting (defined in js_value.h; throw RangeError
+    // JsValue for out-of-range digits like V8) ──
+    JsString toFixed(int64_t digits = 0) const;
+    JsString toFixed(const JsValue& digits) const;
+    // No arg → ToString; explicit arg must be 1..100 significant digits.
+    JsString toPrecision() const;
+    JsString toPrecision(int64_t sig) const;
+    JsString toPrecision(const JsValue& sig) const;
+    // No arg → shortest round-trip mantissa; explicit arg must be 0..100.
+    JsString toExponential() const;
+    JsString toExponential(int64_t frac) const;
+    JsString toExponential(const JsValue& frac) const;
 
 private:
     int32_t as_int32() const {
@@ -214,12 +377,9 @@ inline bool operator>=(size_t a, const JsNumber& b) { return (int64_t)a >= b.as_
 inline std::string JsNumber::as_string() const {
     if (is_int()) return std::to_string(std::get<int64_t>(value));
     if (is_big()) return std::get<std::string>(value);
-    auto s = std::to_string(std::get<double>(value));
-    auto dot = s.find('.');
-    if (dot != std::string::npos) {
-        auto last = s.find_last_not_of('0');
-        if (last > dot) s = s.substr(0, last + 1);
-        else s = s.substr(0, dot);
-    }
-    return s;
+    double d = std::get<double>(value);
+    if (std::isnan(d)) return "NaN";
+    if (std::isinf(d)) return d > 0 ? "Infinity" : "-Infinity";
+    if (d == 0.0) return "0";
+    return js_double_string(d);
 }

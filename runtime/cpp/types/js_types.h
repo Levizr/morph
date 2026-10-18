@@ -15,3 +15,9 @@
 
 // String helpers for native std::string (used when compiler chooses native types over JsString)
 #include "js_string_helpers.h"
+
+// JS value conversions (String/Number/Boolean, parseInt/parseFloat,
+// Number.isFinite/isNaN/isInteger, Array.isArray), Math and JSON.
+#include "js_convert.h"
+#include "js_math.h"
+#include "js_json.h"

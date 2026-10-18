@@ -39,6 +39,8 @@ const NATIVE_GLOBALS: &[&str] = &[
     "setInterval",
     "clearTimeout",
     "clearInterval",
+    "parseInt",
+    "parseFloat",
 ];
 
 /// Morph APIs that must be imported from 'morph' (bare use is an error).
@@ -265,6 +267,10 @@ struct JsMemberVisitor {
     unresolved: HashSet<u32>,
     // Reported member spans, so bare references inside them stay quiet.
     members: Vec<(u32, u32)>,
+    // Call-callee spans for lowered conversions (String(x), parseInt(...)):
+    // the bare loop must not flag the callee itself. `new` forms are
+    // never recorded, so they keep erroring.
+    allowed_calls: HashSet<u32>,
     out: Vec<(u32, String, String)>,
 }
 impl JsMemberVisitor {
@@ -282,6 +288,12 @@ impl JsMemberVisitor {
             }
             return;
         }
+        if let Some(p) = prop.as_ref() {
+            if supported_builtin_member(name, p) {
+                self.members.push(span);
+                return;
+            }
+        }
         if UNSUPPORTED_JS_ROOTS.contains(&name) {
             self.members.push(span);
             let label = prop.map_or_else(|| name.to_string(), |p| format!("{name}.{p}"));
@@ -291,10 +303,12 @@ impl JsMemberVisitor {
 }
 impl<'a> Visit<'a> for JsMemberVisitor {
     fn visit_static_member_expression(&mut self, e: &StaticMemberExpression<'a>) {
-        // No recursion into the object: the root chain is one access.
+        // The object subtree still needs visiting (deeper roots live
+        // there); each node is visited once, so nothing double-reports.
         let root = member_root_name(&e.object);
         let prop = Some(e.property.name.as_str().to_string());
         self.check_root(root, (e.span.start, e.span.end), prop);
+        self.visit_expression(&e.object);
     }
     fn visit_computed_member_expression(&mut self, e: &ComputedMemberExpression<'a>) {
         let root = member_root_name(&e.object);
@@ -322,6 +336,27 @@ impl<'a> Visit<'a> for JsMemberVisitor {
                 MemberExpression::PrivateFieldExpression(_) => (None, None),
             };
             self.check_root(root, (me.span().start, me.span().end), prop);
+            // Recurse into the callee object: f(Math.max(1, 2)) and
+            // Math.sqrt(2).toFixed(3) must see the inner roots too.
+            match me {
+                MemberExpression::StaticMemberExpression(m) => {
+                    self.visit_expression(&m.object);
+                }
+                MemberExpression::ComputedMemberExpression(m) => {
+                    self.visit_expression(&m.object);
+                    self.visit_expression(&m.expression);
+                }
+                MemberExpression::PrivateFieldExpression(m) => {
+                    self.visit_expression(&m.object);
+                }
+            }
+        }
+        // Lowered conversions (String(x), parseInt(...)): the bare callee
+        // is allowed here so the bare-builtin rule stays quiet for it.
+        if let Expression::Identifier(id) = &e.callee {
+            if CONVERSION_CALLS.contains(&id.name.as_str()) {
+                self.allowed_calls.insert(e.callee.span().start);
+            }
         }
         for arg in &e.arguments {
             self.visit_argument(arg);
@@ -388,7 +423,12 @@ fn check_js_members(program: &Program, file_path: &str, offsets: &[usize]) -> Ve
         }
         bare.push((atom, spans));
     }
-    let mut visitor = JsMemberVisitor { unresolved, members: Vec::new(), out: Vec::new() };
+    let mut visitor = JsMemberVisitor {
+        unresolved,
+        members: Vec::new(),
+        allowed_calls: HashSet::new(),
+        out: Vec::new(),
+    };
     visitor.visit_program(program);
     let skip = collect_skip_spans(program);
     let mut out = Vec::new();
@@ -416,7 +456,12 @@ fn check_js_members(program: &Program, file_path: &str, offsets: &[usize]) -> Ve
         if !UNSUPPORTED_JS_ROOTS.contains(&name) {
             continue;
         }
+        // Lowered conversion calls (String(x), Number(x), parseInt(...)):
+        // the callee span is recorded by the visitor, not an error.
         for span in spans {
+            if CONVERSION_CALLS.contains(&name) && visitor.allowed_calls.contains(&span.start) {
+                continue;
+            }
             if skip.intrinsics.contains(&span.start) {
                 continue;
             }
@@ -672,6 +717,24 @@ enum RecvKind {
     Bool,
 }
 
+/// Builtin namespace members with native lowering (mirrors the
+/// translator's emit_js_builtin): anything else on these roots stays
+/// an mx-js-member error.
+fn supported_builtin_member(root: &str, member: &str) -> bool {
+    matches!(
+        (root, member),
+        ("Math", "min" | "max" | "abs" | "floor" | "ceil" | "round" | "pow" | "sqrt")
+            | ("JSON", "parse" | "stringify")
+            | ("Number", "isFinite" | "isNaN" | "isInteger")
+            | ("Object", "keys" | "values" | "entries")
+            | ("Array", "isArray")
+    )
+}
+
+/// Value conversions and numeric globals lowered by the translator
+/// (call form only — `new String()` stays an error).
+const CONVERSION_CALLS: &[&str] = &["String", "Number", "Boolean", "parseInt", "parseFloat"];
+
 /// Supported methods per receiver kind, mirroring the translator:
 /// string helpers (`StringMethod`), `JsArray::{push,pop}`,
 /// `JsObject::{has,keys,get}`, numbers/booleans (`toString`).
@@ -707,9 +770,22 @@ const fn supported_methods(kind: RecvKind) -> &'static [&'static str] {
             "toLocaleLowerCase",
             "toString",
         ],
-        RecvKind::Arr => &["push", "pop"],
-        RecvKind::Obj => &["has", "keys", "get"],
-        RecvKind::Num | RecvKind::Bool => &["toString"],
+        RecvKind::Arr => &[
+            "push",
+            "pop",
+            "join",
+            "slice",
+            "concat",
+            "includes",
+            "indexOf",
+            "lastIndexOf",
+            "at",
+            "reverse",
+            "toString",
+        ],
+        RecvKind::Obj => &["has", "keys", "get", "values", "entries"],
+        RecvKind::Num => &["toString", "toFixed", "toPrecision", "toExponential"],
+        RecvKind::Bool => &["toString"],
     }
 }
 
@@ -4342,12 +4418,22 @@ mod tests {
 
     #[test]
     fn unsupported_builtin_members_report_js_member() {
-        let content = "import { morphState } from 'morph'\nexport default function App() {\n  const v = Math.min(1, 2);\n  const j = JSON.stringify({});\n  return (<div>{v}</div>)\n}\n";
+        let content = "import { morphState } from 'morph'\nexport default function App() {\n  const v = Math.random();\n  const j = JSON.parse2({});\n  return (<div>{v}</div>)\n}\n";
         let errs = check(content, "App.mx");
         assert_eq!(codes(&errs).iter().filter(|c| **c == "mx-js-member").count(), 2, "{errs:?}");
         assert!(!codes(&errs).contains(&"mx-undefined"), "{errs:?}");
-        let math = errs.iter().find(|e| e.message.contains("Math.min")).unwrap();
+        let math = errs.iter().find(|e| e.message.contains("Math.random")).unwrap();
         assert!(math.message.contains("no native counterpart"), "{math:?}");
+    }
+
+    #[test]
+    fn supported_builtins_stay_quiet() {
+        // Lowered builtins (Math.min, JSON.parse, Object.keys, conversions)
+        // must not trip mx-js-member, including nested in member chains.
+        let content = "import { morphState } from 'morph'\nexport const windowConfig = { title: \"D\", width: 800, height: 600 }\nexport default function App() {\n  const o = JSON.parse('{\"a\":1}')\n  const t = Object.keys(o).join()\n  const m = Math.max(1, 9, 3)\n  const n = Number(\"42\")\n  const s = String(m)\n  const p = parseInt(\"42px\")\n  const f = Number.isFinite(m)\n  const b = Array.isArray(o)\n  return (<div>{t}{m}{n}{s}{p}{f}{b}</div>)\n}\n";
+        let errs = check(content, "App.mx");
+        assert!(!codes(&errs).contains(&"mx-js-member"), "{errs:?}");
+        assert!(!codes(&errs).contains(&"mx-undefined"), "{errs:?}");
     }
 
     #[test]
@@ -4462,6 +4548,24 @@ mod tests {
     }
 
     #[test]
+    fn nested_builtin_calls_stay_quiet() {
+        // Nested lowered calls (Object.keys(o).join()) must see the inner
+        // root: previously the inner call was never visited and the bare
+        // root fell through to mx-js-member.
+        let content = "import { morphState } from 'morph'\nexport const windowConfig = { title: \"D\", width: 800, height: 600 }\nexport default function App() {\n  const [a, setA] = morphState([1, 2, 3])\n  const o = JSON.parse('{\"a\":1}')\n  const u = Object.keys(o)\n  const t = Object.keys(o).join()\n  const m = Math.sqrt(2).toFixed(3)\n  console.log(\"arr\", a.join(\"-\"), a.slice(1).join(), a.concat([4]).join(), a.includes(2), a.indexOf(3), a.at(-1))\n  console.log(\"obj\", JSON.stringify(o), Object.keys(o).join())\n  console.log(t, u, m)\n  return (<div>{t}{u}{m}</div>)\n}\n";
+        let errs = check(content, "App.mx");
+        assert!(!codes(&errs).contains(&"mx-js-member"), "{errs:?}");
+    }
+
+    #[test]
+    fn nested_unsupported_member_still_errors_once() {
+        // The deeper traversal must not double-report: one member error.
+        let content = "import { morphState } from 'morph'\nexport const windowConfig = { title: \"D\", width: 800, height: 600 }\nexport default function App() {\n  const t = Math.random().toFixed(2)\n  return (<div>{t}</div>)\n}\n";
+        let errs = check(content, "App.mx");
+        let member_errs = errs.iter().filter(|e| e.code == "mx-js-member").count();
+        assert_eq!(member_errs, 1, "{errs:?}");
+    }
+    #[test]
     fn transposed_prop_typo_suggests() {
         let content = "import { morphState } from 'morph'\nexport default function App() { return (<div sytle=\"x\">x</div>) }\n";
         let errs = check(content, "App.mx");
@@ -4499,7 +4603,6 @@ mod tests {
                 "map",
                 "arrays",
             ),
-            ("const [n] = morphState<number>(0);\n  const v = n.toFixed(2);", "toFixed", "numbers"),
             ("const v = \"abc\".length();", "length", "strings"),
         ];
         for (body, method, kind) in cases {

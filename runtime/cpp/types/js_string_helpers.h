@@ -7,6 +7,10 @@
 #include <vector>
 #include <algorithm>
 #include <cctype>
+#include <type_traits>
+
+struct JsArray;
+struct JsValue;
 
 namespace morph::strutil {
 
@@ -220,10 +224,29 @@ inline std::string to_locale_lower(const std::string& s) {
     return to_lower(s);
 }
 
-// Convert number to string (for native number types)
-template <typename T>
+// Convert to string (JS semantics: booleans become "true"/"false",
+// strings pass through; numbers use std::to_string).
+template <typename T, typename = std::enable_if_t<std::is_arithmetic_v<T>>>
 inline std::string to_string(T n) {
     return std::to_string(n);
 }
+inline std::string to_string(const std::string& s) {
+    return s;
+}
+inline std::string to_string(const char* s) {
+    return s ? s : "";
+}
+inline std::string to_string(bool b) {
+    return b ? "true" : "false";
+}
+inline std::string to_string(const JsArray& a);
+// Array receivers routed here by name (the fallback translator emits
+// strutil forms for shared string/array method names): coerce indices,
+// delegate to JsArray. Defined in js_value.h (needs complete JsArray).
+inline JsArray slice(const JsArray& a, const JsValue& b, const JsValue& c);
+inline JsArray slice(const JsArray& a, const JsValue& b);
+inline bool includes(const JsArray& a, const JsValue& b);
+inline int64_t index_of(const JsArray& a, const JsValue& b, const JsValue& c);
+inline int64_t last_index_of(const JsArray& a, const JsValue& b, const JsValue& c);
 
 } // namespace morph::strutil

@@ -61,7 +61,7 @@ Binary (`+`, `-`, `*`, `/`, `===`, `!==`, `==`, `!=`, `<`, `>`, etc.), unary (`!
 
 ### JS Runtime Semantics
 
-- Truthiness (same rules as JS, except empty arrays are falsy)
+- Truthiness (same rules as JS — `0`, `NaN`, `""`, `null`, `undefined`, `false` are falsy)
 - `==` / `!=` with JS coercion rules, `===` / `!==`, relational operators — on native and `Js*` types alike (see [How JavaScript Comparisons Work in Morph](./js-comparisons.md))
 - String concatenation (`"" + x`)
 - Array `push`/`pop`/index access

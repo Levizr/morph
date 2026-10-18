@@ -661,6 +661,10 @@ fn generated_needs_exceptions(app_cpp: &std::path::Path, extra: &[std::path::Pat
             || s.contains("catch (")
             || s.contains("throw ")
             || s.contains("js_regex_helpers.h")
+            || s.contains("json_parse(")
+            || s.contains("toFixed(")
+            || s.contains("toPrecision(")
+            || s.contains("toExponential(")
     })
 }
 

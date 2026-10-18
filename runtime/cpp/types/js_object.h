@@ -40,6 +40,10 @@ struct JsObject {
 
     std::vector<std::string> keys() const;
 
+    // Defined in js_value.h (JsArray needs complete JsValue).
+    JsArray values() const;
+    JsArray entries() const;
+
     // Sorted keys: preserves the old std::map iteration order for
     // `for-in` and other order-sensitive enumeration.
     std::vector<std::string> sorted_keys() const;

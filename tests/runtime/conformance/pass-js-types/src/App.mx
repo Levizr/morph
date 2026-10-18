@@ -1,0 +1,69 @@
+import "./style.css"
+import { morphState } from 'morph'
+
+export const windowConfig = { title: "PassJsTypes", width: 800, height: 600 }
+
+// Exercises every checker-allowlisted JS builtin so `morph check` passing
+// implies `morph build` compiles: number formatting, conversions,
+// parseInt/parseFloat, Number predicates, Array/Object methods, Math, JSON.
+export default function App() {
+  const [n, setN] = morphState(42)
+  const [s, setS] = morphState("abc")
+  const items = [1, 2, 3]
+  const more = [...items, 4]
+  const reversed = items.reverse().join()
+  const joined = items.join("-")
+  const sliced = items.slice(1).join()
+  const asText = items.toString()
+  const tail = items.at(-1)
+  const has = items.includes(2)
+  const idx = items.indexOf(9)
+  const last = items.lastIndexOf(1)
+  const fixed = (1.005).toFixed(2)
+  const prec = (123.456).toPrecision(4)
+  const expText = (123456).toExponential(2)
+  const expShort = (123456).toExponential()
+  const precPlain = (5).toPrecision()
+  const plain = n.toString()
+  const asString = String(n)
+  const asNumber = Number("0x10")
+  const falsy = Boolean("")
+  const parsed = parseInt("42px")
+  const parsedFloat = parseFloat("3.14abc")
+  const finiteVal = Number.isFinite(asNumber)
+  const notNan = Number.isNaN(asNumber)
+  const whole = Number.isInteger(1.5)
+  const isArr = Array.isArray(items)
+  const keys = Object.keys({ x: 1 }).join()
+  const vals = Object.values({ x: 1 }).join()
+  const ents = Object.entries({ x: 1 }).join()
+  const o = JSON.parse('{"x":1}')
+  const js = JSON.stringify(o)
+  const mx = Math.max(1, 9, 3)
+  const mn = Math.min(...items)
+  const mxSpread = Math.max(...items, 10, ...[5])
+  const fl = Math.floor(2.9)
+  const ce = Math.ceil(2.1)
+  const ro = Math.round(2.5)
+  const po = Math.pow(2, 10)
+  const sq = Math.sqrt(2)
+  const ab = Math.abs(-5)
+  const nested = ("abc").includes("b")
+  const upper = s.toUpperCase()
+  return (
+    <body>
+      <div className="screen">
+        <button onClick={() => setN(n + 1)}>tick</button>
+        <span>{plain} {String(asNumber)} {Boolean(falsy) ? "t" : "f"}</span>
+        <span>{fixed} {prec} {expText} {expShort} {precPlain}</span>
+        <span>{joined} {sliced} {asText} {reversed}</span>
+        <span>{more[3]} {tail}</span>
+        <span>{has ? "y" : "n"} {idx} {last} {isArr ? "y" : "n"}</span>
+        <span>{parsed} {parsedFloat} {finiteVal ? "y" : "n"} {notNan ? "y" : "n"} {whole ? "y" : "n"}</span>
+        <span>{keys} {vals} {ents} {js}</span>
+        <span>{mx} {mn} {mxSpread} {fl} {ce} {ro} {po} {sq} {ab}</span>
+        <span>{upper} {nested ? "y" : "n"} {asString}</span>
+      </div>
+    </body>
+  )
+}

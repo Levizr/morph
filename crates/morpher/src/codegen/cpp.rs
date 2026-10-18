@@ -3374,6 +3374,7 @@ impl<'a> CppTranslator<'a> {
     /// during emission, so routing decisions always match the generated code.
     fn operand_class_of(&self, expr: &Expression<'a>) -> OperandClass {
         match expr {
+            Expression::ParenthesizedExpression(p) => self.operand_class_of(&p.expression),
             Expression::BooleanLiteral(_) => OperandClass::Boolean,
             Expression::NullLiteral(_) => OperandClass::Null,
             Expression::StringLiteral(_) => OperandClass::Text,
@@ -3961,6 +3962,7 @@ impl<'a> CppTranslator<'a> {
                     _ => return Some(true),
                 }
             }
+            Expression::ParenthesizedExpression(p) => self.str_helper_decision(&p.expression),
             Expression::StringLiteral(_) => Some(true),
             Expression::NumericLiteral(_) => Some(true),
             Expression::TemplateLiteral(_) => Some(true),
@@ -4163,6 +4165,148 @@ impl<'a> CppTranslator<'a> {
         }
     }
 
+    /// JS builtin namespace calls (Math/JSON/Number.is*/Object.keys/
+    /// Array.isArray), number formatting and variadic concat. Returns None
+    /// to fall through to default emission (which the checker gates).
+    fn emit_js_builtin(
+        &mut self,
+        root: &str,
+        method: &str,
+        recv: &Expression<'a>,
+        call: &CallExpression<'a>,
+    ) -> Option<String> {
+        // Split fixed args from spreads. A lone spread expands the array
+        // at runtime; mixed fixed+spread chains per group, staying exact.
+        let mut fixed: Vec<String> = Vec::new();
+        let mut spread_count = 0;
+        for a in &call.arguments {
+            if matches!(a, Argument::SpreadElement(_)) {
+                spread_count += 1;
+            } else {
+                fixed.push(self.emit_argument(a));
+            }
+        }
+        match (root, method) {
+            ("Math", "min" | "max") => {
+                let fname =
+                    if method == "min" { "morph::js_math::min" } else { "morph::js_math::max" };
+                if spread_count == 0 {
+                    return Some(format!("{fname}({{{}}})", fixed.join(", ")));
+                }
+                // max(...a, b, ...c) == max(max(a), b, max(c)).
+                let mut parts = fixed;
+                for a in &call.arguments {
+                    if let Argument::SpreadElement(s) = a {
+                        parts.push(format!("{fname}({})", self.emit_expression(&s.argument)));
+                    }
+                }
+                Some(format!("{fname}({{{}}})", parts.join(", ")))
+            }
+            ("Math", "abs" | "floor" | "ceil" | "round" | "sqrt") => {
+                let arg =
+                    fixed.first().cloned().unwrap_or_else(|| "JsValue(JsUndefined{})".to_string());
+                Some(format!("morph::js_math::{method}({arg})"))
+            }
+            ("Math", "pow") => {
+                let x =
+                    fixed.first().cloned().unwrap_or_else(|| "JsValue(JsUndefined{})".to_string());
+                let y =
+                    fixed.get(1).cloned().unwrap_or_else(|| "JsValue(JsUndefined{})".to_string());
+                Some(format!("morph::js_math::pow({x}, {y})"))
+            }
+            ("JSON", "parse") => {
+                let arg =
+                    fixed.first().cloned().unwrap_or_else(|| "JsValue(JsUndefined{})".to_string());
+                Some(format!("morph::json_parse(JsValue({arg}))"))
+            }
+            ("JSON", "stringify") => {
+                let arg =
+                    fixed.first().cloned().unwrap_or_else(|| "JsValue(JsUndefined{})".to_string());
+                Some(format!("morph::json_stringify(JsValue({arg}))"))
+            }
+            ("Number", "isFinite") => Some(self.emit_js_unary("morph::js_is_finite", call)),
+            ("Number", "isNaN") => Some(self.emit_js_unary("morph::js_is_nan", call)),
+            ("Number", "isInteger") => Some(self.emit_js_unary("morph::js_is_integer", call)),
+            ("Object", "keys") => {
+                // Sorted enumeration (kill-runtime-strings decision): see
+                // docs/javascript/types.md — deterministic, not insertion order.
+                let arg = fixed.first().cloned().unwrap_or_else(|| "JsObject{}".to_string());
+                Some(format!("JsArray(JsValue({arg}).sorted_keys())"))
+            }
+            ("Object", "values" | "entries") => {
+                let arg = fixed.first().cloned().unwrap_or_else(|| "JsObject{}".to_string());
+                Some(format!("JsValue({arg}).{method}()"))
+            }
+            ("Array", "isArray") => {
+                let arg =
+                    fixed.first().cloned().unwrap_or_else(|| "JsValue(JsUndefined{})".to_string());
+                Some(format!("morph::js_is_array({arg})"))
+            }
+            (_, "toFixed" | "toPrecision" | "toExponential") => {
+                // Numeric receivers only (ints, doubles, JsNumber, JsValue):
+                // strings keep their own lowering, classes are untouched.
+                if !matches!(
+                    self.operand_class_of(recv),
+                    OperandClass::Integer
+                        | OperandClass::Float
+                        | OperandClass::JsNumber
+                        | OperandClass::JsValue
+                ) {
+                    return None;
+                }
+                let obj = self.emit_expression(recv);
+                let args: Vec<String> =
+                    call.arguments.iter().map(|a| self.emit_argument(a)).collect();
+                Some(format!("JsNumber({obj}).{method}({})", args.join(", ")))
+            }
+            (_, "concat") => {
+                // Array receivers only; strings have no concat here. Array
+                // literals infer as vectors but emit as JsArray, so they
+                // count too.
+                let is_arr = matches!(
+                    self.operand_class_of(recv),
+                    OperandClass::JsArray | OperandClass::JsValue
+                ) || matches!(recv, Expression::ArrayExpression(_));
+                if !is_arr {
+                    return None;
+                }
+                let obj = self.emit_expression(recv);
+                if spread_count == 0 {
+                    return Some(format!("{obj}.concat({{{}}})", fixed.join(", ")));
+                }
+                // a.concat(x, ...s, y) == a.concat({x}).concat(s).concat({y}).
+                let mut out = obj;
+                let mut group: Vec<String> = Vec::new();
+                for a in &call.arguments {
+                    if let Argument::SpreadElement(s) = a {
+                        if !group.is_empty() {
+                            out = format!("{out}.concat({{{}}})", group.join(", "));
+                            group.clear();
+                        }
+                        out = format!("{out}.concat({})", self.emit_expression(&s.argument));
+                    } else {
+                        group.push(self.emit_argument(a));
+                    }
+                }
+                if !group.is_empty() {
+                    out = format!("{out}.concat({{{}}})", group.join(", "));
+                }
+                Some(out)
+            }
+            _ => None,
+        }
+    }
+
+    /// Single-argument builtin call with an undefined default. The arg is
+    /// wrapped in JsValue so overload resolution stays deterministic.
+    fn emit_js_unary(&mut self, fname: &str, call: &CallExpression<'a>) -> String {
+        let arg = call
+            .arguments
+            .first()
+            .map_or_else(|| "JsValue(JsUndefined{})".to_string(), |a| self.emit_argument(a));
+        format!("{fname}(JsValue({arg}))")
+    }
+
     fn emit_call(&mut self, call: &CallExpression<'a>) -> String {
         let callee_str = self.emit_expression(&call.callee);
         let type_args_str = if let Some(ta) = &call.type_arguments {
@@ -4232,6 +4376,38 @@ impl<'a> CppTranslator<'a> {
                     };
                     return format!("{}(std::function<void()>({}), {})", cpp_fn, fn_arg, delay);
                 }
+            }
+            // JS value conversions: String(x) / Number(x) / Boolean(x) lower
+            // to the morph::js_to_* helpers (JsValue semantics, never throw).
+            // Zero-arg forms convert undefined, matching JS.
+            if matches!(id.name.as_str(), "String" | "Number" | "Boolean") {
+                let helper = match id.name.as_str() {
+                    "String" => "morph::js_to_string",
+                    "Number" => "morph::js_to_number",
+                    _ => "morph::js_to_boolean",
+                };
+                if call.arguments.is_empty() {
+                    return format!("{helper}()");
+                }
+                let arg = self.emit_argument(&call.arguments[0]);
+                return format!("{helper}(JsValue({arg}))");
+            }
+            if id.name.as_str() == "parseInt" {
+                let mut args: Vec<String> =
+                    call.arguments.iter().map(|a| self.emit_argument(a)).collect();
+                if args.is_empty() {
+                    args.push("JsValue(JsUndefined{})".to_string());
+                } else {
+                    args[0] = format!("JsValue({})", args[0]);
+                }
+                return format!("morph::js_parse_int({})", args.join(", "));
+            }
+            if id.name.as_str() == "parseFloat" {
+                if call.arguments.is_empty() {
+                    return "morph::js_parse_float(JsValue(JsUndefined{}))".to_string();
+                }
+                let arg = self.emit_argument(&call.arguments[0]);
+                return format!("morph::js_parse_float(JsValue({arg}))");
             }
             if let Some(mapped) = self.ctx.state_vars.get(id.name.as_str()).cloned() {
                 let args: Vec<String> =
@@ -4388,6 +4564,18 @@ impl<'a> CppTranslator<'a> {
                     }
                 }
                 return format!("{}.push({})", obj, arg);
+            }
+        }
+        // JS builtin namespaces (Math/JSON/Number.is*/Object.keys/Array.isArray),
+        // number formatting and variadic concat. Anything else on these roots
+        // falls through verbatim and stays a checker error (mx-js-member).
+        if let Expression::StaticMemberExpression(m) = &call.callee {
+            let root =
+                if let Expression::Identifier(obj) = &m.object { obj.name.as_str() } else { "" };
+            if let Some(lowered) =
+                self.emit_js_builtin(root, m.property.name.as_str(), &m.object, call)
+            {
+                return lowered;
             }
         }
         // Handle string methods on native types (std::string and number types)

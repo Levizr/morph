@@ -34,6 +34,32 @@ fn translate_window_handler(body: &str) -> Option<String> {
         .filter(|b| !b.is_empty())
 }
 
+/// JSX text/expr effects: morpher first so JS builtins (String/Number/
+/// Boolean conversions, array/object methods, Math/JSON, number
+/// formatting) lower exactly like component bodies; the textual
+/// substitution stays the fallback for shapes the snippet parser cannot
+/// represent (already-lowered C++, row aliases, etc.).
+fn translate_text_expr<S: std::hash::BuildHasher>(
+    js: &str,
+    state_map: &std::collections::HashMap<String, String, S>,
+) -> String {
+    let options = morpher::TranslateOptions {
+        indent: 1,
+        state_vars: state_map.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        ..Default::default()
+    };
+    if let Ok(out) = morpher::translate_snippet(js, "snippet.ts", options) {
+        let body = out.body.trim().trim_end_matches(';').trim().to_string();
+        if !body.is_empty() {
+            // Same conventions the textual path applies: list-item aliases
+            // (`__it.name` → `__it["name"]`) and event-object fields.
+            let body = normalize_item_access(&body);
+            return normalize_value_access(&body);
+        }
+    }
+    translate_js(js, state_map)
+}
+
 /// Keyword → C++ enum literal for style/node-type emission. Mirrors the
 /// `parse*` functions in `runtime/cpp/style/css_enums.h` exactly
 /// (case-sensitive, unknown → default).
@@ -1096,7 +1122,7 @@ pub fn emit_node_with_state(
             lines.push(format!("{pid}->addChild({});", node.node_id));
         }
         if !node.reactive_text.is_empty() {
-            let cpp_expr = translate_js(&node.reactive_text, state_map);
+            let cpp_expr = translate_text_expr(&node.reactive_text, state_map);
             let expr = cpp_expr.trim().trim_end_matches(';').to_string();
             let caps = effect_captures(&node.node_id, &[&expr]);
             lines.push(format!(

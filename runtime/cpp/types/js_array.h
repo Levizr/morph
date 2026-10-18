@@ -52,6 +52,28 @@ struct JsArray {
     void clear();
     JsArray slice(int64_t start, int64_t end) const;
     JsArray slice(int64_t start) const;
+    JsArray slice(const JsValue& start, const JsValue& end) const;
+    JsArray slice(const JsValue& start) const;
+    JsArray slice() const;
+
+    // Defined in js_value.h (need _js_to_string for join elements).
+    JsString join() const;
+    JsString join(const JsValue& sep) const;
+    JsArray concat(std::initializer_list<JsValue> items) const;
+    JsArray concat(const JsArray& other) const;
+    JsArray concat(const std::shared_ptr<JsArray>& other) const;
+    bool includes(const JsValue& item, int64_t from = 0) const;
+    bool includes(const JsValue& item, const JsValue& from) const;
+    int64_t indexOf(const JsValue& item, int64_t from = 0) const;
+    int64_t indexOf(const JsValue& item, const JsValue& from) const;
+    int64_t lastIndexOf(const JsValue& item) const;
+    int64_t lastIndexOf(const JsValue& item, int64_t from) const;
+    int64_t lastIndexOf(const JsValue& item, const JsValue& from) const;
+    JsValue at(int64_t idx) const;
+    JsValue at(const JsValue& idx) const;
+    JsValue at() const;
+    JsArray& reverse();
+    JsString toString() const;
 
     JsValue operator[](int64_t idx) const;
     JsValue& operator[](int64_t idx);
