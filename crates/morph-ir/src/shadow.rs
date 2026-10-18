@@ -205,6 +205,9 @@ mod tests {
         assert!(parse_box_shadow("10px 10px 4px 2px 1px black").is_none());
         assert!(parse_box_shadow("10px solid red").is_none());
         assert!(parse_box_shadow("10% 10px black").is_none());
-        assert!(parse_box_shadow("1px 1px black, 2px 2px black, 3px 3px black, 4px 4px black, 5px 5px black").is_none());
+        assert!(parse_box_shadow(
+            "1px 1px black, 2px 2px black, 3px 3px black, 4px 4px black, 5px 5px black"
+        )
+        .is_none());
     }
 }

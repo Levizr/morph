@@ -88,12 +88,8 @@ pub(crate) fn style_enum_literal(prop: &str, value: &str) -> Option<&'static str
         ("justify-content", "space-evenly") => Some("CSS::JustifyContent::SpaceEvenly"),
         ("justify-content", "flex-start") => Some("CSS::JustifyContent::FlexStart"),
         ("justify-content", "flex-end") => Some("CSS::JustifyContent::FlexEnd"),
-        ("align-content", "start") | ("align-content", "left") => {
-            Some("CSS::AlignContent::Start")
-        }
-        ("align-content", "end") | ("align-content", "right") => {
-            Some("CSS::AlignContent::End")
-        }
+        ("align-content", "start") | ("align-content", "left") => Some("CSS::AlignContent::Start"),
+        ("align-content", "end") | ("align-content", "right") => Some("CSS::AlignContent::End"),
         ("align-content", "center") => Some("CSS::AlignContent::Center"),
         ("align-content", "stretch") | ("align-content", "normal") => {
             Some("CSS::AlignContent::Stretch")
@@ -106,9 +102,9 @@ pub(crate) fn style_enum_literal(prop: &str, value: &str) -> Option<&'static str
         ("justify-items", "start")
         | ("justify-items", "left")
         | ("justify-items", "self-start") => Some("CSS::JustifyContent::Start"),
-        ("justify-items", "end")
-        | ("justify-items", "right")
-        | ("justify-items", "self-end") => Some("CSS::JustifyContent::End"),
+        ("justify-items", "end") | ("justify-items", "right") | ("justify-items", "self-end") => {
+            Some("CSS::JustifyContent::End")
+        }
         ("justify-items", "center") => Some("CSS::JustifyContent::Center"),
         ("justify-items", "stretch")
         | ("justify-items", "normal")
@@ -120,9 +116,9 @@ pub(crate) fn style_enum_literal(prop: &str, value: &str) -> Option<&'static str
         ("align-items", "start")
         | ("align-items", "self-start")
         | ("align-items", "flex-start") => Some("CSS::AlignItems::FlexStart"),
-        ("align-items", "end")
-        | ("align-items", "self-end")
-        | ("align-items", "flex-end") => Some("CSS::AlignItems::FlexEnd"),
+        ("align-items", "end") | ("align-items", "self-end") | ("align-items", "flex-end") => {
+            Some("CSS::AlignItems::FlexEnd")
+        }
         ("align-items", "center") => Some("CSS::AlignItems::Center"),
         ("align-items", "stretch")
         | ("align-items", "normal")
@@ -137,9 +133,7 @@ pub(crate) fn style_enum_literal(prop: &str, value: &str) -> Option<&'static str
             Some("CSS::JustifySelf::Stretch")
         }
         ("align-self", "auto") => Some("CSS::AlignSelf::Auto"),
-        ("align-self", "start") | ("align-self", "self-start") => {
-            Some("CSS::AlignSelf::FlexStart")
-        }
+        ("align-self", "start") | ("align-self", "self-start") => Some("CSS::AlignSelf::FlexStart"),
         ("align-self", "end") | ("align-self", "self-end") => Some("CSS::AlignSelf::FlexEnd"),
         ("align-self", "center") => Some("CSS::AlignSelf::Center"),
         ("align-self", "stretch")
@@ -502,10 +496,7 @@ fn emit_box_shadows(access: &str, shadows: &Option<Vec<morph_ir::IRBoxShadow>>) 
         o.push(format!("{base}.color[1] = {:.4}f;", s.color[1]));
         o.push(format!("{base}.color[2] = {:.4}f;", s.color[2]));
         o.push(format!("{base}.color[3] = {:.4}f;", s.color[3]));
-        o.push(format!(
-            "{base}.inset = {};",
-            if s.inset { "true" } else { "false" }
-        ));
+        o.push(format!("{base}.inset = {};", if s.inset { "true" } else { "false" }));
     }
     o
 }
@@ -2024,43 +2015,25 @@ fn emit_grid_delta(
         return o;
     }
     let css = |list: &Option<morph_ir::GridTrackList>| -> String {
-        list.as_ref().map_or(String::new(), |l| {
-            track_list_to_css(l).replace('"', "\\\"")
-        })
+        list.as_ref().map_or(String::new(), |l| track_list_to_css(l).replace('"', "\\\""))
     };
     if css(&s.grid_template_columns) != css(&base.grid_template_columns)
         && s.grid_template_columns.is_some()
     {
-        o.push(format!(
-            "{hv}->gridTemplateColumns = \"{}\";",
-            css(&s.grid_template_columns)
-        ));
+        o.push(format!("{hv}->gridTemplateColumns = \"{}\";", css(&s.grid_template_columns)));
     }
-    if css(&s.grid_template_rows) != css(&base.grid_template_rows)
-        && s.grid_template_rows.is_some()
+    if css(&s.grid_template_rows) != css(&base.grid_template_rows) && s.grid_template_rows.is_some()
     {
-        o.push(format!(
-            "{hv}->gridTemplateRows = \"{}\";",
-            css(&s.grid_template_rows)
-        ));
+        o.push(format!("{hv}->gridTemplateRows = \"{}\";", css(&s.grid_template_rows)));
     }
-    if css(&s.grid_auto_columns) != css(&base.grid_auto_columns)
-        && s.grid_auto_columns.is_some()
-    {
-        o.push(format!(
-            "{hv}->gridAutoColumns = \"{}\";",
-            css(&s.grid_auto_columns)
-        ));
+    if css(&s.grid_auto_columns) != css(&base.grid_auto_columns) && s.grid_auto_columns.is_some() {
+        o.push(format!("{hv}->gridAutoColumns = \"{}\";", css(&s.grid_auto_columns)));
     }
-    if css(&s.grid_auto_rows) != css(&base.grid_auto_rows)
-        && s.grid_auto_rows.is_some()
-    {
-        o.push(format!(
-            "{hv}->gridAutoRows = \"{}\";",
-            css(&s.grid_auto_rows)
-        ));
+    if css(&s.grid_auto_rows) != css(&base.grid_auto_rows) && s.grid_auto_rows.is_some() {
+        o.push(format!("{hv}->gridAutoRows = \"{}\";", css(&s.grid_auto_rows)));
     }
-    if s.grid_auto_flow != base.grid_auto_flow {        let lit = match s.grid_auto_flow {
+    if s.grid_auto_flow != base.grid_auto_flow {
+        let lit = match s.grid_auto_flow {
             morph_ir::GridAutoFlow::Row => "CSS::GridAutoFlow::Row",
             morph_ir::GridAutoFlow::Column => "CSS::GridAutoFlow::Column",
             morph_ir::GridAutoFlow::RowDense => "CSS::GridAutoFlow::RowDense",
@@ -2069,9 +2042,7 @@ fn emit_grid_delta(
         o.push(format!("{hv}->gridAutoFlow = {lit};"));
     }
     let areas_css = |a: &Option<Vec<morph_ir::GridArea>>, c: usize, r: usize| -> String {
-        a.as_ref().map_or(String::new(), |list| {
-            grid_areas_to_css(list, c, r).replace('"', "\\\"")
-        })
+        a.as_ref().map_or(String::new(), |list| grid_areas_to_css(list, c, r).replace('"', "\\\""))
     };
     if areas_css(&s.grid_template_areas, s.grid_area_cols, s.grid_area_rows)
         != areas_css(&base.grid_template_areas, base.grid_area_cols, base.grid_area_rows)

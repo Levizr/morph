@@ -20,10 +20,7 @@ pub enum GridTrackSize {
     MinContent,
     MaxContent,
     FitContent(Length),
-    MinMax {
-        min: GridTrackMin,
-        max: GridTrackMax,
-    },
+    MinMax { min: GridTrackMin, max: GridTrackMax },
 }
 
 /// `minmax()` minimum: fixed, `%`, content keywords, `auto`.
@@ -277,19 +274,13 @@ pub fn parse_track_list(s: &str) -> Option<GridTrackList> {
             repeats: Vec::new(),
         });
     }
-    let mut out = GridTrackList {
-        tracks: Vec::new(),
-        line_names: vec![Vec::new()],
-        repeats: Vec::new(),
-    };
+    let mut out =
+        GridTrackList { tracks: Vec::new(), line_names: vec![Vec::new()], repeats: Vec::new() };
     for tok in split_top_ws(t) {
         if tok.starts_with('[') && tok.ends_with(']') {
             // One `[a b]` group may carry several names.
             let inner = &tok[1..tok.len() - 1];
-            out.line_names
-                .last_mut()
-                .unwrap()
-                .extend(inner.split_whitespace().map(str::to_string));
+            out.line_names.last_mut().unwrap().extend(inner.split_whitespace().map(str::to_string));
             continue;
         }
         if tok.to_ascii_lowercase().starts_with("repeat(") {
@@ -304,11 +295,7 @@ pub fn parse_track_list(s: &str) -> Option<GridTrackList> {
                     }
                 }
                 auto_count => {
-                    out.repeats.push(GridRepeat {
-                        at: out.tracks.len(),
-                        count: auto_count,
-                        inner,
-                    });
+                    out.repeats.push(GridRepeat { at: out.tracks.len(), count: auto_count, inner });
                 }
             }
             continue;
@@ -370,11 +357,8 @@ pub fn parse_grid_placement(s: &str) -> Option<(GridLine, GridLine)> {
     if halves.len() > 2 {
         return None;
     }
-    let start = if halves[0].trim().is_empty() {
-        GridLine::Auto
-    } else {
-        parse_grid_line(halves[0])?
-    };
+    let start =
+        if halves[0].trim().is_empty() { GridLine::Auto } else { parse_grid_line(halves[0])? };
     let end = if halves.len() < 2 || halves[1].trim().is_empty() {
         GridLine::Auto
     } else {
@@ -404,13 +388,14 @@ pub fn parse_grid_area(s: &str) -> Option<GridAreaValue> {
     }
     let mut lines = Vec::new();
     for h in halves {
-        lines.push(if h.trim().is_empty() {
-            GridLine::Auto
-        } else {
-            parse_grid_line(h)?
-        });
+        lines.push(if h.trim().is_empty() { GridLine::Auto } else { parse_grid_line(h)? });
     }
-    Some(GridAreaValue::Lines(lines[0].clone(), lines[1].clone(), lines[2].clone(), lines[3].clone()))
+    Some(GridAreaValue::Lines(
+        lines[0].clone(),
+        lines[1].clone(),
+        lines[2].clone(),
+        lines[3].clone(),
+    ))
 }
 
 /// A parsed `grid-area` value.
@@ -477,13 +462,7 @@ pub fn parse_grid_areas(rows: &[String]) -> Option<(Vec<GridArea>, usize, usize)
                 }
             }
         }
-        areas.push(GridArea {
-            name: name.clone(),
-            row0: *r0,
-            col0: *c0,
-            row1: *r1,
-            col1: *c1,
-        });
+        areas.push(GridArea { name: name.clone(), row0: *r0, col0: *c0, row1: *r1, col1: *c1 });
     }
     areas.sort_by(|a, b| a.name.cmp(&b.name));
     Some((areas, ncols, grid.len()))
@@ -495,7 +474,8 @@ pub fn track_list_to_css(list: &GridTrackList) -> String {
     let mut parts: Vec<String> = Vec::new();
     // Fixed repeats already expanded; auto-fill/fit stay symbolic at
     // their recorded insertion index.
-    let mut repeat_at: std::collections::HashMap<usize, &GridRepeat> = std::collections::HashMap::new();
+    let mut repeat_at: std::collections::HashMap<usize, &GridRepeat> =
+        std::collections::HashMap::new();
     for rep in &list.repeats {
         repeat_at.insert(rep.at, rep);
     }
@@ -559,13 +539,11 @@ pub fn grid_areas_to_css(areas: &[GridArea], ncols: usize, nrows: usize) -> Stri
             }
         }
     }
-    grid.iter()
-        .map(|row| format!("\"{}\"", row.join(" ")))
-        .collect::<Vec<_>>()
-        .join(" ")
+    grid.iter().map(|row| format!("\"{}\"", row.join(" "))).collect::<Vec<_>>().join(" ")
 }
 
-fn track_size_to_css(t: &GridTrackSize) -> String {    match t {
+fn track_size_to_css(t: &GridTrackSize) -> String {
+    match t {
         GridTrackSize::Fixed(l) => l.to_css(),
         GridTrackSize::Flex(v) => {
             if *v == 1.0 {
@@ -634,7 +612,8 @@ mod tests {
 
     #[test]
     fn tracks_minmax_content() {
-        let l = parse_track_list("minmax(100px, 1fr) min-content max-content fit-content(50%)").unwrap();
+        let l = parse_track_list("minmax(100px, 1fr) min-content max-content fit-content(50%)")
+            .unwrap();
         assert_eq!(l.tracks.len(), 4);
         assert!(matches!(l.tracks[0], GridTrackSize::MinMax { .. }));
     }
@@ -655,7 +634,10 @@ mod tests {
         assert_eq!(parse_grid_line("-1"), Some(GridLine::Line(-1)));
         assert_eq!(parse_grid_line("span 3"), Some(GridLine::Span(3)));
         assert_eq!(parse_grid_line("sidebar"), Some(GridLine::Named("sidebar".into())));
-        assert_eq!(parse_grid_placement("1 / span 2"), Some((GridLine::Line(1), GridLine::Span(2))));
+        assert_eq!(
+            parse_grid_placement("1 / span 2"),
+            Some((GridLine::Line(1), GridLine::Span(2)))
+        );
         assert_eq!(parse_grid_placement("span 2"), Some((GridLine::Span(2), GridLine::Auto)));
     }
 

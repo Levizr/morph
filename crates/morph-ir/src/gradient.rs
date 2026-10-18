@@ -63,7 +63,10 @@ pub enum RadialSize {
     FarthestSide,
     #[default]
     FarthestCorner,
-    Explicit { x: GradientPosition, y: Option<GradientPosition> },
+    Explicit {
+        x: GradientPosition,
+        y: Option<GradientPosition>,
+    },
 }
 
 /// Gradient axis in CSS `y-down` space.
@@ -622,24 +625,16 @@ mod tests {
                 y: Some(GradientPosition::Percent(40.0))
             }
         );
-        assert_eq!(
-            g.center,
-            (CenterCoord::Percent(20.0), CenterCoord::Percent(80.0))
-        );
-        let g = parse_gradient("repeating-radial-gradient(circle 10px, red 0 10px, blue 10px 20px)")
-            .expect("parses");
+        assert_eq!(g.center, (CenterCoord::Percent(20.0), CenterCoord::Percent(80.0)));
+        let g =
+            parse_gradient("repeating-radial-gradient(circle 10px, red 0 10px, blue 10px 20px)")
+                .expect("parses");
         assert!(g.repeating);
-        assert_eq!(
-            g.radial_size,
-            RadialSize::Explicit { x: GradientPosition::Px(10.0), y: None }
-        );
-        let g = parse_gradient("radial-gradient(closest-side at top left, red, blue)")
-            .expect("parses");
+        assert_eq!(g.radial_size, RadialSize::Explicit { x: GradientPosition::Px(10.0), y: None });
+        let g =
+            parse_gradient("radial-gradient(closest-side at top left, red, blue)").expect("parses");
         assert_eq!(g.radial_size, RadialSize::ClosestSide);
-        assert_eq!(
-            g.center,
-            (CenterCoord::Percent(0.0), CenterCoord::Percent(0.0))
-        );
+        assert_eq!(g.center, (CenterCoord::Percent(0.0), CenterCoord::Percent(0.0)));
         // Two radii with an explicit circle is invalid.
         assert!(parse_gradient("radial-gradient(circle 10px 20px, red, blue)").is_none());
     }

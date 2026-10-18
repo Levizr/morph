@@ -5802,7 +5802,9 @@ fn parse_border_shorthand(style: &mut IRStyle, val: &str) {
 /// Unknown parts are ignored like the all-side shorthand.
 fn parse_border_side_shorthand(style: &mut IRStyle, side: usize, val: &str) {
     let (width, color, bstyle) = match side {
-        0 => (&mut style.border_top_width, &mut style.border_top_color, &mut style.border_top_style),
+        0 => {
+            (&mut style.border_top_width, &mut style.border_top_color, &mut style.border_top_style)
+        }
         1 => (
             &mut style.border_right_width,
             &mut style.border_right_color,
@@ -6658,7 +6660,8 @@ mod tests {
         apply_css_prop(&mut style, "border", "1px solid #232b3d");
         assert_eq!(style.border_width, Length::Px(1.0));
         assert_eq!(style.border_style, "solid");
-        assert!(style.border_color[0] > 0.1 && style.border_color[0] < 0.2);        apply_css_prop(&mut style, "margin-top", "50px");
+        assert!(style.border_color[0] > 0.1 && style.border_color[0] < 0.2);
+        apply_css_prop(&mut style, "margin-top", "50px");
         apply_css_prop(&mut style, "padding-left", "6px");
         assert_eq!(style.margin[0], Length::Px(50.0));
         assert_eq!(style.padding[3], Length::Px(6.0));

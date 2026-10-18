@@ -243,27 +243,27 @@ impl IRSerializer {
         out.insert("border_gradient_set".to_string(), Value::from(s.border_gradient.is_some()));
         out.insert(
             "grid_template_columns".to_string(),
-            s.grid_template_columns.as_ref().map_or(Value::Null, |l| {
-                Value::String(crate::grid::track_list_to_css(l))
-            }),
+            s.grid_template_columns
+                .as_ref()
+                .map_or(Value::Null, |l| Value::String(crate::grid::track_list_to_css(l))),
         );
         out.insert(
             "grid_template_rows".to_string(),
-            s.grid_template_rows.as_ref().map_or(Value::Null, |l| {
-                Value::String(crate::grid::track_list_to_css(l))
-            }),
+            s.grid_template_rows
+                .as_ref()
+                .map_or(Value::Null, |l| Value::String(crate::grid::track_list_to_css(l))),
         );
         out.insert(
             "grid_auto_columns".to_string(),
-            s.grid_auto_columns.as_ref().map_or(Value::Null, |l| {
-                Value::String(crate::grid::track_list_to_css(l))
-            }),
+            s.grid_auto_columns
+                .as_ref()
+                .map_or(Value::Null, |l| Value::String(crate::grid::track_list_to_css(l))),
         );
         out.insert(
             "grid_auto_rows".to_string(),
-            s.grid_auto_rows.as_ref().map_or(Value::Null, |l| {
-                Value::String(crate::grid::track_list_to_css(l))
-            }),
+            s.grid_auto_rows
+                .as_ref()
+                .map_or(Value::Null, |l| Value::String(crate::grid::track_list_to_css(l))),
         );
         out.insert(
             "grid_auto_flow".to_string(),

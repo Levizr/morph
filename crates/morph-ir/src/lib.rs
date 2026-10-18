@@ -20,12 +20,11 @@ pub use gradient::{
     CenterCoord, GradientAxis, GradientKind, GradientPosition, GradientStop, IRGradient,
     RadialShape, RadialSize,
 };
+pub use grid::{
+    grid_areas_to_css, grid_line_to_css, track_list_to_css, GridArea, GridAreaValue, GridAutoFlow,
+    GridLine, GridRepeatCount, GridTrackList, GridTrackMax, GridTrackMin, GridTrackSize,
+};
 pub use node::{IRAnimation, IRConditionalClassEffect, IREvent, IRKeyframe, IRNode, IRWindow};
 pub use serializer::IRSerializer;
 pub use shadow::{IRBoxShadow, MAX_BOX_SHADOWS};
-pub use grid::{
-    GridArea, GridAreaValue, GridAutoFlow, GridLine, GridRepeatCount, GridTrackList,
-    GridTrackMax, GridTrackMin, GridTrackSize, grid_areas_to_css, grid_line_to_css,
-    track_list_to_css,
-};
 pub use style::{IRStyle, Length};
