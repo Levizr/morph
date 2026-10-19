@@ -397,7 +397,7 @@
           "morphEvent",
           "morph component state"
         ],
-        "lastUpdated": "2026-09-15",
+        "lastUpdated": "2026-10-19",
         "publishedAt": "2026-09-15",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -547,7 +547,7 @@
           "morph js runtime",
           "morph translator coverage"
         ],
-        "lastUpdated": "2026-10-18",
+        "lastUpdated": "2026-10-19",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -567,7 +567,7 @@
           "morph useState",
           "morph re-render state"
         ],
-        "lastUpdated": "2026-09-28",
+        "lastUpdated": "2026-10-19",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -587,7 +587,7 @@
           "morph run after render",
           "morph useEffect"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-10-19",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -1851,6 +1851,24 @@
         "changefreq": "monthly"
       },
       {
+        "title": "mx-effect-nested — morphEffect Must Be Top Level",
+        "sidebarTitle": "mx-effect-nested",
+        "slug": "errors/mx-effect-nested",
+        "file": "errors/mx-effect-nested",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-effect-nested: a morphEffect inside a branch, loop or helper function has no build-time lift point — register one top-level effect and branch inside it.",
+        "keywords": [
+          "mx-effect-nested",
+          "morpheffect inside if",
+          "morph effect in loop"
+        ],
+        "lastUpdated": "2026-10-19",
+        "publishedAt": "2026-10-19",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
         "title": "mx-transpile — JavaScript That Cannot Compile to C++",
         "sidebarTitle": "mx-transpile",
         "slug": "errors/mx-transpile",
@@ -2466,7 +2484,7 @@
           "morph c++ translator",
           "morph js feature coverage"
         ],
-        "lastUpdated": "2026-09-27",
+        "lastUpdated": "2026-10-19",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"

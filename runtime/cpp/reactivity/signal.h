@@ -37,6 +37,12 @@ struct SignalBase {
     std::vector<EffectNode*> subscribers_;
     std::mutex m_mutex;
 
+    // Body-flow mutable locals are seeded by their component's setup
+    // effect. A write made while an effect runs prunes that effect's
+    // subscription first, so seeding can never re-enqueue its own
+    // effect (reads through helper functions included).
+    bool body_local = false;
+
     // Returns true when newly subscribed; records the dep on the
     // effect so cleanup()/destroy_effect() can unsubscribe (without
     // this, branching effects stay subscribed forever and deleted
@@ -67,7 +73,9 @@ template<typename T>
 struct Signal : SignalBase {
     T value_;
 
-    explicit Signal(T v) : value_(v) {}
+    explicit Signal(T v, bool body_local_ = false) : value_(v) {
+        SignalBase::body_local = body_local_;
+    }
 
     T get() {
         if (g_effect_ctx.current) {
@@ -80,7 +88,33 @@ struct Signal : SignalBase {
     void set(T v) {
         std::lock_guard<std::mutex> lock(m_mutex);
         value_ = v;
+        EffectNode* cur = g_effect_ctx.current;
+        if (body_local && cur != nullptr) {
+            unsubscribe(cur);
+        }
         notify_all();
+    }
+
+    /// Read without subscribing the running effect. Body-flow setup
+    /// effects seed their own mutable locals; subscribing to a signal
+    /// they write would re-enqueue the effect on every run.
+    T peek() {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return value_;
+    }
+
+    /// JS `number` values narrow into typed signals the way the emitter
+    /// narrows `int x = <JsNumber>` — `.as_int()` / `.as_double()`. A
+    /// `(next: number) => void` handler (param type `JsNumber`) feeding a
+    /// native-typed state setter otherwise has no implicit conversion.
+    void set(const JsNumber& v)
+        requires(std::is_arithmetic_v<T> && !std::is_same_v<T, JsNumber>)
+    {
+        if constexpr (std::is_integral_v<T>) {
+            set(static_cast<T>(v.as_int()));
+        } else {
+            set(static_cast<T>(v.as_double()));
+        }
     }
 
     T& operator*() { return value_; }

@@ -101,3 +101,4 @@ morphEffect(() => {
 - When a dependency signal changes, the effect is scheduled to re-run on the next frame
 - Cleanup functions are stored and called before the next effect execution or on unmount
 - Effects run after layout + paint, so DOM measurements are accurate
+- Every `morphEffect` must be declared directly in the component body — not inside a branch, loop, or another effect (`morph check` reports `mx-effect-nested`). Use statements in the body itself for conditional or looping logic

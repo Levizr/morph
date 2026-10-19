@@ -3,7 +3,7 @@ use oxc_parser::Parser;
 use oxc_span::SourceType;
 
 use crate::TranslateOptions;
-use crate::codegen::cpp::CppTranslator;
+use crate::codegen::cpp::{CppTranslator, cpp_string_literal};
 use crate::codegen::rust::RustTranslator;
 use crate::error::MorphJsError;
 
@@ -116,7 +116,23 @@ pub fn translate_snippet_to_cpp(
     let mut translator =
         CppTranslator::new(source, options.indent, options.type_mode, options.runtime_path.clone());
     apply_ambient_state(&mut translator, &options);
-    Ok(translator.translate_program(&ret.program))
+    let mut out = translator.translate_program(&ret.program);
+    // A snippet that is nothing but a string literal — a const RHS like
+    // `const s = "hi"`, or JSX text — parses as a directive prologue:
+    // oxc lifts it out of `body`, and the translation came back empty
+    // (the const then vanished downstream). Re-emit those literals as
+    // statements. Non-empty bodies keep dropping directives: there they
+    // are real `"use strict"`-style prologues with no C++ meaning.
+    if ret.program.body.is_empty() {
+        for directive in &ret.program.directives {
+            if !out.is_empty() && !out.ends_with('\n') {
+                out.push('\n');
+            }
+            out.push_str(&cpp_string_literal(&directive.expression.value));
+            out.push_str(";\n");
+        }
+    }
+    Ok(out)
 }
 
 fn normalize_cpp_types(source: &str) -> String {

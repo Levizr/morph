@@ -838,7 +838,8 @@ impl<'src> MxWalker<'src> {
         let state_vars = self.state_vars_from_body(body);
         let effects = self.effects_from_body(body);
         let inner_functions = self.inner_funcs_from_body(body);
-        let consts = self.consts_from_body(body);
+        let mut consts = self.consts_from_body(body);
+        let (body_stmts, mutable_locals) = self.split_body_flow(body, &mut consts);
         let console_logs = self.logs_from_body(body);
         let jsx = self.jsx_from_body(body).unwrap_or_else(|| JsxNode::Fragment {
             props: HashMap::new(),
@@ -863,6 +864,8 @@ impl<'src> MxWalker<'src> {
             inner_functions,
             consts,
             console_logs,
+            body_stmts,
+            mutable_locals,
         });
     }
 
@@ -945,20 +948,43 @@ impl<'src> MxWalker<'src> {
         let (props_param, props) = self.component_props(&arrow.params);
         let params: Vec<String> = props.iter().map(|p| p.name.clone()).collect();
 
-        let (state_vars, event_subs, effects, inner_functions, consts, console_logs) =
-            arrow.body.as_function_body().map_or_else(
-                || (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new()),
-                |body| {
-                    (
-                        self.state_vars_from_body(body),
-                        self.event_subs_from_body(body),
-                        self.effects_from_body(body),
-                        self.inner_funcs_from_body(body),
-                        self.consts_from_body(body),
-                        self.logs_from_body(body),
-                    )
-                },
-            );
+        let (
+            state_vars,
+            event_subs,
+            effects,
+            inner_functions,
+            consts,
+            console_logs,
+            body_stmts,
+            mutable_locals,
+        ) = arrow.body.as_function_body().map_or_else(
+            || {
+                (
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                )
+            },
+            |body| {
+                let mut consts = self.consts_from_body(body);
+                let (body_stmts, mutable_locals) = self.split_body_flow(body, &mut consts);
+                (
+                    self.state_vars_from_body(body),
+                    self.event_subs_from_body(body),
+                    self.effects_from_body(body),
+                    self.inner_funcs_from_body(body),
+                    consts,
+                    self.logs_from_body(body),
+                    body_stmts,
+                    mutable_locals,
+                )
+            },
+        );
 
         self.components.push(MxComponent {
             name,
@@ -974,6 +1000,8 @@ impl<'src> MxWalker<'src> {
             inner_functions,
             consts,
             console_logs,
+            body_stmts,
+            mutable_locals,
         });
     }
 
@@ -1368,6 +1396,143 @@ impl<'src> MxWalker<'src> {
             }
         }
     }
+
+    /// `morphEffect(...)`, `<event>.on(...)` and `console.log(...)`
+    /// statements are owned by other passes (effects / channel subs /
+    /// static startup labels) and stay out of the body-flow block.
+    fn expr_is_static_setup(expr: &Expression) -> bool {
+        let Expression::CallExpression(call) = expr else {
+            return false;
+        };
+        if matches!(&call.callee, Expression::Identifier(id) if id.name.as_str() == "morphEffect") {
+            return true;
+        }
+        match call.callee.as_member_expression() {
+            Some(MemberExpression::StaticMemberExpression(s)) => {
+                let Expression::Identifier(obj) = &s.object else {
+                    return false;
+                };
+                s.property.name.as_str() == "on"
+                    || (obj.name.as_str() == "console" && s.property.name.as_str() == "log")
+            }
+            _ => false,
+        }
+    }
+
+    /// True when a declarator is owned by the declarative collectors:
+    /// `morph*` calls (state pairs, shared/event bindings) stay with their
+    /// passes; any other init with an identifier binding becomes a const
+    /// (or an inner function). Everything else — `let x;`, destructured
+    /// bindings the linter rejects — flows into the body block.
+    fn declarator_is_declarative(decl: &VariableDeclarator) -> bool {
+        let Some(init) = decl.init.as_ref() else {
+            return false;
+        };
+        if let Expression::CallExpression(call) = init {
+            let is_morph = matches!(&call.callee, Expression::Identifier(id) if matches!(
+                id.name.as_str(),
+                "morphState" | "morphShared" | "morphEvent" | "morphOn" | "morphEmit"
+            )) || is_member_expr_callee(&call.callee, "morphState", "");
+            if is_morph {
+                return true;
+            }
+        }
+        binding_ident_name(&decl.id).is_some()
+    }
+
+    fn stmt_is_declarative(stmt: &Statement) -> bool {
+        match stmt {
+            Statement::FunctionDeclaration(_) | Statement::ReturnStatement(_) => true,
+            Statement::VariableDeclaration(vd) => {
+                vd.declarations.iter().all(Self::declarator_is_declarative)
+            }
+            Statement::ExpressionStatement(es) => Self::expr_is_static_setup(&es.expression),
+            _ => false,
+        }
+    }
+
+    /// Split a component body into the setup flow the declarative
+    /// collectors do not own. `consts` is filtered in place: a local any
+    /// body statement (or nested closure) reassigns moves out of the
+    /// thunk list into signals, and its declaration becomes the seeding
+    /// assignment `name = <init>;` at its original position — so the
+    /// block re-seeds the local on every run, exactly like re-running the
+    /// body would.
+    fn split_body_flow(
+        &self,
+        body: &FunctionBody,
+        consts: &mut Vec<ComponentConst>,
+    ) -> (Vec<String>, Vec<MutableLocal>) {
+        let mut assigned = AssignedNames::default();
+        assigned.visit_function_body(body);
+        let mut locals: Vec<MutableLocal> = Vec::new();
+        let mut kept: Vec<ComponentConst> = Vec::new();
+        for cst in consts.drain(..) {
+            if cst.name.is_empty() || !assigned.names.contains(&cst.name) {
+                kept.push(cst);
+            } else {
+                locals.push(MutableLocal { name: cst.name, init: cst.rhs });
+            }
+        }
+        *consts = kept;
+
+        let mut stmts: Vec<String> = Vec::new();
+        for stmt in &body.statements {
+            if let Statement::VariableDeclaration(vd) = stmt {
+                let mut undecided = false;
+                for decl in &vd.declarations {
+                    let Some(name) = binding_ident_name(&decl.id) else {
+                        if !Self::declarator_is_declarative(decl) {
+                            undecided = true;
+                        }
+                        continue;
+                    };
+                    if locals.iter().any(|l| l.name == name) {
+                        if let Some(init) = &decl.init {
+                            let init = self.span_text(init.span());
+                            stmts.push(format!("{name} = {init};"));
+                        }
+                    } else if !Self::declarator_is_declarative(decl) {
+                        undecided = true;
+                    }
+                }
+                if undecided {
+                    stmts.push(self.span_text(stmt.span()).to_string());
+                }
+                continue;
+            }
+            if Self::stmt_is_declarative(stmt) {
+                continue;
+            }
+            stmts.push(self.span_text(stmt.span()).to_string());
+        }
+        (stmts, locals)
+    }
+}
+
+/// Identifier names assigned anywhere inside a component body — plain
+/// `x = ...`, compound `x += ...` and `x++` / `--x` targets, nested
+/// blocks, loops and closures included. Drives the mutable-local
+/// classification: a `let` among these lowers to a signal.
+#[derive(Default)]
+struct AssignedNames {
+    names: std::collections::HashSet<String>,
+}
+
+impl<'a> Visit<'a> for AssignedNames {
+    fn visit_assignment_expression(&mut self, expr: &AssignmentExpression<'a>) {
+        if let AssignmentTarget::AssignmentTargetIdentifier(id) = &expr.left {
+            self.names.insert(id.name.to_string());
+        }
+        oxc_ast_visit::walk::walk_assignment_expression(self, expr);
+    }
+
+    fn visit_update_expression(&mut self, expr: &UpdateExpression<'a>) {
+        if let SimpleAssignmentTarget::AssignmentTargetIdentifier(id) = &expr.argument {
+            self.names.insert(id.name.to_string());
+        }
+        oxc_ast_visit::walk::walk_update_expression(self, expr);
+    }
 }
 
 impl<'a> Visit<'a> for MxWalker<'_> {
@@ -1660,6 +1825,62 @@ mod walker_tests {
 
     fn parse(src: &str) -> MxSource {
         parse_mx_str(src, "test.mx").expect("parse")
+    }
+
+    fn component(src: &str) -> crate::ast_types::MxComponent {
+        parse(src).components.into_iter().next().expect("one component")
+    }
+
+    #[test]
+    fn body_flow_moves_assigned_let_to_mutable_locals() {
+        let c = component(
+            "export default function App() {\n  let label = \"zero\"\n  if (label === \"zero\") {\n    label = \"one\"\n  }\n  return (<div>{label}</div>)\n}\n",
+        );
+        assert_eq!(c.mutable_locals.len(), 1, "{c:?}");
+        assert_eq!(c.mutable_locals[0].name, "label");
+        assert_eq!(c.mutable_locals[0].init, "\"zero\"");
+        assert!(!c.consts.iter().any(|k| k.name == "label"), "{:?}", c.consts);
+        let joined = c.body_stmts.join("\n");
+        assert!(joined.contains("label = \"zero\";"), "{joined}");
+        assert!(joined.contains("if ("), "{joined}");
+        assert!(joined.contains("label = \"one\""), "{joined}");
+    }
+
+    #[test]
+    fn body_flow_keeps_unassigned_let_as_const() {
+        let c = component(
+            "export default function App() {\n  let title = \"hello\"\n  if (title) { console.log(title) }\n  return (<div>{title}</div>)\n}\n",
+        );
+        assert!(c.mutable_locals.is_empty(), "{c:?}");
+        assert!(c.consts.iter().any(|k| k.name == "title"), "{:?}", c.consts);
+        assert!(!c.body_stmts.join("\n").contains("title = \"hello\";"), "{:?}", c.body_stmts);
+    }
+
+    #[test]
+    fn body_flow_moves_let_written_from_inner_function() {
+        let c = component(
+            "export default function App() {\n  let total = 0\n  function bump() {\n    total += 1\n  }\n  return (<div>{total}</div>)\n}\n",
+        );
+        assert_eq!(c.mutable_locals.len(), 1, "{c:?}");
+        assert_eq!(c.mutable_locals[0].name, "total");
+        assert!(c.inner_functions.iter().any(|f| f.name == "bump"), "{c:?}");
+    }
+
+    #[test]
+    fn body_flow_keeps_control_flow_and_excludes_declarations() {
+        let c = component(
+            "export default function App() {\n  const [count, setCount] = morphState(0)\n  const title = \"t\"\n  function bump() { setCount(count + 1) }\n  console.log(\"hello\")\n  for (const n of [1, 2]) { console.log(n) }\n  while (count < 0) { break }\n  morphEffect(() => { console.log(count) })\n  return (<div>{title}</div>)\n}\n",
+        );
+        let joined = c.body_stmts.join("\n");
+        assert!(joined.contains("for ("), "{joined}");
+        assert!(joined.contains("while ("), "{joined}");
+        assert!(!joined.contains("morphState"), "{joined}");
+        assert!(!joined.contains("console.log(\"hello\")"), "{joined}");
+        assert!(!joined.contains("function bump"), "{joined}");
+        assert!(!joined.contains("morphEffect"), "{joined}");
+        assert!(!joined.contains("return ("), "{joined}");
+        assert!(c.mutable_locals.is_empty(), "{c:?}");
+        assert!(c.consts.iter().any(|k| k.name == "title"), "{:?}", c.consts);
     }
 
     #[test]

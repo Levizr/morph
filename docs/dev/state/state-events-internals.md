@@ -75,6 +75,40 @@ Constraints enforced here (not in the linter): unknown event name, empty/missing
 - `cpp/mod.rs`: builds `state_map` (getter→`{read}.get()`, setter→`{read}.set`, event names→`{name}()`) used by `node_emitter.rs` for reactive text, conditions, and list expressions; serializes `shared_decls` (with `ns`) into `app_main.cpp.tera`, which wraps declarations in the conditional namespace block.
 - Build and dev TUs emit the same function-local statics so hot-reload and AOT agree on identity.
 
+## Component-body flow (`body_stmts`) → one setup effect
+
+Statements between a component's declarations that no declarative
+collector owns — `if`/`else`, `for`, `while`, `switch`, plain calls — are
+split out at parse time (`MxWalker::split_body_flow`) into
+`MxComponent::body_stmts`. Any `let` those statements (or a function in
+the body) reassign moves out of `consts` into `mutable_locals`, and its
+declaration becomes a seeding assignment at its original position — so
+the block re-derives the local exactly like re-running the body would.
+
+`morph-ir` lowers the whole block into **one setup effect** per component
+(`IRWindow::body_effects`), emitted *before* node construction so JSX
+reads seeded values on the first frame:
+
+- Reads of a mutable local come from `.peek()`, and the signal is
+  declared with `body_local = true`; `Signal::set` prunes the *running*
+  effect's subscription before notifying. Together they stop the effect
+  from re-enqueueing itself when it seeds its own locals — reads through
+  helper functions included.
+- Reads of state come through `.get()`, so the effect subscribes to them
+  and a branch re-runs when they change (same contract as `morphEffect`).
+- Writes use the setter lowering: `x = v` → `x.set(v)`, `x += v` →
+  `x.set(x.get() + v)`, `x++` → `x.set(x.get() + 1)`. The head comes from
+  `CppTranslator::signal_set_head`, which strips the `.get()` / `.peek()`
+  suffix off any mapped signal read; unmapped names keep their plain C++
+  form.
+
+Emitters: the entry path emits each lambda with `morph::create_effect` in
+`app.cpp` / `morph_logic_rewire`; route mounts emit
+`morph::create_effect_scoped` inside the mount body (which is why a body
+effect alone is enough to pull in the mount scope). `morphEffect` has no
+lift point inside this block — a nested call is rejected by
+`mx-effect-nested` (see that error page).
+
 ## Common contributions, by file
 
 | "I want to…" | Touch |

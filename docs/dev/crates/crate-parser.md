@@ -24,7 +24,7 @@ The Oxc invocation is worth noting: `SourceType::from_path("file.tsx")` — ever
 |---|---|
 | `imports` | Every import, classified (`MxImportKind`, below) |
 | `window_config` | The `windowConfig` object, if declared |
-| `components` | `MxComponent`s: name, props, JSX tree, state, effects, handlers |
+| `components` | `MxComponent`s: name, props, JSX tree, state, effects, handlers, body-flow statements (`body_stmts`) and the locals they reassign (`mutable_locals`) |
 | `shared_bindings` / `event_bindings` | Exported top-level `morphShared` / `morphEvent` declarations, with `line`/`col` |
 | `state_vars`, `effects`, `inner_functions`, `function_declarations`, `class_declarations` | Module- and component-level logic inventory |
 | `exported_vars`, `named_exports`, `default_export`, `re_exports` | The full export surface, including `export *` (`star`) and `export * as ns` (`star_as`) |
@@ -39,7 +39,7 @@ Two types deserve a closer look:
 
 ## The walker (`js_walker.rs`): `MxWalker` visits everything
 
-`MxWalker` implements Oxc's `Visit` trait and extracts, method by method: `extract_import`, `extract_window_config_from_decl`, `extract_component` (plus `extract_arrow_component` / `try_extract_arrow_declarator` for `const X = (props) => …` components), `extract_binding_declarator` (the `morphShared` / `morphEvent` / `morphState` shapes), `component_props` (identifier params vs destructured params merged with the type annotation via `parse_props_annotation` / `split_top_level_props`), `state_vars_from_body`, `effects_from_body`, `inner_funcs_from_body`, `event_subs_from_body` (statement-level `name.on(handler)`), `consts_from_body`, `logs_from_body`, and the legacy `CSS.load()` detector (`check_css_load` / `walk_css_load_stmts`).
+`MxWalker` implements Oxc's `Visit` trait and extracts, method by method: `extract_import`, `extract_window_config_from_decl`, `extract_component` (plus `extract_arrow_component` / `try_extract_arrow_declarator` for `const X = (props) => …` components), `extract_binding_declarator` (the `morphShared` / `morphEvent` / `morphState` shapes), `component_props` (identifier params vs destructured params merged with the type annotation via `parse_props_annotation` / `split_top_level_props`), `state_vars_from_body`, `effects_from_body`, `inner_funcs_from_body`, `event_subs_from_body` (statement-level `name.on(handler)`), `consts_from_body`, `logs_from_body`, `split_body_flow` (statements the collectors don't own + the `let`s they reassign, which move out of `consts` into `mutable_locals`), and the legacy `CSS.load()` detector (`check_css_load` / `walk_css_load_stmts`).
 
 Text handling has opinions: `normalize_jsx_text` collapses JSX whitespace the way a browser would, `camel_to_kebab` bridges `className`-style props to CSS, and line/col attribution runs through byte-offset tables (`build_line_offsets`, `offset_to_line_col_fast`) so every diagnostic points at the right character.
 

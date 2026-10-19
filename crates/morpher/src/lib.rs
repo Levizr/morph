@@ -226,6 +226,124 @@ mod tests {
     }
 
     #[test]
+    fn snippet_keeps_bare_string_literal() {
+        // `const s = "hi"` sends just the literal through the snippet
+        // parser, where it parses as a directive prologue (oxc lifts it
+        // out of `body`). The translation must still yield the literal,
+        // or the const disappears and JSX references fail to compile.
+        let out = translate_snippet("\"hi\"", "snippet.ts", TranslateOptions::default()).unwrap();
+        assert_eq!(out.body.trim(), "\"hi\";");
+        // Escapes survive through the C++ literal path.
+        let out =
+            translate_snippet("\"a\\\"b\\n\"", "snippet.ts", TranslateOptions::default()).unwrap();
+        assert_eq!(out.body.trim(), "\"a\\\"b\\n\";");
+    }
+
+    #[test]
+    fn snippet_drops_real_directive_prologues() {
+        // Inside a non-empty program the leading literal is a real
+        // directive and must not surface as a statement.
+        let out = translate_snippet(
+            "\"use strict\";\nlet x = 1;\nconsole.log(x);\n",
+            "snippet.ts",
+            TranslateOptions::default(),
+        )
+        .unwrap();
+        assert!(!out.body.contains("use strict"), "body: {}", out.body);
+        assert!(out.body.contains("x = 1"), "body: {}", out.body);
+    }
+
+    fn mapped_count(read: &str) -> TranslateOptions {
+        let mut options = TranslateOptions::default();
+        options.state_vars.insert("count".to_string(), read.to_string());
+        options.state_types.insert("count".to_string(), "int".to_string());
+        options
+    }
+
+    #[test]
+    fn snippet_lowers_assignments_to_mapped_signal_setter() {
+        // Body-level flow and inner closures write mutable locals through
+        // the ambient mapping: `x = v` → `set(v)`, `x += v` reads back
+        // through the mapping, `x++` becomes a one-step setter.
+        let out = translate_snippet(
+            "count = 1;\ncount += 2;\ncount++;\n",
+            "body.ts",
+            mapped_count("__st_count.get()"),
+        )
+        .unwrap();
+        assert!(out.body.contains("__st_count.set(1);"), "body: {}", out.body);
+        assert!(
+            out.body.contains("__st_count.set((__st_count.get()) + (2));"),
+            "body: {}",
+            out.body
+        );
+        assert!(out.body.contains("__st_count.set((__st_count.get()) + 1);"), "body: {}", out.body);
+    }
+
+    #[test]
+    fn snippet_lowers_peek_mapped_and_ctx_mapped_assignments() {
+        // Body effects read their own locals through `peek()`; route
+        // components map onto `ctx->` context members. The setter head is
+        // derived by stripping either suffix.
+        let out = translate_snippet("count += 2;\n", "body.ts", mapped_count("__st_total.peek()"))
+            .unwrap();
+        assert!(
+            out.body.contains("__st_total.set((__st_total.peek()) + (2));"),
+            "body: {}",
+            out.body
+        );
+        let out = translate_snippet("count += 2;\n", "body.ts", mapped_count("ctx->count.get()"))
+            .unwrap();
+        assert!(
+            out.body.contains("ctx->count.set((ctx->count.get()) + (2));"),
+            "body: {}",
+            out.body
+        );
+    }
+
+    #[test]
+    fn snippet_keeps_plain_assignment_without_mapping() {
+        let out = translate_snippet("other += 2;\n", "body.ts", mapped_count("__st_count.get()"))
+            .unwrap();
+        assert!(!out.body.contains(".set("), "body: {}", out.body);
+        assert!(out.body.contains("other += 2"), "body: {}", out.body);
+    }
+
+    #[test]
+    fn for_of_over_js_sequence_converts_loop_var_in_numeric_context() {
+        // `for (auto x : JsArray{...})` binds a JsValue element; `acc += x`
+        // must ToNumber it — a raw operator+= cannot bind `JsNumber&` to the
+        // element (`acc` is a native int).
+        let out = translate_snippet(
+            "let acc = 0;\nfor (const x of [1, 2]) {\n  acc += x;\n}\n",
+            "body.ts",
+            TranslateOptions::default(),
+        )
+        .unwrap();
+        assert!(out.body.contains("std::get<JsNumber>(x.inner).as_int()"), "body: {}", out.body);
+        assert!(out.body.contains("for (auto x : JsArray{1, 2})"), "body: {}", out.body);
+    }
+
+    #[test]
+    fn for_of_over_native_sequence_keeps_plain_element() {
+        // A `std::vector<int>` iterable keeps `x` as a plain int: no
+        // ToNumber step is added.
+        let options = TranslateOptions {
+            state_vars: HashMap::from([("nums".to_string(), "nums".to_string())]),
+            state_types: HashMap::from([("nums".to_string(), "std::vector<int>".to_string())]),
+            ..Default::default()
+        };
+        let out = translate_snippet(
+            "let acc = 0;\nfor (const x of nums) {\n  acc += x;\n}\n",
+            "body.ts",
+            options,
+        )
+        .unwrap();
+        assert!(!out.body.contains("std::get<JsNumber>(x.inner)"), "body: {}", out.body);
+        assert!(out.body.contains("acc += x"), "body: {}", out.body);
+    }
+
+    #[test]
     fn effect_cleanup_closure_captures_timer_handle() {
         // Regression for docs/dev/bugs#4: the cleanup arrow must capture
         // the timer handle with shared ownership instead of `[]`, and the

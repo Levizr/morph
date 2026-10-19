@@ -1,0 +1,7 @@
+{
+  "name": "fail-effect-nested",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "fail-effect-nested" },
+  "dependencies": {},
+  "cpp_sources": []
+}

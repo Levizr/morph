@@ -114,4 +114,5 @@ import "./hero.css";
 | `mx-shared-scope` | `morphShared` is exported at module scope |
 | `mx-event-scope` | `morphEvent` is exported at module scope |
 | `mx-api-removed` | Removed string-key/shared/event APIs are not used |
+| `mx-effect-nested` | `morphEffect` must be a top-level component-body statement |
 | `mx-css-load-deprecated` | `CSS.load()` — use `import "./x.css"` |

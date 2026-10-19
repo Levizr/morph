@@ -185,6 +185,15 @@ pub struct MxComponent {
     pub inner_functions: Vec<InnerFunction>,
     pub consts: Vec<ComponentConst>,
     pub console_logs: Vec<String>,
+    /// Body-level statements the declarative collectors do not own — the
+    /// `if`/`for`/`while`/`switch` flow and plain expression statements
+    /// between the declarations. Lowered into a setup effect that re-runs
+    /// on whatever state it reads.
+    pub body_stmts: Vec<String>,
+    /// `let` locals reassigned by `body_stmts` (or a nested closure).
+    /// They move out of `consts` into signals so statements can write
+    /// them and JSX reads stay reactive.
+    pub mutable_locals: Vec<MutableLocal>,
 }
 
 impl MxComponent {
@@ -281,6 +290,18 @@ pub struct ReExport {
 pub struct ComponentConst {
     pub name: String,
     pub rhs: String,
+}
+
+/// A component-body local that body-level flow reassigns.
+///
+/// Declared as `let total = 0` and written by e.g. `total += n` inside a
+/// loop. Backed by a signal: body statements write it through the setter
+/// lowering, JSX reads stay reactive.
+#[derive(Debug, Clone)]
+pub struct MutableLocal {
+    pub name: String,
+    /// Initializer source text (used to infer the signal's C++ type).
+    pub init: String,
 }
 
 /// Intermediate JSX representation (mirrors Python's dict-based IR).

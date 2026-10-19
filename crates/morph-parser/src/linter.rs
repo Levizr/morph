@@ -1982,6 +1982,77 @@ fn scope_error(
     });
 }
 
+/// `morphEffect(...)` calls nested anywhere inside one top-level statement.
+/// Effects lift to one native closure per component at a fixed build-time
+/// point; inside a branch/loop there is no lift point and the call reaches
+/// codegen as an unknown function (mx-effect-nested).
+#[derive(Default)]
+struct NestedEffectCalls {
+    spans: Vec<u32>,
+}
+
+impl<'a> Visit<'a> for NestedEffectCalls {
+    fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+        if let Expression::Identifier(id) = &call.callee {
+            if id.name.as_str() == "morphEffect" {
+                self.spans.push(call.span.start);
+            }
+        }
+        oxc_ast_visit::walk::walk_call_expression(self, call);
+    }
+}
+
+fn is_morph_effect_call(expr: &Expression) -> bool {
+    matches!(
+        expr,
+        Expression::CallExpression(call)
+            if matches!(&call.callee, Expression::Identifier(id) if id.name.as_str() == "morphEffect")
+    )
+}
+
+/// Report every `morphEffect` call in a component-body statement that is
+/// not itself the supported top-level form. A top-level `morphEffect(...)`
+/// statement still gets scanned *inside* its arguments, so a nested effect
+/// in its callback is caught too.
+fn check_nested_effects(
+    stmt: &Statement,
+    offsets: &[usize],
+    file_path: &str,
+    out: &mut Vec<LintError>,
+) {
+    let mut finder = NestedEffectCalls::default();
+    match stmt {
+        Statement::ExpressionStatement(es) if is_morph_effect_call(&es.expression) => {
+            if let Expression::CallExpression(call) = &es.expression {
+                for arg in &call.arguments {
+                    finder.visit_argument(arg);
+                }
+            }
+        }
+        _ => finder.visit_statement(stmt),
+    }
+    report_nested_effects(finder.spans, offsets, file_path, out);
+}
+
+fn report_nested_effects(
+    spans: Vec<u32>,
+    offsets: &[usize],
+    file_path: &str,
+    out: &mut Vec<LintError>,
+) {
+    for start in spans {
+        scope_error(
+            "mx-effect-nested",
+            "`morphEffect` must be a top-level statement of the component body".into(),
+            "Move the effect out of the branch/loop and guard its work with `if` on state".into(),
+            file_path,
+            offsets,
+            start,
+            out,
+        );
+    }
+}
+
 fn scope_stmt(
     stmt: &Statement,
     components: &HashSet<&str>,
@@ -2622,6 +2693,9 @@ fn scope_function(
 ) {
     if let Some(body) = &f.body {
         for s in &body.statements {
+            if in_component && body_top {
+                check_nested_effects(s, offsets, file_path, out);
+            }
             scope_stmt(
                 s,
                 components,
@@ -2649,6 +2723,9 @@ fn scope_arrow(
 ) {
     if let Some(body) = a.body.as_function_body() {
         for s in &body.statements {
+            if in_component && body_top {
+                check_nested_effects(s, offsets, file_path, out);
+            }
             scope_stmt(
                 s,
                 components,
@@ -2662,6 +2739,11 @@ fn scope_arrow(
             );
         }
     } else if let Some(expr) = a.body.as_expression() {
+        if in_component && body_top {
+            let mut finder = NestedEffectCalls::default();
+            finder.visit_expression(expr);
+            report_nested_effects(finder.spans, offsets, file_path, out);
+        }
         scope_expr(expr, components, in_component, false, func_depth + 1, offsets, file_path, out);
     }
 }
@@ -4285,6 +4367,35 @@ mod tests {
         let errs = check(content, "App.mx");
         assert_eq!(errs.iter().filter(|e| e.code == "mx-no-morph-import").count(), 1, "{errs:?}");
         assert!(!codes(&errs).contains(&"mx-undefined"), "{errs:?}");
+    }
+
+    #[test]
+    fn top_level_effect_is_clean() {
+        let content = "import { morphState, morphEffect } from 'morph'\nexport default function App() {\n  const [count, setCount] = morphState(0)\n  morphEffect(() => { console.log(count) })\n  return (<div><span>{count}</span></div>)\n}\n";
+        let errs = check(content, "App.mx");
+        assert!(!codes(&errs).contains(&"mx-effect-nested"), "{errs:?}");
+    }
+
+    #[test]
+    fn effect_inside_branch_is_flagged() {
+        let content = "import { morphState, morphEffect } from 'morph'\nexport default function App() {\n  const [count, setCount] = morphState(0)\n  if (count > 0) {\n    morphEffect(() => { console.log(count) })\n  }\n  return (<div><span>{count}</span></div>)\n}\n";
+        let errs = check(content, "App.mx");
+        assert!(codes(&errs).contains(&"mx-effect-nested"), "{errs:?}");
+        assert_eq!(errs.iter().filter(|e| e.code == "mx-effect-nested").count(), 1, "{errs:?}");
+    }
+
+    #[test]
+    fn effect_inside_loop_and_nested_callback_are_flagged() {
+        let content = "import { morphState, morphEffect } from 'morph'\nexport default function App() {\n  const [n, setN] = morphState(3)\n  for (const it of [1, 2]) {\n    morphEffect(() => { console.log(it) })\n  }\n  morphEffect(() => {\n    morphEffect(() => { console.log(n) })\n  })\n  return (<div><span>{n}</span></div>)\n}\n";
+        let errs = check(content, "App.mx");
+        assert_eq!(errs.iter().filter(|e| e.code == "mx-effect-nested").count(), 2, "{errs:?}");
+    }
+
+    #[test]
+    fn effect_inside_inner_function_is_flagged() {
+        let content = "import { morphState, morphEffect } from 'morph'\nexport default function App() {\n  const [n, setN] = morphState(3)\n  function attach() {\n    morphEffect(() => { console.log(n) })\n  }\n  return (<div><span>{n}</span></div>)\n}\n";
+        let errs = check(content, "App.mx");
+        assert_eq!(errs.iter().filter(|e| e.code == "mx-effect-nested").count(), 1, "{errs:?}");
     }
 
     #[test]

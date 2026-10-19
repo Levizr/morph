@@ -1071,6 +1071,24 @@ pub fn generate_state_header(windows: &[IRWindow], premain: &[String]) -> String
         }
         lines.push(String::new());
     }
+    // Mutable body locals: extern declarations only — the names are
+    // component-local, so no JSX state wrappers here.
+    let mut local_decls: Vec<String> = Vec::new();
+    for w in windows {
+        for ml in &w.mutable_locals {
+            let name = ml.get("name").map_or("", String::as_str);
+            if name.is_empty() || !seen_signals.insert(name.to_string()) {
+                continue;
+            }
+            let ty = ml.get("type").map_or("JsValue", String::as_str);
+            local_decls.push(format!("extern morph::Signal<{ty}> __st_{name};"));
+        }
+    }
+    if !local_decls.is_empty() {
+        lines.push("// ── mutable body locals (defined in the generated TU) ──".to_string());
+        lines.extend(local_decls);
+        lines.push(String::new());
+    }
     // morphShared wrappers are NOT emitted here: the generated
     // `morph_api.h` (always included before this header) already defines
     // them exactly once — duplicating them here is a redefinition error.
@@ -1138,6 +1156,18 @@ fn emit_signal_statics(lines: &mut Vec<String>, windows: &[IRWindow], native_mod
             } else {
                 signal_lines
                     .push(format!("static morph::Signal<{cpp_type}> __st_{getter}({cleaned});"));
+            }
+        }
+        for ml in &w.mutable_locals {
+            let name = ml.get("name").map_or("", String::as_str);
+            if name.is_empty() || !seen_signals.insert(name.to_string()) {
+                continue;
+            }
+            let ty = ml.get("type").map_or("JsValue", String::as_str);
+            if native_mode {
+                signal_lines.push(format!("morph::Signal<{ty}> __st_{name}({{}}, true);"));
+            } else {
+                signal_lines.push(format!("static morph::Signal<{ty}> __st_{name}({{}}, true);"));
             }
         }
     }
@@ -1237,6 +1267,7 @@ fn emit_rewire(
     guarded: &HashMap<usize, Vec<String>>,
     maps: &AmbientMaps,
     channel_subs: &[&HashMap<String, String>],
+    body_effects: &[&str],
 ) -> Vec<String> {
     let mut rewire =
         vec!["void morph_logic_rewire(::NodeRegistry& nodes, ::SignalStore& store) {".to_string()];
@@ -1247,6 +1278,19 @@ fn emit_rewire(
         rewire.push("    morph::clear_channels();".to_string());
     }
     rewire.push(String::new());
+    // Body-flow setup effects run before node wiring so JSX reads seeded
+    // mutable locals on the first frame.
+    let mut wrote_body_effect = false;
+    for eff in body_effects {
+        if eff.is_empty() {
+            continue;
+        }
+        rewire.push(format!("    __effects[__effect_count++] = morph::create_effect({eff});"));
+        wrote_body_effect = true;
+    }
+    if wrote_body_effect {
+        rewire.push(String::new());
+    }
     let mut wired: HashSet<(String, String)> = HashSet::new();
     for node in all_nodes {
         let mut event_lines = Vec::new();
@@ -1583,7 +1627,10 @@ pub fn emit_logic(windows: &[IRWindow]) -> LogicOutput {
     }
 
     // ── morph_logic_rewire ──
-    let rewire = emit_rewire(&all_nodes, &effect_decls, &guarded, &maps, &channel_subs);
+    let body_effect_refs: Vec<&str> =
+        windows.iter().flat_map(|w| w.body_effects.iter()).map(String::as_str).collect();
+    let rewire =
+        emit_rewire(&all_nodes, &effect_decls, &guarded, &maps, &channel_subs, &body_effect_refs);
     let effect_count = rewire.iter().filter(|l| l.contains("__effects[__effect_count++]")).count();
     lines.extend(rewire);
     lines.push(String::new());

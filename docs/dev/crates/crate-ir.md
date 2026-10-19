@@ -20,6 +20,8 @@ At 6,300+ lines, `builder.rs` is the largest single file in the Rust workspace. 
 | `channel_subs` | Subscriptions as `{channel, body}` pairs — body is a `[](const JsValue&)` lambda *only* (the emitter adds the single `.on()` wrap) |
 | `mid_assignments` | `mid` native-index assignments per tagged instance (`MID_*` constants) |
 | `module_bindings` | Universal bindings (functions/vars/classes + re-export aliases) with defining namespaces |
+| `mutable_locals` | Body-flow `let`s lowered to signals: `name` (emitted, instance-mangled), `init`, `type`, optional `ns` — declared as `Signal<T>` with the `body_local` prune flag |
+| `body_effects` | One setup-effect lambda per component whose body has `if`/`for`/`while` flow; emitted before node construction and re-run on the state it reads |
 | `cpp_imports`, `keyframes` | Native edges and animation data |
 
 **`IRStyle`** is the computed-style value object: colors as `[f32; 4]`, box fields (`margin`/`padding` as 4-arrays, `margin_auto` as 4-bools), sizing (`width/height/min/max` as `Option<f32>`), flexbox (`flex_dir`, `grow/shrink/basis`, `gap`, `wrap`, `justify_content`, `align_items`), positioning, borders, `z_index`, `opacity`, scrollbar fields, and transform state (`transform_ops`, composed `transform_matrix`, `transform_origin`). `IRStyle::new()` sets web-sane defaults (`display: block`, `font_size: 16.0`, `opacity: 1.0`, …); `is_empty_style()` detects untouched pseudo buckets via exact-equality field comparison (float `==` is intentional here — change detection, not math).

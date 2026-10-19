@@ -7,6 +7,19 @@ use crate::feature_set::FeatureSet;
 use crate::logic_emitter;
 use crate::node_emitter;
 
+/// Type-correct default for a signal decl whose real value arrives from a
+/// body effect (`mutable_locals`).
+fn zero_value_for_type(ty: &str) -> &'static str {
+    match ty {
+        "int" | "int32_t" | "int64_t" => "0",
+        "double" | "float" => "0.0",
+        "bool" => "false",
+        "std::string" => "\"\"",
+        "JsArray" => "JsArray{}",
+        _ => "{}",
+    }
+}
+
 const TEMPLATE: &str = include_str!("../../templates/app_main.cpp.tera");
 
 pub struct CppEmitter<'a> {
@@ -106,6 +119,7 @@ impl<'a> CppEmitter<'a> {
 
         // Collect state decls
         let mut state_decls = Vec::new();
+        let mut seen_signals = std::collections::HashSet::new();
         for w in self.windows {
             for sv in &w.state_vars {
                 let init = sv.get("init").cloned().unwrap_or_else(|| "0".into());
@@ -120,6 +134,22 @@ impl<'a> CppEmitter<'a> {
                     "signal_name": format!("__st_{}", name),
                     "type": ty,
                     "init": init
+                }));
+            }
+            // Mutable body locals get a signal each. The body effect seeds
+            // the real value before node construction, so the declared
+            // initializer only has to be type-correct.
+            for ml in &w.mutable_locals {
+                let name = ml.get("name").map_or("", String::as_str);
+                if name.is_empty() || !seen_signals.insert(name.to_string()) {
+                    continue;
+                }
+                let ty = ml.get("type").map_or("JsValue", String::as_str);
+                state_decls.push(serde_json::json!({
+                    "signal_name": format!("__st_{}", name),
+                    "type": ty,
+                    "init": zero_value_for_type(ty),
+                    "body_local": true,
                 }));
             }
         }
@@ -184,6 +214,14 @@ impl<'a> CppEmitter<'a> {
                     if let Some(setter) = sv.get("setter") {
                         state_map.insert(setter.clone(), format!("__st_{getter}.set"));
                     }
+                }
+            }
+            // Mutable body locals: signal reads like state, written by the
+            // body effect through the setter lowering.
+            for ml in &win.mutable_locals {
+                let name = ml.get("name").map_or("", String::as_str);
+                if !name.is_empty() {
+                    state_map.insert(name.to_string(), format!("__st_{name}.get()"));
                 }
             }
             for sv in &win.shared_vars {
@@ -252,6 +290,12 @@ impl<'a> CppEmitter<'a> {
                 code.push_str(&format!(
                     "{var}->setConstraints({min_w}, {min_h}, {max_w}, {max_h});\n"
                 ));
+            }
+            // Body-level flow (`if` / `for` / ... outside functions) runs
+            // before node construction so JSX reads seeded values on the
+            // first frame; the effect re-runs on whatever state it reads.
+            for eff in &win.body_effects {
+                code.extend(["morph::create_effect(", eff, ");\n"]);
             }
             for node in &win.nodes {
                 let c = node_emitter::emit_node_with_state(
@@ -1507,6 +1551,12 @@ fn route_state_map(win: &IRWindow) -> std::collections::HashMap<String, String> 
             }
         }
     }
+    for ml in &win.mutable_locals {
+        let name = ml.get("name").map_or("", String::as_str);
+        if !name.is_empty() {
+            state_map.insert(name.to_string(), format!("ctx->{name}.get()"));
+        }
+    }
     for sv in &win.shared_vars {
         if let (Some(getter), Some(accessor)) = (sv.get("getter"), sv.get("accessor")) {
             let ns = sv.get("ns").map_or("", String::as_str);
@@ -1619,6 +1669,19 @@ pub fn generate_route_mounts(
             }
             code.push(format!("    morph::Signal<{ty}> {getter}{{{}}};", route_zero_value(&ty)));
         }
+        // Mutable body locals: signals seeded by the body effect on every
+        // mount (the effect writes through the setter lowering).
+        for ml in &win.mutable_locals {
+            let name = ml.get("name").map_or("", String::as_str);
+            if name.is_empty() {
+                continue;
+            }
+            let ty = ml.get("type").map_or("JsValue", String::as_str);
+            code.push(format!(
+                "    morph::Signal<{ty}> {name}{{{zero}, true}};",
+                zero = zero_value_for_type(ty)
+            ));
+        }
         code.push("    std::vector<morph::EffectNode*> effects;".to_string());
         code.push("    std::vector<std::pair<morph::Channel*, size_t>> subs;".to_string());
         code.push("}; // struct Context".to_string());
@@ -1659,15 +1722,21 @@ pub fn generate_route_mounts(
         // Effect scope links create_effect/destroy_effect (effect.cpp):
         // emit only when this mount can own effects (a scoped, non-
         // run-once effect), so effect-free routes never pull the TU.
-        let needs_scope = win.effect_decls.iter().any(|ed| {
-            let lambda = ed.get("lambda").map_or("", String::as_str);
-            if lambda.is_empty() {
-                return false;
-            }
-            ed.get("deps").map_or("", |d| d.trim()) != "[]"
-        });
+        let needs_scope = !win.body_effects.is_empty()
+            || win.effect_decls.iter().any(|ed| {
+                let lambda = ed.get("lambda").map_or("", String::as_str);
+                if lambda.is_empty() {
+                    return false;
+                }
+                ed.get("deps").map_or("", |d| d.trim()) != "[]"
+            });
         if needs_scope {
             code.push("    morph::MountScope __scope(&ctx->effects);".to_string());
+        }
+        // Body-level flow runs before node construction so JSX reads
+        // seeded values on the first frame.
+        for eff in &win.body_effects {
+            code.push(format!("    morph::create_effect_scoped({eff});"));
         }
         // Route state map: bare reads rewrite to context members (baked
         // `ctx->` refs survive via the member-access guard in translate_js).
@@ -3333,6 +3402,8 @@ mod tests {
             module_bindings: Vec::new(),
             cpp_imports: Vec::new(),
             keyframes: std::collections::HashMap::new(),
+            mutable_locals: Vec::new(),
+            body_effects: Vec::new(),
         }
     }
 

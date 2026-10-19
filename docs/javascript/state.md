@@ -142,6 +142,36 @@ return (
 )
 ```
 
+## Locals Reassigned in the Component Body
+
+Branches and loops written between a component's declarations run before
+the UI is built and re-run whenever the state they read changes:
+
+```tsx
+const [count, setCount] = morphState(0)
+
+let label = "zero"
+if (count > 0) {
+  label = "positive"
+}
+
+let total = 0
+for (const n of [1, 2, 3]) {
+  total += n
+}
+
+return (
+  <div>
+    {label} {total}
+  </div>
+)
+```
+
+A `let` that this flow (or a function in the body) reassigns is backed by
+a signal: the flow runs in a setup effect that re-seeds it, JSX reads
+subscribe to it, and flipping a branch it reads re-renders the text. A
+`let` nothing reassigns, and every `const`, stays a plain stack value.
+
 ## Implementation Notes
 
 - State is implemented via `Signal<T>` in the C++ runtime (`runtime/cpp/reactivity/signal.h`)

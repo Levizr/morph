@@ -82,6 +82,7 @@ run_fail fail-destructuring mx-js-syntax
 run_fail fail-state-init mx-state-init
 run_fail fail-state-pattern mx-state-pattern
 run_fail fail-const-init mx-js-syntax
+run_fail fail-effect-nested mx-effect-nested
 
 echo "[conformance] $checks checks, $failures failures"
 [ "$failures" -eq 0 ]

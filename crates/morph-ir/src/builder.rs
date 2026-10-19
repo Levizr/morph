@@ -268,6 +268,8 @@ impl IRBuilder {
             reactive_consts,
             route_props: Vec::new(),
             effect_decls: all_effects,
+            mutable_locals: Vec::new(),
+            body_effects: Vec::new(),
             // Legacy single-file path: no shared store or channels (use
             // `build_with_graph`).
             shared_vars: Vec::new(),
@@ -440,6 +442,13 @@ impl IRBuilder {
             }
         }
         Self::preseed_sibling_names(root_comp, &mut frame, None);
+        Self::seed_mutable_locals(
+            root_comp,
+            &mut frame,
+            &mut ctx,
+            None,
+            &ns_of(graph, &entry_mod.path).unwrap_or_default(),
+        );
         self.expand_component_sources(root_comp, &mut frame, &mut ctx, &mut extra_headers)?;
         for log in root_comp.console_logs.iter().chain(entry_mod.source.console_logs.iter()) {
             if !ctx.logs.contains(log) {
@@ -542,6 +551,8 @@ impl IRBuilder {
             reactive_consts: ctx.const_names.clone(),
             route_props: Vec::new(),
             effect_decls: ctx.effects.clone(),
+            mutable_locals: ctx.mutable_locals.clone(),
+            body_effects: ctx.body_effects.clone(),
             shared_vars: ctx.shared_entries.clone(),
             event_decls: ctx.event_entries.clone(),
             channel_subs: ctx.channels.clone(),
@@ -654,6 +665,13 @@ impl IRBuilder {
             }
         }
         Self::preseed_sibling_names(root_comp, &mut frame, None);
+        Self::seed_mutable_locals(
+            root_comp,
+            &mut frame,
+            &mut ctx,
+            None,
+            &ns_of(graph, &route_mod.path).unwrap_or_default(),
+        );
         self.expand_component_sources(root_comp, &mut frame, &mut ctx, &mut extra_headers)?;
         for log in root_comp.console_logs.iter().chain(route_mod.source.console_logs.iter()) {
             if !ctx.logs.contains(log) {
@@ -746,6 +764,8 @@ impl IRBuilder {
             reactive_consts: ctx.const_names.clone(),
             route_props,
             effect_decls: ctx.effects.clone(),
+            mutable_locals: ctx.mutable_locals.clone(),
+            body_effects: ctx.body_effects.clone(),
             shared_vars: ctx.shared_entries.clone(),
             event_decls: ctx.event_entries.clone(),
             channel_subs: ctx.channels.clone(),
@@ -869,6 +889,44 @@ impl IRBuilder {
         }
     }
 
+    /// Seed a component's mutable body locals: each lowers to a signal, so
+    /// reads map through `.get()` (written by body flow via the setter
+    /// lowering) and the codegen gets one `mutable_locals` slot per local.
+    fn seed_mutable_locals(
+        comp: &morph_parser::MxComponent,
+        frame: &mut InstanceFrame,
+        ctx: &mut BuilderCtx,
+        mangle_prefix: Option<&str>,
+        ns: &str,
+    ) {
+        for local in &comp.mutable_locals {
+            if local.name.is_empty() {
+                continue;
+            }
+            let emitted =
+                mangle_prefix.map_or_else(|| local.name.clone(), |p| format!("{p}_{}", local.name));
+            let read = format!("{}{emitted}.get()", ctx.signal_prefix);
+            frame.vars.insert(local.name.clone(), read.clone());
+            frame.vars.insert(emitted.clone(), read);
+            let ty = infer_state_type(&local.init);
+            if let Some(ty) = &ty {
+                frame.types.insert(local.name.clone(), ty.clone());
+                frame.types.insert(emitted.clone(), ty.clone());
+            }
+            if local.name != emitted {
+                frame.renames.insert(local.name.clone(), emitted.clone());
+            }
+            let mut slot = HashMap::new();
+            slot.insert("name".into(), emitted);
+            slot.insert("init".into(), local.init.clone());
+            slot.insert("type".into(), ty.unwrap_or_else(|| "JsValue".to_string()));
+            if !ns.is_empty() {
+                slot.insert("ns".into(), ns.to_string());
+            }
+            ctx.mutable_locals.push(slot);
+        }
+    }
+
     /// Translate one component's consts / inner functions / effects against
     /// `frame` (names must be pre-seeded). Sources are pre-renamed before
     /// morpher so no post-pass can corrupt parent-scope text.
@@ -954,6 +1012,36 @@ impl IRBuilder {
             m.insert("channel".into(), frame.events.get(&sub.event).cloned().unwrap_or_default());
             m.insert("body".into(), body);
             ctx.channels.push(m);
+        }
+        // Body-level flow (`if` / `for` / `while` / calls between the
+        // declarations) lowers into one setup effect per component. It runs
+        // before node construction and auto-subscribes to whatever state it
+        // reads, so branches react like `morphEffect` does.
+        if !comp.body_stmts.is_empty() {
+            let mut src = String::new();
+            for stmt in &comp.body_stmts {
+                src.push_str(stmt);
+                src.push('\n');
+            }
+            let src = prepare_source(&src, frame);
+            // Mutable locals read through `peek()` inside the setup effect:
+            // it seeds them itself, so subscribing to a signal it writes
+            // would re-enqueue the effect on every run (self-feeding loop).
+            let mut body_vars = frame.vars.clone();
+            for local in &comp.mutable_locals {
+                let emitted =
+                    frame.renames.get(&local.name).cloned().unwrap_or_else(|| local.name.clone());
+                let peek = format!("{}{emitted}.peek()", ctx.signal_prefix);
+                body_vars.insert(local.name.clone(), peek.clone());
+                body_vars.insert(emitted, peek);
+            }
+            if let Some(out) = self.translate_logic(&src, &body_vars, &frame.types, &frame.events) {
+                let body = out.body.trim();
+                if !body.is_empty() {
+                    extra_headers.extend(include_lines(&out.includes));
+                    ctx.body_effects.push(format!("[]() -> auto {{\n{body}\n}}"));
+                }
+            }
         }
         Ok(())
     }
@@ -1974,6 +2062,13 @@ impl IRBuilder {
             }
         }
         Self::preseed_sibling_names(&comp, &mut frame, Some(&prefix));
+        Self::seed_mutable_locals(
+            &comp,
+            &mut frame,
+            ctx,
+            Some(&prefix),
+            &ns_of(graph, &target_module).unwrap_or_default(),
+        );
         self.bind_props(
             ctx,
             &comp,
@@ -3044,6 +3139,11 @@ struct BuilderCtx<'a> {
     /// Instance states for indexed native access: instance_no →
     /// [(suffix getter, suffix setter, init)].
     mid_states: HashMap<usize, Vec<(String, String, String)>>,
+    /// Mutable body locals across all components: `name` (emitted,
+    /// instance-mangled), `init`, `type` (C++), `ns`.
+    mutable_locals: Vec<HashMap<String, String>>,
+    /// Body-flow setup effects, emitted before node construction.
+    body_effects: Vec<String>,
     /// Signal owner expression prefix (`"__st_"` for entry globals,
     /// `"ctx->"` for route mount contexts). Threaded to instance
     /// seeding so shared expansion paths stay build-agnostic.
@@ -3070,6 +3170,8 @@ impl<'a> BuilderCtx<'a> {
             list_depth: 0,
             mid_tags: HashMap::new(),
             mid_states: HashMap::new(),
+            mutable_locals: Vec::new(),
+            body_effects: Vec::new(),
             signal_prefix: "__st_",
         }
     }
@@ -6532,6 +6634,8 @@ mod tests {
                     rhs: "count * 2".to_string(),
                 }],
                 console_logs: vec!["body log".to_string()],
+                body_stmts: Vec::new(),
+                mutable_locals: Vec::new(),
             }],
             shared_bindings: Vec::new(),
             event_bindings: Vec::new(),
@@ -6798,6 +6902,8 @@ mod tests {
                 inner_functions: Vec::new(),
                 consts: Vec::new(),
                 console_logs: Vec::new(),
+                body_stmts: Vec::new(),
+                mutable_locals: Vec::new(),
             }],
             shared_bindings: Vec::new(),
             event_bindings: Vec::new(),
@@ -7359,6 +7465,49 @@ function Helper(props: { msg: string }) {
         let mut texts = Vec::new();
         reactive_texts(&win.nodes[0], &mut texts);
         assert!(texts.iter().any(|t| t.contains("\"hi\"")), "{texts:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn body_flow_lowers_to_setup_effect_with_mutable_locals() {
+        let root = scratch("bodyflow");
+        write_file(
+            &root,
+            "App.mx",
+            r#"
+export default function App() {
+  let label = "zero"
+  if (label === "zero") {
+    label = "one"
+  }
+  let total = 0
+  for (const n of [1, 2, 3]) {
+    total += n
+  }
+  return (
+    <body>
+      <text>label {label} total {total}</text>
+    </body>
+  )
+}
+"#,
+        );
+        let graph = morph_parser::resolve_graph(&root.join("App.mx"), &root).unwrap();
+        let win = &IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap()[0];
+        let names: Vec<&str> =
+            win.mutable_locals.iter().filter_map(|m| m.get("name").map(String::as_str)).collect();
+        assert_eq!(names, vec!["label", "total"], "{:?}", win.mutable_locals);
+        assert_eq!(win.body_effects.len(), 1, "{:?}", win.body_effects);
+        let eff = &win.body_effects[0];
+        assert!(eff.contains("__st_label.set(\"zero\")"), "{eff}");
+        assert!(eff.contains("__st_label.set(\"one\")"), "{eff}");
+        assert!(eff.contains("__st_total.set(0)"), "{eff}");
+        assert!(eff.contains("__st_total.set((__st_total.peek()) + (n))"), "{eff}");
+        // JSX reads the locals; codegen maps them onto the seeded signals.
+        let mut texts = Vec::new();
+        reactive_texts(&win.nodes[0], &mut texts);
+        assert!(texts.iter().any(|t| t.contains("label")), "{texts:?}");
+        assert!(texts.iter().any(|t| t.contains("total")), "{texts:?}");
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -9,9 +9,9 @@
 `CppEmitter::new(windows).emit(output_dir)` runs the whole backend in order:
 
 1. **Scan features.** `FeatureSet::scan(windows)` → `required_headers()` + `required_defines()`. Only used runtime features get compiled in — the guest-list model from [The Build Machine](../architecture/build-system.md).
-2. **Collect state decls.** Every `state_vars` entry becomes `{signal_name: __st_<name>, type, init}` (via `infer_cpp_type`; array-literal `JsArray` inits normalize to `JsArray{}`). Shared vars resolve through `shared_expr(ns, accessor)`; module bindings (functions/vars/classes) rewrite to their defining namespaces (aliases contribute nothing — they were never local).
+2. **Collect state decls.** Every `state_vars` entry becomes `{signal_name: __st_<name>, type, init}` (via `infer_cpp_type`; array-literal `JsArray` inits normalize to `JsArray{}`). Body-flow mutable locals (`mutable_locals`) get a signal too, zero-initialized for their inferred type and flagged `body_local` — the component's setup effect seeds the real value before any node reads it. Shared vars resolve through `shared_expr(ns, accessor)`; module bindings (functions/vars/classes) rewrite to their defining namespaces (aliases contribute nothing — they were never local).
 3. **Dedupe events.** `event_decls` deduped by identity key; then the **channel lowering**: every `morph::channel("<id>")` placeholder (shared with the dev TU) is string-replaced with its static accessor expression (`event_expr(ns, accessor)`), so *no string lookup survives in `app.cpp`*. The build TU speaks in statics; only the dev TU keeps the string registry.
-4. **Build the `state_map`.** Getters → `__st_<name>.get()` (or `{shared}.get()`), setters → `__st_<name>.set` (or `{shared}.set`). This map is the *only* place user-visible names become C++ — every downstream emitter just substitutes through it.
+4. **Build the `state_map`.** Getters → `__st_<name>.get()` (or `{shared}.get()`), setters → `__st_<name>.set` (or `{shared}.set`); mutable body locals map like state for JSX reads, and `route_state_map` maps them onto `ctx-><name>` for route mounts. This map is the *only* place user-visible names become C++ — every downstream emitter just substitutes through it.
 5. **Render the template.** `app_main.cpp.tera` (baked in via `include_str!("../../templates/app_main.cpp.tera")`) filled with window code from `node_emitter`, logic from `logic_emitter`, `shared_decls`, keyframes, and the self-test (`generate_self_test` — the `--morph-self-test` body).
 6. **Write the headers.** `generate_morph_api_header` (plus `generate_morph_api_header_dev` for the dev TU): shared-store accessors, `emit_`/`notify_` channel wrappers, `MID_*` constants with `mid_header_entries`, `using`-aliases for re-exports (`alias_wrapper`), `extern` var decls, with class entries relocated correctly (`move_class_entry`, `premain_names`).
 
@@ -36,12 +36,12 @@ State substitution deserves emphasis: reactive expressions rewrite names through
 
 | Function | Emits |
 |---|---|
-| `emit_signal_statics` | `__st_*` signal statics (with `clean_init` / `infer_cpp_type` / `array_init_to_cpp` shaping inits) |
+| `emit_signal_statics` | `__st_*` signal statics (with `clean_init` / `infer_cpp_type` / `array_init_to_cpp` shaping inits; body-flow locals get the `body_local` flag) |
 | `emit_shared_entries` (+ `shared_static`, `shared_ns`, `shared_ref`, `shared_backing_ref`) | Shared-store statics + accessors inside per-module namespace blocks |
 | `emit_factories` (+ `emit_list_factory`, `collect_list_nodes`) | List item factories for keyed reconciliation |
 | `emit_node_effects` (+ `emit_text_effect`, `emit_conditional_effect`, `emit_list_wiring`, `emit_style_effects`, `emit_font_size_effects`, `emit_attr_effects`, `emit_class_effect`, `emit_conditional_class_effects`) | One effect per reactive facet, with deps from `effect_dep_exprs` |
 | `emit_node_events` (+ `translate_handler`, `translate_cond`, `translate_expr`, `event_member`) | Event wiring through the channel registry (comparison helpers hoisted out of handler lambdas) |
-| `emit_rewire` | `morph_logic_rewire`: clears channels, re-registers subscriptions (the hot-reload path — see [Dev Mode](../architecture/dev-mode.md)) |
+| `emit_rewire` | `morph_logic_rewire`: registers body-flow setup effects (`create_effect`), clears channels, re-registers subscriptions (the hot-reload path — see [Dev Mode](../architecture/dev-mode.md)) |
 | `emit_init` | Startup wiring |
 | `emit_includes` (+ `dev_features`) | Include set: dev TU gets everything, build TU gets the feature subset |
 | `collect_premain`, `emit_native_block`, `strip_static_function` | User functions/classes hoisted before `main`, native blocks spliced in, dev TUs get `MID` dispatch defs |

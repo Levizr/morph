@@ -315,6 +315,8 @@ impl FeatureSet {
                 || !win.effect_decls.is_empty()
                 || !win.channel_subs.is_empty()
                 || !win.mid_assignments.is_empty()
+                || !win.mutable_locals.is_empty()
+                || !win.body_effects.is_empty()
             {
                 self.features.insert("reactivity".into());
             }
@@ -332,6 +334,9 @@ impl FeatureSet {
                 if let Some(l) = ed.get("lambda") {
                     bodies.push(l.as_str());
                 }
+            }
+            for eff in &win.body_effects {
+                bodies.push(eff.as_str());
             }
             for sub in &win.channel_subs {
                 if let Some(b) = sub.get("body") {
@@ -781,6 +786,8 @@ mod tests {
             module_bindings: Vec::new(),
             channel_subs: Vec::new(),
             keyframes: std::collections::HashMap::new(),
+            mutable_locals: Vec::new(),
+            body_effects: Vec::new(),
         };
         let mut fs = FeatureSet::new();
         fs.scan(std::slice::from_ref(&win));
@@ -825,6 +832,8 @@ mod tests {
             module_bindings: Vec::new(),
             channel_subs: Vec::new(),
             keyframes: std::collections::HashMap::new(),
+            mutable_locals: Vec::new(),
+            body_effects: Vec::new(),
         }
     }
 

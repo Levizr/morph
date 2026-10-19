@@ -12,6 +12,7 @@ For how `morphState` / `morphShared` / `morphEvent` travel from source to C++, s
 
 - **`get()` auto-subscribes the current effect.** There is a `thread_local EffectContext g_effect_ctx` recording which effect (if any) is currently running. Read a signal inside an effect, and the effect is now subscribed. No decorator, no dependency array, no manual `subscribe()` — the dependency graph builds itself out of reads.
 - **`set()` notifies.** Subscribers are stored on `SignalBase` (with a mutex — signals can be `set()` from worker threads, e.g. the fetch thread or a native-interop `std::thread` updating state behind a mutex).
+- **`peek()` reads without subscribing**, and a signal built with `body_local = true` prunes the *running* effect from its subscribers inside `set()` before notifying. Both exist for component-body flow: one setup effect seeds its own mutable locals, and without the caveats that seeding would re-enqueue the very effect that wrote them.
 
 ```cpp
 Signal<int> count;

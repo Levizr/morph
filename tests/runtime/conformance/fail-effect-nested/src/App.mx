@@ -1,0 +1,19 @@
+import { morphState, morphEffect } from 'morph'
+
+export const windowConfig = { title: "fail-effect-nested", width: 800, height: 600 }
+
+export default function App() {
+  const [count, setCount] = morphState(0)
+
+  if (count > 0) {
+    morphEffect(() => {
+      console.log("positive")
+    })
+  }
+
+  return (
+    <body>
+      <div>ok</div>
+    </body>
+  )
+}

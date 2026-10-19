@@ -68,8 +68,8 @@ inline void setColor(float rgba[4], const std::string& c) {
 {% if state_decls %}
 // ── morphState signals ──
 {% for s in state_decls %}
-{% if native_mode %}morph::Signal<{{ s.type }}> {{ s.signal_name }}({{ s.init }});
-{% else %}static morph::Signal<{{ s.type }}> {{ s.signal_name }}({{ s.init }});
+{% if native_mode %}morph::Signal<{{ s.type }}> {{ s.signal_name }}({{ s.init }}{% if s.body_local %}, true{% endif %});
+{% else %}static morph::Signal<{{ s.type }}> {{ s.signal_name }}({{ s.init }}{% if s.body_local %}, true{% endif %});
 {% endif %}{% endfor %}
 
 {% endif %}

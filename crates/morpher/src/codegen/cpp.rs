@@ -61,8 +61,26 @@ fn escape_cpp_text(text: &str) -> String {
 }
 
 /// A cooked string value as a C++ literal, quotes included.
-fn cpp_string_literal(value: &str) -> String {
+pub(crate) fn cpp_string_literal(value: &str) -> String {
     format!("\"{}\"", escape_cpp_text(value))
+}
+
+/// Binary operator a compound assignment folds into when the target is a
+/// signal-backed binding; `=` and the logical assignments yield `None`.
+fn compound_assign_binop(op: &str) -> Option<&'static str> {
+    match op {
+        "+=" => Some("+"),
+        "-=" => Some("-"),
+        "*=" => Some("*"),
+        "/=" => Some("/"),
+        "%=" => Some("%"),
+        "&=" => Some("&"),
+        "|=" => Some("|"),
+        "^=" => Some("^"),
+        "<<=" => Some("<<"),
+        ">>=" => Some(">>"),
+        _ => None,
+    }
 }
 
 /// Escape raw template text (escapes unprocessed) for a C++ literal.
@@ -1629,11 +1647,49 @@ impl<'a> CppTranslator<'a> {
     fn emit_for_of(&mut self, f: &ForOfStatement<'a>) -> String {
         let left = self.emit_for_left(&f.left);
         let right = self.emit_expression(&f.right);
+        // `for (auto x : <js sequence>)` binds a JsValue element. Record the
+        // loop variable so numeric contexts convert (`acc += x` needs a
+        // ToNumber step); the binding is scoped to the loop body.
+        let loop_var = match &f.left {
+            ForStatementLeft::VariableDeclaration(d) => {
+                d.declarations.first().map(|first| self.binding_to_identifier(&first.id).0)
+            }
+            _ => None,
+        };
+        let js_seq = self.iterates_js_sequence(&f.right);
+        let prev_type = loop_var
+            .as_ref()
+            .filter(|_| js_seq)
+            .map(|name| self.ctx.var_types.insert(name.clone(), "JsValue".to_string()));
         let body = self.emit_statement(&f.body).unwrap_or_else(|| "{}".to_string());
+        match (loop_var, prev_type) {
+            (Some(name), Some(Some(prev))) => {
+                self.ctx.var_types.insert(name, prev);
+            }
+            (Some(name), Some(None)) => {
+                self.ctx.var_types.remove(&name);
+            }
+            _ => {}
+        }
         if f.r#await {
             format!("{}for (auto {} : co_await {}) {}", self.indent(), left, right, body)
         } else {
             format!("{}for (auto {} : {}) {}", self.indent(), left, right, body)
+        }
+    }
+
+    /// True when a `for (... of ...)` right-hand side is a js sequence whose
+    /// elements are JsValue: array/object literals and `JsArray` / `JsObject`
+    /// / `JsValue` bindings. Everything else keeps default element typing.
+    fn iterates_js_sequence(&self, expr: &Expression<'a>) -> bool {
+        match expr {
+            Expression::ArrayExpression(_) | Expression::ObjectExpression(_) => true,
+            Expression::Identifier(id) => self
+                .ctx
+                .var_types
+                .get(id.name.as_str())
+                .is_some_and(|t| t == "JsArray" || t == "JsObject" || t == "JsValue"),
+            _ => false,
         }
     }
 
@@ -2994,6 +3050,14 @@ impl<'a> CppTranslator<'a> {
                 }
             }
             Expression::UpdateExpression(u) => {
+                if let SimpleAssignmentTarget::AssignmentTargetIdentifier(id) = &u.argument
+                    && let Some(set_head) = self.signal_set_head(id.name.as_str())
+                {
+                    let read =
+                        self.ctx.state_vars.get(id.name.as_str()).cloned().unwrap_or_default();
+                    let bin = if u.operator.as_str() == "++" { "+" } else { "-" };
+                    return format!("{set_head}(({read}) {bin} 1)");
+                }
                 let arg = self.emit_simple_target(&u.argument);
                 if u.prefix {
                     format!("{}{}", u.operator.as_str(), arg)
@@ -3981,7 +4045,39 @@ impl<'a> CppTranslator<'a> {
         self.move_eligible_at(source.name.as_str(), source.span.start)
     }
 
+    /// `Some("__st_x.set")` when `name` maps to a signal read
+    /// (`__st_x.get()` / `__st_x.peek()` / `ctx->x.get()`); reactive-const
+    /// thunks (`name()`) and plain values keep their default lowering.
+    fn signal_set_head(&self, name: &str) -> Option<String> {
+        let mapped = self.ctx.state_vars.get(name)?;
+        let head = mapped.strip_suffix(".get()").or_else(|| mapped.strip_suffix(".peek()"))?;
+        Some(format!("{head}.set"))
+    }
+
     fn emit_assignment(&mut self, a: &AssignmentExpression<'a>) -> String {
+        // A plain assignment to a signal-backed binding — `x = ...` where
+        // `x` maps to `__st_x.get()` in the ambient state map — lowers to
+        // its setter (`__st_x.set(...)`); compound forms read back through
+        // the getter (`x += 1` → `set(get() + 1)`). Body-level flow and
+        // inner closures write mutable locals this way.
+        if let AssignmentTarget::AssignmentTargetIdentifier(left_id) = &a.left
+            && let Some(set_head) = self.signal_set_head(left_id.name.as_str())
+        {
+            let mut right = self.emit_expression(&a.right);
+            let op = a.operator.as_str();
+            if op == "=" {
+                if let Some(left_type) = self.ctx.var_types.get(left_id.name.as_str()).cloned() {
+                    right = self.convert_number_value(&left_type, &a.right, right);
+                }
+                return format!("{set_head}({right})");
+            }
+            if let Some(bin) = compound_assign_binop(op) {
+                let read =
+                    self.ctx.state_vars.get(left_id.name.as_str()).cloned().unwrap_or_default();
+                return format!("{set_head}(({read}) {bin} ({right}))");
+            }
+            // `??=` / `&&=` / `||=` keep their default lowering.
+        }
         // `win.title = x` on a tracked Window handle lowers to a registry
         // write; every other member assignment keeps default emission.
         if a.operator.as_str() == "=" {

@@ -13,6 +13,7 @@ The translator (`crates/morpher/`) is the heart of the "write JS, get native bin
 ## Currently supported (the baseline)
 
 - Statements: `if`/`while`/`for`/`do-while`/`switch`/`try-catch`/`throw`, variable declarations, functions + arrow functions, classes/interfaces (inheritance, `super`, generics), `return`/`break`/`continue`
+- Component-body flow: `if`/`for`/`while`/calls between a component's declarations lower into one setup effect that re-runs on the state it reads; a `let` that flow (or a body function) reassigns becomes a signal the JSX reads reactively, everything else stays a stack value
 - Expressions: binary/unary/ternary/sequence/update/assignment, template literals, array literals **with spread**, object literals, `new`, member access, calls, `await`
 - Builtins: `fetch()`, `console.*`, `setTimeout`/`setInterval`/`clearTimeout`, `morphState`/`morphEffect`, `Error`
 - Value semantics: truthiness, `==`/`!=`, `typeof`, string concatenation coercion, array `push`/`pop`/index, object `has`/`keys`, string `toUpperCase`/`toLowerCase`/`trim`/`indexOf`/`substring`/`slice`/`replace`/`charAt`/`split`/`includes`/`startsWith`/`endsWith`, optional chaining `?.`, nullish coalescing `??`
@@ -29,7 +30,7 @@ The translator (`crates/morpher/`) is the heart of the "write JS, get native bin
 | `instanceof` / `in` | error | type/containment checks |
 | Optional chaining `?.` | ✅ Shipped (`emit_chain` in morpher) | safe deep access |
 | Generator functions / `yield` | error | lazy sequences |
-| `for...in` / `for...of` | error | iteration over keys/values |
+| `for...in` / `for...of` | ✅ Shipped (`emit_for_of` / `emit_for_in` in morpher; loop variables ToNumber in numeric contexts; component-body loops lower into the setup effect) | iteration over keys/values |
 | Destructuring (except `morphState` pattern) | error | multi-return unpacking |
 | Spread in call args / object spread | error | functional style |
 

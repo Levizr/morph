@@ -93,6 +93,17 @@ pub struct IRWindow {
     pub extra_headers: Vec<String>,
     pub state_vars: Vec<HashMap<String, String>>,
     pub reactive_consts: Vec<String>,
+    /// Mutable body locals (`let` reassigned by body-level flow): `name`
+    /// (emitted, instance-mangled), `init` (source text), `type` (C++
+    /// signal type). Declared as `Signal<T>` statics; body effects seed
+    /// them on every run.
+    #[serde(default)]
+    pub mutable_locals: Vec<HashMap<String, String>>,
+    /// Setup effects for body-level flow (`if`/`for`/`...` outside
+    /// functions), one `[]() -> auto {...}` lambda per component that has
+    /// any. Emitted before node construction so JSX reads seeded values.
+    #[serde(default)]
+    pub body_effects: Vec<String>,
     /// Route root prop declarations (empty for entry windows): one entry
     /// per declared prop — `name`, `class` (C++ type class), `optional`.
     /// Props are context members (`ctx-><name>`, like state); the mount
