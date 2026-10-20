@@ -59,6 +59,7 @@ trap 'rm -rf "$CONF"/*/\.morph' EXIT
 run_pass pass-full
 run_pass pass-css
 run_pass pass-js-types
+run_pass pass-arrow-default
 
 run_fail fail-math-member mx-js-member
 run_fail fail-pow-op mx-js-op

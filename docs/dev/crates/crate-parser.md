@@ -30,6 +30,8 @@ The Oxc invocation is worth noting: `SourceType::from_path("file.tsx")` — ever
 | `exported_vars`, `named_exports`, `default_export`, `re_exports` | The full export surface, including `export *` (`star`) and `export * as ns` (`star_as`) |
 | `global_vars`, `console_logs`, `extra_headers`, `cpp_imports` | Globals, log sites, and native-import edges |
 
+Export names resolve to components while walking: a default export that names a declared binding (`export default App`, `export { App as default }`) marks that component `is_default` + `exported`, and a named export list (`export { Card }`) marks the matching components exported — so `const App = () => …` plus a separate export behaves exactly like `export default function App()`. The shared `exported_component(source, name)` helper in `lib.rs` is the one lookup the IR builder and the linter both use for default, plain, and aliased (`export { Card as Button }`) imports.
+
 Two types deserve a closer look:
 
 - **`MxImportKind`** classifies every import at parse time: `CssLocal` / `CssUrl` (stylesheets), `CppLocal` (native imports with specifiers), and `Component` (everything else — with `default` local name plus `(local, imported)` specifier pairs, so `import { a as b }` records `("b", "a")`). Helpers answer the only questions downstream asks: `is_mx()`, `is_ts()`, `is_tsx()`, `is_morph_module()` (the `'morph'` runtime import), and `is_module_source()` (anything that joins the module graph).

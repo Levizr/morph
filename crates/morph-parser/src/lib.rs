@@ -17,6 +17,23 @@ pub use resolve::{
     resolve_graph, resolve_import_path, ModuleGraph, ResolvedModule,
 };
 
+/// Resolve a module's component export by name.
+///
+/// `"default"` is the default-export component, a plain name matches a
+/// component directly, and `export { Card as Button }` aliases map through
+/// `named_exports`. Single source of truth for import/use-site resolution
+/// in the IR builder and the linter.
+pub fn exported_component<'a>(source: &'a MxSource, exported: &str) -> Option<&'a MxComponent> {
+    if exported == "default" {
+        return source.components.iter().find(|c| c.is_default);
+    }
+    if let Some(c) = source.components.iter().find(|c| c.name == exported && c.exported) {
+        return Some(c);
+    }
+    let original = source.named_exports.iter().find(|(_, e)| e == exported).map(|(l, _)| l)?;
+    source.components.iter().find(|c| c.name == *original && c.exported)
+}
+
 /// Parse an .mx file (which is TSX) and return a structured representation.
 pub fn parse_mx_file(path: &Path) -> Result<MxSource> {
     let source = std::fs::read_to_string(path)?;

@@ -1324,7 +1324,7 @@ impl IRBuilder {
     ) -> anyhow::Result<()> {
         let target_ns = ns_of(graph, target_path)?;
         // Components keep use-site resolution.
-        if target.components.iter().any(|c| c.name == imported && c.exported) {
+        if morph_parser::exported_component(target, imported).is_some() {
             return Ok(());
         }
         if let Some(sb) = target.shared_bindings.iter().find(|b| b.getter == imported) {
@@ -3277,13 +3277,18 @@ fn resolve_binding(
                 module.display()
             );
         }
-        if let Some(c) = target_mod.source.components.iter().find(|c| c.name == local && c.exported)
-        {
-            return Ok((target, c.clone()));
+        // Named specifiers carry (local, imported): alias lookup follows
+        // the target's export name, including `export { Card as Button }`.
+        let imported = specifiers.iter().find(|(l, _)| l == local).map(|(_, i)| i.as_str());
+        if let Some(imported) = imported {
+            if let Some(c) = morph_parser::exported_component(&target_mod.source, imported) {
+                return Ok((target, c.clone()));
+            }
         }
         anyhow::bail!(
-            "`{}` has no exported component `{local}` (imported by {})",
+            "`{}` has no exported component `{}` (imported by {})",
             target.display(),
+            imported.unwrap_or(local),
             module.display()
         );
     }
@@ -8036,6 +8041,35 @@ export default function App() {
         // Badge takes no function props — sanity: no adapters, still builds.
         let win = &IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap()[0];
         assert!(win.premain_functions.iter().all(|p| !p.contains("_prop_")));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn arrow_default_export_and_named_alias_resolve() {
+        let root = scratch("arrow_default");
+        write_file(
+            &root,
+            "App.mx",
+            "import { B } from './Card.mx'\nimport Screen from './Screen.mx'\nimport { default as P } from './Panel.mx'\nconst App = () => { return (<body><B /><Screen /><P /></body>) }\nexport default App",
+        );
+        write_file(
+            &root,
+            "Card.mx",
+            "const Card = () => { return (<text>card</text>) }\nexport { Card as B }",
+        );
+        write_file(
+            &root,
+            "Screen.mx",
+            "const Screen = () => { return (<text>screen</text>) }\nexport default Screen",
+        );
+        write_file(
+            &root,
+            "Panel.mx",
+            "const Panel = () => { return (<text>panel</text>) }\nexport default Panel",
+        );
+        let graph = morph_parser::resolve_graph(&root.join("App.mx"), &root).unwrap();
+        let windows = IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap();
+        assert_eq!(windows.len(), 1);
         let _ = std::fs::remove_dir_all(&root);
     }
 

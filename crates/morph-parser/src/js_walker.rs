@@ -1698,10 +1698,13 @@ impl<'a> Visit<'a> for MxWalker<'_> {
                 Statement::ExportNamedDeclaration(d) => {
                     // `export { a, b as c }`: mark locals exported.
                     for spec in &d.specifiers {
-                        self.named_exports.push((
-                            Self::export_name(&spec.local),
-                            Self::export_name(&spec.exported),
-                        ));
+                        let local = Self::export_name(&spec.local);
+                        let exported = Self::export_name(&spec.exported);
+                        // `export { App as default }` is a default export.
+                        if exported == "default" {
+                            self.default_export = Some(local.clone());
+                        }
+                        self.named_exports.push((local, exported));
                     }
                 }
                 Statement::ExportFromDeclaration(d) => {
@@ -1773,6 +1776,36 @@ impl<'a> Visit<'a> for MxWalker<'_> {
                     }
                 }
                 _ => {}
+            }
+        }
+
+        // `export { Card }` is as good as `export const Card = …` for a
+        // locally declared component: mark every named-export local that
+        // matches a component as exported.
+        let named_locals: Vec<String> = self
+            .named_exports
+            .iter()
+            .filter(|(_, exported)| exported != "default")
+            .map(|(local, _)| local.clone())
+            .collect();
+        for c in &mut self.components {
+            if named_locals.contains(&c.name) {
+                c.exported = true;
+            }
+        }
+
+        // A default export that names an already-declared binding
+        // (`export default App`, `export { App as default }`) resolves to
+        // the component it points at when that name yields JSX. Marking it
+        // is what makes it the entry/route root and reachable through
+        // default imports, exactly like `export default function App()`.
+        if let Some(name) = self.default_export.clone() {
+            let has_default = self.components.iter().any(|c| c.is_default);
+            if !has_default {
+                if let Some(c) = self.components.iter_mut().find(|c| c.name == name) {
+                    c.exported = true;
+                    c.is_default = true;
+                }
             }
         }
 
@@ -2057,6 +2090,47 @@ mod walker_tests {
         // Non-JSX arrows stay plain globals.
         assert!(s.global_vars.iter().any(|g| g.contains("Plain")));
         assert!(!s.global_vars.iter().any(|g| g.contains("Hidden")));
+    }
+
+    #[test]
+    fn identifier_default_export_marks_the_component() {
+        let s = parse("const App = () => { return (<div/>) }\nexport default App");
+        assert_eq!(s.default_export.as_deref(), Some("App"));
+        let c = &s.components[0];
+        assert_eq!(c.name, "App");
+        assert!(c.exported && c.is_default, "{c:?}");
+
+        // Function-declaration components work the same way.
+        let s = parse("function App() { return (<div/>) }\nexport default App");
+        let c = &s.components[0];
+        assert!(c.exported && c.is_default, "{c:?}");
+    }
+
+    #[test]
+    fn named_default_export_spelling_marks_the_component() {
+        let s = parse("const App = () => { return (<div/>) }\nexport { App as default }");
+        assert_eq!(s.default_export.as_deref(), Some("App"));
+        let c = &s.components[0];
+        assert!(c.exported && c.is_default, "{c:?}");
+    }
+
+    #[test]
+    fn export_list_marks_components_exported() {
+        let s = parse("const Card = () => { return (<div/>) }\nexport { Card }");
+        let c = &s.components[0];
+        assert!(c.exported && !c.is_default, "{c:?}");
+        assert!(s.default_export.is_none());
+
+        // Aliased lists mark the component exported under its own name;
+        // the alias pair feeds cross-module resolution.
+        let s = parse("const Card = () => { return (<div/>) }\nexport { Card as Button }");
+        let c = &s.components[0];
+        assert!(c.exported && !c.is_default, "{c:?}");
+        assert!(
+            s.named_exports.contains(&("Card".to_string(), "Button".to_string())),
+            "{:?}",
+            s.named_exports
+        );
     }
 
     #[test]

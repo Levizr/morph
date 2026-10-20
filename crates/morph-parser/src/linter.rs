@@ -4288,8 +4288,8 @@ fn resolve_in_graph(
             }
             return None;
         }
-        if let Some(c) = target_mod.source.components.iter().find(|c| c.name == local && c.exported)
-        {
+        let imported = specifiers.iter().find(|(l, _)| l == local).map(|(_, i)| i.as_str());
+        if let Some(c) = imported.and_then(|i| crate::exported_component(&target_mod.source, i)) {
             return Some(c.clone());
         }
         return None;
@@ -4475,6 +4475,34 @@ mod tests {
         let graph = crate::resolve_graph(&root.join("src/App.mx"), &root).expect("graph");
         let errs = lint_graph(&graph);
         assert!(codes(&errs).contains(&"mx-component-prop"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn graph_resolves_aliased_component_imports() {
+        let root = std::env::temp_dir().join(format!("morph_lint_alias_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("src")).expect("mkdir");
+        // `import { Card as C }` … and `export { Card2 as C2 }` on the other
+        // side — both spellings resolve without mx-component-unknown.
+        std::fs::write(
+            root.join("src/App.mx"),
+            "import { Card as C } from './ui.mx'\nimport { C2 } from './ui2.mx'\nexport default function App() { return (<body><C /><C2 /></body>) }",
+        )
+        .expect("write");
+        std::fs::write(
+            root.join("src/ui.mx"),
+            "export const Card = () => { return (<text>card</text>) }",
+        )
+        .expect("write");
+        std::fs::write(
+            root.join("src/ui2.mx"),
+            "const Card2 = () => { return (<text>card2</text>) }\nexport { Card2 as C2 }",
+        )
+        .expect("write");
+        let graph = crate::resolve_graph(&root.join("src/App.mx"), &root).expect("graph");
+        let errs = lint_graph(&graph);
+        assert!(!codes(&errs).contains(&"mx-component-unknown"), "{errs:?}");
         let _ = std::fs::remove_dir_all(&root);
     }
 

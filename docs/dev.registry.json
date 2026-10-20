@@ -136,7 +136,7 @@
           "morph module graph",
           "morph linter codes"
         ],
-        "lastUpdated": "2026-10-19",
+        "lastUpdated": "2026-10-20",
         "publishedAt": "2026-09-19",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -156,7 +156,7 @@
           "morph Tailwind resolver",
           "morph IR serializer"
         ],
-        "lastUpdated": "2026-10-19",
+        "lastUpdated": "2026-10-20",
         "publishedAt": "2026-09-19",
         "priority": 0.7,
         "changefreq": "monthly"

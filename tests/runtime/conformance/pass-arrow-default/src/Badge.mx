@@ -1,0 +1,15 @@
+import { morphState } from 'morph'
+
+// Named-export list form: `export { Badge }` on an arrow component must be
+// as importable as `export const Badge = …`.
+const Badge = (props: { label: string }) => {
+  const [n, setN] = morphState(1)
+  return (
+    <div>
+      <text>{props.label}:{n}</text>
+      <button onClick={() => setN(n + 2)}>+2</button>
+    </div>
+  )
+}
+
+export { Badge }

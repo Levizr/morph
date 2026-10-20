@@ -1,0 +1,7 @@
+{
+  "name": "pass-arrow-default",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 360, "title": "PassArrowDefault" },
+  "dependencies": {},
+  "cpp_sources": []
+}

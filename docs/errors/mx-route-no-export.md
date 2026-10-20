@@ -56,6 +56,9 @@ export default function LoginRoute() {
 Steps:
 
 1. Add `export default function <Name>() { ... }` rendering the route's UI.
+   The default export may instead be an arrow component named by reference
+   (`const Home = () => ...` plus `export default Home`, or
+   `export { Home as default }`).
 2. Keep helpers/stores as named exports alongside it — they are still
    importable.
 3. The default export may declare props — they bind to mount-time props.

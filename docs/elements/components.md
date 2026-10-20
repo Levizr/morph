@@ -4,6 +4,27 @@ Split your UI into `.mx` files and reuse them like React components. Each
 instance gets its own local state — two `<Counter />` on one page never share
 a `count`.
 
+## Declaring components
+
+A component is any top-level function that returns JSX. Declaration style and
+export style compose freely — what matters is which binding the export names,
+not how it was written:
+
+```tsx
+// Named exports — any of these spellings:
+export function Card() { return <div>hi</div>; }
+const Badge = () => <div>hi</div>; export { Badge }
+const Chip = () => <div>hi</div>; export { Chip as Tag }   // aliased
+
+// Default exports — any of these spellings:
+export default function App() { return <body>hi</body>; }
+const Shell = () => { return <body>hi</body>; }; export default Shell
+const Panel = () => { return <body>hi</body>; }; export { Panel as default }
+```
+
+Imports follow the same names: `import App from './App.mx'`,
+`import { Card } from './ui.mx'`, or `import { Card as C } from './ui.mx'`.
+
 ## Importing a component
 
 ```tsx

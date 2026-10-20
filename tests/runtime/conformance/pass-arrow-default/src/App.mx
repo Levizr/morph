@@ -1,0 +1,23 @@
+import { morphState } from 'morph'
+import { Badge } from './Badge.mx'
+import Screen from './Screen.mx'
+
+export const windowConfig = { title: "PassArrowDefault", width: 800, height: 360 }
+
+// Arrow component default-exported by reference: `const App = …` plus
+// `export default App` must behave exactly like `export default function App`.
+const App = () => {
+  const [count, setCount] = morphState(0)
+  return (
+    <body>
+      <div className="screen">
+        <text>count {count}</text>
+        <button onClick={() => setCount(count + 1)}>+</button>
+        <Badge label="arrow" />
+        <Screen />
+      </div>
+    </body>
+  )
+}
+
+export default App

@@ -1,0 +1,14 @@
+import { morphState } from 'morph'
+
+// Default import target: arrow component with `export default Screen`.
+const Screen = () => {
+  const [on, setOn] = morphState(true)
+  return (
+    <div>
+      <text>{on ? 'on' : 'off'}</text>
+      <button onClick={() => setOn(!on)}>toggle</button>
+    </div>
+  )
+}
+
+export default Screen

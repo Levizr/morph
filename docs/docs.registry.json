@@ -397,7 +397,7 @@
           "morphEvent",
           "morph component state"
         ],
-        "lastUpdated": "2026-10-19",
+        "lastUpdated": "2026-10-20",
         "publishedAt": "2026-09-15",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -2025,7 +2025,7 @@
           "morph route no default export",
           "morph route.mx"
         ],
-        "lastUpdated": "2026-09-21",
+        "lastUpdated": "2026-10-20",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"
