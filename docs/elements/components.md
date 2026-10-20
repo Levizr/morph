@@ -18,8 +18,13 @@ const Chip = () => <div>hi</div>; export { Chip as Tag }   // aliased
 
 // Default exports — any of these spellings:
 export default function App() { return <body>hi</body>; }
+export default function() { return <body>hi</body>; }
+export default (() => <body>hi</body>)
 const Shell = () => { return <body>hi</body>; }; export default Shell
 const Panel = () => { return <body>hi</body>; }; export { Panel as default }
+
+// Function expressions are the same component as arrows:
+const Dash = function () { return <body>hi</body>; }; export default Dash
 ```
 
 Imports follow the same names: `import App from './App.mx'`,
@@ -45,6 +50,11 @@ Rules:
 
 - Default import (`import Hero from ...`) binds the file's default export.
 - Named imports (`import { Card } from ...`) bind exported components by name.
+- Default and named imports can be combined: `import Hero, { Card } from './ui.mx'`.
+- Barrels work: `export { default as Card } from './Card.mx'`,
+  `export { Card } from './Card.mx'`, and `export * from './Card.mx'` all
+  make `import { Card } from './components'` resolve to the component that
+  declares it.
 - Only the entry file's default export renders as a window. Every other
   component renders solely where it is instantiated.
 - Missing imports are hard errors at build time, and `morph check` flags

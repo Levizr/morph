@@ -1,0 +1,7 @@
+{
+  "name": "pass-export-spellings",
+  "entry": "src/App.mx",
+  "window": { "width": 420, "height": 320, "title": "PassExportSpellings" },
+  "dependencies": {},
+  "cpp_sources": []
+}

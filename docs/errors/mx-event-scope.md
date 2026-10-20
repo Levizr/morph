@@ -62,6 +62,18 @@ export default function App() {
 }
 ```
 
+```tsx
+// ✅ An export list exports the same channel
+import { morphEvent } from 'morph';
+
+const saved = morphEvent<string>();
+export { saved };
+
+export default function App() {
+  return <button onClick={() => saved.emit("done")}>Save</button>;
+}
+```
+
 Steps:
 
 1. Hoist `morphEvent<T>()` to the top of the file, add `export`, take no

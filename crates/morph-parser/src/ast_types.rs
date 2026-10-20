@@ -27,6 +27,9 @@ pub struct MxSource {
     /// `export ... from './path'` re-exports (resolved into the graph).
     pub re_exports: Vec<ReExport>,
     pub global_vars: Vec<String>,
+    /// Names bound by top-level plain variable declarations (the same
+    /// declarations whose statements live in [`Self::global_vars`]).
+    pub global_var_names: Vec<String>,
     pub console_logs: Vec<String>,
     pub extra_headers: Vec<String>,
     pub cpp_imports: Vec<CppImport>,

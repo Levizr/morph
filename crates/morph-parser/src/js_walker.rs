@@ -302,6 +302,7 @@ pub struct MxWalker<'src> {
     pub default_export: Option<String>,
     pub re_exports: Vec<ReExport>,
     pub global_vars: Vec<String>,
+    pub global_var_names: Vec<String>,
     pub console_logs: Vec<String>,
     pub extra_headers: Vec<String>,
     pub cpp_imports: Vec<CppImport>,
@@ -327,6 +328,7 @@ impl<'src> MxWalker<'src> {
             default_export: None,
             re_exports: Vec::new(),
             global_vars: Vec::new(),
+            global_var_names: Vec::new(),
             console_logs: Vec::new(),
             extra_headers: Vec::new(),
             cpp_imports: Vec::new(),
@@ -399,7 +401,18 @@ impl<'src> MxWalker<'src> {
                 JsxPropValue::Fn(self.span_text(a.span).to_string())
             }
             Expression::FunctionExpression(f) => {
-                JsxPropValue::Fn(self.span_text(f.span).to_string())
+                // `onClick={function () { … }}` is the same handler as the
+                // arrow spelling; hand codegen the arrow form it translates.
+                let params = self.span_text(f.params.span);
+                match f.body.as_deref() {
+                    Some(body) => JsxPropValue::Fn(format!(
+                        "{}{} => {}",
+                        if f.r#async { "async " } else { "" },
+                        params,
+                        self.span_text(body.span)
+                    )),
+                    None => JsxPropValue::Fn(self.span_text(f.span).to_string()),
+                }
             }
             Expression::ObjectExpression(obj) => {
                 let mut style = HashMap::new();
@@ -815,6 +828,18 @@ impl<'src> MxWalker<'src> {
             },
             |id| id.name.to_string(),
         );
+        self.extract_component_named(name, func, exported, is_default);
+    }
+
+    /// Extract a component from a function body under an explicit binding
+    /// name (declarator names win for `const X = function () {…}`).
+    fn extract_component_named(
+        &mut self,
+        name: String,
+        func: &Function,
+        exported: bool,
+        is_default: bool,
+    ) {
         if name.is_empty() {
             return;
         }
@@ -1005,17 +1030,24 @@ impl<'src> MxWalker<'src> {
         });
     }
 
-    /// Claim a variable declarator as an arrow-function component when it
-    /// yields JSX.
-    fn try_extract_arrow_declarator(
+    /// Claim a variable declarator as a component when it yields JSX.
+    /// Function expressions are the same thing as arrow functions here.
+    fn try_extract_declarator_component(
         &mut self,
         decl: &VariableDeclarator,
         exported: bool,
         is_default: bool,
     ) {
         let Some(name) = binding_ident_name(&decl.id) else { return };
-        let Some(Expression::ArrowFunctionExpression(arrow)) = &decl.init else { return };
-        self.extract_arrow_component(name, arrow, exported, is_default);
+        match &decl.init {
+            Some(Expression::ArrowFunctionExpression(arrow)) => {
+                self.extract_arrow_component(name, arrow, exported, is_default);
+            }
+            Some(Expression::FunctionExpression(func)) => {
+                self.extract_component_named(name, func, exported, is_default);
+            }
+            _ => {}
+        }
     }
 
     /// Declared props from a component's first parameter.
@@ -1610,6 +1642,49 @@ impl<'a> Visit<'a> for MxWalker<'_> {
                             }
                         }
                     }
+                    // `export default (function () { return <jsx/> })` —
+                    // same component, written as a function expression.
+                    ExportDefaultDeclarationKind::FunctionExpression(func) => {
+                        let before = self.components.len();
+                        self.extract_component_named("default".to_string(), func, true, true);
+                        if self.components.len() != before {
+                            self.default_export = Some("default".to_string());
+                        }
+                    }
+                    // Parentheses preserve nothing: `export default (() => …)`
+                    // and `export default (App)` are the same exports.
+                    ExportDefaultDeclarationKind::ParenthesizedExpression(paren) => {
+                        match &paren.expression {
+                            Expression::ArrowFunctionExpression(arrow) => {
+                                let before = self.components.len();
+                                self.extract_arrow_component(
+                                    "default".to_string(),
+                                    arrow,
+                                    true,
+                                    true,
+                                );
+                                if self.components.len() != before {
+                                    self.default_export = Some("default".to_string());
+                                }
+                            }
+                            Expression::FunctionExpression(func) => {
+                                let before = self.components.len();
+                                self.extract_component_named(
+                                    "default".to_string(),
+                                    func,
+                                    true,
+                                    true,
+                                );
+                                if self.components.len() != before {
+                                    self.default_export = Some("default".to_string());
+                                }
+                            }
+                            Expression::Identifier(id) => {
+                                self.default_export = Some(id.name.to_string());
+                            }
+                            _ => {}
+                        }
+                    }
                     ExportDefaultDeclarationKind::ClassDeclaration(c) => {
                         let name = c
                             .id
@@ -1662,7 +1737,7 @@ impl<'a> Visit<'a> for MxWalker<'_> {
                         });
                         if is_framework_call {
                             for decl in &vd.declarations {
-                                self.try_extract_arrow_declarator(decl, true, false);
+                                self.try_extract_declarator_component(decl, true, false);
                             }
                             continue;
                         }
@@ -1675,7 +1750,7 @@ impl<'a> Visit<'a> for MxWalker<'_> {
                             .to_string();
                         for decl in &vd.declarations {
                             let before = self.components.len();
-                            self.try_extract_arrow_declarator(decl, true, false);
+                            self.try_extract_declarator_component(decl, true, false);
                             if self.components.len() == before {
                                 if let Some(name) = binding_ident_name(&decl.id) {
                                     self.exported_vars
@@ -1772,7 +1847,7 @@ impl<'a> Visit<'a> for MxWalker<'_> {
                 }
                 Statement::VariableDeclaration(vd) => {
                     for decl in &vd.declarations {
-                        self.try_extract_arrow_declarator(decl, false, false);
+                        self.try_extract_declarator_component(decl, false, false);
                     }
                 }
                 _ => {}
@@ -1844,6 +1919,11 @@ impl<'a> Visit<'a> for MxWalker<'_> {
                     }
                 });
                 if !is_framework_call {
+                    for d in &vd.declarations {
+                        if let Some(name) = binding_ident_name(&d.id) {
+                            self.global_var_names.push(name);
+                        }
+                    }
                     self.global_vars.push(self.span_text(vd.span).to_string());
                 }
             }
@@ -1854,7 +1934,7 @@ impl<'a> Visit<'a> for MxWalker<'_> {
 #[cfg(test)]
 mod walker_tests {
     use crate::ast_types::MxImportKind;
-    use crate::{parse_mx_str, ComponentProp, MxSource};
+    use crate::{parse_mx_str, ComponentProp, JsxNode, JsxPropValue, MxSource};
 
     fn parse(src: &str) -> MxSource {
         parse_mx_str(src, "test.mx").expect("parse")
@@ -2112,6 +2192,44 @@ mod walker_tests {
         assert_eq!(s.default_export.as_deref(), Some("App"));
         let c = &s.components[0];
         assert!(c.exported && c.is_default, "{c:?}");
+    }
+
+    #[test]
+    fn function_expression_components_are_components() {
+        // `const X = function () {…}` is the same component as the arrow.
+        let s = parse("const App = function() { return (<div/>) }\nexport default App");
+        assert_eq!(s.default_export.as_deref(), Some("App"));
+        let c = &s.components[0];
+        assert_eq!(c.name, "App");
+        assert!(c.exported && c.is_default, "{c:?}");
+
+        // The declarator name wins over the function expression's own name.
+        let s = parse("const Card = function Inner() { return (<div/>) }\nexport { Card }");
+        let c = &s.components[0];
+        assert_eq!(c.name, "Card");
+        assert!(c.exported && !c.is_default, "{c:?}");
+
+        // Anonymous default function expression.
+        let s = parse("export default (function() { return (<div/>) })");
+        let c = &s.components[0];
+        assert_eq!(c.name, "default");
+        assert!(c.exported && c.is_default, "{c:?}");
+        assert_eq!(s.default_export.as_deref(), Some("default"));
+    }
+
+    #[test]
+    fn function_expression_handlers_normalize_to_arrows() {
+        let c = component(
+            "export default function App() { return (<div onClick={function() { save() }} />) }",
+        );
+        let JsxNode::Element { props, .. } = &c.jsx else {
+            panic!("expected element, got {:?}", c.jsx);
+        };
+        let Some(JsxPropValue::Fn(src)) = props.get("onClick") else {
+            panic!("expected fn prop, got {:?}", props.get("onClick"));
+        };
+        assert!(src.starts_with("() =>"), "{src}");
+        assert!(src.contains("save()"), "{src}");
     }
 
     #[test]

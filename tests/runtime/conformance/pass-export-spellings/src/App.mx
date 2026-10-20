@@ -1,0 +1,36 @@
+import { morphState } from 'morph'
+import shout, { greet, pong, mark } from './lib.ts'
+import { theme, setTheme, tone, setTone } from './theme.ts'
+import { Card } from './components.ts'
+
+// Function expression instead of an arrow, default-exported by reference.
+const App = function AppComponent() {
+  const [count, setCount] = morphState(0)
+
+  function inc() {
+    setCount(count + 1)
+  }
+
+  function dec() {
+    setCount(count - 1)
+  }
+
+  return (
+    <body>
+      <text id="text">{greet()} {pong()} {shout("yes")}{mark}</text>
+      <text id="theme">{theme} {tone}</text>
+      <text id="count">count: {count}</text>
+      <button id="inc" onClick={inc}>+</button>
+      <button id="dec" onClick={dec}>-</button>
+      <button id="tone" onClick={() => setTone("#ffffff")}>tone</button>
+      <button
+        id="toggle"
+        onClick={function() { setTheme(theme === "light" ? "dark" : "light") }}
+      >
+        toggle
+      </button>
+      <Card />
+    </body>
+  )
+}
+export default App

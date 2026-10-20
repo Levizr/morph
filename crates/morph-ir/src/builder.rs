@@ -1324,10 +1324,19 @@ impl IRBuilder {
     ) -> anyhow::Result<()> {
         let target_ns = ns_of(graph, target_path)?;
         // Components keep use-site resolution.
-        if morph_parser::exported_component(target, imported).is_some() {
+        if morph_parser::resolve_component_export(graph, target_path, imported).is_some() {
             return Ok(());
         }
-        if let Some(sb) = target.shared_bindings.iter().find(|b| b.getter == imported) {
+        // Named imports name the target's *export*; `export { local as
+        // exported }` renames on the way out, so map back to the declared
+        // binding before looking it up.
+        let original = target
+            .named_exports
+            .iter()
+            .find(|(_, exported)| exported == imported)
+            .map_or(imported, |(local, _)| local.as_str());
+        let listed = target.named_exports.iter().any(|(local, _)| local == original);
+        if let Some(sb) = target.shared_bindings.iter().find(|b| b.getter == original) {
             let accessor = shared_signal_accessor(&sb.getter);
             let ty = shared_binding_type(&sb.type_arg, &sb.init);
             Self::register_binding(
@@ -1360,7 +1369,7 @@ impl IRBuilder {
             }
             return Ok(());
         }
-        if let Some(sb) = target.shared_bindings.iter().find(|b| b.setter == imported) {
+        if let Some(sb) = target.shared_bindings.iter().find(|b| b.setter == original) {
             let accessor = shared_signal_accessor(&sb.getter);
             let ty = shared_binding_type(&sb.type_arg, &sb.init);
             Self::register_binding(
@@ -1378,38 +1387,44 @@ impl IRBuilder {
             Self::register_import(module_path, local, &target_ns, &sb.setter, &expr, ctx);
             return Ok(());
         }
-        if target.event_bindings.iter().any(|b| b.name == imported) {
-            let id = event_channel_id(target_path, imported);
+        if target.event_bindings.iter().any(|b| b.name == original) {
+            let id = event_channel_id(target_path, original);
             if frame.events.insert(local.to_string(), id).is_some() {
                 anyhow::bail!(
                     "ambiguous import of `{local}` in {}: bound by two different modules; import it from only one module",
                     module_path.display()
                 );
             }
-            Self::register_event(target_path, &target_ns, imported, ctx);
+            Self::register_event(target_path, &target_ns, original, ctx);
             return Ok(());
         }
-        if target.function_declarations.iter().any(|f| f.name == imported && f.exported)
-            || target.named_exports.iter().any(|(l, _)| l == imported)
-        {
-            Self::register_module_binding(target_path, &target_ns, "function", imported, ctx);
-            let qualified = format!("::{MODULE_NS_ROOT}::{target_ns}::{}", binding_ident(imported));
+        if target.class_declarations.iter().any(|c| c.name == original && (c.exported || listed)) {
+            Self::register_module_binding(target_path, &target_ns, "class", original, ctx);
+            let qualified = format!("::{MODULE_NS_ROOT}::{target_ns}::{}", binding_ident(original));
             Self::seed_frame_name(frame, module_path, local, &qualified)?;
-            Self::register_import(module_path, local, &target_ns, imported, &qualified, ctx);
+            Self::register_import(module_path, local, &target_ns, original, &qualified, ctx);
             return Ok(());
         }
-        if target.exported_vars.iter().any(|v| v.name == imported) {
-            Self::register_module_binding(target_path, &target_ns, "var", imported, ctx);
-            let qualified = format!("::{MODULE_NS_ROOT}::{target_ns}::{}", binding_ident(imported));
+        if listed || target.function_declarations.iter().any(|f| f.name == original && f.exported) {
+            // Plain top-level consts (including arrow helpers) are emitted
+            // as values, not functions; `const x = …; export { x }` binds
+            // the same C++ symbol under the var kind.
+            let kind = if listed && target.global_var_names.iter().any(|n| n == original) {
+                "var"
+            } else {
+                "function"
+            };
+            Self::register_module_binding(target_path, &target_ns, kind, original, ctx);
+            let qualified = format!("::{MODULE_NS_ROOT}::{target_ns}::{}", binding_ident(original));
             Self::seed_frame_name(frame, module_path, local, &qualified)?;
-            Self::register_import(module_path, local, &target_ns, imported, &qualified, ctx);
+            Self::register_import(module_path, local, &target_ns, original, &qualified, ctx);
             return Ok(());
         }
-        if target.class_declarations.iter().any(|c| c.name == imported && c.exported) {
-            Self::register_module_binding(target_path, &target_ns, "class", imported, ctx);
-            let qualified = format!("::{MODULE_NS_ROOT}::{target_ns}::{}", binding_ident(imported));
+        if target.exported_vars.iter().any(|v| v.name == original) {
+            Self::register_module_binding(target_path, &target_ns, "var", original, ctx);
+            let qualified = format!("::{MODULE_NS_ROOT}::{target_ns}::{}", binding_ident(original));
             Self::seed_frame_name(frame, module_path, local, &qualified)?;
-            Self::register_import(module_path, local, &target_ns, imported, &qualified, ctx);
+            Self::register_import(module_path, local, &target_ns, original, &qualified, ctx);
             return Ok(());
         }
         // Through re-exports: resolve to the ultimate definition site.
@@ -1462,6 +1477,10 @@ impl IRBuilder {
         } else if target.class_declarations.iter().any(|c| c.name == decl) {
             "class"
         } else if target.exported_vars.iter().any(|v| v.name == decl) {
+            "var"
+        } else if target.global_var_names.iter().any(|n| n == &decl) {
+            // `const token = …; export default token` — declared among the
+            // module's plain top-level vars (not in `exported_vars`).
             "var"
         } else if let Some(sb) = target.shared_bindings.iter().find(|b| b.getter == decl) {
             // Shared default: map to the getter read.
@@ -1516,9 +1535,9 @@ impl IRBuilder {
                 return Ok(None);
             };
             // Direct definition wins over further re-exports.
-            if Self::target_defines(&current_mod.source, &current_name) {
+            if let Some(local_name) = Self::direct_export_name(&current_mod.source, &current_name) {
                 let ns = ns_of(graph, &current_path)?;
-                return Ok(Some((ns, current_name)));
+                return Ok(Some((ns, local_name)));
             }
             let mut advanced = false;
             for re in &current_mod.source.re_exports {
@@ -1539,16 +1558,39 @@ impl IRBuilder {
         }
     }
 
-    /// True when the module directly defines `name` as an importable value
-    /// binding (components resolve separately at use sites).
-    fn target_defines(source: &morph_parser::MxSource, name: &str) -> bool {
-        source.shared_bindings.iter().any(|b| b.getter == name || b.setter == name)
-            || source.event_bindings.iter().any(|b| b.name == name)
-            || source.function_declarations.iter().any(|f| f.name == name && f.exported)
-            || source.exported_vars.iter().any(|v| v.name == name)
-            || source.class_declarations.iter().any(|c| c.name == name && c.exported)
-            || source.named_exports.iter().any(|(l, _)| l == name)
-            || source.default_export.as_deref() == Some(name)
+    /// The local binding `exported` resolves to when the module defines it
+    /// directly, if any. `export { local as exported }` renames on the way
+    /// out and `export default X` exposes `X` as `default`. Components
+    /// resolve separately at use sites.
+    fn direct_export_name(source: &morph_parser::MxSource, exported: &str) -> Option<String> {
+        let original = if exported == "default" {
+            source.default_export.clone().unwrap_or_else(|| exported.to_string())
+        } else {
+            source
+                .named_exports
+                .iter()
+                .find(|(_, e)| e == exported)
+                .map_or_else(|| exported.to_string(), |(l, _)| l.clone())
+        };
+        if source.components.iter().any(|c| c.name == original) {
+            return None;
+        }
+        let listed = source.named_exports.iter().any(|(l, _)| l == &original);
+        let defined =
+            source.shared_bindings.iter().any(|b| b.getter == original || b.setter == original)
+                || source.event_bindings.iter().any(|b| b.name == original)
+                || source
+                    .function_declarations
+                    .iter()
+                    .any(|f| f.name == original && (f.exported || listed))
+                || source.exported_vars.iter().any(|v| v.name == original)
+                || source
+                    .class_declarations
+                    .iter()
+                    .any(|c| c.name == original && (c.exported || listed))
+                || listed
+                || source.default_export.as_deref() == Some(original.as_str());
+        defined.then_some(original)
     }
 
     /// Original name a re-export provides under `exported`, if any. Star
@@ -1627,6 +1669,11 @@ impl IRBuilder {
                         "cannot re-export `default` under its own name in {}: rename it (`export {{ default as x }}`)",
                         module_path.display()
                     );
+                }
+                // Components resolve at use sites through the same re-export
+                // chain; no value alias is emitted for them.
+                if morph_parser::resolve_component_export(graph, &target_path, orig).is_some() {
+                    continue;
                 }
                 let (ultimate_ns, ultimate_name) =
                     Self::resolve_through_reexports(&target_path, graph, orig, module_path)?
@@ -3263,13 +3310,11 @@ fn resolve_binding(
         }
         let target = src.module_imports.iter().find(|(p, _)| p == raw).map(|(_, t)| t.clone());
         let Some(target) = target else { continue };
-        let target_mod = graph
-            .modules
-            .get(&target)
-            .ok_or_else(|| anyhow::anyhow!("unresolved component module {}", target.display()))?;
         if is_default_binding {
-            if let Some(c) = target_mod.source.components.iter().find(|c| c.is_default) {
-                return Ok((target, c.clone()));
+            if let Some((owner, c)) =
+                morph_parser::resolve_component_export(graph, &target, "default")
+            {
+                return Ok((owner, c));
             }
             anyhow::bail!(
                 "`{}` has no default export (imported by {})",
@@ -3278,11 +3323,14 @@ fn resolve_binding(
             );
         }
         // Named specifiers carry (local, imported): alias lookup follows
-        // the target's export name, including `export { Card as Button }`.
+        // the target's export name, including `export { Card as Button }`
+        // and re-export chains through barrel modules.
         let imported = specifiers.iter().find(|(l, _)| l == local).map(|(_, i)| i.as_str());
         if let Some(imported) = imported {
-            if let Some(c) = morph_parser::exported_component(&target_mod.source, imported) {
-                return Ok((target, c.clone()));
+            if let Some((owner, c)) =
+                morph_parser::resolve_component_export(graph, &target, imported)
+            {
+                return Ok((owner, c));
             }
         }
         anyhow::bail!(
@@ -6658,6 +6706,7 @@ mod tests {
             default_export: None,
             re_exports: Vec::new(),
             global_vars: vec!["const API_URL = \"https://api.test\";".to_string()],
+            global_var_names: vec!["API_URL".to_string()],
             console_logs: vec!["module log".to_string()],
             extra_headers: Vec::new(),
             cpp_imports: Vec::new(),
@@ -6922,6 +6971,7 @@ mod tests {
             default_export: None,
             re_exports: Vec::new(),
             global_vars: Vec::new(),
+            global_var_names: Vec::new(),
             console_logs: Vec::new(),
             extra_headers: Vec::new(),
             cpp_imports: Vec::new(),

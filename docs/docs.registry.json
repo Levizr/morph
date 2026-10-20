@@ -1737,7 +1737,7 @@
           "morph morphState outside component",
           "morph state scope"
         ],
-        "lastUpdated": "2026-09-28",
+        "lastUpdated": "2026-10-20",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -1755,7 +1755,7 @@
           "morph morphShared scope",
           "morph shared state export"
         ],
-        "lastUpdated": "2026-09-28",
+        "lastUpdated": "2026-10-20",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -1773,7 +1773,7 @@
           "morph morphEvent scope",
           "morph event channel export"
         ],
-        "lastUpdated": "2026-09-21",
+        "lastUpdated": "2026-10-20",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -2561,7 +2561,7 @@
           "re-export alias",
           "native function call"
         ],
-        "lastUpdated": "2026-09-17",
+        "lastUpdated": "2026-10-20",
         "publishedAt": "2026-09-17",
         "priority": "0.9",
         "changefreq": "monthly"

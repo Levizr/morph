@@ -68,6 +68,18 @@ export default function App() {
 ```
 
 ```tsx
+// ✅ An export list exports the same binding
+import { morphShared } from 'morph';
+
+const [count, setCount] = morphShared(0);
+export { count, setCount };   // aliases (`as`) are fine too
+
+export default function App() {
+  return <div>{count}</div>;
+}
+```
+
+```tsx
 // ✅ Per-instance instead — morphState inside the component
 import { morphState } from 'morph';
 

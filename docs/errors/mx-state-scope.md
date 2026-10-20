@@ -18,12 +18,14 @@ error : mx-state-scope : `morphState` may only be called inside a component body
 `morphState` creates **per-instance** reactive state: each rendered instance
 of the component gets its own independent slot, allocated by call order during
 that component's render. Outside a component there is no instance and no
-render — the call has nothing to attach to. This is the single most common
-state bug (a "global" that silently behaves like a local or vice versa), so
-Morph makes it a build error instead of a runtime mystery. Module-level shared
-state exists — it is called [`morphShared`](../api/morphShared.md), and the
-linter enforces the split from the other side
-([mx-shared-scope](mx-shared-scope.md)).
+render — the call has nothing to attach to. Any top-level function that
+returns JSX counts as a component, including `const App = () => …`,
+`const App = function () {…}`, and anonymous default exports. This is the
+single most common state bug (a "global" that silently behaves like a local
+or vice versa), so Morph makes it a build error instead of a runtime mystery.
+Module-level shared state exists — it is called
+[`morphShared`](../api/morphShared.md), and the linter enforces the split from
+the other side ([mx-shared-scope](mx-shared-scope.md)).
 
 ## Example that triggers it
 

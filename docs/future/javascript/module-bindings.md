@@ -58,8 +58,8 @@ Namespaces reuse the one scheme from the state/events record: entry-relative seg
 
 The parser records every exportable binding (morpher already emits functions, vars, and classes via `emit_class`, so all three are inventoryable):
 
-- **Named**: `export function f`, `export const x`, `export class C`, `export { a, b }`.
-- **Default**: `export default function f` / `export default class C` — importable as `import f from './m'` or `import { default as f } from './m'`; the binding keeps its declared name in the namespace.
+- **Named**: `export function f`, `export const x`, `export class C`, `export { a, b }`, plus aliases (`export { a as b }`) and the equivalent split declaration (`const x = …` then `export { x }`). Function expressions are inventoried like arrows.
+- **Default**: `export default function f` / `export default class C` / `export default value` — importable as `import f from './m'` or `import { default as f } from './m'`; the binding keeps its declared name in the namespace. Anonymous defaults stay entry-only.
 - **Types/interfaces**: erased, no C++ emission. `import type { T }` is always fine; a value-position `import { T }` where `T` is type-only is a hard error with an `import type` hint.
 
 ---
@@ -69,9 +69,12 @@ The parser records every exportable binding (morpher already emits functions, va
 `import { x } from './y'` (or default import) resolves `x` against `y`'s full inventory — component, shared, event, function, var, class:
 
 - Found → every use rewrites to `app::<ns_y>::x` (same rename machinery shared state already uses).
+- An aliased specifier (`import { x as y }`) or export (`export { x as y }`) resolves to the declared binding `x`; the local name `y` is what the importing module sees.
 - Specifier matches nothing in `y` → **hard error** (no silent fall-through).
 - Same local name imported from two modules → **hard error** (existing ambiguous-import rule, now universal).
 - No re-declaration in the importing namespace: the name exists only at its definition site.
+
+Components resolve the same way at use sites, following re-export chains to the declaring `.mx` module (so `<Card />` works whether `Card` is imported directly or through an `export { default as Card } from './Card.mx'` barrel).
 
 ---
 
@@ -170,6 +173,7 @@ A local `const loadData` next to `import { loadData }` is an ambiguous-import ha
 
 | Date | Decision | Rationale |
 |---|---|---|
+| 2026-10-20 | Export spelling is not semantic: inline, export list, alias, function expression, and barrel re-export all resolve to the declaring binding | One resolver (`exported_component` + `resolve_component_export` + alias mapping in `seed_named_import`) so users write what they mean |
 | 2026-09-17 | Universal module-path identity for all binding kinds | Same trick that solved shared/events; kills the `fetchUserData` collision class |
 | 2026-09-17 | Re-exports allowed; C++-callable via `using`-alias | Explicit re-export = explicit alias; plain imports create nothing |
 | 2026-09-17 | Default exports bind local name → qualified defining name | Matches ES semantics with zero new syntax |

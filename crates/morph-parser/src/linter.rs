@@ -1217,6 +1217,7 @@ pub fn check(source: &str, file_path: &str) -> Vec<LintError> {
         default_export: walker.default_export,
         re_exports: walker.re_exports,
         global_vars: walker.global_vars,
+        global_var_names: walker.global_var_names,
         console_logs: walker.console_logs,
         extra_headers: walker.extra_headers,
         cpp_imports: walker.cpp_imports,
@@ -1854,9 +1855,25 @@ fn lint_state_event_scope(source: &MxSource, content: &str, file_path: &str) -> 
     if ret.panicked {
         return Vec::new();
     }
+    // `export { theme, setTheme }` exports the same bindings as an inline
+    // `export const [theme, setTheme] = …`; pass that through so the scope
+    // check accepts both spellings.
+    let exported_locals: HashSet<&str> =
+        source.named_exports.iter().map(|(local, _)| local.as_str()).collect();
     let mut out = Vec::new();
     for stmt in &ret.program.body {
-        scope_stmt(stmt, &components, false, false, 0, false, &offsets, file_path, &mut out);
+        let listed = match stmt {
+            Statement::VariableDeclaration(vd) => vd.declarations.iter().any(|d| {
+                binding_ident_name(&d.id).is_some_and(|n| exported_locals.contains(n.as_str()))
+                    || binding_array_elements(&d.id)
+                        .into_iter()
+                        .flatten()
+                        .flatten()
+                        .any(|n| exported_locals.contains(n.as_str()))
+            }),
+            _ => false,
+        };
+        scope_stmt(stmt, &components, false, listed, 0, false, &offsets, file_path, &mut out);
     }
     out
 }
@@ -1956,6 +1973,16 @@ fn is_state_pair(pat: &BindingPattern) -> bool {
 fn binding_ident_name(bp: &BindingPattern) -> Option<String> {
     if let BindingPattern::BindingIdentifier(id) = bp {
         Some(id.name.to_string())
+    } else {
+        None
+    }
+}
+
+/// Identifier names bound by an array pattern (`[a, b]`), holes included as
+/// `None`.
+fn binding_array_elements(bp: &BindingPattern) -> Option<Vec<Option<String>>> {
+    if let BindingPattern::ArrayPattern(arr) = bp {
+        Some(arr.elements.iter().map(|e| e.as_ref().and_then(binding_ident_name)).collect())
     } else {
         None
     }
@@ -2092,6 +2119,45 @@ fn scope_stmt(
                         out,
                     );
                 }
+                ExportDefaultDeclarationKind::FunctionExpression(f) => {
+                    scope_function(
+                        f,
+                        components,
+                        decl_in_comp,
+                        func_depth,
+                        decl_in_comp,
+                        offsets,
+                        file_path,
+                        out,
+                    );
+                }
+                ExportDefaultDeclarationKind::ParenthesizedExpression(p) => match &p.expression {
+                    Expression::ArrowFunctionExpression(a) => {
+                        scope_arrow(
+                            a,
+                            components,
+                            decl_in_comp,
+                            func_depth,
+                            decl_in_comp,
+                            offsets,
+                            file_path,
+                            out,
+                        );
+                    }
+                    Expression::FunctionExpression(f) => {
+                        scope_function(
+                            f,
+                            components,
+                            decl_in_comp,
+                            func_depth,
+                            decl_in_comp,
+                            offsets,
+                            file_path,
+                            out,
+                        );
+                    }
+                    _ => {}
+                },
                 _ => {}
             }
         }
@@ -2672,6 +2738,20 @@ fn scope_declarator(
             in_component || is_arrow_comp,
             func_depth,
             is_arrow_comp,
+            offsets,
+            file_path,
+            out,
+        );
+    } else if let Expression::FunctionExpression(f) = init {
+        // `const App = function () { … }` is the same component as the
+        // arrow spelling, so its body allows framework state calls.
+        let is_fn_comp = !owned_name.is_empty() && components.contains(owned_name.as_str());
+        scope_function(
+            f,
+            components,
+            in_component || is_fn_comp,
+            func_depth,
+            is_fn_comp,
             offsets,
             file_path,
             out,
@@ -4281,16 +4361,15 @@ fn resolve_in_graph(
             continue;
         }
         let target = src.module_imports.iter().find(|(p, _)| p == raw).map(|(_, t)| t)?;
-        let target_mod = graph.modules.get(target)?;
         if is_default {
-            if let Some(c) = target_mod.source.components.iter().find(|c| c.is_default) {
-                return Some(c.clone());
+            if let Some((_, c)) = crate::resolve_component_export(graph, target, "default") {
+                return Some(c);
             }
             return None;
         }
         let imported = specifiers.iter().find(|(l, _)| l == local).map(|(_, i)| i.as_str());
-        if let Some(c) = imported.and_then(|i| crate::exported_component(&target_mod.source, i)) {
-            return Some(c.clone());
+        if let Some(c) = imported.and_then(|i| crate::resolve_component_export(graph, target, i)) {
+            return Some(c.1);
         }
         return None;
     }
@@ -4410,6 +4489,30 @@ mod tests {
         let content = "const [count, setCount] = morphState(0)\nexport default function App() { return (<div/>) }\n";
         let errs = check(content, "App.mx");
         assert!(codes(&errs).contains(&"mx-state-scope"), "{errs:?}");
+    }
+
+    #[test]
+    fn function_expression_component_allows_state() {
+        let content = "const App = function() {\n  const [count, setCount] = morphState(0)\n  return (<div>{count}</div>)\n}\nexport default App\n";
+        let errs = check(content, "App.mx");
+        assert!(!codes(&errs).contains(&"mx-state-scope"), "{errs:?}");
+
+        let content = "export default (function() {\n  const [count, setCount] = morphState(0)\n  return (<div>{count}</div>)\n})\n";
+        let errs = check(content, "App.mx");
+        assert!(!codes(&errs).contains(&"mx-state-scope"), "{errs:?}");
+    }
+
+    #[test]
+    fn export_list_counts_as_exported_shared_and_event() {
+        let content = "import { morphShared, morphEvent } from 'morph'\nconst [theme, setTheme] = morphShared(\"light\")\nconst click = morphEvent()\nexport { theme, setTheme, click }\nexport default function App() { return (<div/>) }\n";
+        let errs = check(content, "App.mx");
+        assert!(!codes(&errs).contains(&"mx-shared-scope"), "{errs:?}");
+        assert!(!codes(&errs).contains(&"mx-event-scope"), "{errs:?}");
+
+        // Unexported bindings still need their inline export.
+        let content = "import { morphShared } from 'morph'\nconst [theme, setTheme] = morphShared(\"light\")\nexport default function App() { return (<div/>) }\n";
+        let errs = check(content, "App.mx");
+        assert!(codes(&errs).contains(&"mx-shared-scope"), "{errs:?}");
     }
 
     #[test]

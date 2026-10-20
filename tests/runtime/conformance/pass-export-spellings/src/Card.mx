@@ -1,0 +1,6 @@
+const Card = () => (
+  <view className="card">
+    <text>card from barrel</text>
+  </view>
+)
+export default Card

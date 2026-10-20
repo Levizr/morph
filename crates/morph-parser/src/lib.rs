@@ -1,5 +1,6 @@
 use anyhow::{bail, Result};
-use std::path::Path;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 
 pub(crate) mod ast_types;
 pub mod css_lint;
@@ -32,6 +33,52 @@ pub fn exported_component<'a>(source: &'a MxSource, exported: &str) -> Option<&'
     }
     let original = source.named_exports.iter().find(|(_, e)| e == exported).map(|(l, _)| l)?;
     source.components.iter().find(|c| c.name == *original && c.exported)
+}
+
+/// Resolve a component export through re-export chains (barrel modules).
+///
+/// Starts at `module` looking for `exported` (`"default"` for the default
+/// export), follows `export { x } from './m'`, `export { default as X }
+/// from './m'`, and `export * from './m'`, and returns the module that
+/// actually declares the component plus the component itself. Cycles and
+/// dead ends resolve to `None`.
+pub fn resolve_component_export(
+    graph: &ModuleGraph,
+    module: &Path,
+    exported: &str,
+) -> Option<(PathBuf, MxComponent)> {
+    let mut visited: HashSet<PathBuf> = HashSet::new();
+    let mut current_path = module.to_path_buf();
+    let mut current_name = exported.to_string();
+    loop {
+        if !visited.insert(current_path.clone()) {
+            return None;
+        }
+        let resolved = graph.modules.get(&current_path)?;
+        if let Some(c) = exported_component(&resolved.source, &current_name) {
+            return Some((current_path.clone(), c.clone()));
+        }
+        let mut next: Option<(String, String)> = None;
+        for re in &resolved.source.re_exports {
+            if re.star {
+                // `export *` covers named exports only, never `default`.
+                if current_name != "default" {
+                    next = Some((re.path.clone(), current_name.clone()));
+                    break;
+                }
+                continue;
+            }
+            if let Some((original, _)) = re.names.iter().find(|(_, e)| e == &current_name) {
+                next = Some((re.path.clone(), original.clone()));
+                break;
+            }
+        }
+        let (raw_path, next_name) = next?;
+        let target =
+            resolved.module_imports.iter().find(|(p, _)| p == &raw_path).map(|(_, t)| t.clone())?;
+        current_path = target;
+        current_name = next_name;
+    }
 }
 
 /// Parse an .mx file (which is TSX) and return a structured representation.
@@ -79,6 +126,7 @@ pub fn parse_mx_str(source: &str, filename: &str) -> Result<MxSource> {
         default_export: walker.default_export,
         re_exports: walker.re_exports,
         global_vars: walker.global_vars,
+        global_var_names: walker.global_var_names,
         console_logs: walker.console_logs,
         extra_headers: walker.extra_headers,
         cpp_imports: walker.cpp_imports,
