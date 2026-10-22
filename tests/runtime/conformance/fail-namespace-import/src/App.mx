@@ -1,0 +1,11 @@
+export const windowConfig = { title: "fail-namespace-import", width: 800, height: 600 }
+
+import * as lib from './lib.ts'
+
+export default function App() {
+  return (
+    <body>
+      <text>{lib.token} {lib.greet()}</text>
+    </body>
+  )
+}

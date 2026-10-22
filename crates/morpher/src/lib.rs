@@ -27,6 +27,10 @@ pub struct TranslateOptions {
     /// Ambient types: JS name to recorded C++ type. Feeds operand classes
     /// (comparisons) and member-access style for ambient reads.
     pub state_types: HashMap<String, String>,
+    /// Omit parameter defaults from top-level forward declarations. Project
+    /// builds provide them once in `morph_api.h`; standalone translations
+    /// keep them on the prototype and omit them from the definition.
+    pub omit_param_defaults: bool,
 }
 
 impl TranslateOptions {
@@ -109,6 +113,19 @@ pub struct SnippetOutput {
     pub includes: String,
     /// Everything else: statements ready to splice.
     pub body: String,
+    /// Inferred C++ return types for functions declared by the snippet.
+    pub fn_return_types: HashMap<String, String>,
+}
+
+/// A translated standalone expression plus its inferred C++ type.
+#[derive(Debug, Clone, Default)]
+pub struct ExpressionOutput {
+    /// Leading `#include` lines the expression needs.
+    pub includes: String,
+    /// The C++ expression, usable as an initializer.
+    pub body: String,
+    /// Inferred C++ type (`JsObject`, `std::vector<…>`, `bool`, …), when known.
+    pub ty: Option<String>,
 }
 
 /// Translate `.mx`-embedded logic (handlers, effects, inner functions)
@@ -123,9 +140,21 @@ pub fn translate_snippet(
     filename: &str,
     options: TranslateOptions,
 ) -> Result<SnippetOutput, MorphJsError> {
-    let code = parser::translate_snippet_to_cpp(source, filename, options)?;
+    let (code, fn_return_types) =
+        parser::translate_snippet_to_cpp_with_types(source, filename, &options)?;
     let (header, body) = split_output_includes(&code);
-    Ok(SnippetOutput { includes: header.to_string(), body: body.to_string() })
+    Ok(SnippetOutput { includes: header.to_string(), body: body.to_string(), fn_return_types })
+}
+
+/// Translate one standalone expression against ambient app state.
+/// Used for component consts: unlike [`translate_snippet`], an object or
+/// array literal is an expression here, not a block statement.
+pub fn translate_expression(
+    source: &str,
+    filename: &str,
+    options: TranslateOptions,
+) -> Result<ExpressionOutput, MorphJsError> {
+    parser::translate_expression_to_cpp(source, filename, options)
 }
 
 /// Translate with custom indent and default options

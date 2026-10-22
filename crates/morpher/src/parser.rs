@@ -10,6 +10,7 @@ use crate::error::MorphJsError;
 /// Seed ambient app state into a translator: mapped read expressions plus
 /// recorded types for operand classes and member-access style.
 fn apply_ambient_state(translator: &mut CppTranslator, options: &TranslateOptions) {
+    translator.set_omit_param_defaults(options.omit_param_defaults);
     for (name, cpp_type) in &options.state_types {
         translator.ctx.var_types.insert(name.clone(), cpp_type.clone());
     }
@@ -93,6 +94,51 @@ pub fn translate_to_cpp(
     Ok(code)
 }
 
+/// Translate one standalone expression against ambient app state.
+/// `source` is parsed as an initializer, so object/array literals are
+/// expressions rather than block statements.
+pub fn translate_expression_to_cpp(
+    source: &str,
+    filename: &str,
+    options: TranslateOptions,
+) -> Result<crate::ExpressionOutput, MorphJsError> {
+    let wrapped = format!("const __morph_expr = ({source});");
+    let allocator = Allocator::default();
+    let source_type = SourceType::from_path(filename).unwrap_or_default().with_typescript(true);
+    let ret = Parser::new(&allocator, &wrapped, source_type).parse();
+    if ret.panicked || !ret.diagnostics.is_empty() {
+        let msgs: Vec<String> = ret.diagnostics.iter().map(|e| e.message.to_string()).collect();
+        return Err(MorphJsError::Parse(format!(
+            "parse errors in expression {}: {}",
+            filename,
+            msgs.join("; ")
+        )));
+    }
+    let init = ret
+        .program
+        .body
+        .iter()
+        .find_map(|stmt| match stmt {
+            oxc_ast::ast::Statement::VariableDeclaration(vd) => {
+                vd.declarations.first().and_then(|d| d.init.as_ref())
+            }
+            _ => None,
+        })
+        .ok_or_else(|| MorphJsError::Parse(format!("empty expression in {filename}")))?;
+    let mut translator = CppTranslator::new(
+        &wrapped,
+        options.indent,
+        options.type_mode,
+        options.runtime_path.clone(),
+    );
+    apply_ambient_state(&mut translator, &options);
+    translator.analyze_program(&ret.program);
+    let ty = translator.expression_type(init);
+    let body = translator.emit_expression_host(init);
+    let includes = translator.ctx.generate_includes();
+    Ok(crate::ExpressionOutput { includes, body, ty })
+}
+
 /// Translate one `.mx`-embedded logic snippet (handler body, effect,
 /// inner function) against ambient app state. Single parse attempt, no
 /// C++-type fallback: snippets must be plain TypeScript; anything else
@@ -102,6 +148,18 @@ pub fn translate_snippet_to_cpp(
     filename: &str,
     options: TranslateOptions,
 ) -> Result<String, MorphJsError> {
+    Ok(translate_snippet_to_cpp_with_types(source, filename, &options)?.0)
+}
+
+/// Like [`translate_snippet_to_cpp`], but also returns the inferred C++
+/// return types of functions declared in the snippet. The app builder
+/// seeds these into ambient state types so later expressions (for example
+/// `make().name`) choose bracket access for object factories.
+pub(crate) fn translate_snippet_to_cpp_with_types(
+    source: &str,
+    filename: &str,
+    options: &TranslateOptions,
+) -> Result<(String, std::collections::HashMap<String, String>), MorphJsError> {
     let allocator = Allocator::default();
     let source_type = SourceType::from_path(filename).unwrap_or_default().with_typescript(true);
     let ret = Parser::new(&allocator, source, source_type).parse();
@@ -115,7 +173,7 @@ pub fn translate_snippet_to_cpp(
     }
     let mut translator =
         CppTranslator::new(source, options.indent, options.type_mode, options.runtime_path.clone());
-    apply_ambient_state(&mut translator, &options);
+    apply_ambient_state(&mut translator, options);
     let mut out = translator.translate_program(&ret.program);
     // A snippet that is nothing but a string literal — a const RHS like
     // `const s = "hi"`, or JSX text — parses as a directive prologue:
@@ -132,7 +190,8 @@ pub fn translate_snippet_to_cpp(
             out.push_str(";\n");
         }
     }
-    Ok(out)
+    let fn_return_types = translator.ctx.fn_return_types.clone();
+    Ok((out, fn_return_types))
 }
 
 fn normalize_cpp_types(source: &str) -> String {

@@ -33,9 +33,13 @@ This module is provided by `node_modules/morph/index.d.ts` — it ships with eve
 - `const`, `let`, `var` with type annotations
 - `function` declarations and expressions
 - Arrow functions (`() => {}`)
+- Arrow/function expressions assigned to consts (inside components and at
+  module scope)
+- `async` / `await` (C++20 coroutines; see [Async & Networking](async.md))
+- Object/array literal consts, including nested object member access
 - Classes with constructors, methods, `super()`, `this`
 - Interfaces and type aliases
-- `enum` (basic)
+- Type-only imports and exports (`import type`, inline `type`, `export type`)
 
 ### Type Annotations
 
@@ -59,7 +63,7 @@ Inside a component body, statements written between the declarations (branches, 
 
 ### Expressions
 
-Binary (`+`, `-`, `*`, `/`, `===`, `!==`, `==`, `!=`, `<`, `>`, etc.), unary (`!`, `-`, `++`, `--`), ternary (`? :`), template literals, array/object literals, `new`, member access, function calls, `await`
+Binary (`+`, `-`, `*`, `/`, `===`, `!==`, `==`, `!=`, `<`, `>`, etc.), unary (`!`, `-`, `++`, `--`), ternary (`? :`), template literals, array/object literals, `new`, member access, function calls, optional chaining / nullish coalescing
 
 ### JS Runtime Semantics
 
@@ -75,16 +79,25 @@ Binary (`+`, `-`, `*`, `/`, `===`, `!==`, `==`, `!=`, `<`, `>`, etc.), unary (`!
 
 ## What's Not Supported Yet
 
-- Destructuring assignments
-- Spread/rest operators in all contexts
-- `import` from other `.mx` files (CSS: `import "./x.css"`; native code: C++ imports)
-- `class` extends across files
-- Generics beyond basic usage
-- `async`/`await` in non-event-handler contexts
-- The `typeof` operator (compare against `undefined`/`null` instead)
-- JS-only methods the natives don't implement yet — `.map()`, `.filter()`, `.join()`, `.toFixed()`, `.toPrecision()`, etc. (`.split()`, `.includes()`, `.startsWith()` already lower to `morph::str::*` helpers)
+- Object spread (`{ ...base }`) and rest parameters (`...args`)
+- Promise static helpers (`Promise.resolve`, `Promise.all`, …); `await`
+  and `new Promise(...)` lower to C++ coroutines
+- Regular expression literals
+- TypeScript `enum` declarations
+- `import * as ns` namespace imports
+- Browser globals (`document`, `window`, `localStorage`, …)
+- Class expressions assigned to a const (`const C = class { … }`)
+- Destructuring at the top of a component body (the `morphState` pair is
+  the exception)
+- C++ keywords used as JS binding or class member names (`double`,
+  `template`, `delete`, …)
+- A few JS methods whose receiver is provably a native type (for example
+  array `.sort()` and body-level `.forEach()`)
 
-The linter (`morph check`) rejects unsupported operators and methods with a clear error before building.
+The linter (`morph check`) rejects every unsupported construct above with
+a precise error and exits non-zero. A clean `morph check` is the preflight
+for `morph build`; the two commands share the same parser, graph, lint, and
+IR pipeline.
 
 ## Codegen Mode
 

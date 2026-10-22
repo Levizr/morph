@@ -260,6 +260,7 @@ impl<'a> CppEmitter<'a> {
             for name in &win.reactive_consts {
                 state_map.insert(name.clone(), format!("{name}()"));
             }
+            let state_types = ambient_state_types(win);
             let mut code = String::new();
             let var = format!("win_{}", win.window_id);
             code.push_str(&format!(
@@ -303,6 +304,7 @@ impl<'a> CppEmitter<'a> {
                     Some(&var),
                     &fs.features,
                     &state_map,
+                    &state_types,
                     None,
                 );
                 if !c.is_empty() {
@@ -410,8 +412,9 @@ impl<'a> CppEmitter<'a> {
             for name in &w.reactive_consts {
                 state_map.insert(name.clone(), format!("{name}()"));
             }
+            let state_types = ambient_state_types(w);
             for n in logic_emitter::collect_list_nodes(&w.nodes) {
-                if let Some(fac) = list_factory_for(n, &state_map, &fs.features) {
+                if let Some(fac) = list_factory_for(n, &state_map, &state_types, &fs.features) {
                     factories.push(fac);
                 }
             }
@@ -421,8 +424,9 @@ impl<'a> CppEmitter<'a> {
         // namespace scope — that stays a clear `mx-route-state` error.
         for (route, win) in self.routes_ir {
             let state_map = route_state_map(win);
+            let state_types = ambient_state_types(win);
             for n in logic_emitter::collect_list_nodes(&win.nodes) {
-                match list_factory_for(n, &state_map, &fs.features) {
+                match list_factory_for(n, &state_map, &state_types, &fs.features) {
                     Some(fac) if fac.contains("ctx->") => anyhow::bail!(
                         "mx-route-state: route {} reads mount state inside keyed-list item `{}`; move the read out of the template or into shared state. Learn more: https://morph.levizr.com/docs/errors/mx-route-state",
                         route.id,
@@ -557,7 +561,11 @@ impl<'a> CppEmitter<'a> {
         // placeholders lower to static accessors like window code.
         // Window placeholders resolve too — except bare useWindow(),
         // which has no window at module scope (hard error).
-        let premain_code = lower_channels(kept_entries.join("\n\n"));
+        // Defaults stay in `morph_api.h` (included at the top of app.cpp);
+        // repeating them on the definition is a C++ error.
+        let premain_defs: Vec<String> =
+            kept_entries.iter().map(|e| logic_emitter::strip_param_defaults(e)).collect();
+        let premain_code = lower_channels(premain_defs.join("\n\n"));
         let premain_code = resolve_window_placeholders(&premain_code, self.routes)?;
 
         // Native mode: user C++ imports via `import "./file.cpp"`
@@ -1537,6 +1545,30 @@ fn route_zero_value(class: &str) -> &'static str {
     }
 }
 
+/// Ambient C++ types for node expressions: reactive consts (`new C()` →
+/// `shared_ptr<C>`), function return types, state getters, and mutable
+/// locals. Without these the node emitter falls back to JS-object dot
+/// access for every name.
+fn ambient_state_types(win: &IRWindow) -> std::collections::HashMap<String, String> {
+    let mut types = win.reactive_const_types.clone();
+    types.extend(win.fn_return_types.iter().map(|(k, v)| (k.clone(), v.clone())));
+    for sv in &win.state_vars {
+        if let (Some(getter), Some(init)) = (sv.get("getter"), sv.get("init")) {
+            if let Some(ty) = logic_emitter::infer_state_type(init) {
+                types.insert(getter.clone(), ty);
+            }
+        }
+    }
+    for ml in &win.mutable_locals {
+        if let (Some(name), Some(ty)) = (ml.get("name"), ml.get("type")) {
+            if !name.is_empty() && !ty.is_empty() {
+                types.insert(name.clone(), ty.clone());
+            }
+        }
+    }
+    types
+}
+
 /// State map for one route mount: bare reads rewrite to context members
 /// (baked `ctx->` refs survive via the member-access guard in
 /// translate_js). Single source for mount bodies and route list
@@ -1599,6 +1631,7 @@ fn route_state_map(win: &IRWindow) -> std::collections::HashMap<String, String> 
 fn list_factory_for(
     n: &morph_ir::IRNode,
     state_map: &std::collections::HashMap<String, String>,
+    state_types: &std::collections::HashMap<String, String>,
     features: &std::collections::HashSet<String>,
 ) -> Option<String> {
     let tmpl = n.item_template.as_ref()?;
@@ -1611,7 +1644,8 @@ fn list_factory_for(
     if !n.list_index_param.is_empty() {
         tmpl_map.insert(n.list_index_param.clone(), "__index".to_string());
     }
-    let body = node_emitter::emit_node_with_state(tmpl, None, features, &tmpl_map, None);
+    let body =
+        node_emitter::emit_node_with_state(tmpl, None, features, &tmpl_map, state_types, None);
     let mut caps = String::new();
     if body.contains("__it") {
         caps.push_str(", &__it");
@@ -1741,9 +1775,16 @@ pub fn generate_route_mounts(
         // Route state map: bare reads rewrite to context members (baked
         // `ctx->` refs survive via the member-access guard in translate_js).
         let state_map = route_state_map(win);
+        let state_types = ambient_state_types(win);
         for node in &win.nodes {
-            let c =
-                node_emitter::emit_node_with_state(node, Some("win"), features, &state_map, None);
+            let c = node_emitter::emit_node_with_state(
+                node,
+                Some("win"),
+                features,
+                &state_map,
+                &state_types,
+                None,
+            );
             if !c.is_empty() {
                 code.push(c);
             }
@@ -3374,6 +3415,8 @@ mod tests {
             extra_headers: Vec::new(),
             state_vars: Vec::new(),
             reactive_consts: Vec::new(),
+            reactive_const_types: Default::default(),
+            fn_return_types: Default::default(),
             route_props: Vec::new(),
             shared_vars: Vec::new(),
             effect_decls: vec![

@@ -93,6 +93,16 @@ pub struct IRWindow {
     pub extra_headers: Vec<String>,
     pub state_vars: Vec<HashMap<String, String>>,
     pub reactive_consts: Vec<String>,
+    /// C++ types of reactive const wrappers, keyed by original and mangled
+    /// name. Codegen seeds these as ambient types so member access picks
+    /// `->` for `shared_ptr` class instances and brackets for JS objects.
+    #[serde(default)]
+    pub reactive_const_types: HashMap<String, String>,
+    /// C++ return types of inner/module functions, keyed by source name.
+    /// Seeded into ambient state types for node expressions so a call
+    /// result can choose bracket access (`make()["name"]`).
+    #[serde(default)]
+    pub fn_return_types: HashMap<String, String>,
     /// Mutable body locals (`let` reassigned by body-level flow): `name`
     /// (emitted, instance-mangled), `init` (source text), `type` (C++
     /// signal type). Declared as `Signal<T>` statics; body effects seed

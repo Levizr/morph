@@ -1,0 +1,32 @@
+import { morphState } from 'morph'
+
+export const windowConfig = { title: "PassConstInits", width: 800, height: 600 }
+
+class Greeter {
+  name: string
+  constructor(name: string) { this.name = name }
+  greet() { return "hi " + this.name }
+}
+
+// Conventional JS const forms: arrow/function consts lower like inner
+// functions, object literals become JsObject, and `new C()` keeps its
+// shared_ptr type for member calls.
+export default function App() {
+  const [count, setCount] = morphState(0)
+  const inc = () => setCount(count + 1)
+  const twice = function() { return count * 2 }
+  const user = { name: "ada", meta: { city: "paris" } }
+  const g = new Greeter("ada")
+
+  function label(prefix: string = "hi") {
+    return prefix + " " + user.name
+  }
+
+  return (
+    <body>
+      <text>{twice()} {user.meta.city} {g.greet()} {label()}</text>
+      <button onClick={() => { inc(); g.greet() }}>+</button>
+      <button onClick={() => { const id = setTimeout(() => inc(), 10); clearTimeout(id) }}>timer</button>
+    </body>
+  )
+}

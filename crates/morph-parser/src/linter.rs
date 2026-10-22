@@ -288,6 +288,16 @@ impl JsMemberVisitor {
             }
             return;
         }
+        // `Promise<T>` is a type and `new Promise(...)` lowers, but the
+        // static combinators/helpers have no runtime counterpart. Reject
+        // them here instead of emitting `Promise.resolve` as raw C++.
+        if name == "Promise" {
+            if let Some(p) = prop {
+                self.members.push(span);
+                self.out.push((span.0, "Promise".into(), format!("Promise.{p}")));
+            }
+            return;
+        }
         if let Some(p) = prop.as_ref() {
             if supported_builtin_member(name, p) {
                 self.members.push(span);
@@ -436,6 +446,8 @@ fn check_js_members(program: &Program, file_path: &str, offsets: &[usize]) -> Ve
         let (line, col) = offset_to_line_col_fast(offsets, *start);
         let suggestion = if root == "console" {
             "Use console.log/warn/error/info instead".to_string()
+        } else if root == "Promise" {
+            "Await a runtime task (`fetch(...)`) or use `new Promise(...)`".to_string()
         } else {
             "Replace with runtime-type methods or plain operators (docs/javascript/types.md)"
                 .to_string()
@@ -579,6 +591,107 @@ fn check_js_operators(program: &Program, file_path: &str, offsets: &[usize]) -> 
         .collect()
 }
 
+/// C++ keywords that can appear as JS identifiers or as member/property
+/// names. A binding emits an identifier the C++ compiler rejects
+/// (`auto double`); a class field or method named `delete` fails the same
+/// way, even though `delete` is a legal JS property key.
+const CPP_KEYWORDS: &[&str] = &[
+    "alignas",
+    "alignof",
+    "and",
+    "and_eq",
+    "asm",
+    "auto",
+    "bitand",
+    "bitor",
+    "bool",
+    "break",
+    "case",
+    "catch",
+    "char",
+    "char8_t",
+    "char16_t",
+    "char32_t",
+    "class",
+    "co_await",
+    "co_return",
+    "co_yield",
+    "compl",
+    "concept",
+    "const",
+    "const_cast",
+    "consteval",
+    "constexpr",
+    "constinit",
+    "continue",
+    "decltype",
+    "default",
+    "delete",
+    "do",
+    "double",
+    "dynamic_cast",
+    "else",
+    "enum",
+    "explicit",
+    "export",
+    "extern",
+    "false",
+    "float",
+    "for",
+    "friend",
+    "goto",
+    "if",
+    "import",
+    "inline",
+    "int",
+    "long",
+    "module",
+    "mutable",
+    "namespace",
+    "new",
+    "noexcept",
+    "not",
+    "not_eq",
+    "nullptr",
+    "operator",
+    "or",
+    "or_eq",
+    "private",
+    "protected",
+    "public",
+    "register",
+    "reinterpret_cast",
+    "requires",
+    "return",
+    "short",
+    "signed",
+    "sizeof",
+    "static",
+    "static_assert",
+    "static_cast",
+    "struct",
+    "switch",
+    "template",
+    "this",
+    "thread_local",
+    "throw",
+    "true",
+    "try",
+    "typedef",
+    "typeid",
+    "typename",
+    "union",
+    "unsigned",
+    "using",
+    "virtual",
+    "void",
+    "volatile",
+    "wchar_t",
+    "while",
+    "xor",
+    "xor_eq",
+];
+
 /// `mx-js-syntax`: syntax constructs the translator cannot handle. Every
 /// entry below was verified to produce uncompilable C++ or silently
 /// dropped code (see the translator probes, not the stale coverage doc:
@@ -603,6 +716,13 @@ impl<'a> Visit<'a> for JsSyntaxVisitor {
                     m.span.start,
                     "`import.meta`",
                     "Pass build-time values in through imports or constants",
+                ));
+            }
+            Expression::RegExpLiteral(r) => {
+                self.out.push((
+                    r.span.start,
+                    "regular expression literal",
+                    "Use a `.cpp` helper or plain string checks instead",
                 ));
             }
             _ => {}
@@ -681,7 +801,89 @@ impl<'a> Visit<'a> for JsSyntaxVisitor {
             ));
             return;
         }
+        if let Declaration::TSEnumDeclaration(e) = d {
+            self.out.push((
+                e.span.start,
+                "`enum` declaration",
+                "Use a plain object const with string/number literals",
+            ));
+            return;
+        }
         oxc_ast_visit::walk::walk_declaration(self, d);
+    }
+    fn visit_import_declaration(&mut self, d: &ImportDeclaration<'a>) {
+        // Type-only imports are erased before codegen; their names never
+        // become C++ bindings, so they cannot collide with keywords.
+        if matches!(d.import_kind, ImportOrExportKind::Type) {
+            return;
+        }
+        if d.specifiers.as_ref().is_some_and(|specs| {
+            specs
+                .iter()
+                .any(|s| matches!(s, ImportDeclarationSpecifier::ImportNamespaceSpecifier(_)))
+        }) {
+            self.out.push((
+                d.span.start,
+                "`import * as` namespace import",
+                "Import the names explicitly: `import { token, greet } from './lib.ts'`",
+            ));
+            return;
+        }
+        oxc_ast_visit::walk::walk_import_declaration(self, d);
+    }
+    fn visit_import_specifier(&mut self, s: &ImportSpecifier<'a>) {
+        if matches!(s.import_kind, ImportOrExportKind::Type) {
+            return;
+        }
+        oxc_ast_visit::walk::walk_import_specifier(self, s);
+    }
+    // Type-only syntax is erased before codegen. Its contents never
+    // become runtime bindings, so rest params / keyword names inside a
+    // type alias or annotation must not reject an otherwise valid file.
+    fn visit_ts_type_alias_declaration(&mut self, _d: &TSTypeAliasDeclaration<'a>) {}
+    fn visit_ts_interface_declaration(&mut self, _d: &TSInterfaceDeclaration<'a>) {}
+    fn visit_ts_type_annotation(&mut self, _a: &TSTypeAnnotation<'a>) {}
+    fn visit_formal_parameter_rest(&mut self, p: &FormalParameterRest<'a>) {
+        self.out.push((
+            p.span.start,
+            "rest parameter (`...args`)",
+            "Pass an array parameter explicitly instead",
+        ));
+        oxc_ast_visit::walk::walk_formal_parameter_rest(self, p);
+    }
+    fn visit_binding_identifier(&mut self, id: &BindingIdentifier<'a>) {
+        if CPP_KEYWORDS.contains(&id.name.as_str()) {
+            self.out.push((
+                id.span.start,
+                "C++ keyword as a binding name",
+                "Rename the binding — C++ reserves this word",
+            ));
+        }
+    }
+    fn visit_property_definition(&mut self, p: &PropertyDefinition<'a>) {
+        self.check_member_key(&p.key);
+        oxc_ast_visit::walk::walk_property_definition(self, p);
+    }
+    fn visit_method_definition(&mut self, m: &MethodDefinition<'a>) {
+        self.check_member_key(&m.key);
+        oxc_ast_visit::walk::walk_method_definition(self, m);
+    }
+}
+
+impl<'a> JsSyntaxVisitor {
+    fn check_member_key(&mut self, key: &PropertyKey<'a>) {
+        let (name, start) = match key {
+            PropertyKey::StaticIdentifier(id) => (id.name.as_str(), id.span.start),
+            PropertyKey::Identifier(id) => (id.name.as_str(), id.span.start),
+            _ => return,
+        };
+        if CPP_KEYWORDS.contains(&name) {
+            self.out.push((
+                start,
+                "C++ keyword as a class member name",
+                "Rename the field or method — C++ reserves this word",
+            ));
+        }
     }
 }
 
@@ -1062,6 +1264,15 @@ fn collect_state_kinds(program: &Program, content: &str) -> HashMap<String, Recv
                             self.out.insert(getter, kind);
                         }
                     }
+                }
+            }
+            // Plain literals used as locals: `const xs = [1, 2, 3]`
+            // makes `xs.sort()` provably an array method. Keep the
+            // morphState-derived kind when both apply.
+            if let (BindingPattern::BindingIdentifier(id), Some(init)) = (&d.id, &d.init) {
+                let text = span_text(self.content, init.span().start, init.span().end);
+                if let Some(kind) = sniff_state_kind(None, text) {
+                    self.out.entry(id.name.to_string()).or_insert(kind);
                 }
             }
             oxc_ast_visit::walk::walk_variable_declarator(self, d);
@@ -1919,7 +2130,7 @@ fn check_state_init(
         Expression::ObjectExpression(_) => {
             ("use one morphState per field instead of an object", "object state initializers")
         }
-        Expression::Identifier(id) => {
+        Expression::Identifier(_) => {
             ("initialize with a literal value instead of a variable", "variable state initializers")
         }
         _ => (
@@ -1938,18 +2149,11 @@ fn check_state_init(
     );
 }
 
-/// Initializer shapes the component-const pipeline drops: only plain
-/// top-level statements become reactive lambdas, and only for value
-/// initializers. Arrows, function/class expressions and object literals
-/// vanish — each verified to break the C++ compile.
+/// Initializer shapes the component-const pipeline still cannot lower.
+/// Arrow/function/object consts now lower (functions as inner functions,
+/// objects as `JsObject`); class expressions have no native equivalent.
 const fn unlowerable_const_init(init: &Expression) -> Option<(&'static str, &'static str)> {
     match init {
-        Expression::ArrowFunctionExpression(_) | Expression::FunctionExpression(_) => {
-            Some(("function expressions assigned to consts", "use a function declaration instead"))
-        }
-        Expression::ObjectExpression(_) => {
-            Some(("object literals in component consts", "declare each field with its own const"))
-        }
         Expression::ClassExpression(_) => {
             Some(("class expressions assigned to consts", "use a class declaration instead"))
         }
@@ -4352,7 +4556,7 @@ fn resolve_in_graph(
         if !imp.kind.is_module_source() {
             continue;
         }
-        let MxImportKind::Component { path: raw, default, specifiers } = &imp.kind else {
+        let MxImportKind::Component { path: raw, default, specifiers, .. } = &imp.kind else {
             continue;
         };
         let is_default = default.as_deref() == Some(local);
@@ -4669,6 +4873,18 @@ mod tests {
     }
 
     #[test]
+    fn promise_static_helpers_report_js_member() {
+        let content = "import { morphState } from 'morph'\nexport default function App() {\n  const p = Promise.resolve(1);\n  return (<div>x</div>)\n}\n";
+        let errs = check(content, "App.mx");
+        let err = errs
+            .iter()
+            .find(|e| e.code == "mx-js-member")
+            .unwrap_or_else(|| panic!("Promise.resolve fires mx-js-member, got {errs:?}"));
+        assert!(err.message.contains("Promise.resolve"), "{err:?}");
+        assert!(!codes(&errs).contains(&"mx-js-syntax"), "{errs:?}");
+    }
+
+    #[test]
     fn supported_builtins_stay_quiet() {
         // Lowered builtins (Math.min, JSON.parse, Object.keys, conversions)
         // must not trip mx-js-member, including nested in member chains.
@@ -4777,6 +4993,79 @@ mod tests {
     #[test]
     fn translatable_syntax_stays_quiet() {
         let content = "import { morphState } from 'morph'\nclass A { greet(): any { return 1; } }\nclass B extends A { m(): any { return super.greet(); } }\nexport default function App() {\n  const arr = [...[1]];\n  for (let i = 0; i < 2; i++) { if (i) { break; } }\n  return (<div>{arr.length}</div>)\n}\n";
+        let errs = check(content, "App.mx");
+        assert!(!codes(&errs).contains(&"mx-js-syntax"), "{errs:?}");
+    }
+
+    #[test]
+    fn runtime_only_syntax_rejections_error() {
+        let cases = [
+            ("const r = /ab+c/;", "regular expression literal"),
+            ("enum Color { Red }", "`enum` declaration"),
+            ("function f(...xs: number[]) { return xs }", "rest parameter"),
+        ];
+        for (stmt, what) in cases {
+            let content = format!(
+                "import {{ morphState }} from 'morph'\nconst x = {{}};\n{stmt}\nexport default function App() {{ return (<div>x</div>) }}\n"
+            );
+            let errs = check(&content, "App.mx");
+            let err = errs
+                .iter()
+                .find(|e| e.code == "mx-js-syntax")
+                .unwrap_or_else(|| panic!("{stmt} fires mx-js-syntax, got {errs:?}"));
+            assert!(err.message.contains(what), "{err:?}");
+        }
+    }
+
+    #[test]
+    fn await_inside_async_stays_quiet() {
+        let content = "import { morphState } from 'morph'\nexport default function App() {\n  async function load() { await fetch(\"http://127.0.0.1\"); }\n  return (<div onClick={load}>x</div>)\n}\n";
+        let errs = check(content, "App.mx");
+        assert!(!codes(&errs).contains(&"mx-js-syntax"), "{errs:?}");
+    }
+
+    #[test]
+    fn namespace_imports_error() {
+        let content = "import { morphState } from 'morph'\nimport * as lib from './lib.ts';\nexport default function App() { return (<div>{lib.token}</div>) }\n";
+        let errs = check(content, "App.mx");
+        let err = errs
+            .iter()
+            .find(|e| e.code == "mx-js-syntax")
+            .unwrap_or_else(|| panic!("namespace import fires mx-js-syntax, got {errs:?}"));
+        assert!(err.message.contains("`import * as` namespace import"), "{err:?}");
+    }
+
+    #[test]
+    fn cpp_keyword_bindings_error() {
+        for name in ["int", "goto", "double", "template", "co_await"] {
+            let content = format!(
+                "import {{ morphState }} from 'morph'\nexport default function App() {{\n  const {name} = 1;\n  return (<div>{name}</div>)\n}}\n"
+            );
+            let errs = check(&content, "App.mx");
+            let err = errs
+                .iter()
+                .find(|e| e.code == "mx-js-syntax")
+                .unwrap_or_else(|| panic!("{name} fires mx-js-syntax, got {errs:?}"));
+            assert!(err.message.contains("C++ keyword as a binding name"), "{err:?}");
+        }
+    }
+
+    #[test]
+    fn cpp_keyword_class_members_error() {
+        let content = "import { morphState } from 'morph'\nclass C {\n  int = 1;\n  delete() { return 1 }\n}\nexport default function App() { return (<div>x</div>) }\n";
+        let errs = check(content, "App.mx");
+        let members: Vec<_> = errs
+            .iter()
+            .filter(|e| e.code == "mx-js-syntax" && e.message.contains("class member"))
+            .collect();
+        assert_eq!(members.len(), 2, "{errs:?}");
+    }
+
+    #[test]
+    fn type_only_positions_stay_quiet() {
+        // Type aliases and annotations are erased; rest params and keyword
+        // names inside them must not resolve to runtime C++ bindings.
+        let content = "import { morphState } from 'morph'\nimport type { double } from './types.ts';\nimport { type float } from './types.ts';\ntype F = (...args: string[]) => void;\ntype long = number;\nconst unused: F | undefined = undefined;\nexport default function App() {\n  const x: long = 1;\n  return (<div>{x}</div>)\n}\n";
         let errs = check(content, "App.mx");
         assert!(!codes(&errs).contains(&"mx-js-syntax"), "{errs:?}");
     }
@@ -4945,23 +5234,27 @@ mod tests {
     }
 
     #[test]
-    fn unlowerable_const_inits_error() {
-        for (init, what) in [
-            ("() => 1", "function expressions assigned to consts"),
-            ("function() { return 1; }", "function expressions assigned to consts"),
-            ("{ tag: \"x\" }", "object literals in component consts"),
-            ("class { m() { return 1; } }", "class expressions assigned to consts"),
-        ] {
+    fn function_and_object_const_inits_stay_quiet() {
+        // Arrow/function consts lower like inner functions; object
+        // literals lower to JsObject. Neither is a syntax error.
+        for init in ["() => 1", "function() { return 1; }", "{ tag: \"x\" }"] {
             let content = format!(
-                "import {{ morphState }} from 'morph'\nexport default function App() {{\n  const h = {init};\n  return (<div>{{h()}}</div>)\n}}\n"
+                "import {{ morphState }} from 'morph'\nexport default function App() {{\n  const h = {init};\n  return (<div>{{h}}</div>)\n}}\n"
             );
             let errs = check(&content, "App.mx");
-            let err = errs
-                .iter()
-                .find(|e| e.code == "mx-js-syntax")
-                .unwrap_or_else(|| panic!("{init} fires mx-js-syntax, got {errs:?}"));
-            assert!(err.message.contains(what), "{err:?}");
+            assert!(!errs.iter().any(|e| e.code == "mx-js-syntax"), "{init}: {errs:?}");
         }
+    }
+
+    #[test]
+    fn class_expression_consts_error() {
+        let content = "import { morphState } from 'morph'\nexport default function App() {\n  const C = class { m() { return 1; } };\n  return (<div>{C.name}</div>)\n}\n";
+        let errs = check(content, "App.mx");
+        let err = errs
+            .iter()
+            .find(|e| e.code == "mx-js-syntax")
+            .unwrap_or_else(|| panic!("class expression fires mx-js-syntax, got {errs:?}"));
+        assert!(err.message.contains("class expressions assigned to consts"), "{err:?}");
     }
 
     #[test]

@@ -18,11 +18,15 @@ pub struct CppTranslator<'a> {
     source: &'a str,
     pub ctx: Ctx,
     type_mode: TypeMode,
-    analysis: Option<crate::codegen::analyzer::AnalysisResult>,
+    analysis: Option<AnalysisResult>,
     comparison_uses: HashSet<ComparisonSignature>,
     narrow_index: HashMap<(String, u32), (String, String)>,
     active_narrows: HashMap<String, String>,
     destructure_count: usize,
+    /// When set, top-level forward declarations omit parameter defaults.
+    /// Project builds declare the defaults once in `morph_api.h`; repeating
+    /// them on the premain prototype is a C++ redefinition error.
+    omit_param_defaults: bool,
 }
 
 /// One access step from a destructured root to a bound name.
@@ -135,6 +139,35 @@ fn is_void_timer_call(expr: &Expression<'_>) -> bool {
     false
 }
 
+/// Default C++ initializer for a TS optional parameter (`name?: T`).
+/// Optional means "may be omitted": containers/strings default-construct,
+/// numbers/bools take their zero value, and JS values become `undefined`
+/// so `x ?? fallback` keeps its JS meaning.
+fn optional_param_default(cpp_type: &str) -> &'static str {
+    let ty = cpp_type.trim();
+    if ty == "auto" || ty == "JsValue" {
+        "JsValue(JsUndefined{})"
+    } else if ty == "JsNumber" || ty == "double" || ty == "float" {
+        "0"
+    } else if ty.starts_with("int")
+        || ty.starts_with("uint")
+        || ty.starts_with("long")
+        || ty.starts_with("short")
+        || ty == "size_t"
+    {
+        "0"
+    } else if ty == "bool" || ty == "JsBoolean" {
+        "false"
+    } else if ty.starts_with("std::shared_ptr")
+        || ty.starts_with("std::unique_ptr")
+        || ty.contains('*')
+    {
+        "nullptr"
+    } else {
+        "{}"
+    }
+}
+
 impl<'a> CppTranslator<'a> {
     pub fn new(
         source: &'a str,
@@ -155,8 +188,13 @@ impl<'a> CppTranslator<'a> {
             narrow_index: HashMap::new(),
             active_narrows: HashMap::new(),
             destructure_count: 0,
+            omit_param_defaults: false,
         };
         this
+    }
+
+    pub fn set_omit_param_defaults(&mut self, omit: bool) {
+        self.omit_param_defaults = omit;
     }
 
     fn span_text(&self, span: oxc_span::Span) -> &'a str {
@@ -200,6 +238,13 @@ impl<'a> CppTranslator<'a> {
         if f.r#async {
             final_ret = self.ctx.async_result_type(&final_ret);
         }
+        if final_ret == "auto" {
+            if let Some(body_ref) = f.body.as_ref() {
+                if let Some(ty) = self.literal_return_type(body_ref) {
+                    final_ret = ty;
+                }
+            }
+        }
         if !f.r#async && final_ret == "JsValue" {
             if let Some(body_ref) = f.body.as_ref() {
                 if Self::returns_only_lambdas(body_ref) {
@@ -207,7 +252,11 @@ impl<'a> CppTranslator<'a> {
                 }
             }
         }
-        let params = self.format_params(&f.params);
+        let params = if self.omit_param_defaults {
+            self.format_params_no_defaults(&f.params)
+        } else {
+            self.format_params(&f.params)
+        };
         let tp = if let Some(tp) = &f.type_parameters {
             let decls: Vec<String> =
                 tp.params.iter().map(|p| format!("typename {}", p.name.name)).collect();
@@ -219,7 +268,9 @@ impl<'a> CppTranslator<'a> {
         Some((name, sig))
     }
 
-    pub fn translate_program(&mut self, program: &Program<'a>) -> String {
+    /// Run the analysis pass and register narrowed locals. Shared by whole
+    /// program emission and standalone-expression emission.
+    pub(crate) fn analyze_program(&mut self, program: &Program<'a>) {
         // Analysis always runs: escape analysis, type widening, comparison
         // tracking, and integer-range proofs feed the single emitter path.
         if self.analysis.is_none() {
@@ -233,6 +284,20 @@ impl<'a> CppTranslator<'a> {
                 );
             }
         }
+    }
+
+    /// Emit one expression for a hosting unit (component const lowering).
+    pub(crate) fn emit_expression_host(&mut self, expr: &Expression<'a>) -> String {
+        self.emit_expression(expr)
+    }
+
+    /// Inferred C++ type of a standalone expression, when known.
+    pub(crate) fn expression_type(&self, expr: &Expression<'a>) -> Option<String> {
+        self.infer_type_from_init(expr)
+    }
+
+    pub fn translate_program(&mut self, program: &Program<'a>) -> String {
+        self.analyze_program(program);
         // Pre-register every class-like name so later-defined bases,
         // `new C()` sites, and `instanceof` targets resolve regardless
         // of declaration order.
@@ -1266,8 +1331,16 @@ impl<'a> CppTranslator<'a> {
         if proven_small { "int32_t".to_string() } else { "int64_t".to_string() }
     }
 
+    /// Element type of `std::vector<T>`, including nested template
+    /// arguments (`std::vector<std::vector<JsObject>>` → `std::vector<JsObject>`).
+    fn vector_element_type(ty: &str) -> Option<String> {
+        let inner = ty.strip_prefix("std::vector<")?.strip_suffix('>')?;
+        if inner.is_empty() { None } else { Some(inner.to_string()) }
+    }
+
     fn infer_type_from_init(&self, node: &Expression<'a>) -> Option<String> {
         match node {
+            Expression::ParenthesizedExpression(p) => self.infer_type_from_init(&p.expression),
             Expression::StringLiteral(_) => Some("std::string".to_string()),
             Expression::TemplateLiteral(_) => Some("std::string".to_string()),
             Expression::BooleanLiteral(_) => Some("bool".to_string()),
@@ -1279,8 +1352,12 @@ impl<'a> CppTranslator<'a> {
                 }
             }
             Expression::NullLiteral(_) => Some("JsNull".to_string()),
-            Expression::Identifier(id) if id.name.as_str() == "undefined" => {
-                Some("JsUndefined".to_string())
+            Expression::Identifier(id) => {
+                if id.name.as_str() == "undefined" {
+                    Some("JsUndefined".to_string())
+                } else {
+                    self.ctx.var_types.get(id.name.as_str()).cloned()
+                }
             }
             Expression::ArrayExpression(arr) => {
                 if arr.elements.is_empty() {
@@ -1315,13 +1392,21 @@ impl<'a> CppTranslator<'a> {
             }
             Expression::ObjectExpression(_) => Some("JsObject".to_string()),
             Expression::ComputedMemberExpression(m) => {
-                // Check if we're indexing into a JsArray
-                if let Expression::Identifier(id) = &m.object {
-                    if let Some(var_type) = self.ctx.var_types.get(id.name.as_str()) {
-                        if var_type == "JsArray" {
-                            return Some("JsValue".to_string());
-                        }
-                    }
+                let obj_type = self.infer_type_from_init(&m.object)?;
+                if obj_type == "JsArray" || obj_type == "JsObject" {
+                    return Some("JsValue".to_string());
+                }
+                // `std::vector<JsObject>[i]` yields the element type, so
+                // chained member access can choose bracket notation.
+                if let Some(elem) = Self::vector_element_type(&obj_type) {
+                    return Some(elem);
+                }
+                None
+            }
+            Expression::StaticMemberExpression(m) => {
+                let obj_type = self.infer_type_from_init(&m.object)?;
+                if obj_type == "JsObject" || obj_type == "JsValue" || obj_type == "JsArray" {
+                    return Some("JsValue".to_string());
                 }
                 None
             }
@@ -1353,20 +1438,24 @@ impl<'a> CppTranslator<'a> {
                 }
                 Some("JsValue".to_string())
             }
-            Expression::Identifier(id) => self.ctx.var_types.get(id.name.as_str()).cloned(),
             Expression::CallExpression(c) => {
+                let Expression::Identifier(id) = &c.callee else {
+                    return None;
+                };
                 // Timer handles are ints in the runtime (`task.h`): naming
                 // the type (instead of `auto`) lets escaping declarations
                 // wrap in `shared_ptr` so cleanup closures capture the
                 // handle safely (docs/dev/bugs#4).
-                if let Expression::Identifier(id) = &c.callee {
-                    match id.name.as_str() {
-                        "setTimeout" | "setInterval" => Some("int".to_string()),
-                        _ => None,
-                    }
-                } else {
-                    None
+                if matches!(id.name.as_str(), "setTimeout" | "setInterval") {
+                    return Some("int".to_string());
                 }
+                // Ambient function return types let `make().name` choose
+                // bracket access when `make` returns a JsObject.
+                self.ctx
+                    .fn_return_types
+                    .get(id.name.as_str())
+                    .or_else(|| self.ctx.var_types.get(id.name.as_str()))
+                    .cloned()
             }
             _ => None,
         }
@@ -1989,7 +2078,15 @@ impl<'a> CppTranslator<'a> {
                 "void".to_string()
             }
         };
-        let params = self.format_params(&f.params);
+        // A top-level definition never repeats defaults: they live on the
+        // forward declaration (standalone output) or `morph_api.h`
+        // (project builds). Nested functions become lambdas with no
+        // prototype, so they keep their defaults at the definition.
+        let params = if is_nested {
+            self.format_params(&f.params)
+        } else {
+            self.format_params_no_defaults(&f.params)
+        };
         if name == "main" && is_async {
             let code = self.emit_async_main(f, &ret, &params);
             self.ctx.has_infinite_loop = old_has_loop || self.ctx.has_infinite_loop;
@@ -1998,6 +2095,13 @@ impl<'a> CppTranslator<'a> {
         let mut final_ret = ret.clone();
         if is_async {
             final_ret = self.ctx.async_result_type(&ret);
+        }
+        if !is_async && final_ret == "auto" {
+            if let Some(body_ref) = f.body.as_ref() {
+                if let Some(ty) = self.literal_return_type(body_ref) {
+                    final_ret = ty;
+                }
+            }
         }
         // Intent-based: sync fn annotated Promise<T> (Result<T>) but returning plain value
         // should return T directly to match JS runtime (e.g. wrap<T>(x:T): Promise<T> { return x; })
@@ -2238,6 +2342,42 @@ impl<'a> CppTranslator<'a> {
         }
     }
 
+    /// Return type for a function whose body returns only literals. This
+    /// keeps `auto` from swallowing an object factory: callers need the
+    /// concrete `JsObject` type to choose bracket member access.
+    fn literal_return_type(&self, body: &FunctionBody<'a>) -> Option<String> {
+        let mut args = Vec::new();
+        Self::collect_returns(&body.statements, &mut args);
+        if args.is_empty() {
+            return None;
+        }
+        let mut ty: Option<String> = None;
+        for arg in args {
+            let literal = matches!(
+                Self::unwrap_expr(arg),
+                Expression::ObjectExpression(_)
+                    | Expression::ArrayExpression(_)
+                    | Expression::StringLiteral(_)
+                    | Expression::TemplateLiteral(_)
+                    | Expression::BooleanLiteral(_)
+                    | Expression::NumericLiteral(_)
+                    | Expression::NullLiteral(_)
+            ) || matches!(
+                Self::unwrap_expr(arg),
+                Expression::Identifier(id) if id.name.as_str() == "undefined"
+            );
+            if !literal {
+                return None;
+            }
+            let this = self.infer_type_from_init(arg)?;
+            if ty.as_ref().is_some_and(|prev| prev != &this) {
+                return None;
+            }
+            ty = Some(this);
+        }
+        ty
+    }
+
     fn all_returns_plain(body: &FunctionBody<'a>) -> bool {
         let mut args = Vec::new();
         Self::collect_returns(&body.statements, &mut args);
@@ -2305,6 +2445,18 @@ impl<'a> CppTranslator<'a> {
     }
 
     fn format_params(&mut self, params: &FormalParameters<'a>) -> String {
+        self.format_params_impl(params, true)
+    }
+
+    fn format_params_no_defaults(&mut self, params: &FormalParameters<'a>) -> String {
+        self.format_params_impl(params, false)
+    }
+
+    fn format_params_impl(
+        &mut self,
+        params: &FormalParameters<'a>,
+        include_defaults: bool,
+    ) -> String {
         let mut parts = Vec::new();
         for p in &params.items {
             let destructured = self.expand_destructured_param(&p.pattern);
@@ -2336,9 +2488,14 @@ impl<'a> CppTranslator<'a> {
                 self.ctx.need("std::string_view");
             }
             let mut decl = format!("{} {}", param_cpp, name);
-            // Default value is in FormalParameter.initializer, not in pattern
-            if let Some(init) = &p.initializer {
-                decl.push_str(&format!(" = {}", self.emit_expression(init)));
+            if include_defaults {
+                // Default value is in FormalParameter.initializer, not in pattern.
+                if let Some(init) = &p.initializer {
+                    decl.push_str(&format!(" = {}", self.emit_expression(init)));
+                } else if p.optional {
+                    // TS `name?: T` means "may be omitted".
+                    decl.push_str(&format!(" = {}", optional_param_default(&cpp_type)));
+                }
             }
             parts.push(decl);
         }
@@ -4987,10 +5144,15 @@ impl<'a> CppTranslator<'a> {
                 Some("JsObject") | Some("JsValue")
             );
         }
-        // For chained access like `a.b.c` or `arr[i].prop`, be conservative:
-        // Only use bracket for JsObject/JsValue property access, not for JsString/JsArray methods
-        // `arr[i]` returns JsValue, but `arr[i].toUpperCase()` should be dot, not bracket
-        // So don't automatically return true for Static/ComputedMemberExpression
+        // For chained access like `a.b.c` or `arr[i].prop`, infer the
+        // receiver type. `users[0]` on `std::vector<JsObject>` is a
+        // JsObject and must bracket; `arr[i]` on a vector<string> stays
+        // dot for string methods.
+        if let Some(t) = self.infer_type_from_init(obj_node) {
+            if t == "JsObject" || t == "JsValue" {
+                return true;
+            }
+        }
         if let Some(t) = self.ctx.var_types.get(obj_str) {
             return t == "JsObject" || t == "JsValue";
         }

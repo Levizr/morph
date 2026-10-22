@@ -1,33 +1,36 @@
 use morph_ir::{IRNode, IRStyle, Length};
 use std::fmt::Write as _;
 
-/// Handler bodies mentioning window constructs (`new Window(…)` /
-/// `useWindow(`, or the already-substituted `__morph_current_window(` /
-/// `__morph_use_window(` placeholders from cross-snippet `const win`
-/// bindings) translate through morpher (placeholder lowering +
-/// handle tracking); everything else keeps the textual path.
-/// Nonzero indent avoids `static` locals — handlers run per event.
-fn translate_window_handler(body: &str) -> Option<String> {
-    if !(body.contains("new Window(")
-        || body.contains("useWindow(")
-        || body.contains("__morph_current_window(")
-        || body.contains("__morph_use_window("))
-    {
-        return None;
-    }
+/// Translate an event handler target to a C++ handler body.
+///
+/// The IR stores the JS target (an arrow, a block, or a handler
+/// identifier). Morpher lowers arrows anywhere in the body — including
+/// callback arguments like `setCount(c => c + 1)` — while the textual
+/// path cannot. Window placeholders lower through the same pass because
+/// their `__morph_current_window(…)` calls are valid ambient expressions.
+/// Nonzero indent avoids `static` locals: handlers run per event.
+fn translate_handler_target(
+    body: &str,
+    state_map: &std::collections::HashMap<String, String>,
+    state_types: &std::collections::HashMap<String, String>,
+) -> Option<String> {
     // Unwrap the arrow and braced block to bare statements first:
     // morpher translates `{ ... }` / `() => ...` into a never-invoked
-    // lambda value (`[]() -> auto {...};`) instead of splicing
-    // statements into the handler body. (Mirrors translate_handler's
-    // arrow-stripping in logic_emitter.)
+    // lambda value instead of splicing statements into the handler body.
     let mut body = body.trim();
     if let Some(idx) = body.find("=>") {
         body = body[idx + 2..].trim();
     }
-    let body =
-        body.strip_prefix('{').and_then(|b| b.strip_suffix('}')).map(str::trim).unwrap_or(body);
-    let mut options = morpher::TranslateOptions::default();
-    options.indent = 1;
+    let body = body.strip_prefix('{').and_then(|b| b.strip_suffix('}')).map_or(body, str::trim);
+    if body.is_empty() {
+        return None;
+    }
+    let options = morpher::TranslateOptions {
+        indent: 1,
+        state_vars: state_map.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        state_types: state_types.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        ..Default::default()
+    };
     morpher::translate_snippet(body, "snippet.ts", options)
         .ok()
         .map(|out| out.body.trim().to_string())
@@ -39,13 +42,15 @@ fn translate_window_handler(body: &str) -> Option<String> {
 /// formatting) lower exactly like component bodies; the textual
 /// substitution stays the fallback for shapes the snippet parser cannot
 /// represent (already-lowered C++, row aliases, etc.).
-fn translate_text_expr<S: std::hash::BuildHasher>(
+fn translate_text_expr<S: std::hash::BuildHasher, T: std::hash::BuildHasher>(
     js: &str,
     state_map: &std::collections::HashMap<String, String, S>,
+    state_types: &std::collections::HashMap<String, String, T>,
 ) -> String {
     let options = morpher::TranslateOptions {
         indent: 1,
         state_vars: state_map.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        state_types: state_types.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
         ..Default::default()
     };
     if let Ok(out) = morpher::translate_snippet(js, "snippet.ts", options) {
@@ -1081,7 +1086,14 @@ pub fn emit_node(
     parent_id: Option<&str>,
     features: &std::collections::HashSet<String>,
 ) -> String {
-    emit_node_with_state(node, parent_id, features, &std::collections::HashMap::new(), None)
+    emit_node_with_state(
+        node,
+        parent_id,
+        features,
+        &std::collections::HashMap::new(),
+        &std::collections::HashMap::new(),
+        None,
+    )
 }
 
 pub fn emit_node_with_state(
@@ -1089,13 +1101,14 @@ pub fn emit_node_with_state(
     parent_id: Option<&str>,
     features: &std::collections::HashSet<String>,
     state_map: &std::collections::HashMap<String, String>,
+    state_types: &std::collections::HashMap<String, String>,
     parent_style: Option<&IRStyle>,
 ) -> String {
     let mut lines = Vec::new();
     let indent = "    ";
 
     if node.node_type == "__list__" {
-        return emit_list(node, parent_id, indent, state_map);
+        return emit_list(node, parent_id, indent, state_map, state_types);
     }
     if node.node_type == "__text__" || node.node_type == "__expr__" {
         let escaped = node
@@ -1122,7 +1135,7 @@ pub fn emit_node_with_state(
             lines.push(format!("{pid}->addChild({});", node.node_id));
         }
         if !node.reactive_text.is_empty() {
-            let cpp_expr = translate_text_expr(&node.reactive_text, state_map);
+            let cpp_expr = translate_text_expr(&node.reactive_text, state_map, state_types);
             let expr = cpp_expr.trim().trim_end_matches(';').to_string();
             let caps = effect_captures(&node.node_id, &[&expr]);
             lines.push(format!(
@@ -1135,7 +1148,15 @@ pub fn emit_node_with_state(
         return lines.join("\n");
     }
     if node.node_type == "__conditional__" {
-        return emit_conditional(node, parent_id, indent, features, state_map, parent_style);
+        return emit_conditional(
+            node,
+            parent_id,
+            indent,
+            features,
+            state_map,
+            state_types,
+            parent_style,
+        );
     }
 
     // Regular element
@@ -1251,11 +1272,10 @@ pub fn emit_node_with_state(
             // Already a complete lambda (handler-ref form built in the IR builder).
             ev.target.clone()
         } else {
-            // Window constructs lower through morpher (same placeholders
-            // as everywhere else); the textual path below would pass
-            // `new Window(` through raw. Falls back to textual on error.
-            let cpp = match translate_window_handler(&ev.target) {
-                Some(body) => body,
+            // Window constructs and callback arguments both need morpher;
+            // the textual path below cannot lower either.
+            let cpp = match translate_handler_target(&ev.target, state_map, state_types) {
+                Some(body) => normalize_value_access(&body),
                 None => translate_js(&ev.target, state_map),
             };
             // Inside a list-item factory `__it` / `__index` alias the
@@ -1282,6 +1302,7 @@ pub fn emit_node_with_state(
             Some(&node.node_id),
             features,
             state_map,
+            state_types,
             Some(&node.style),
         ));
     }
@@ -1350,6 +1371,7 @@ fn emit_conditional(
     indent: &str,
     features: &std::collections::HashSet<String>,
     state_map: &std::collections::HashMap<String, String>,
+    state_types: &std::collections::HashMap<String, String>,
     parent_style: Option<&IRStyle>,
 ) -> String {
     let mut lines =
@@ -1374,20 +1396,23 @@ fn emit_conditional(
     let mut then_code = String::new();
     let mut then_var = String::new();
     for tn in &node.then_nodes {
-        then_code = emit_node_with_state(tn, None, features, state_map, parent_style);
+        then_code = emit_node_with_state(tn, None, features, state_map, state_types, parent_style);
         then_var = tn.node_id.clone();
         break;
     }
     let mut else_code = String::new();
     let mut else_var = String::new();
     for en in &node.else_nodes {
-        else_code = emit_node_with_state(en, None, features, state_map, parent_style);
+        else_code = emit_node_with_state(en, None, features, state_map, state_types, parent_style);
         else_var = en.node_id.clone();
         break;
     }
     lines.push(format!("{}->m_associatedEffects.push_back(morph::create_effect([{}, {then_slot}, {else_slot}]() {{", node.node_id, node.node_id));
     let bi = format!("{indent}    ");
-    lines.push(format!("{bi}if ({}) {{", translate_condition(&node.condition_expr, state_map)));
+    lines.push(format!(
+        "{bi}if ({}) {{",
+        translate_text_expr(&node.condition_expr, state_map, state_types).trim()
+    ));
     lines.push(format!("{bi}    if (*{else_slot}) {{ {0}->removeChild(*{else_slot}); delete *{else_slot}; *{else_slot}=nullptr; }}", node.node_id));
     if !then_code.is_empty() {
         lines.push(format!("{bi}    if (!*{then_slot}) {{"));
@@ -1420,6 +1445,7 @@ fn emit_list(
     parent_id: Option<&str>,
     _indent: &str,
     state_map: &std::collections::HashMap<String, String>,
+    state_types: &std::collections::HashMap<String, String>,
 ) -> String {
     let mut lines = vec![format!(
         "morph::ListContainer* {} = new morph::ListContainer({}, {}, {}, {});",
@@ -1432,7 +1458,10 @@ fn emit_list(
     if let Some(pid) = parent_id {
         lines.push(format!("{pid}->addChild({});", node.node_id));
     }
-    let array_expr = translate_js(&node.list_expr, state_map);
+    // Morpher first so array producers like `Object.keys(obj)` lower to
+    // the runtime (`JsArray(...sorted_keys())`) instead of passing through
+    // as C++-invalid JS. The textual path stays for already-lowered shapes.
+    let array_expr = translate_text_expr(&node.list_expr, state_map, state_types);
     let array_expr = array_expr.trim().trim_end_matches(';').to_string();
     lines.push(format!("{}->arrayFn = []() {{ return {}; }};", node.node_id, array_expr));
     lines.push(format!("{}->itemFactory = __list_factory_{};", node.node_id, node.node_id));
@@ -3555,15 +3584,20 @@ mod tests {
 
     #[test]
     fn window_handler_lowers_placeholder_handles() {
-        let out = translate_window_handler("() => __morph_current_window().navigate(\"/ledger\")")
-            .expect("placeholder handler lowers");
+        let empty = HashMap::new();
+        let out = translate_handler_target(
+            "() => __morph_current_window().navigate(\"/ledger\")",
+            &empty,
+            &empty,
+        )
+        .expect("placeholder handler lowers");
         assert!(
             out.contains("__morph_win_navigate(__morph_current_window(), \"/ledger\", JsObject{})"),
             "{out}"
         );
         assert!(
-            translate_window_handler("() => setCount(count + 1)").is_none(),
-            "plain handlers keep the textual path"
+            translate_handler_target("() => setCount(count + 1)", &empty, &empty).is_some(),
+            "plain handlers also lower through morpher now"
         );
     }
 

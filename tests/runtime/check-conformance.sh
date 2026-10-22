@@ -45,7 +45,7 @@ run_fail() {
     local dir="$CONF/$name"
     rm -rf "$dir/.morph"
     local cout
-    cout="$(cd "$dir" && "$MORPH" check 2>&1)"
+    cout="$(cd "$dir" && "$MORPH" check 2>&1)" || true
     check "grep -q \"error : $code\" <<<\"\$cout\"" "$name check reports $code"
     local bout rc=0
     bout="$(cd "$dir" && "$MORPH" build --no-upx 2>&1)" || rc=$?
@@ -61,6 +61,8 @@ run_pass pass-css
 run_pass pass-js-types
 run_pass pass-arrow-default
 run_pass pass-export-spellings
+run_pass pass-const-inits
+run_pass pass-async
 
 run_fail fail-math-member mx-js-member
 run_fail fail-pow-op mx-js-op
@@ -73,6 +75,7 @@ run_fail fail-labeled-break mx-js-syntax
 run_fail fail-import-meta mx-js-syntax
 run_fail fail-dyn-import mx-js-syntax
 run_fail fail-namespace mx-js-syntax
+run_fail fail-namespace-import mx-js-syntax
 run_fail fail-array-map mx-js-method
 run_fail fail-str-method mx-js-method
 run_fail fail-document-global mx-js-global

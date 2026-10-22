@@ -350,7 +350,15 @@ impl FeatureSet {
                 // task scheduler — net implies tasks.
                 self.features.insert("tasks".into());
             }
-            if has("set_timeout(") || has("set_interval(") || has("co_await") || has("morph::Task")
+            if has("set_timeout(")
+                || has("setTimeout(")
+                || has("set_interval(")
+                || has("setInterval(")
+                || has("clear_timer(")
+                || has("clearTimeout(")
+                || has("clearInterval(")
+                || has("co_await")
+                || has("morph::Task")
             {
                 self.features.insert("tasks".into());
             }
@@ -435,6 +443,29 @@ impl FeatureSet {
                     ) {
                         self.features.insert("hover".into());
                         break;
+                    }
+                }
+                // Handler targets are translated at emit time; scan both
+                // the source spelling (`setTimeout`) and the lowered
+                // (`set_timeout`) form so timers in event handlers link
+                // the scheduler TU.
+                for ev in &node.events {
+                    let t = ev.target.as_str();
+                    if t.contains("setTimeout(")
+                        || t.contains("setInterval(")
+                        || t.contains("clearTimeout(")
+                        || t.contains("clearInterval(")
+                        || t.contains("set_timeout(")
+                        || t.contains("set_interval(")
+                        || t.contains("clear_timer(")
+                        || t.contains("co_await")
+                        || t.contains("morph::Task")
+                    {
+                        self.features.insert("tasks".into());
+                    }
+                    if t.contains("fetch(") || t.contains("morph::net::") {
+                        self.features.insert("net".into());
+                        self.features.insert("tasks".into());
                     }
                 }
                 // Ownership keys inside handler lambdas (`new Window`
@@ -777,6 +808,8 @@ mod tests {
             extra_headers: Vec::new(),
             state_vars: Vec::new(),
             reactive_consts: Vec::new(),
+            reactive_const_types: Default::default(),
+            fn_return_types: Default::default(),
             route_props: Vec::new(),
             shared_vars: Vec::new(),
             effect_decls: Vec::new(),
@@ -823,6 +856,8 @@ mod tests {
             extra_headers: Vec::new(),
             state_vars: Vec::new(),
             reactive_consts: Vec::new(),
+            reactive_const_types: Default::default(),
+            fn_return_types: Default::default(),
             route_props: Vec::new(),
             shared_vars: Vec::new(),
             effect_decls: Vec::new(),
@@ -906,6 +941,35 @@ mod tests {
             assert!(
                 fs.required_defines().contains(&"MORPH_FEATURE_OWNERSHIP".to_string()),
                 "{target:?} should enable ownership"
+            );
+        }
+    }
+
+    #[test]
+    fn timers_detected_in_handler_lambdas() {
+        // Timer calls in node handlers are translated at emit time; both
+        // the JS spelling and the lowered runtime spelling must link the
+        // scheduler TU (otherwise the app fails at link with an undefined
+        // `morph::set_timeout`).
+        use morph_ir::IREvent;
+        for target in [
+            "setTimeout(() => done(), 10)",
+            "setInterval(() => tick(), 100)",
+            "clearTimeout(id)",
+            "clearInterval(id)",
+            "morph::set_timeout(std::function<void()>([]() { done(); }), 10)",
+        ] {
+            let mut win = text_window("plain", "__text__");
+            win.nodes[0].events.push(IREvent {
+                trigger: "click".to_string(),
+                action: "call".to_string(),
+                target: target.to_string(),
+            });
+            let mut fs = FeatureSet::new();
+            fs.scan(std::slice::from_ref(&win));
+            assert!(
+                fs.required_defines().contains(&"MORPH_FEATURE_TASKS".to_string()),
+                "{target:?} should enable tasks"
             );
         }
     }

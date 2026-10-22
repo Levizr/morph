@@ -1965,13 +1965,14 @@
         "file": "errors/mx-js-syntax",
         "status": "production",
         "author": "PIYUSH",
-        "description": "Fix mx-js-syntax: rewriting optional chaining spread destructuring generators and for-of loops.",
+        "description": "Fix mx-js-syntax: rewrite rejected enums, regex literals, namespace imports, generators, object spread, and C++ keyword bindings.",
         "keywords": [
           "mx-js-syntax",
-          "morph optional chaining",
-          "morph spread destructuring"
+          "morph enum error",
+          "morph namespace import",
+          "morph regex literal"
         ],
-        "lastUpdated": "2026-09-21",
+        "lastUpdated": "2026-10-22",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"

@@ -26,7 +26,7 @@ morph app.ts --to cpp     # → app.cpp (intent-based codegen)
 | `morph dev [--entry]` | Start dev mode with hot reload |
 | `morph build [--static/--no-upx/--output]` | Compile production binary |
 | `morph run [binary] [--static]` | Build and run |
-| `morph check [PATH] [--migrate]` | Lint source files |
+| `morph check [PATH] [--migrate]` | Lint source files and run the build's IR preflight |
 | `morph doctor [-v/-y]` | Verify system dependencies |
 | `morph cache` | Manage fetched CSS cache |
 
@@ -54,7 +54,7 @@ morph update --self       # upgrade morph (downloads the release tarball)
 
 **`morph build`** — Fingerprinting incremental builds, UPX/static flags, feature detection.
 
-**`morph check`** — Exit code 0 = clean (warnings only don't fail), 1 = errors (CI-friendly).
+**`morph check`** — Lints the file set, resolves the module graph, runs cross-file checks, then (when checking the project entry) builds the same IR as `morph build` without generating or compiling C++. Checking a single component file stays lint-only. Exit code 0 = clean (warnings only don't fail), 1 = any lint, graph, or IR-preflight error (CI-friendly).
 
 **`morph doctor`** — Reports required tools (g++, cmake, make, pkg-config), mandatory graphics/text libs (GLFW, FreeType, HarfBuzz), and project state. `-v` shows verbose version info. Missing packages can be auto-installed via `-y` (no prompt) or an interactive prompt.
 

@@ -69,9 +69,12 @@ pub enum MxImportKind {
     /// Module import: `default` is the local name of a default import;
     /// `specifiers` are `(local, imported)` pairs (`import { a as b }`
     /// records `("b", "a")`; non-aliased pairs repeat the name).
+    /// `namespace` is the local name of `import * as ns` (member accesses
+    /// rewrite to the module's C++ namespace).
     Component {
         path: String,
         default: Option<String>,
+        namespace: Option<String>,
         specifiers: Vec<(String, String)>,
     },
 }

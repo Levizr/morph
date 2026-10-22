@@ -1,13 +1,12 @@
-import { morphState } from 'morph'
-
 export const windowConfig = { title: "fail-const-init", width: 800, height: 600 }
 
 export default function App() {
-  const [count, setCount] = morphState(0)
-  const handle = () => count + 1;
+  // Class expressions still have no lowering; arrow/function/object consts
+  // are covered by pass-const-inits.
+  const C = class { greet() { return "hi" } }
   return (
     <body>
-      <div>{handle()}</div>
+      <div>{C.name}</div>
     </body>
   )
 }

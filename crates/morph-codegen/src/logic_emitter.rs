@@ -255,11 +255,20 @@ fn ambient_maps(windows: &[IRWindow]) -> AmbientMaps {
         for name in &w.reactive_consts {
             vars.insert(name.clone(), format!("{name}()"));
         }
+        types.extend(w.reactive_const_types.iter().map(|(k, v)| (k.clone(), v.clone())));
+        types.extend(w.fn_return_types.iter().map(|(k, v)| (k.clone(), v.clone())));
+        for ml in &w.mutable_locals {
+            if let (Some(name), Some(ty)) = (ml.get("name"), ml.get("type")) {
+                if !name.is_empty() && !ty.is_empty() {
+                    types.insert(name.clone(), ty.clone());
+                }
+            }
+        }
     }
     AmbientMaps { vars, types }
 }
 
-fn infer_state_type(init: &str) -> Option<String> {
+pub(crate) fn infer_state_type(init: &str) -> Option<String> {
     let s = init.trim();
     if s == "true" || s == "false" {
         return Some("bool".to_string());
@@ -873,7 +882,7 @@ fn emit_list_factory(node: &IRNode, maps: &AmbientMaps) -> Option<String> {
     if !node.list_index_param.is_empty() {
         tmpl_vars.insert(node.list_index_param.clone(), "__index".to_string());
     }
-    let body = emit_node_with_state(tmpl, None, &features, &tmpl_vars, None);
+    let body = emit_node_with_state(tmpl, None, &features, &tmpl_vars, &maps.types, None);
     let mut caps = String::new();
     if body.contains("__it") {
         caps.push_str(", &__it");
@@ -956,6 +965,190 @@ pub(crate) fn extract_function_decl(cpp: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Remove C++ default arguments from project premain declarations.
+///
+/// `morph_api.h` keeps the defaults (its declarations are the discovery
+/// surface). A module function's premain entry is namespace-wrapped and
+/// starts with a forward declaration, so the second copy is a hard C++
+/// error. Strip only that leading declaration: component inner functions
+/// are unwrapped (no header declaration, their prototype must keep the
+/// default) and bodies are untouched.
+pub(crate) fn strip_param_defaults(cpp: &str) -> String {
+    let trimmed = cpp.trim();
+    if !trimmed.starts_with("namespace ") {
+        return cpp.to_string();
+    }
+    strip_wrapped_defaults(trimmed)
+}
+
+fn strip_wrapped_defaults(text: &str) -> String {
+    let t = text.trim();
+    if t.starts_with("namespace ") {
+        if let Some(open) = t.find('{') {
+            if t.ends_with('}') {
+                let head = &t[..=open];
+                let body = &t[open + 1..t.len() - 1];
+                return format!("{head}{}{}", strip_wrapped_defaults(body), "}");
+            }
+        }
+    }
+    strip_leading_decl_defaults(t)
+}
+
+/// Strip defaults from the first top-level declaration (text before the
+/// first depth-0 `;`). Definitions (`{` in the prefix) and globals pass
+/// through untouched.
+fn strip_leading_decl_defaults(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut depth = 0i32;
+    let mut i = 0usize;
+    let mut end = None;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' | b'\'' => {
+                i = skip_quoted(bytes, i);
+                continue;
+            }
+            b'{' | b'(' | b'[' => depth += 1,
+            b'}' | b')' | b']' => depth -= 1,
+            b';' if depth == 0 => {
+                end = Some(i);
+                break;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    let Some(end) = end else {
+        return text.to_string();
+    };
+    let decl = &text[..end];
+    // The parameter list is the last top-level `(...)` before the `;`.
+    // `find('(')` would pick the `()` inside a `std::function<void()>`
+    // return type instead.
+    let mut open = None;
+    let mut depth = 0i32;
+    let mut i = 0usize;
+    let bytes = decl.as_bytes();
+    while i < bytes.len() {
+        if bytes[i] == b'"' || bytes[i] == b'\'' {
+            i = skip_quoted(bytes, i);
+            continue;
+        }
+        match bytes[i] {
+            b'(' => {
+                if depth == 0 {
+                    open = Some(i);
+                }
+                depth += 1;
+            }
+            b')' => depth -= 1,
+            b'[' | b'{' => depth += 1,
+            b']' | b'}' => depth -= 1,
+            _ => {}
+        }
+        i += 1;
+    }
+    let Some(open) = open else { return text.to_string() };
+    let mut close = None;
+    let mut depth = 0i32;
+    let mut i = open;
+    while i < bytes.len() {
+        if bytes[i] == b'"' || bytes[i] == b'\'' {
+            i = skip_quoted(bytes, i);
+            continue;
+        }
+        match bytes[i] {
+            b'(' => depth += 1,
+            b')' => {
+                depth -= 1;
+                if depth == 0 {
+                    close = Some(i);
+                    break;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    let Some(close) = close else { return text.to_string() };
+    if close < open || decl[..open].contains('{') || decl[..open].contains('=') {
+        return text.to_string();
+    }
+    let params = &decl[open + 1..close];
+    if !params.contains('=') {
+        return text.to_string();
+    }
+    let stripped = strip_defaults_in_params(params);
+    format!("{}{}{}", &decl[..=open], stripped, &text[close..])
+}
+
+/// Drop each parameter's top-level `= default` tail while preserving the
+/// comma separators. Handles nested templates/parens/braces and string
+/// defaults (`name = "a,b"`). Angle brackets are tracked only in the type
+/// prefix: inside a default expression `<`/`>` can be comparisons, and
+/// treating those as template depth would swallow later parameters.
+fn strip_defaults_in_params(params: &str) -> String {
+    let bytes = params.as_bytes();
+    let mut out = String::with_capacity(params.len());
+    let mut depth = 0i32;
+    let mut angle = 0i32;
+    let mut in_default = false;
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let ch = params[i..].chars().next().unwrap_or('\0');
+        if ch == '"' || ch == '\'' {
+            let end = skip_quoted(bytes, i);
+            if !in_default {
+                out.push_str(&params[i..end]);
+            }
+            i = end;
+            continue;
+        }
+        match ch {
+            '<' if !in_default => angle += 1,
+            '>' if !in_default && angle > 0 => angle -= 1,
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            '=' if depth == 0 && angle == 0 && !in_default => {
+                while out.ends_with(' ') || out.ends_with('\t') {
+                    out.pop();
+                }
+                in_default = true;
+                i += 1;
+                continue;
+            }
+            ',' if depth == 0 && angle == 0 => {
+                in_default = false;
+                out.push(',');
+                i += 1;
+                continue;
+            }
+            _ => {}
+        }
+        if !in_default {
+            out.push(ch);
+        }
+        i += ch.len_utf8();
+    }
+    out.trim().to_string()
+}
+
+fn skip_quoted(bytes: &[u8], start: usize) -> usize {
+    let quote = bytes[start];
+    let mut i = start + 1;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            i += 2;
+        } else if bytes[i] == quote {
+            return i + 1;
+        } else {
+            i += 1;
+        }
+    }
+    bytes.len()
 }
 
 fn has_word(text: &str, word: &str) -> bool {
@@ -1992,6 +2185,24 @@ mod tests {
             output.source.contains("case 0: __st_inst1_count.set(v); break;"),
             "dispatch over instance signal: {}",
             output.source
+        );
+    }
+
+    #[test]
+    fn strip_defaults_keeps_all_params_around_comparisons() {
+        let stripped = strip_defaults_in_params(
+            "JsNumber n = (1 < 2 ? 3 : 4), const JsString& suffix = \"x\"",
+        );
+        assert_eq!(stripped, "JsNumber n, const JsString& suffix");
+        let templates = strip_defaults_in_params(
+            "std::pair<int, int> p = {1, 2}, const JsString& suffix = \"x\"",
+        );
+        assert_eq!(templates, "std::pair<int, int> p, const JsString& suffix");
+        // A function-returning-function type has parens before the real
+        // parameter list; the last top-level pair is the one to strip.
+        assert_eq!(
+            strip_leading_decl_defaults("std::function<void()> make(JsNumber n = 1);"),
+            "std::function<void()> make(JsNumber n);"
         );
     }
 }

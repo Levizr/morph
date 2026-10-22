@@ -789,6 +789,11 @@ fn path_which(bin: &str) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    /// `MORPH_STATIC_CFLAGS` is process-global; keep env-touching tests
+    /// from observing a value another test set concurrently.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn opt_flag_picks_size_by_default_and_speed_for_perf_features() {
@@ -806,6 +811,7 @@ mod tests {
 
     #[test]
     fn static_flags_default_to_os_and_strip() {
+        let _guard = ENV_LOCK.lock().unwrap();
         let (opt, extras) = static_size_flags("g++");
         assert_eq!(opt, "-Os");
         assert!(extras.contains(&"-s".to_string()));
@@ -814,6 +820,7 @@ mod tests {
 
     #[test]
     fn static_flags_skip_lto_under_clang() {
+        let _guard = ENV_LOCK.lock().unwrap();
         let (opt, extras) = static_size_flags("clang++");
         assert_eq!(opt, "-Os");
         assert!(!extras.contains(&"-flto".to_string()));
@@ -821,6 +828,7 @@ mod tests {
 
     #[test]
     fn static_flags_env_override_replaces_all() {
+        let _guard = ENV_LOCK.lock().unwrap();
         std::env::set_var("MORPH_STATIC_CFLAGS", "-Oz -g0");
         let (opt, extras) = static_size_flags("g++");
         std::env::remove_var("MORPH_STATIC_CFLAGS");

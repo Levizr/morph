@@ -671,23 +671,33 @@ impl<'src> MxWalker<'src> {
     // ── Import / windowConfig / component extraction ────────────────────────
 
     fn extract_import(&mut self, decl: &ImportDeclaration) {
+        // `import type { T }` is erased: T is a compile-time name, never a
+        // runtime binding. Inline `{ type T }` specifiers are filtered below.
+        if matches!(decl.import_kind, ImportOrExportKind::Type) {
+            return;
+        }
         let source = decl.source.value.to_string();
         let mut default: Option<String> = None;
+        let mut namespace: Option<String> = None;
         let mut specifiers: Vec<(String, String)> = Vec::new();
         if let Some(specs) = decl.specifiers.as_ref() {
             for s in specs {
                 match s {
                     ImportDeclarationSpecifier::ImportSpecifier(spec) => {
+                        if matches!(spec.import_kind, ImportOrExportKind::Type) {
+                            continue;
+                        }
                         specifiers
                             .push((spec.local.name.to_string(), Self::export_name(&spec.imported)));
                     }
                     ImportDeclarationSpecifier::ImportDefaultSpecifier(spec) => {
                         default = Some(spec.local.name.to_string());
                     }
-                    // Member tags (`<NS.Hero/>`) are unsupported; keep the
-                    // binding visible so the linter can point at it.
+                    // `import * as lib` reads module exports as
+                    // `lib.member`; IR rewrites those to the module's C++
+                    // namespace.
                     ImportDeclarationSpecifier::ImportNamespaceSpecifier(spec) => {
-                        default = Some(spec.local.name.to_string());
+                        namespace = Some(spec.local.name.to_string());
                     }
                 }
             }
@@ -722,7 +732,7 @@ impl<'src> MxWalker<'src> {
             });
         } else {
             self.imports.push(MxImport {
-                kind: MxImportKind::Component { path: source, default, specifiers },
+                kind: MxImportKind::Component { path: source, default, namespace, specifiers },
                 style: "import".to_string(),
             });
         }
@@ -1248,19 +1258,48 @@ impl<'src> MxWalker<'src> {
                 Statement::VariableDeclaration(vd) => {
                     for decl in &vd.declarations {
                         let Some(name) = binding_ident_name(&decl.id) else { continue };
-                        let is_fn = matches!(
-                            decl.init.as_ref(),
-                            Some(
-                                Expression::ArrowFunctionExpression(_)
-                                    | Expression::FunctionExpression(_)
-                            )
-                        );
-                        if is_fn {
-                            funcs.push(InnerFunction {
-                                name,
-                                source: self.span_text(decl.span).to_string(),
-                                exported: false,
-                            });
+                        // Lower `const f = () => …` / `= function () {…}` to
+                        // the function-declaration form codegen emits, so a
+                        // handler const is the same as `function f() {…}`.
+                        let source = match decl.init.as_ref() {
+                            Some(Expression::ArrowFunctionExpression(arrow)) => {
+                                let type_params = arrow
+                                    .type_parameters
+                                    .as_ref()
+                                    .map_or("", |tp| self.span_text(tp.span));
+                                let params = self.span_text(arrow.params.span);
+                                let body = match &arrow.body {
+                                    ArrowFunctionBody::FunctionBody(b) => {
+                                        self.span_text(b.span).to_string()
+                                    }
+                                    other => other.as_expression().map_or_else(String::new, |e| {
+                                        format!("{{ return {}; }}", self.span_text(e.span()))
+                                    }),
+                                };
+                                let is_async = if arrow.r#async { "async " } else { "" };
+                                Some(format!(
+                                    "{is_async}function {name}{type_params}{params} {body}"
+                                ))
+                            }
+                            Some(Expression::FunctionExpression(func)) => {
+                                let type_params = func
+                                    .type_parameters
+                                    .as_ref()
+                                    .map_or("", |tp| self.span_text(tp.span));
+                                func.body.as_ref().map(|b| {
+                                    let is_async = if func.r#async { "async " } else { "" };
+                                    let star = if func.generator { "*" } else { "" };
+                                    format!(
+                                        "{is_async}function{star} {name}{type_params}{} {}",
+                                        self.span_text(func.params.span),
+                                        self.span_text(b.span)
+                                    )
+                                })
+                            }
+                            _ => None,
+                        };
+                        if let Some(source) = source {
+                            funcs.push(InnerFunction { name, source, exported: false });
                         }
                     }
                 }
@@ -1771,8 +1810,15 @@ impl<'a> Visit<'a> for MxWalker<'_> {
                     _ => {}
                 },
                 Statement::ExportNamedDeclaration(d) => {
+                    // `export type { T }` is erased, not a value export.
+                    if matches!(d.export_kind, ImportOrExportKind::Type) {
+                        continue;
+                    }
                     // `export { a, b as c }`: mark locals exported.
                     for spec in &d.specifiers {
+                        if matches!(spec.export_kind, ImportOrExportKind::Type) {
+                            continue;
+                        }
                         let local = Self::export_name(&spec.local);
                         let exported = Self::export_name(&spec.exported);
                         // `export { App as default }` is a default export.
@@ -1783,13 +1829,23 @@ impl<'a> Visit<'a> for MxWalker<'_> {
                     }
                 }
                 Statement::ExportFromDeclaration(d) => {
+                    // `export type { T } from './t'` is erased too.
+                    if matches!(d.export_kind, ImportOrExportKind::Type) {
+                        continue;
+                    }
                     // `export { a, b as c } from './path'` re-export.
                     let mut names = Vec::new();
                     for spec in &d.specifiers {
+                        if matches!(spec.export_kind, ImportOrExportKind::Type) {
+                            continue;
+                        }
                         names.push((
                             Self::export_name(&spec.local),
                             Self::export_name(&spec.exported),
                         ));
+                    }
+                    if names.is_empty() {
+                        continue;
                     }
                     self.re_exports.push(ReExport {
                         path: d.source.value.to_string(),
@@ -1799,6 +1855,10 @@ impl<'a> Visit<'a> for MxWalker<'_> {
                     });
                 }
                 Statement::ExportAllDeclaration(d) => {
+                    // `export type * from './t'` has no runtime binding.
+                    if matches!(d.export_kind, ImportOrExportKind::Type) {
+                        continue;
+                    }
                     // `export * [as ns] from './path'`.
                     let star_as = d.exported.as_ref().and_then(|e| match e {
                         ModuleExportName::IdentifierName(id) => Some(id.name.to_string()),
@@ -2002,8 +2062,9 @@ mod walker_tests {
             parse("import Hero from './Hero.mx'\nexport default function App() { return <div/> }");
         assert_eq!(s.imports.len(), 1);
         match &s.imports[0].kind {
-            MxImportKind::Component { path, default, specifiers } => {
+            MxImportKind::Component { path, default, namespace, specifiers } => {
                 assert_eq!(path, "./Hero.mx");
+                assert_eq!(namespace, &None);
                 assert_eq!(default.as_deref(), Some("Hero"));
                 assert!(specifiers.is_empty());
                 assert!(s.imports[0].kind.is_mx());

@@ -62,6 +62,70 @@ fn save_cache(path: &Path, cache: &HashMap<String, (String, Vec<LintError>)>) {
     }
 }
 
+type LocalCss =
+    (Vec<(String, morph_parser::CssRule)>, HashMap<String, Vec<morph_parser::CssKeyframe>>);
+
+/// Collect CSS rules imported by graph modules. Remote URLs are skipped:
+/// check is offline and a failed fetch is non-fatal during build too.
+fn collect_local_css(graph: &morph_parser::ModuleGraph, cwd: &Path) -> LocalCss {
+    let mut rules = Vec::new();
+    let mut keyframes: HashMap<String, Vec<morph_parser::CssKeyframe>> = HashMap::new();
+    for mod_path in graph.all_paths() {
+        let Some(resolved) = graph.get(mod_path) else { continue };
+        for imp in &resolved.source.imports {
+            let morph_parser::MxImportKind::CssLocal { path } = &imp.kind else {
+                continue;
+            };
+            for cand in [resolved.dir.join(path), cwd.join(path)] {
+                if cand.exists() {
+                    if let Ok(text) = std::fs::read_to_string(&cand) {
+                        if let Ok(data) = morph_parser::parse_css(&text) {
+                            rules.extend(data.rules);
+                            for (k, v) in data.keyframes {
+                                keyframes.entry(k).or_default().extend(v);
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    (rules, keyframes)
+}
+
+/// Build the same IR `morph build` would build, without generating or
+/// compiling C++. Everything check can catch here would otherwise fail
+/// after the user has already seen `All files passed`.
+fn preflight(cwd: &Path, entry_path: &Path, graph: &morph_parser::ModuleGraph) -> Result<()> {
+    let config_path = cwd.join("morph.config.json");
+    let config = morph_config::MorphConfig::from_file(&config_path)?;
+    let type_mode: morpher::TypeMode =
+        config.type_mode.parse().map_err(|e: String| anyhow::anyhow!(e))?;
+    let (css_rules, css_keyframes) = collect_local_css(graph, cwd);
+    let builder = morph_ir::IRBuilder::new()
+        .with_type_mode(type_mode)
+        .with_project_root(cwd.to_path_buf())
+        .with_app_renderer(config.renderer.clone())
+        .with_app_window(config.window.title.clone(), config.window.width, config.window.height);
+    builder.build_with_graph(graph, &css_rules, &css_keyframes)?;
+    // Route files are separate graphs; they compile into the same binary and
+    // fail the build after lint, so validate them here too.
+    let src_root = entry_path.parent().unwrap_or(cwd);
+    let routes = morph_parser::routes::scan_routes(src_root);
+    if !routes.is_empty() {
+        let canonical = src_root.canonicalize().unwrap_or_else(|_| src_root.to_path_buf());
+        for route in &routes {
+            let mut route_graph = morph_parser::resolve_graph(&route.file, cwd)?;
+            route_graph.set_ns_base(canonical.clone());
+            builder
+                .build_route(&route_graph, route, &css_rules, &css_keyframes)
+                .map_err(|e| anyhow::anyhow!("route `{}`: {e}", route.id))?;
+        }
+    }
+    Ok(())
+}
+
 // Long lint pipeline: collect → cache → graph → report.
 // Function kept whole to preserve check ordering.
 #[allow(clippy::too_many_lines)]
@@ -204,7 +268,7 @@ pub(crate) fn run(path: Option<&PathBuf>, entry: Option<String>, _migrate: bool)
     for f in &mx_files {
         let content = std::fs::read_to_string(f)?;
         // Bump when lint rules change so stale diagnostics are re-computed.
-        let hash = morph_cache::sha256_bytes(format!("v7:{content}").as_bytes());
+        let hash = morph_cache::sha256_bytes(format!("v12:{content}").as_bytes());
         let key = f.display().to_string();
         contents.insert(key.clone(), content.clone());
 
@@ -250,33 +314,39 @@ pub(crate) fn run(path: Option<&PathBuf>, entry: Option<String>, _migrate: bool)
     // ── Cross-file component validation over the resolved module graph ──
     // Single-file lints accept imported names without prop checks; the graph
     // pass resolves them to declarations so prop mismatches surface here.
+    let mut resolved_graph: Option<morph_parser::ModuleGraph> = None;
+    let mut graph_error: Option<anyhow::Error> = None;
     if let Some(entry_path) = resolve_check_entry(&cwd, path) {
-        if let Ok(graph) = morph_parser::resolve_graph(&entry_path, &cwd) {
-            // Only the entry module renders as a window; component files
-            // must not carry `windowConfig`, so drop that hint for them.
-            // Anything outside the graph (routes, route-only components)
-            // mounts inside the entry window too: keep the hint for the
-            // entry alone.
-            all_errors.retain(|e| {
-                if e.code != "mx-window-missing" {
-                    return true;
-                }
-                let canon = std::fs::canonicalize(&e.file_path)
-                    .unwrap_or_else(|_| PathBuf::from(&e.file_path));
-                canon == graph.entry
-            });
-            for err in morph_parser::linter::lint_graph(&graph) {
-                let duplicate = all_errors.iter().any(|e| {
-                    e.code == err.code
-                        && e.file_path == err.file_path
-                        && e.line == err.line
-                        && e.col == err.col
-                        && e.message == err.message
+        match morph_parser::resolve_graph(&entry_path, &cwd) {
+            Ok(graph) => {
+                // Only the entry module renders as a window; component files
+                // must not carry `windowConfig`, so drop that hint for them.
+                // Anything outside the graph (routes, route-only components)
+                // mounts inside the entry window too: keep the hint for the
+                // entry alone.
+                all_errors.retain(|e| {
+                    if e.code != "mx-window-missing" {
+                        return true;
+                    }
+                    let canon = std::fs::canonicalize(&e.file_path)
+                        .unwrap_or_else(|_| PathBuf::from(&e.file_path));
+                    canon == graph.entry
                 });
-                if !duplicate {
-                    all_errors.push(err);
+                for err in morph_parser::linter::lint_graph(&graph) {
+                    let duplicate = all_errors.iter().any(|e| {
+                        e.code == err.code
+                            && e.file_path == err.file_path
+                            && e.line == err.line
+                            && e.col == err.col
+                            && e.message == err.message
+                    });
+                    if !duplicate {
+                        all_errors.push(err);
+                    }
                 }
+                resolved_graph = Some(graph);
             }
+            Err(e) => graph_error = Some(e),
         }
     }
 
@@ -307,19 +377,72 @@ pub(crate) fn run(path: Option<&PathBuf>, entry: Option<String>, _migrate: bool)
             crate::logger::log_error(&format!(
                 "{n_err} error(s), {n_warn} warning(s) — fix and save to hot reload"
             ));
-            // Return error to block build pipeline (like Python)
-            // But for `morph check` we don't fail, just report
-        } else {
-            crate::logger::log_warn(&format!("{n_warn} warning(s)."));
+            println!();
+            anyhow::bail!("check failed with {n_err} error(s)");
+        }
+        crate::logger::log_warn(&format!("{n_warn} warning(s)."));
+        println!();
+    }
+
+    if let Some(err) = graph_error {
+        println!();
+        crate::logger::log_error(&format!("cannot resolve module graph: {err}"));
+        for cause in err.chain().skip(1) {
+            crate::logger::log_dim(&format!("  caused by: {cause}"));
         }
         println!();
-        return Ok(());
+        return Err(err);
+    }
+
+    // ── Build preflight: parser/linter/graph all passed, so build the same
+    // IR `morph build` builds. IR-level failures (unknown imports, prop
+    // mismatches, mid rules, …) must surface here, never after a green check.
+    // Only a project entry has a meaningful build IR; checking one component
+    // file from a larger project must stay a lint-only operation.
+    let project_entry = project_entry(&cwd);
+    let preflight_entry = match (path, &project_entry) {
+        (Some(_), Some(project)) => {
+            let same = resolve_check_entry(&cwd, path)
+                .and_then(|p| std::fs::canonicalize(p).ok())
+                .zip(std::fs::canonicalize(project).ok())
+                .is_some_and(|(a, b)| a == b);
+            same.then(|| project.clone())
+        }
+        (None, Some(project)) => Some(project.clone()),
+        _ => None,
+    };
+    if let (Some(graph), Some(entry_path)) = (resolved_graph.as_ref(), preflight_entry.as_ref()) {
+        let pb = crate::logger::spinner("Building IR (preflight)...");
+        match preflight(&cwd, entry_path, graph) {
+            Ok(()) => {
+                pb.finish_and_clear();
+                crate::logger::log_success("Build preflight passed — IR built");
+            }
+            Err(e) => {
+                pb.finish_and_clear();
+                crate::logger::log_error(&format!("build preflight failed: {e}"));
+                for cause in e.chain().skip(1) {
+                    crate::logger::log_dim(&format!("  caused by: {cause}"));
+                }
+                println!();
+                return Err(e);
+            }
+        }
     }
 
     println!();
     crate::logger::log_success(&format!("All {} file(s) passed.", mx_files.len()));
     println!();
     Ok(())
+}
+
+/// The configured project entry, when `cwd` contains a project config.
+/// Used to distinguish `morph check` (preflight the app) from
+/// `morph check src/components/Card.mx` (lint one file).
+fn project_entry(cwd: &Path) -> Option<PathBuf> {
+    let config = morph_config::MorphConfig::from_file(&cwd.join("morph.config.json")).ok()?;
+    let entry = cwd.join(&config.entry);
+    (is_source_file(&entry) && entry.is_file()).then_some(entry)
 }
 
 /// Entry file for graph-aware checks: an explicitly selected supported source

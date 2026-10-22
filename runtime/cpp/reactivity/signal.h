@@ -117,6 +117,16 @@ struct Signal : SignalBase {
         }
     }
 
+    // ── Functional updater: `setCount(c => c + 1)` ──
+    // React-style updaters read the current value and return the next one.
+    // `peek()` keeps the updater from subscribing the running effect to the
+    // signal it is about to write.
+    template <typename F>
+        requires std::is_invocable_v<F&, T>
+    void set(F&& updater) {
+        set(updater(peek()));
+    }
+
     T& operator*() { return value_; }
 };
 

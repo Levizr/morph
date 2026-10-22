@@ -110,6 +110,7 @@ impl IRBuilder {
         // order Python builds its per-component translator state.
         let mut ambient_vars: HashMap<String, String> = HashMap::new();
         let mut ambient_types: HashMap<String, String> = HashMap::new();
+        let mut fn_types: HashMap<String, String> = HashMap::new();
         let events: HashMap<String, String> = HashMap::new();
         let mut all_state: Vec<HashMap<String, String>> = Vec::new();
         for sv in source
@@ -144,7 +145,9 @@ impl IRBuilder {
                 &ambient_vars,
                 &ambient_types,
                 &events,
+                &mut fn_types,
                 None,
+                false,
             );
         }
         for gv in &source.global_vars {
@@ -155,25 +158,39 @@ impl IRBuilder {
                 &ambient_vars,
                 &ambient_types,
                 &events,
+                &mut fn_types,
                 None,
+                false,
             );
         }
         // ── Component consts become reactive lambdas; later translations ──
         // see them as `name()` calls (Python: `auto x = []() { return …; };`).
         let mut reactive_consts: Vec<String> = Vec::new();
+        let mut const_types: HashMap<String, String> = HashMap::new();
         for c in &source.components {
             for cst in &c.consts {
                 if cst.name.is_empty() || cst.rhs.is_empty() {
                     continue;
                 }
-                if let Some(out) =
-                    self.translate_logic(&cst.rhs, &ambient_vars, &ambient_types, &events)
-                {
-                    let expr = out.body.trim().trim_end_matches(';').trim();
+                let translated = self
+                    .translate_expr(&cst.rhs, &ambient_vars, &ambient_types, &events)
+                    .map(|out| (out.body, out.includes, out.ty))
+                    .or_else(|| {
+                        self.translate_logic(&cst.rhs, &ambient_vars, &ambient_types, &events)
+                            .map(|out| (out.body, out.includes, None))
+                    });
+                if let Some((body, includes, ty)) = translated {
+                    let expr = body.trim().trim_end_matches(';').trim();
                     if expr.is_empty() {
                         continue;
                     }
-                    extra_headers.extend(include_lines(&out.includes));
+                    extra_headers.extend(include_lines(&includes));
+                    let ty =
+                        ty.filter(|ty| ty != "JsValue").or_else(|| class_instance_type(&cst.rhs));
+                    if let Some(ty) = ty {
+                        const_types.insert(cst.name.clone(), ty.clone());
+                        ambient_types.insert(cst.name.clone(), ty);
+                    }
                     premain.push(format!("auto {} = []() {{ return ({}); }};", cst.name, expr));
                     ambient_vars.insert(cst.name.clone(), format!("{}()", cst.name));
                     reactive_consts.push(cst.name.clone());
@@ -193,7 +210,9 @@ impl IRBuilder {
                 &ambient_vars,
                 &ambient_types,
                 &events,
+                &mut fn_types,
                 None,
+                false,
             );
         }
         // ── Effects: transpile callbacks now, emit `create_effect` later ──
@@ -266,6 +285,8 @@ impl IRBuilder {
             extra_headers,
             state_vars: all_state,
             reactive_consts,
+            reactive_const_types: const_types,
+            fn_return_types: fn_types,
             route_props: Vec::new(),
             effect_decls: all_effects,
             mutable_locals: Vec::new(),
@@ -307,6 +328,47 @@ impl IRBuilder {
         ambient_types: &HashMap<String, String>,
         events: &HashMap<String, String>,
     ) -> Option<morpher::SnippetOutput> {
+        self.translate_logic_opts(source, ambient_vars, ambient_types, events, false)
+    }
+
+    /// [`Self::translate_logic`] with control over parameter defaults.
+    /// Project module functions are declared (defaults included) in
+    /// `morph_api.h`, so their premain prototype must not repeat them.
+    fn translate_logic_opts(
+        &self,
+        source: &str,
+        ambient_vars: &HashMap<String, String>,
+        ambient_types: &HashMap<String, String>,
+        events: &HashMap<String, String>,
+        omit_param_defaults: bool,
+    ) -> Option<morpher::SnippetOutput> {
+        let options = morpher::TranslateOptions {
+            type_mode: self.type_mode,
+            state_vars: ambient_vars.clone(),
+            state_types: ambient_types.clone(),
+            omit_param_defaults,
+            ..Default::default()
+        };
+        let rebased = rewrite_event_emits(source, events);
+        morpher::translate_snippet(&rewrite_emit_for_js(&rebased), "snippet.ts", options)
+            .ok()
+            .filter(|out| !out.body.trim().is_empty())
+            .map(|mut out| {
+                out.body = rewrite_emit_for_cpp(&out.body);
+                out
+            })
+    }
+
+    /// Translate one standalone expression against ambient app state.
+    /// Object and array literals stay expressions (consts previously
+    /// disappeared when their RHS was parsed as a block statement).
+    fn translate_expr(
+        &self,
+        source: &str,
+        ambient_vars: &HashMap<String, String>,
+        ambient_types: &HashMap<String, String>,
+        events: &HashMap<String, String>,
+    ) -> Option<morpher::ExpressionOutput> {
         let options = morpher::TranslateOptions {
             type_mode: self.type_mode,
             state_vars: ambient_vars.clone(),
@@ -314,7 +376,7 @@ impl IRBuilder {
             ..Default::default()
         };
         let rebased = rewrite_event_emits(source, events);
-        morpher::translate_snippet(&rewrite_emit_for_js(&rebased), "snippet.ts", options)
+        morpher::translate_expression(&rewrite_emit_for_js(&rebased), "snippet.ts", options)
             .ok()
             .filter(|out| !out.body.trim().is_empty())
             .map(|mut out| {
@@ -336,9 +398,18 @@ impl IRBuilder {
         ambient_vars: &HashMap<String, String>,
         ambient_types: &HashMap<String, String>,
         events: &HashMap<String, String>,
+        fn_types: &mut HashMap<String, String>,
         wrap_ns: Option<&str>,
+        omit_param_defaults: bool,
     ) {
-        if let Some(out) = self.translate_logic(source, ambient_vars, ambient_types, events) {
+        if let Some(out) = self.translate_logic_opts(
+            source,
+            ambient_vars,
+            ambient_types,
+            events,
+            omit_param_defaults,
+        ) {
+            fn_types.extend(out.fn_return_types.iter().map(|(k, v)| (k.clone(), v.clone())));
             extra_headers.extend(include_lines(&out.includes));
             let body = strip_static_linkage(&out.body);
             if body.is_empty() {
@@ -549,6 +620,8 @@ impl IRBuilder {
             extra_headers,
             state_vars: ctx.states.clone(),
             reactive_consts: ctx.const_names.clone(),
+            reactive_const_types: ctx.const_types.clone(),
+            fn_return_types: ctx.fn_types.clone(),
             route_props: Vec::new(),
             effect_decls: ctx.effects.clone(),
             mutable_locals: ctx.mutable_locals.clone(),
@@ -762,6 +835,8 @@ impl IRBuilder {
             extra_headers,
             state_vars: ctx.states.clone(),
             reactive_consts: ctx.const_names.clone(),
+            reactive_const_types: ctx.const_types.clone(),
+            fn_return_types: ctx.fn_types.clone(),
             route_props,
             effect_decls: ctx.effects.clone(),
             mutable_locals: ctx.mutable_locals.clone(),
@@ -798,7 +873,9 @@ impl IRBuilder {
                 &frame.vars,
                 &frame.types,
                 &frame.events,
+                &mut ctx.fn_types,
                 wrap,
+                false,
             );
         }
         for cd in &source.class_declarations {
@@ -809,7 +886,9 @@ impl IRBuilder {
                 &frame.vars,
                 &frame.types,
                 &frame.events,
+                &mut ctx.fn_types,
                 wrap,
+                false,
             );
         }
         for gv in source.global_vars.iter().chain(source.exported_vars.iter().map(|v| &v.source)) {
@@ -820,7 +899,9 @@ impl IRBuilder {
                 &frame.vars,
                 &frame.types,
                 &frame.events,
+                &mut ctx.fn_types,
                 wrap,
+                false,
             );
         }
     }
@@ -942,7 +1023,7 @@ impl IRBuilder {
                 continue;
             }
             let rhs = prepare_source(&cst.rhs, frame);
-            let Some(out) = self.translate_logic(&rhs, &frame.vars, &frame.types, &frame.events)
+            let Some(out) = self.translate_expr(&rhs, &frame.vars, &frame.types, &frame.events)
             else {
                 continue;
             };
@@ -951,20 +1032,32 @@ impl IRBuilder {
                 continue;
             }
             extra_headers.extend(include_lines(&out.includes));
+            let mangled = frame.renames.get(&cst.name).cloned().unwrap_or_else(|| cst.name.clone());
+            // Seed the wrapper's C++ type so member access at use sites
+            // picks brackets for JsObject/JsValue (`user["name"]`), dot
+            // for native vectors/strings, and `?.` keeps the same shape.
+            let ty = out
+                .ty
+                .as_deref()
+                .filter(|ty| *ty != "JsValue")
+                .map(str::to_string)
+                .or_else(|| class_instance_type(&cst.rhs));
+            if let Some(ty) = ty {
+                frame.types.insert(cst.name.clone(), ty.clone());
+                frame.types.insert(mangled.clone(), ty.clone());
+                ctx.const_types.insert(cst.name.clone(), ty.clone());
+                ctx.const_types.insert(mangled.clone(), ty);
+            }
             // `useWindow()` consts stay lazy: an eager namespace-scope
             // const would evaluate "current window" once at startup.
             // Bound to the placeholder instead, each use site resolves
             // to its own window (entry WID, route `__wid`).
             if expr.contains("__morph_current_window()") || expr.contains("__morph_use_window(") {
-                let mangled = frame.renames.get(&cst.name).cloned();
                 frame.vars.insert(cst.name.clone(), expr.to_string());
                 frame.renames.insert(cst.name.clone(), expr.to_string());
-                if let Some(mangled) = mangled {
-                    frame.vars.insert(mangled, expr.to_string());
-                }
+                frame.vars.insert(mangled, expr.to_string());
                 continue;
             }
-            let mangled = frame.renames.get(&cst.name).cloned().unwrap_or_else(|| cst.name.clone());
             ctx.premain.push(format!("auto {mangled} = []() {{ return ({expr}); }};"));
             if !ctx.const_names.contains(&mangled) {
                 ctx.const_names.push(mangled);
@@ -979,6 +1072,14 @@ impl IRBuilder {
             else {
                 continue;
             };
+            for (name, ty) in &out.fn_return_types {
+                ctx.fn_types.insert(name.clone(), ty.clone());
+                frame.types.insert(name.clone(), ty.clone());
+                if name != &f.name {
+                    ctx.fn_types.insert(f.name.clone(), ty.clone());
+                    frame.types.insert(f.name.clone(), ty.clone());
+                }
+            }
             let body = strip_static_linkage(&out.body);
             if body.is_empty() {
                 continue;
@@ -1241,8 +1342,8 @@ impl IRBuilder {
             .iter()
             .chain(module.components.iter().flat_map(|c| c.inner_functions.iter()))
         {
-            if let Ok((params, _, _)) = parse_callable_source(&fd.source) {
-                frame.fn_arity.insert(fd.name.clone(), params.len());
+            if let Some(arity) = callable_arity(&fd.source) {
+                frame.fn_arity.insert(fd.name.clone(), arity);
             }
         }
         for ev in &module.exported_vars {
@@ -1266,12 +1367,25 @@ impl IRBuilder {
         for (raw_path, target_path) in &resolved_mod.module_imports {
             let Some(target_mod) = graph.modules.get(target_path) else { continue };
             for imp in &module.imports {
-                let morph_parser::MxImportKind::Component { path, specifiers, default } = &imp.kind
+                let morph_parser::MxImportKind::Component { path, specifiers, default, namespace } =
+                    &imp.kind
                 else {
                     continue;
                 };
                 if path != raw_path {
                     continue;
+                }
+                if let Some(local) = namespace {
+                    if !seeded.insert(local.clone()) {
+                        anyhow::bail!(
+                            "ambiguous import of `{local}` in {}: it is both an export and an import, or imported from two different modules; import it from only one module",
+                            module_path.display()
+                        );
+                    }
+                    let target_ns = ns_of(graph, target_path)?;
+                    frame
+                        .namespace_aliases
+                        .insert(local.clone(), format!("::{}::{target_ns}::", MODULE_NS_ROOT));
                 }
                 if let Some(local) = default {
                     Self::seed_default_import(
@@ -3130,6 +3244,8 @@ struct InstanceFrame {
     props_param: String,
     renames: HashMap<String, String>,
     prop_binds: HashMap<String, String>,
+    /// `import * as ns` aliases → C++ namespace prefix (`::app::<module>::`).
+    namespace_aliases: HashMap<String, String>,
 }
 
 impl InstanceFrame {
@@ -3143,6 +3259,7 @@ impl InstanceFrame {
             props_param: String::new(),
             renames: HashMap::new(),
             prop_binds: HashMap::new(),
+            namespace_aliases: HashMap::new(),
         }
     }
 
@@ -3156,6 +3273,7 @@ impl InstanceFrame {
             props_param: String::new(),
             renames: HashMap::new(),
             prop_binds: HashMap::new(),
+            namespace_aliases: HashMap::new(),
         }
     }
 }
@@ -3168,6 +3286,8 @@ struct BuilderCtx<'a> {
     channels: Vec<HashMap<String, String>>,
     states: Vec<HashMap<String, String>>,
     const_names: Vec<String>,
+    const_types: HashMap<String, String>,
+    fn_types: HashMap<String, String>,
     premain: Vec<String>,
     effects: Vec<HashMap<String, String>>,
     logs: Vec<String>,
@@ -3207,6 +3327,8 @@ impl<'a> BuilderCtx<'a> {
             channels: Vec::new(),
             states: Vec::new(),
             const_names: Vec::new(),
+            const_types: HashMap::new(),
+            fn_types: HashMap::new(),
             premain: Vec::new(),
             effects: Vec::new(),
             logs: Vec::new(),
@@ -3296,7 +3418,7 @@ fn resolve_binding(
     }
     for imp in &src.source.imports {
         let (raw, default, specifiers) = match &imp.kind {
-            morph_parser::MxImportKind::Component { path, default, specifiers }
+            morph_parser::MxImportKind::Component { path, default, specifiers, .. }
                 if path != "morph" =>
             {
                 (path, default, specifiers)
@@ -3464,16 +3586,249 @@ fn rename_symbols(src: &str, renames: &HashMap<String, String>, frame: &Instance
 fn capture_raw(raw: &str, frame: &InstanceFrame) -> String {
     let reemit = rewrite_event_emits(raw, &frame.events);
     let emit = rewrite_emit_for_cpp(&reemit);
-    let sub = subst_props_refs(&emit, frame);
+    let sub = qualify_namespace_members(&subst_props_refs(&emit, frame), &frame.namespace_aliases);
     let renamed = rename_symbols(&sub, &frame.renames, frame);
-    rename_symbols(&renamed, &frame.prop_binds, frame)
+    let renamed = rename_symbols(&renamed, &frame.prop_binds, frame);
+    // Emit-time translation has no type map, so `user.name` on a JsObject
+    // const would render `.name` (JsObject has no such member). Rewrite
+    // typed field access to JS bracket access while the type is known.
+    normalize_object_members(&renamed, &frame.types)
+}
+
+/// Properties the translator lowers as member calls (`.length` → `.size()`,
+/// string methods, array push/pop) and must keep dotted.
+fn is_method_member(name: &str) -> bool {
+    matches!(
+        name,
+        "toUpperCase"
+            | "toLowerCase"
+            | "charAt"
+            | "indexOf"
+            | "substring"
+            | "slice"
+            | "trim"
+            | "replace"
+            | "split"
+            | "toString"
+            | "length"
+            | "push"
+            | "pop"
+    )
+}
+
+/// `user.name` / `user?.name` → `user["name"]` / `user?.["name"]` when
+/// `user` is a known `JsObject`. Nested fields keep bracketing because the
+/// runtime `JsValue::operator[]` resolves objects and arrays. Strings,
+/// templates, and comments are copied verbatim; method names stay dotted.
+fn normalize_object_members(src: &str, types: &HashMap<String, String>) -> String {
+    if types.is_empty() {
+        return src.to_string();
+    }
+    let bytes = src.as_bytes();
+    let mut out = String::with_capacity(src.len());
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let c = bytes[i] as char;
+        if c == '"' || c == '\'' {
+            let end = str_lit_end(src, i);
+            out.push_str(&src[i..end]);
+            i = end;
+            continue;
+        }
+        if c == '`' {
+            let mut j = i + 1;
+            while j < bytes.len() {
+                if bytes[j] == b'\\' {
+                    j += 2;
+                    continue;
+                }
+                if bytes[j] == b'`' {
+                    j += 1;
+                    break;
+                }
+                j += 1;
+            }
+            out.push_str(&src[i..j.min(bytes.len())]);
+            i = j.min(bytes.len());
+            continue;
+        }
+        if c == '/' && i + 1 < bytes.len() {
+            if bytes[i + 1] == b'/' {
+                if let Some(nl) = src[i..].find('\n') {
+                    out.push_str(&src[i..i + nl]);
+                    i += nl;
+                    continue;
+                }
+                out.push_str(&src[i..]);
+                break;
+            }
+            if bytes[i + 1] == b'*' {
+                if let Some(end) = src[i..].find("*/") {
+                    out.push_str(&src[i..i + end + 2]);
+                    i += end + 2;
+                    continue;
+                }
+                out.push_str(&src[i..]);
+                break;
+            }
+        }
+        if is_ident_start(c) {
+            let start = i;
+            let mut j = i + c.len_utf8();
+            while j < bytes.len() && is_ident_char_at(src, j) {
+                let ch_len = src[j..].chars().next().map_or(1, char::len_utf8);
+                j += ch_len;
+            }
+            let word = &src[start..j];
+            let preceded_by_dot = start > 0 && bytes[start - 1] == b'.';
+            let is_object = !preceded_by_dot && types.get(word).is_some_and(|ty| ty == "JsObject");
+            if is_object {
+                out.push_str(word);
+                i = j;
+                while i < bytes.len() {
+                    let optional = src[i..].starts_with("?.");
+                    if !optional && !src[i..].starts_with('.') {
+                        break;
+                    }
+                    let prop_start = i + if optional { 2 } else { 1 };
+                    if prop_start >= bytes.len() || !is_ident_start(bytes[prop_start] as char) {
+                        break;
+                    }
+                    let mut k = prop_start + 1;
+                    while k < bytes.len() && is_ident_char_at(src, k) {
+                        let ch_len = src[k..].chars().next().map_or(1, char::len_utf8);
+                        k += ch_len;
+                    }
+                    let prop = &src[prop_start..k];
+                    if is_method_member(prop) {
+                        out.push_str(&src[i..k]);
+                        i = k;
+                        break;
+                    }
+                    out.push_str(if optional { "?.[\"" } else { "[\"" });
+                    out.push_str(prop);
+                    out.push_str("\"]");
+                    i = k;
+                }
+                continue;
+            }
+            out.push_str(word);
+            i = j;
+            continue;
+        }
+        out.push(c);
+        i += c.len_utf8();
+    }
+    out
+}
+
+/// C++ type for a `new Class(...)` const initializer. The snippet
+/// translator has no module class table, so its inferred type is
+/// `JsValue`; the class name is still right there in the source. Member
+/// access only needs the `shared_ptr<...>` shape to pick `->`.
+fn class_instance_type(rhs: &str) -> Option<String> {
+    let rest = rhs.trim_start().strip_prefix("new ")?;
+    let name: String =
+        rest.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '$').collect();
+    if name.is_empty() {
+        None
+    } else {
+        Some(format!("std::shared_ptr<{name}>"))
+    }
 }
 
 /// Prepare a component-definition source for morpher translation.
 /// Pre-renaming removes the need for a post-pass over morpher output.
 fn prepare_source(src: &str, frame: &InstanceFrame) -> String {
-    let sub = subst_props_refs(src, frame);
+    let sub = qualify_namespace_members(&subst_props_refs(src, frame), &frame.namespace_aliases);
     rename_symbols(&sub, &frame.renames, frame)
+}
+
+/// `lib.member` → `::app::<module>::member` for `import * as lib`.
+/// Member accesses only: bare namespace values have no C++ meaning.
+fn qualify_namespace_members(src: &str, aliases: &HashMap<String, String>) -> String {
+    if aliases.is_empty() {
+        return src.to_string();
+    }
+    let bytes = src.as_bytes();
+    let mut out = String::with_capacity(src.len());
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let c = src[i..].chars().next().unwrap_or(' ');
+        if c == '"' || c == '\'' {
+            let end = str_lit_end(src, i);
+            out.push_str(&src[i..end]);
+            i = end;
+            continue;
+        }
+        if c == '`' {
+            // Copy templates verbatim; interpolation is handled by the
+            // expression parser downstream.
+            let mut j = i + 1;
+            while j < bytes.len() {
+                if bytes[j] == b'\\' {
+                    j += 2;
+                    continue;
+                }
+                if bytes[j] == b'`' {
+                    j += 1;
+                    break;
+                }
+                j += 1;
+            }
+            out.push_str(&src[i..j.min(bytes.len())]);
+            i = j.min(bytes.len());
+            continue;
+        }
+        if c == '/' && i + 1 < bytes.len() {
+            if bytes[i + 1] == b'/' {
+                if let Some(nl) = src[i..].find('\n') {
+                    out.push_str(&src[i..i + nl]);
+                    i += nl;
+                    continue;
+                }
+                out.push_str(&src[i..]);
+                break;
+            }
+            if bytes[i + 1] == b'*' {
+                if let Some(end) = src[i..].find("*/") {
+                    out.push_str(&src[i..i + end + 2]);
+                    i += end + 2;
+                    continue;
+                }
+                out.push_str(&src[i..]);
+                break;
+            }
+        }
+        if is_ident_start(c) {
+            let start = i;
+            let mut j = i + c.len_utf8();
+            while j < bytes.len() && is_ident_char_at(src, j) {
+                j += src[j..].chars().next().map_or(1, char::len_utf8);
+            }
+            let word = &src[start..j];
+            let preceded_by_dot = start > 0 && bytes[start - 1] == b'.';
+            if !preceded_by_dot {
+                if let Some(prefix) = aliases.get(word) {
+                    let mut k = j;
+                    while k < bytes.len() && bytes[k].is_ascii_whitespace() {
+                        k += 1;
+                    }
+                    if k < bytes.len() && bytes[k] == b'.' {
+                        out.push_str(prefix);
+                        i = k + 1;
+                        continue;
+                    }
+                }
+            }
+            out.push_str(word);
+            i = j;
+            continue;
+        }
+        out.push(c);
+        i += c.len_utf8();
+    }
+    out
 }
 
 /// Copy a template literal, renaming inside `${...}` interpolations only.
@@ -4113,6 +4468,20 @@ fn parse_fn_type(t: &str) -> anyhow::Result<(Vec<(String, String, bool)>, String
 ///
 /// # Errors
 /// Rejects async callables, non-arrow references, and destructured params.
+/// Parameter count for handler-ref arity, including async functions.
+/// `parse_callable_source` deliberately rejects async callable props; event
+/// handlers only need the arity, and `async function f()` still takes zero
+/// event arguments.
+fn callable_arity(src: &str) -> Option<usize> {
+    let src = src.trim();
+    let src = src
+        .strip_prefix("async")
+        .filter(|rest| rest.starts_with(char::is_whitespace) || rest.starts_with('('))
+        .map(str::trim_start)
+        .unwrap_or(src);
+    parse_callable_source(src).ok().map(|(params, _, _)| params.len())
+}
+
 fn parse_callable_source(src: &str) -> anyhow::Result<(Vec<String>, String, bool)> {
     let mut s = src.trim();
     if s.starts_with("async ") || s.starts_with("async(") || s.starts_with("async{") {
@@ -4530,8 +4899,15 @@ fn strip_static_linkage(cpp: &str) -> String {
                 break;
             }
         }
-        if !block.contains('{') && block.contains('(') && block.trim_end().ends_with(';') {
-            continue;
+        // Keep prototypes that carry defaults: `morph_api.h` derives its
+        // declarations from these entries, and the header must advertise
+        // the default. Codegen strips the duplicate from app.cpp.
+        if block.contains('(') && block.trim_end().ends_with(';') && block_is_prototype(&block) {
+            if block.contains('=') {
+                // Header needs the default (app.cpp strips it).
+            } else {
+                continue;
+            }
         }
         if !out.is_empty() {
             out.push_str("\n\n");
@@ -4539,6 +4915,44 @@ fn strip_static_linkage(cpp: &str) -> String {
         out.push_str(&block);
     }
     out
+}
+
+/// True when `block` is a declaration (no top-level `{` body). Braces that
+/// belong to parameter defaults (`x = {}`) are nested inside the parameter
+/// list and do not make it a definition.
+fn block_is_prototype(block: &str) -> bool {
+    let bytes = block.as_bytes();
+    let mut depth = 0i32;
+    let mut i = 0usize;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' | b'\'' => {
+                i = skip_quoted(bytes, i);
+                continue;
+            }
+            b'{' if depth == 0 => return false,
+            b'{' | b'(' | b'[' => depth += 1,
+            b'}' | b')' | b']' => depth -= 1,
+            _ => {}
+        }
+        i += 1;
+    }
+    block.trim_end().ends_with(';')
+}
+
+fn skip_quoted(bytes: &[u8], start: usize) -> usize {
+    let quote = bytes[start];
+    let mut i = start + 1;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            i += 2;
+        } else if bytes[i] == quote {
+            return i + 1;
+        } else {
+            i += 1;
+        }
+    }
+    bytes.len()
 }
 
 /// Analyze a dynamic `className` template/expression for ternary branches
@@ -6718,7 +7132,7 @@ mod tests {
         // Raw JS must never reach the app TU: functions are transpiled and
         // stripped of internal linkage, consts become reactive lambdas.
         assert!(premain.contains("void doLogin()"), "handler transpiled: {premain}");
-        assert!(premain.contains("auto helper"), "module fn transpiled: {premain}");
+        assert!(premain.contains("int64_t helper"), "module fn transpiled: {premain}");
         assert!(premain.contains("API_URL"), "global transpiled: {premain}");
         assert!(!premain.contains("function "), "no raw JS: {premain}");
         assert!(
@@ -7346,8 +7760,10 @@ export default function Nav() {
         );
         let dumped = format!("{:?}", win.nodes);
         assert!(
-            dumped.contains("__morph_current_window().navigate(") && dumped.contains("ledger"),
-            "handle call keeps the lazy placeholder for codegen"
+            dumped.contains("__morph_current_window()")
+                && dumped.contains("navigate(")
+                && dumped.contains("ledger"),
+            "handle call keeps the lazy placeholder for codegen: {dumped}"
         );
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -8173,6 +8589,9 @@ export default function App() {
         assert!(names.is_empty());
         assert!(parse_callable_source("async (x) => x").is_err());
         assert!(parse_callable_source("(a, {b}) => a").is_err());
+        // Handler refs still need an arity for async functions.
+        assert_eq!(callable_arity("async function load() { await q(); }"), Some(0));
+        assert_eq!(callable_arity("async (e) => e"), Some(1));
     }
 
     #[test]
@@ -8278,6 +8697,7 @@ export default function App() {
             props_param: String::new(),
             renames,
             prop_binds: HashMap::new(),
+            namespace_aliases: HashMap::new(),
         };
         let out = capture_raw(r#"item.count + count + "count" + f(count)"#, &frame);
         assert_eq!(out, r#"item.count + inst0_count + "count" + f(inst0_count)"#);
@@ -8291,6 +8711,7 @@ export default function App() {
             props_param: "props".to_string(),
             renames: HashMap::new(),
             prop_binds: HashMap::new(),
+            namespace_aliases: HashMap::new(),
         };
         assert_eq!(subst_props_refs("props.title + y.props.z", &frame2), "title + y.props.z");
     }

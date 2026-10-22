@@ -1,0 +1,21 @@
+import { morphState } from 'morph'
+
+export const windowConfig = { title: "pass-async", width: 800, height: 600 }
+
+// Async functions compile to C++ coroutines; `await fetch(...)` resumes on
+// the scheduler. Handler refs call zero-arg async functions as `load()`.
+export default function App() {
+  const [msg, setMsg] = morphState("idle")
+
+  async function load() {
+    const response = await fetch("http://127.0.0.1/")
+    setMsg(response.text())
+  }
+
+  return (
+    <body>
+      <text>{msg}</text>
+      <button onClick={load}>Load</button>
+    </body>
+  )
+}

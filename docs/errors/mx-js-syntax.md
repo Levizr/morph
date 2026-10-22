@@ -2,27 +2,45 @@
 
 **Severity:** error | **Blocks `morph build`:** yes
 
-> **Status:** reported by `morph check`. Only probe-verified breakage is
-> rejected — `?.`, destructuring, `for...in/of`, array spread and getters
-> lower correctly and stay allowed.
+> **Status:** reported by `morph check`. The gate exits non-zero, so a
+> clean `morph check` means no rejected syntax remains. Only probe-verified
+> breakage is rejected — common JS spellings that lower correctly stay
+> allowed.
 
 ## What this error means
 
-Your code uses a syntax construct the translator cannot handle:
-generators / `yield`, the `with` statement, labeled `break`/`continue`,
-`import.meta`, dynamic `import()`, object spread, `namespace` blocks,
-decorators, destructuring in component bodies, or arrow / function /
-class / object const initializers at the top of a component body:
+Your code uses a syntax construct the translator cannot represent in C++.
+The current set is:
+
+- generators / `yield`
+- the `with` statement
+- labeled `break` / `continue`
+- `import.meta` and dynamic `import()`
+- object spread
+- `namespace` blocks
+- decorators
+- TypeScript `enum` declarations
+- regular expression literals (`/ab+c/`)
+- rest parameters (`...args`)
+- `import * as ns` namespace imports
+- C++ keywords used as binding names or class member names (`double`,
+  `template`, `delete`, …)
+- class expressions assigned to a const
+- destructuring at the top of a component body (except the
+  `const [value, setValue] = morphState(...)` pair)
 
 ```
-error : mx-js-syntax : destructuring in component bodies cannot be translated to C++
-  hint: Declare each binding with its own const (only `const [value, setValue] = morphState(...)` pairs lower)
+error : mx-js-syntax : `enum` declaration cannot be translated to C++
+  hint:  Use a plain object const with string/number literals
   Learn more: https://morph.levizr.com/docs/errors/mx-js-syntax
 ```
 
-Stays allowed because it lowers correctly: `?.` / `??`, plain-TS
-destructuring, `for...in` / `for...of`, array spread, `super`,
-getters/setters, enums, nested-block declarations.
+These lower correctly and are **not** errors: optional chaining `?.`,
+nullish coalescing `??`, `for...in` / `for...of`, array spread, getters and
+setters, plain-TS destructuring and loop-head destructuring, class
+declarations / `new`, type-only imports and exports, default and optional
+parameters, arrow/function consts, object-literal consts, and JSX list
+expressions.
 
 ## Why Morph raises it
 
@@ -30,18 +48,18 @@ Each rejected construct needs hidden runtime machinery Morph omits on
 purpose: generators need resumable frames; `with` needs dynamic scope;
 labeled jumps have no C++ equivalent; `import.meta` / dynamic `import()`
 need a module loader; object spread needs reflective copies; namespaces
-and decorators vanish in translation. Supporting any of them approximately
-would change program meaning — so each is rejected with its explicit
-rewrite. See
+and decorators vanish in translation; enums and regex literals have no
+lowering yet. Supporting any of them approximately would change
+program meaning — so each is rejected with an explicit rewrite. See
 [translator coverage](../future/javascript/coverage.md) for what is planned.
 
 ## Examples that trigger it
 
 ```tsx
-// ❌ Optional chaining — mx-js-syntax
+// ❌ TypeScript enum — mx-js-syntax
 export default function App() {
-  const user = { name: "Ada" };
-  return <div>{user?.name}</div>;
+  enum Color { Red, Green }
+  return <div>{Color.Red}</div>;
 }
 ```
 
@@ -55,14 +73,19 @@ export default function App() {
 ```
 
 ```tsx
-// ❌ Labeled break — mx-js-syntax
+// ❌ Namespace import — mx-js-syntax
+import * as lib from "./lib.ts";
+
 export default function App() {
-  let total = 0;
-  top: {
-    total = 1;
-    break top;
-  }
-  return <div>{total}</div>;
+  return <div>{lib.token}</div>;
+}
+```
+
+```tsx
+// ❌ C++ keyword as a binding name — mx-js-syntax
+export default function App() {
+  const double = 2;
+  return <div>{double}</div>;
 }
 ```
 
@@ -70,31 +93,36 @@ export default function App() {
 
 | Instead of | Write |
 |---|---|
-| `{...o, k: v}` | explicit object literal |
-| destructuring in component bodies | one const per binding (`const [v, setV]` pairs only) |
-| arrow/function/class/object const inits | function/class declarations, per-field consts |
-| generator / `yield` | state machine with `morphState` |
+| `enum Color { Red }` | `const Color = { Red: "Red" }` |
+| `/ab+c/` | plain string checks or a `.cpp` helper |
+| `import * as lib` | `import { token, greet } from "./lib.ts"` |
+| `...args` | an explicit array parameter |
+| `const C = class { … }` | a class declaration |
+| `{...o, k: v}` | an explicit object literal |
+| destructuring in a component body | one const per binding (`const [v, setV]` state pairs are fine) |
+| generator / `yield` | a state machine with `morphState` |
 | `with (o) { ... }` | explicit `o.` qualification |
-| labeled `break`/`continue` | flag variable or early return |
+| labeled `break`/`continue` | a flag variable or early return |
 | `import.meta` / `import()` | static imports and constants |
 | `namespace N { ... }` | exported functions and constants |
+| a C++ keyword binding or member (`double`, `template`, `delete`, …) | rename the binding/field/method |
 | decorators | inline the decorator's effect |
 
 ```tsx
-// ✅ State machine instead of a generator
+// ✅ Object const instead of an enum
+const Color = { Red: "red", Green: "green" };
+
 export default function App() {
-  const [step, setStep] = morphState(0);
-  const next = step + 1;
-  return <div onClick={() => setStep(next)}>{next}</div>;
+  return <div>{Color.Red}</div>;
 }
 ```
 
 Steps:
 
 1. Match the flagged construct to the table rewrite.
-2. For object-heavy logic, consider moving it to `.cpp` (see
-   [native C++](../guides/native-cpp.md)).
-3. Re-run `morph check`.
+2. For object-heavy or string-heavy logic, consider moving it to `.cpp`
+   (see [native C++](../guides/native-cpp.md)).
+3. Re-run `morph check`; only a clean check should be followed by a build.
 
 ## Tuning this rule
 
@@ -103,6 +131,6 @@ Do not disable this rule. These constructs have no native representation.
 ## See also
 
 - [mx-js-op](mx-js-op.md) — unsupported operators
+- [mx-js-global](mx-js-global.md) — browser globals and timers
 - [mx-transpile](mx-transpile.md) — the general rule
 - [How Morph Compiles JavaScript](../javascript/overview.md)
-
