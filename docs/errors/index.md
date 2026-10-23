@@ -54,18 +54,18 @@ rule off or change its severity in `morph.config.json`:
 ### Window
 
 - [mx-window-missing](mx-window-missing.md) — no window created
-- [mx-windowconfig-key](mx-windowconfig-key.md) **(rule)** — invalid `windowConfig` key
-- [mx-windowconfig-type](mx-windowconfig-type.md) **(rule)** — invalid `windowConfig` value type
+- [mx-windowconfig-key](mx-windowconfig-key.md) — invalid `windowConfig` key
+- [mx-windowconfig-type](mx-windowconfig-type.md) — invalid `windowConfig` value type
 
 ### Elements and props
 
 - [mx-tag](mx-tag.md) — unknown element tag
 - [mx-tag-stub](mx-tag-stub.md) — registered but unimplemented element
 - [mx-prop](mx-prop.md) — invalid or misspelled prop
-- [mx-img-src](mx-img-src.md) **(rule)** — `<img>` without `src`
-- [mx-event-value](mx-event-value.md) **(rule)** — event handler is not a function
-- [mx-key-misuse](mx-key-misuse.md) **(rule)** — `key` used outside a list
-- [mx-dup-class](mx-dup-class.md) **(rule)** — `class` and `className` used together
+- [mx-img-src](mx-img-src.md) — `<img>` without `src`
+- [mx-event-value](mx-event-value.md) — event handler is not a function
+- [mx-key-misuse](mx-key-misuse.md) — `key` used outside a list
+- [mx-dup-class](mx-dup-class.md) — `class` and `className` used together
 
 ### Styles
 
@@ -79,10 +79,10 @@ rule off or change its severity in `morph.config.json`:
 
 ### Imports and names
 
-- [mx-import-morph](mx-import-morph.md) **(rule)** — bad import from `'morph'`
+- [mx-import-morph](mx-import-morph.md) — bad import from `'morph'`
 - [mx-no-morph-import](mx-no-morph-import.md) — Morph API used without import
 - [mx-undefined](mx-undefined.md) — name is not defined or imported
-- [mx-import-type](mx-import-type.md) **(rule)** — unsupported import type
+- [mx-import-type](mx-import-type.md) — unsupported import type
 - [mx-naming](mx-naming.md) — invalid module file or directory name
 
 ### State and effects
@@ -92,7 +92,8 @@ rule off or change its severity in `morph.config.json`:
 - [mx-event-scope](mx-event-scope.md) — `morphEvent` not at exported module scope
 - [mx-api-removed](mx-api-removed.md) — removed string-key API in use
 - [mx-state-pattern](mx-state-pattern.md) **(rule)** — `morphState` not destructured as pair
-- [mx-effect-cb](mx-effect-cb.md) **(rule)** — `morphEffect` first argument is not a function
+- [mx-state-init](mx-state-init.md) **(rule)** — `morphState` initializer is not a literal
+- [mx-effect-cb](mx-effect-cb.md) — `morphEffect` first argument is not a function
 - [mx-effect-deps](mx-effect-deps.md) **(rule)** — effect dependency is not state
 
 ### JavaScript support

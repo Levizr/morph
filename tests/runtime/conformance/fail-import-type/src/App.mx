@@ -1,0 +1,9 @@
+import config from './config.json'
+
+export const windowConfig = { title: "fail-import-type", width: 800, height: 600 }
+
+export default function App() {
+  // JSON has no Morph module kind. Binding `config` means codegen would have
+  // to emit a reference that cannot exist, so check rejects it.
+  return (<body><text>{config.title}</text></body>)
+}

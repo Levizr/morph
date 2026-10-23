@@ -2,7 +2,8 @@
 
 **Severity:** error | **Blocks `morph build`:** yes
 
-> **Status:** documented rule — `morph check` does not report this code yet. The underlying problem still breaks your build or your UI; the cause and fix below apply when you hit it.
+> **Status:** enforced by `morph check`. The rule reports at the source site
+> before codegen, so unsupported code cannot reach the C++ compiler.
 
 ## What this error means
 
@@ -23,6 +24,10 @@ function *call* instead of a function) leaves nothing to lift — and the common
 variant `morphEffect(fetchData(), [])` runs the effect immediately during
 render while registering its *return value* as the effect. Both break the
 lifecycle contract, so the call is rejected.
+
+Method references (`morphEffect(cleaner.cleanup, [])`) are also rejected: the
+lifter emits a standalone callable and cannot bind the receiver object. Move
+the effect body into an arrow that calls the method instead.
 
 ## Example that triggers it
 

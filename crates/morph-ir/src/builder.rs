@@ -2844,7 +2844,7 @@ impl IRBuilder {
                             }
                         }
                         if let Some(data) = data_src {
-                            cfg.push(format!("data: {}", strip_braces(&data)));
+                            cfg.push(format!("data: {data}"));
                         }
                         format!(
                             "() => {{ const __w = new Window(\"{href}\", {{{}}}) }}",
@@ -2853,10 +2853,7 @@ impl IRBuilder {
                     } else {
                         format!(
                             "() => {{ const __w = useWindow(); __w.navigate(\"{href}\"{}) }}",
-                            data_src.map_or_else(String::new, |data| format!(
-                                ", {}",
-                                strip_braces(&data)
-                            ))
+                            data_src.map_or_else(String::new, |data| format!(", {data}"))
                         )
                     };
                     node.events.push(IREvent {
@@ -5193,16 +5190,6 @@ fn match_selector_compound(tag: &str, classes: &[String], id: Option<&str>, sel:
         }
     }
     true
-}
-
-/// Strip one `{…}` container layer (attribute expression spans cover
-/// their braces; call sites need the bare object expression as-is).
-fn strip_braces(expr: &str) -> String {
-    let trimmed = expr.trim();
-    trimmed
-        .strip_prefix('{')
-        .and_then(|b| b.strip_suffix('}'))
-        .map_or_else(|| trimmed.to_string(), |inner| inner.trim().to_string())
 }
 
 /// True for external link targets: any URI scheme (`https:`, `http:`,

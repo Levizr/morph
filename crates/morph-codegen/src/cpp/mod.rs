@@ -2904,6 +2904,9 @@ fn generate_morph_api_header<'w>(
         "// call the accessors/wrappers below. Never read app.cpp.".to_string(),
         // Runtime base, spelled explicitly (never `#include "morph_api.h"`:
         // this file SHADOWS the runtime header by include order).
+        // Class methods and other module-level bindings live in this header,
+        // so `console.log` lowering (`std::println`) must compile here too.
+        "#include <print>".to_string(),
         "#include \"types/js_value.h\"".to_string(),
         "#include \"types/js_object.h\"".to_string(),
         "#include \"reactivity/signal.h\"".to_string(),
@@ -3156,6 +3159,7 @@ pub fn generate_morph_api_header_dev(windows: &[IRWindow], premain_parts: &[Stri
         "// namespaces and wrapper names as the build header, bound to the".to_string(),
         "// dev TU (string-registry channels, TU-local signals). Refreshed".to_string(),
         "// on every rebuild; bodies may differ from `morph build`.".to_string(),
+        "#include <print>".to_string(),
         "#include \"types/js_value.h\"".to_string(),
         "#include \"types/js_object.h\"".to_string(),
         "#include \"reactivity/signal.h\"".to_string(),
@@ -3395,6 +3399,15 @@ pub fn generate_morph_api_header_dev(windows: &[IRWindow], premain_parts: &[Stri
 mod tests {
     use super::*;
     use morph_ir::IRNode;
+
+    #[test]
+    fn api_header_includes_print_for_module_level_console_log() {
+        let header = generate_morph_api_header(&[], &[], "", &[], &[], &[], &[]);
+        assert!(
+            header.contains("#include <print>"),
+            "class methods live in this header and lower console.log to std::println: {header}"
+        );
+    }
 
     fn test_window() -> IRWindow {
         IRWindow {

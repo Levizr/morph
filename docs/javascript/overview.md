@@ -63,7 +63,7 @@ Inside a component body, statements written between the declarations (branches, 
 
 ### Expressions
 
-Binary (`+`, `-`, `*`, `/`, `===`, `!==`, `==`, `!=`, `<`, `>`, etc.), unary (`!`, `-`, `++`, `--`), ternary (`? :`), template literals, array/object literals, `new`, member access, function calls, optional chaining / nullish coalescing
+Binary (`+`, `-`, `*`, `/`, `===`, `!==`, `==`, `!=`, `<`, `>`, etc.), unary (`!`, `-`, `++`, `--`), ternary (`? :`), template literals, array/object literals, `new`, member access, function calls, optional chaining / nullish coalescing. Object literals hold data values only — keep functions as separate consts (`{ handler: save }` is [mx-js-syntax](../errors/mx-js-syntax.md)).
 
 ### JS Runtime Semantics
 
@@ -98,6 +98,35 @@ The linter (`morph check`) rejects every unsupported construct above with
 a precise error and exits non-zero. A clean `morph check` is the preflight
 for `morph build`; the two commands share the same parser, graph, lint, and
 IR pipeline.
+
+## Rules `morph check` Enforces
+
+Beyond the supported-syntax list, these structural rules are checked before
+codegen. Errors block `morph build`; warnings are reported but do not:
+
+- **One component entry point** — a UI module exports exactly one
+  `export default function` (`mx-export`).
+- **Images need a source** — every `<img>` has a non-empty `src`
+  (`mx-img-src`).
+- **Handlers are functions** — event props receive a function reference or
+  arrow, not a call, string, or boolean (`mx-event-value`).
+- **`key` only in lists** — `key` belongs on the root of a `.map()` item;
+  outside a list it is dead markup (`mx-key-misuse`, warning).
+- **One class source** — do not combine `class` and `className`
+  (`mx-dup-class`, warning).
+- **Real imports** — names imported from `'morph'` must be actual runtime
+  exports imported under their canonical names, and module imports must
+  target `.css`, `.cpp`, `'morph'`, or a source module
+  (`mx-import-morph`, `mx-import-type`).
+- **Literal window config** — `windowConfig` keys are known and values are
+  literals of the documented type (`mx-windowconfig-key`,
+  `mx-windowconfig-type`).
+- **Effects receive functions** — the first `morphEffect` argument is a
+  function, never a call result or a receiver-qualified method
+  (`mx-effect-cb`).
+
+Each rule links to its full explanation and fix in the
+[error reference](../errors/index.md).
 
 ## Codegen Mode
 

@@ -2,7 +2,8 @@
 
 **Severity:** error | **Blocks `morph build`:** yes
 
-> **Status:** documented rule — `morph check` does not report this code yet. The underlying problem still breaks your build or your UI; the cause and fix below apply when you hit it.
+> **Status:** enforced by `morph check`. The rule reports at the source site
+> before codegen, so unsupported code cannot reach the C++ compiler.
 
 ## What this error means
 
@@ -25,6 +26,14 @@ code as [mx-undefined](mx-undefined.md) noise.
 
 The exported surface is: `morphState`, `morphShared`, `morphEvent`,
 `morphEffect`, `useWindow`, `Window`, `CSS`.
+
+Runtime APIs must keep their original names. Aliasing is rejected because
+codegen recognizes each API by its canonical binding name:
+
+```tsx
+// ❌ Codegen does not recognize `effect`
+import { morphEffect as effect } from 'morph';
+```
 
 ## Example that triggers it
 

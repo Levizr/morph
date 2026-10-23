@@ -1,5 +1,6 @@
 mod cache;
 mod commands;
+mod lint_config;
 mod logger;
 mod versions;
 

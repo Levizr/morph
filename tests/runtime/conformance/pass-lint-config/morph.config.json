@@ -1,0 +1,8 @@
+{
+  "name": "pass-lint-config",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "pass-lint-config" },
+  "dependencies": {},
+  "cpp_sources": [],
+  "lint": { "disable": ["mx-img-src"] }
+}

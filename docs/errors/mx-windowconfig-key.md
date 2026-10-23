@@ -2,7 +2,8 @@
 
 **Severity:** error | **Blocks `morph build`:** yes
 
-> **Status:** documented rule — `morph check` does not report this code yet. The underlying problem still breaks your build or your UI; the cause and fix below apply when you hit it.
+> **Status:** enforced by `morph check`. The rule reports at the source site
+> before codegen, so unsupported code cannot reach the C++ compiler.
 
 ## What this error means
 
@@ -23,7 +24,7 @@ did-you-mean suggestion instead. (Wrong *value types* are a separate check:
 [mx-windowconfig-type](mx-windowconfig-type.md).)
 
 Valid keys include `title`, `width`, `height`, `minWidth`, `minHeight`,
-`maxWidth`, `maxHeight`, `visible`, and `modal` — see
+`maxWidth`, `maxHeight`, `visible`, `modal`, `parent`, and `role` — see
 [configuration](../getting-started/configuration.md) for the full list.
 
 ## Example that triggers it

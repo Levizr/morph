@@ -1,0 +1,8 @@
+{
+  "name": "fail-lint-severity",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "fail-lint-severity" },
+  "dependencies": {},
+  "cpp_sources": [],
+  "lint": { "severities": { "mx-key-misuse": "error" } }
+}

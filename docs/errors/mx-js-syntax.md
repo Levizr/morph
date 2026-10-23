@@ -26,6 +26,8 @@ The current set is:
 - C++ keywords used as binding names or class member names (`double`,
   `template`, `delete`, …)
 - class expressions assigned to a const
+- function-valued object properties (`{ handler: save }` — `JsObject`
+  fields cannot store closures)
 - destructuring at the top of a component body (except the
   `const [value, setValue] = morphState(...)` pair)
 
@@ -39,8 +41,8 @@ These lower correctly and are **not** errors: optional chaining `?.`,
 nullish coalescing `??`, `for...in` / `for...of`, array spread, getters and
 setters, plain-TS destructuring and loop-head destructuring, class
 declarations / `new`, type-only imports and exports, default and optional
-parameters, arrow/function consts, object-literal consts, and JSX list
-expressions.
+parameters, arrow/function consts, data-only object-literal consts, and JSX
+list expressions.
 
 ## Why Morph raises it
 
@@ -73,6 +75,15 @@ export default function App() {
 ```
 
 ```tsx
+// ❌ Closure stored in an object — mx-js-syntax
+export default function App() {
+  const save = () => console.log("saved");
+  const handlers = { save };
+  return <button onClick={handlers.save}>Save</button>;
+}
+```
+
+```tsx
 // ❌ Namespace import — mx-js-syntax
 import * as lib from "./lib.ts";
 
@@ -99,6 +110,7 @@ export default function App() {
 | `...args` | an explicit array parameter |
 | `const C = class { … }` | a class declaration |
 | `{...o, k: v}` | an explicit object literal |
+| `{ handler: fn }` | keep `fn` as its own const and call it directly |
 | destructuring in a component body | one const per binding (`const [v, setV]` state pairs are fine) |
 | generator / `yield` | a state machine with `morphState` |
 | `with (o) { ... }` | explicit `o.` qualification |

@@ -1,0 +1,7 @@
+{
+  "name": "fail-img-src",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "fail-img-src" },
+  "dependencies": {},
+  "cpp_sources": []
+}

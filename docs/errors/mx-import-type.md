@@ -1,8 +1,9 @@
 # mx-import-type — Unsupported Import Type
 
-**Severity:** warning | **Blocks `morph build`:** no
+**Severity:** error for bound imports; warning for bare imports | **Blocks `morph build`:** yes when bound
 
-> **Status:** documented rule — `morph check` does not report this code yet. The underlying problem still breaks your build or your UI; the cause and fix below apply when you hit it.
+> **Status:** enforced by `morph check`. The rule reports at the source site
+> before codegen, so unsupported code cannot reach the C++ compiler.
 
 ## What this error means
 
@@ -11,7 +12,7 @@ An import targets a module kind Morph cannot resolve — anything other than a
 source module (`.mx`, `.tsx`, `.ts`):
 
 ```
-warning : mx-import-type : Unsupported import `./data.json` — only .css, .cpp, 'morph', and source modules can be imported
+error : mx-import-type : Unsupported import `./data.json` — only .css, .cpp, 'morph', and source modules can be imported
   hint: Move the data into a `.ts` module or fetch it at runtime
   Learn more: https://morph.levizr.com/docs/errors/mx-import-type
 ```
@@ -23,17 +24,18 @@ logic in `.ts`/`.cpp`.
 ## Why Morph raises it
 
 Imports are resolved at compile time into the module graph (components, logic,
-styles, native code). A `.json` file, an npm package, or a URL has no graph
-node type — the compiler cannot turn it into C++. Rather than emitting a
-broken reference, Morph warns at the import line. This is a warning (not an
-error) because the import may be type-only or otherwise erasable — but if the
-value is used, expect a follow-up [mx-undefined](mx-undefined.md) or a build
-failure.
+styles, native code). A `.json` file, an npm package, or a URL used as a value
+has no graph node type — the compiler cannot turn it into C++. Rather than
+emitting a broken reference, Morph reports at the import line. The rule is an
+error when the import binds a name (`import config from …`), because codegen
+must resolve that name; a bare side-effect import (`import "./data.json"`) is
+only a warning because it can be erased. A side-effect stylesheet URL
+(`import "https://…/app.css"`) is still supported and does not warn.
 
 ## Example that triggers it
 
 ```tsx
-// ⚠️ JSON imports have no module kind — mx-import-type
+// ❌ Bound name from a JSON module — mx-import-type (error)
 import config from './config.json';
 
 export default function App() {
@@ -41,12 +43,17 @@ export default function App() {
 }
 ```
 
+```tsx
+// ⚠️ Bare side-effect import — mx-import-type (warning)
+import './config.json';
+```
+
 ## How to fix
 
 ```tsx
 // ✅ Option 1: move the data into a .ts module
 // config.ts:  export const title = "My App";
-import { title } from './config';
+import { title } from './config.ts';
 
 export default function App() {
   return <div>{title}</div>;

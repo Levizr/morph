@@ -1,13 +1,15 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ast_types::{JsxNode, JsxPropValue, LintError, MxImportKind, MxSource};
+use crate::js_walker::window_config_object;
 use oxc_allocator::Allocator;
 use oxc_ast::ast::*;
 use oxc_ast_visit::Visit;
 use oxc_parser::Parser;
-use oxc_semantic::SemanticBuilder;
+use oxc_semantic::{Scoping, SemanticBuilder};
 use oxc_span::{GetSpan, LabeledSpan};
 use oxc_syntax::scope::ScopeFlags;
+use oxc_syntax::symbol::SymbolId;
 
 #[allow(dead_code)]
 fn offset_to_line_col(source: &str, offset: u32) -> (usize, usize) {
@@ -44,8 +46,43 @@ const NATIVE_GLOBALS: &[&str] = &[
 ];
 
 /// Morph APIs that must be imported from 'morph' (bare use is an error).
+/// This is also the complete set of value exports from the runtime module.
 const MORPH_BUILTINS: &[&str] =
     &["morphState", "morphEffect", "morphShared", "morphEvent", "useWindow", "Window", "CSS"];
+
+/// Keys codegen reads from `export const windowConfig = {...}`.
+const WINDOW_CONFIG_KEYS: &[&str] = &[
+    "title",
+    "width",
+    "height",
+    "minWidth",
+    "minHeight",
+    "maxWidth",
+    "maxHeight",
+    "visible",
+    "modal",
+    "parent",
+    "role",
+];
+
+/// Extensions that resolve to a JavaScript/TypeScript module in the graph.
+fn is_source_module(path: &str) -> bool {
+    // Remote URLs never resolve to a module node, even when the path ends in
+    // `.ts`/`.tsx`/`.mx`. Check this before looking at the extension.
+    if path.contains("://") {
+        return false;
+    }
+    std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|ext| matches!(ext.to_ascii_lowercase().as_str(), "mx" | "ts" | "tsx"))
+}
+
+/// Component imports resolve to `'morph'` or another source module. CSS and
+/// native modules are represented by their own `MxImportKind` variants.
+fn is_supported_component_import(path: &str) -> bool {
+    path == "morph" || is_source_module(path)
+}
 
 /// AST positions that are never value references: JSX tag names
 /// (lowercase intrinsics like `<div>`, and component tags like `<Card>` —
@@ -117,13 +154,6 @@ fn collect_skip_spans(program: &Program) -> SkipSpans {
     };
     collector.visit_program(program);
     collector.out
-}
-
-/// Lowercase JSX tag positions (`<div>`, `<span>`): intrinsic elements,
-/// never identifier references. Collected from the AST so a real
-/// variable that merely shares a name is still checked at its own spans.
-fn jsx_intrinsic_spans(program: &Program) -> HashSet<u32> {
-    collect_skip_spans(program).intrinsics
 }
 
 /// `mx-undefined` / `mx-no-morph-import`: every referenced name must be
@@ -697,11 +727,13 @@ const CPP_KEYWORDS: &[&str] = &[
 /// dropped code (see the translator probes, not the stale coverage doc:
 /// `?.`, destructuring, for-of/in, spreads in *arrays* and getters all
 /// lower correctly and stay allowed).
-struct JsSyntaxVisitor {
+struct JsSyntaxVisitor<'s> {
     // (span start, construct text, hint)
     out: Vec<(u32, &'static str, &'static str)>,
+    function_symbols: &'s HashSet<SymbolId>,
+    scoping: &'s Scoping,
 }
-impl<'a> Visit<'a> for JsSyntaxVisitor {
+impl<'a> Visit<'a> for JsSyntaxVisitor<'_> {
     fn visit_expression(&mut self, e: &Expression<'a>) {
         match e {
             Expression::YieldExpression(y) => {
@@ -767,12 +799,23 @@ impl<'a> Visit<'a> for JsSyntaxVisitor {
     }
     fn visit_object_expression(&mut self, e: &ObjectExpression<'a>) {
         for prop in &e.properties {
-            if let ObjectPropertyKind::SpreadProperty(sp) = prop {
-                self.out.push((
-                    sp.span.start,
-                    "object spread",
-                    "Copy the fields explicitly — spread data is dropped",
-                ));
+            match prop {
+                ObjectPropertyKind::SpreadProperty(sp) => {
+                    self.out.push((
+                        sp.span.start,
+                        "object spread",
+                        "Copy the fields explicitly — spread data is dropped",
+                    ));
+                }
+                ObjectPropertyKind::ObjectProperty(p) => {
+                    if self.property_value_is_function(p) {
+                        self.out.push((
+                            p.span.start,
+                            "function-valued object property",
+                            "Keep functions as separate consts; JsObject fields cannot store closures",
+                        ));
+                    }
+                }
             }
         }
         oxc_ast_visit::walk::walk_object_expression(self, e);
@@ -870,8 +913,27 @@ impl<'a> Visit<'a> for JsSyntaxVisitor {
     }
 }
 
-impl<'a> JsSyntaxVisitor {
-    fn check_member_key(&mut self, key: &PropertyKey<'a>) {
+impl JsSyntaxVisitor<'_> {
+    fn property_value_is_function(&self, property: &ObjectProperty<'_>) -> bool {
+        if property.method {
+            return true;
+        }
+        match unwrap_ts_expr(&property.value) {
+            Expression::ArrowFunctionExpression(_) | Expression::FunctionExpression(_) => true,
+            Expression::Identifier(id) => self.reference_is_function(id),
+            _ => false,
+        }
+    }
+
+    fn reference_is_function(&self, id: &IdentifierReference<'_>) -> bool {
+        let Some(reference_id) = id.reference_id.get() else { return false };
+        let Some(symbol_id) = self.scoping.get_reference(reference_id).symbol_id() else {
+            return false;
+        };
+        self.function_symbols.contains(&symbol_id)
+    }
+
+    fn check_member_key(&mut self, key: &PropertyKey<'_>) {
         let (name, start) = match key {
             PropertyKey::StaticIdentifier(id) => (id.name.as_str(), id.span.start),
             PropertyKey::Identifier(id) => (id.name.as_str(), id.span.start),
@@ -887,8 +949,63 @@ impl<'a> JsSyntaxVisitor {
     }
 }
 
+/// Strip TypeScript/parenthesis wrappers that do not change the runtime value.
+fn unwrap_ts_expr<'a, 'b>(expr: &'b Expression<'a>) -> &'b Expression<'a> {
+    match expr {
+        Expression::ParenthesizedExpression(paren) => unwrap_ts_expr(&paren.expression),
+        Expression::TSAsExpression(ts) => unwrap_ts_expr(&ts.expression),
+        Expression::TSSatisfiesExpression(ts) => unwrap_ts_expr(&ts.expression),
+        Expression::TSNonNullExpression(ts) => unwrap_ts_expr(&ts.expression),
+        _ => expr,
+    }
+}
+
+fn expression_is_function(expr: &Expression<'_>) -> bool {
+    matches!(
+        unwrap_ts_expr(expr),
+        Expression::ArrowFunctionExpression(_) | Expression::FunctionExpression(_)
+    )
+}
+
+/// Symbols bound to a function value so object literals can reject
+/// `{ handler: save }` before codegen emits a `JsObject` it cannot build.
+struct FunctionSymbolCollector {
+    out: HashSet<SymbolId>,
+}
+
+impl<'a> Visit<'a> for FunctionSymbolCollector {
+    fn visit_variable_declarator(&mut self, declarator: &VariableDeclarator<'a>) {
+        if let (BindingPattern::BindingIdentifier(id), Some(init)) =
+            (&declarator.id, &declarator.init)
+        {
+            if expression_is_function(init) {
+                if let Some(symbol_id) = id.symbol_id.get() {
+                    self.out.insert(symbol_id);
+                }
+            }
+        }
+        oxc_ast_visit::walk::walk_variable_declarator(self, declarator);
+    }
+
+    fn visit_function(&mut self, function: &Function<'a>, flags: ScopeFlags) {
+        if let Some(id) = &function.id {
+            if let Some(symbol_id) = id.symbol_id.get() {
+                self.out.insert(symbol_id);
+            }
+        }
+        oxc_ast_visit::walk::walk_function(self, function, flags);
+    }
+}
+
 fn check_js_syntax(program: &Program, file_path: &str, offsets: &[usize]) -> Vec<LintError> {
-    let mut st = JsSyntaxVisitor { out: Vec::new() };
+    let semantic = SemanticBuilder::new().with_build_nodes(true).build(program).semantic;
+    let mut functions = FunctionSymbolCollector { out: HashSet::new() };
+    functions.visit_program(program);
+    let mut st = JsSyntaxVisitor {
+        out: Vec::new(),
+        function_symbols: &functions.out,
+        scoping: semantic.scoping(),
+    };
     st.visit_program(program);
     st.out
         .iter()
@@ -1597,6 +1714,112 @@ static UNSUPPORTED_JS_ROOTS: &[&str] = &[
 /// `console` itself is supported, but only these methods exist natively.
 static CONSOLE_METHODS: &[&str] = &["log", "warn", "error", "info"];
 
+/// Import-surface rules: every `'morph'` binding must be a real runtime
+/// export, and every module path must map to a kind the build graph can
+/// resolve. Both would otherwise fail later with a less actionable message.
+fn lint_imports(source: &MxSource, file_path: &str, out: &mut Vec<LintError>) {
+    for imp in &source.imports {
+        let MxImportKind::Component { path, default, specifiers, .. } = &imp.kind else {
+            continue;
+        };
+        if path == "morph" {
+            let available = MORPH_BUILTINS.join(", ");
+            if let Some(name) = default {
+                out.push(LintError {
+                    severity: "error".into(),
+                    code: "mx-import-morph".into(),
+                    message: format!("`{name}` is not exported by 'morph'"),
+                    suggestion: Some(format!("Available: {available}")),
+                    file_path: file_path.into(),
+                    line: imp.line,
+                    col: imp.col,
+                });
+            }
+            for (local, imported) in specifiers {
+                if !MORPH_BUILTINS.contains(&imported.as_str()) {
+                    out.push(LintError {
+                        severity: "error".into(),
+                        code: "mx-import-morph".into(),
+                        message: format!("`{imported}` is not exported by 'morph'"),
+                        suggestion: Some(format!("Available: {available}")),
+                        file_path: file_path.into(),
+                        line: imp.line,
+                        col: imp.col,
+                    });
+                    continue;
+                }
+                if local != imported {
+                    out.push(LintError {
+                        severity: "error".into(),
+                        code: "mx-import-morph".into(),
+                        message: format!(
+                            "runtime API `{imported}` cannot be imported under the alias `{local}`"
+                        ),
+                        suggestion: Some(format!(
+                            "Use the original name: `import {{ {imported} }} from 'morph'`"
+                        )),
+                        file_path: file_path.into(),
+                        line: imp.line,
+                        col: imp.col,
+                    });
+                }
+            }
+        } else if !is_supported_component_import(path) {
+            // A bare unsupported import is erasable (warning); binding names
+            // means codegen must resolve them, so the build would fail.
+            let bound = matches!(
+                &imp.kind,
+                MxImportKind::Component { default, namespace, specifiers, .. }
+                    if default.is_some() || namespace.is_some() || !specifiers.is_empty()
+            );
+            out.push(LintError {
+                severity: if bound { "error" } else { "warning" }.into(),
+                code: "mx-import-type".into(),
+                message: format!(
+                    "Unsupported import `{path}` — only .css, .cpp, 'morph', and source modules can be imported"
+                ),
+                suggestion: Some("Move the data into a .ts module or fetch it at runtime".into()),
+                file_path: file_path.into(),
+                line: imp.line,
+                col: imp.col,
+            });
+        }
+    }
+    for re in &source.re_exports {
+        if re.path == "morph" {
+            let available = MORPH_BUILTINS.join(", ");
+            for (original, _exported) in &re.names {
+                if !MORPH_BUILTINS.contains(&original.as_str()) {
+                    out.push(LintError {
+                        severity: "error".into(),
+                        code: "mx-import-morph".into(),
+                        message: format!("`{original}` is not exported by 'morph'"),
+                        suggestion: Some(format!("Available: {available}")),
+                        file_path: file_path.into(),
+                        line: re.line,
+                        col: re.col,
+                    });
+                }
+            }
+            continue;
+        }
+        if !is_source_module(&re.path) {
+            out.push(LintError {
+                severity: "error".into(),
+                code: "mx-import-type".into(),
+                message: format!(
+                    "Unsupported import `{}` — only .css, .cpp, 'morph', and source modules can be imported",
+                    re.path
+                ),
+                suggestion: Some("Move the data into a .ts module or fetch it at runtime".into()),
+                file_path: file_path.into(),
+                line: re.line,
+                col: re.col,
+            });
+        }
+    }
+}
+
 pub fn lint(source: &MxSource, content: &str, file_path: &str) -> Vec<LintError> {
     let mut out = Vec::new();
 
@@ -1656,9 +1879,12 @@ pub fn lint(source: &MxSource, content: &str, file_path: &str) -> Vec<LintError>
         }
     }
 
+    // ── Import surface: runtime exports and resolvable module kinds ──
+    lint_imports(source, file_path, &mut out);
+
     // ── Walk JSX for tag/prop/list/JS global checks ──
     for comp in &source.components {
-        lint_jsx(&comp.jsx, content, file_path, &mut out);
+        lint_jsx(&comp.jsx, content, file_path, false, &mut out);
     }
 
     // ── Component usage checks (single-file) ──
@@ -1682,8 +1908,8 @@ pub fn lint(source: &MxSource, content: &str, file_path: &str) -> Vec<LintError>
                 message: format!("`CSS.load(\"{path}\")` is deprecated"),
                 suggestion: Some(format!("Use `import \"{path}\"` instead")),
                 file_path: file_path.into(),
-                line: 1,
-                col: 1,
+                line: imp.line,
+                col: imp.col,
             });
         }
     }
@@ -1713,7 +1939,124 @@ fn jsx_has_tag(node: &JsxNode, target: &str) -> bool {
     }
 }
 
-fn lint_jsx(node: &JsxNode, _content: &str, file_path: &str, out: &mut Vec<LintError>) {
+/// A `src` is present but empty (`src=""`, `src={""}`) — both produce an
+/// image node with no decodable source.
+fn jsx_src_missing(props: &HashMap<String, JsxPropValue>) -> bool {
+    match props.get("src") {
+        None => true,
+        Some(JsxPropValue::String(s)) => s.trim().is_empty(),
+        Some(JsxPropValue::Ref(name)) => name == "undefined",
+        Some(JsxPropValue::Expr(src)) => {
+            let src = src.trim();
+            if src.is_empty() || src == "\"\"" || src == "''" || src == "``" {
+                return true;
+            }
+            let allocator = Allocator::default();
+            match Parser::new(&allocator, src, SourceType::tsx()).parse_expression() {
+                Ok(expr) => !img_expr_could_be_source(&expr),
+                Err(_) => {
+                    matches!(src, "null" | "undefined" | "true" | "false")
+                        || src.starts_with('{')
+                        || src.starts_with('[')
+                }
+            }
+        }
+        Some(JsxPropValue::Template(s)) => {
+            let t = s.trim();
+            t.is_empty() || t == "``"
+        }
+        // A function is never a source string, and a style object cannot
+        // be decoded as an image path.
+        Some(JsxPropValue::Fn(_) | JsxPropValue::Bool | JsxPropValue::Style(_)) => true,
+    }
+}
+
+fn img_expr_could_be_source(expr: &Expression<'_>) -> bool {
+    match expr {
+        Expression::StringLiteral(_) | Expression::TemplateLiteral(_) => true,
+        Expression::Identifier(id) => !matches!(id.name.as_str(), "undefined" | "NaN" | "Infinity"),
+        Expression::StaticMemberExpression(_)
+        | Expression::ComputedMemberExpression(_)
+        | Expression::PrivateFieldExpression(_)
+        | Expression::CallExpression(_) => true,
+        Expression::BinaryExpression(_) | Expression::LogicalExpression(_) => true,
+        Expression::ParenthesizedExpression(paren) => img_expr_could_be_source(&paren.expression),
+        Expression::TSAsExpression(ts) => img_expr_could_be_source(&ts.expression),
+        Expression::TSSatisfiesExpression(ts) => img_expr_could_be_source(&ts.expression),
+        Expression::TSNonNullExpression(ts) => img_expr_could_be_source(&ts.expression),
+        Expression::ConditionalExpression(cond) => {
+            img_expr_could_be_source(&cond.consequent) && img_expr_could_be_source(&cond.alternate)
+        }
+        _ => false,
+    }
+}
+
+/// A value that certainly cannot be used as an event callback. Parsing the
+/// expression (instead of matching source text) catches parenthesized calls
+/// and rejects literals/objects/arithmetic that visual inspection misses.
+fn event_handler_is_not_callable(value: &JsxPropValue) -> bool {
+    match value {
+        JsxPropValue::String(_)
+        | JsxPropValue::Template(_)
+        | JsxPropValue::Bool
+        | JsxPropValue::Style(_) => true,
+        JsxPropValue::Ref(name) => matches!(name.as_str(), "undefined" | "NaN" | "Infinity"),
+        JsxPropValue::Fn(_) => false,
+        JsxPropValue::Expr(src) => {
+            let src = src.trim();
+            if src.is_empty() {
+                return true;
+            }
+            let allocator = Allocator::default();
+            match Parser::new(&allocator, src, SourceType::tsx()).parse_expression() {
+                Ok(expr) => !handler_expr_could_be_callable(&expr),
+                // Unparseable snippets are diagnosed by the parser pass, but
+                // obvious non-expression shapes still cannot be callbacks.
+                Err(_) => {
+                    matches!(src, "null" | "undefined" | "true" | "false")
+                        || src.starts_with('{')
+                        || src.starts_with('[')
+                        || src.starts_with("new ")
+                }
+            }
+        }
+    }
+}
+
+/// Whether an expression can evaluate to a callable. Identifiers, member
+/// reads, and ternaries of callables are accepted; calls, literals, objects,
+/// and arithmetic are not.
+fn handler_expr_could_be_callable(expr: &Expression<'_>) -> bool {
+    match expr {
+        Expression::ArrowFunctionExpression(_) | Expression::FunctionExpression(_) => true,
+        Expression::Identifier(id) => !matches!(id.name.as_str(), "undefined" | "NaN" | "Infinity"),
+        Expression::StaticMemberExpression(_)
+        | Expression::ComputedMemberExpression(_)
+        | Expression::PrivateFieldExpression(_) => true,
+        Expression::ParenthesizedExpression(paren) => {
+            handler_expr_could_be_callable(&paren.expression)
+        }
+        Expression::TSAsExpression(ts) => handler_expr_could_be_callable(&ts.expression),
+        Expression::TSSatisfiesExpression(ts) => handler_expr_could_be_callable(&ts.expression),
+        Expression::TSNonNullExpression(ts) => handler_expr_could_be_callable(&ts.expression),
+        Expression::ConditionalExpression(cond) => {
+            handler_expr_could_be_callable(&cond.consequent)
+                && handler_expr_could_be_callable(&cond.alternate)
+        }
+        Expression::SequenceExpression(seq) => {
+            seq.expressions.last().is_some_and(|last| handler_expr_could_be_callable(last))
+        }
+        _ => false,
+    }
+}
+
+fn lint_jsx(
+    node: &JsxNode,
+    _content: &str,
+    file_path: &str,
+    allow_key: bool,
+    out: &mut Vec<LintError>,
+) {
     match node {
         JsxNode::Element { tag, props, children, line, col, .. } => {
             // ── mx-tag ──
@@ -1744,18 +2087,84 @@ fn lint_jsx(node: &JsxNode, _content: &str, file_path: &str, out: &mut Vec<LintE
                 }
             }
 
+            // ── mx-img-src ──
+            if tag == "img" && jsx_src_missing(props) {
+                out.push(LintError {
+                    severity: "error".into(),
+                    code: "mx-img-src".into(),
+                    message: "<img> requires a `src` attribute".into(),
+                    suggestion: Some("Add `src=\"./photo.png\"` (local path or URL)".into()),
+                    file_path: file_path.into(),
+                    line: *line,
+                    col: *col,
+                });
+            }
+
+            // ── mx-event-value ──
+            if !is_component_tag(tag) {
+                for (prop, value) in props {
+                    if EVENT_PROPS.contains(&prop.as_str()) && event_handler_is_not_callable(value)
+                    {
+                        out.push(LintError {
+                            severity: "error".into(),
+                            code: "mx-event-value".into(),
+                            message: format!(
+                                "Event handler `{prop}` on <{tag}> must be a function"
+                            ),
+                            suggestion: Some(
+                                "Pass `onClick={() => ...}` or a named function reference".into(),
+                            ),
+                            file_path: file_path.into(),
+                            line: *line,
+                            col: *col,
+                        });
+                    }
+                }
+            }
+
+            // ── mx-key-misuse ──
+            // `key` is meaningful only on the root of a `.map()` template;
+            // the list arm below sets `allow_key` for that one node.
+            if !allow_key && props.contains_key("key") {
+                out.push(LintError {
+                    severity: "warning".into(),
+                    code: "mx-key-misuse".into(),
+                    message: "`key` is only meaningful inside `.map()` lists".into(),
+                    suggestion: Some("Remove `key` here, or move it to the list item root".into()),
+                    file_path: file_path.into(),
+                    line: *line,
+                    col: *col,
+                });
+            }
+
             // ── mx-prop ──
             for prop in props.keys() {
                 if prop == "class" {
-                    out.push(LintError {
-                        severity: "warning".into(),
-                        code: "mx-prop".into(),
-                        message: format!("Use `className` instead of `class` on <{tag}>"),
-                        suggestion: Some("Replace `class` with `className`".into()),
-                        file_path: file_path.into(),
-                        line: *line,
-                        col: *col,
-                    });
+                    if props.contains_key("className") {
+                        out.push(LintError {
+                            severity: "warning".into(),
+                            code: "mx-dup-class".into(),
+                            message: format!(
+                                "`class` and `className` must not be used together on <{tag}>"
+                            ),
+                            suggestion: Some(
+                                "Keep `className` and merge both values into it".into(),
+                            ),
+                            file_path: file_path.into(),
+                            line: *line,
+                            col: *col,
+                        });
+                    } else {
+                        out.push(LintError {
+                            severity: "warning".into(),
+                            code: "mx-prop".into(),
+                            message: format!("Use `className` instead of `class` on <{tag}>"),
+                            suggestion: Some("Replace `class` with `className`".into()),
+                            file_path: file_path.into(),
+                            line: *line,
+                            col: *col,
+                        });
+                    }
                     continue;
                 }
                 if !is_allowed_prop(tag, prop) {
@@ -1792,20 +2201,31 @@ fn lint_jsx(node: &JsxNode, _content: &str, file_path: &str, out: &mut Vec<LintE
             }
 
             for child in children {
-                lint_jsx(child, _content, file_path, out);
+                lint_jsx(child, _content, file_path, false, out);
             }
         }
-        JsxNode::Fragment { children, .. } => {
+        JsxNode::Fragment { props, children, line, col } => {
+            if !allow_key && props.contains_key("key") {
+                out.push(LintError {
+                    severity: "warning".into(),
+                    code: "mx-key-misuse".into(),
+                    message: "`key` is only meaningful inside `.map()` lists".into(),
+                    suggestion: Some("Remove `key` here, or move it to the list item root".into()),
+                    file_path: file_path.into(),
+                    line: *line,
+                    col: *col,
+                });
+            }
             for child in children {
-                lint_jsx(child, _content, file_path, out);
+                lint_jsx(child, _content, file_path, false, out);
             }
         }
         JsxNode::Conditional { then_branch, else_branch, .. } => {
             for c in then_branch {
-                lint_jsx(c, _content, file_path, out);
+                lint_jsx(c, _content, file_path, false, out);
             }
             for c in else_branch {
-                lint_jsx(c, _content, file_path, out);
+                lint_jsx(c, _content, file_path, false, out);
             }
         }
         JsxNode::List { key_expr, item_template, line, col, .. } => {
@@ -1823,7 +2243,7 @@ fn lint_jsx(node: &JsxNode, _content: &str, file_path: &str, out: &mut Vec<LintE
                     col: *col,
                 });
             }
-            lint_jsx(item_template, _content, file_path, out);
+            lint_jsx(item_template, _content, file_path, true, out);
         }
         _ => {}
     }
@@ -2072,6 +2492,11 @@ fn lint_state_event_scope(source: &MxSource, content: &str, file_path: &str) -> 
     let exported_locals: HashSet<&str> =
         source.named_exports.iter().map(|(local, _)| local.as_str()).collect();
     let mut out = Vec::new();
+    // AST-level rules that need source positions: windowConfig shape and
+    // morphEffect callback shape. Both are compile-time contracts, not
+    // runtime conventions.
+    lint_window_config(&ret.program, &offsets, file_path, &mut out);
+    lint_effect_callbacks(&ret.program, &offsets, file_path, &mut out);
     for stmt in &ret.program.body {
         let listed = match stmt {
             Statement::VariableDeclaration(vd) => vd.declarations.iter().any(|d| {
@@ -2087,6 +2512,209 @@ fn lint_state_event_scope(source: &MxSource, content: &str, file_path: &str) -> 
         scope_stmt(stmt, &components, false, listed, 0, false, &offsets, file_path, &mut out);
     }
     out
+}
+
+fn property_key_text(key: &PropertyKey<'_>) -> Option<(String, u32)> {
+    match key {
+        PropertyKey::StaticIdentifier(id) => Some((id.name.to_string(), id.span.start)),
+        PropertyKey::Identifier(id) => Some((id.name.to_string(), id.span.start)),
+        PropertyKey::StringLiteral(s) => Some((s.value.to_string(), s.span.start)),
+        _ => None,
+    }
+}
+
+fn window_config_expected(key: &str) -> Option<&'static str> {
+    match key {
+        "title" | "parent" | "role" => Some("string"),
+        "width" | "height" | "minWidth" | "minHeight" | "maxWidth" | "maxHeight" => Some("number"),
+        "visible" | "modal" => Some("boolean"),
+        _ => None,
+    }
+}
+
+fn expression_type_name(expr: &Expression<'_>) -> &'static str {
+    match expr {
+        Expression::StringLiteral(_) => "string",
+        Expression::NumericLiteral(_) => "number",
+        Expression::BooleanLiteral(_) => "boolean",
+        Expression::ObjectExpression(_) => "object",
+        Expression::ArrayExpression(_) => "array",
+        Expression::ArrowFunctionExpression(_) | Expression::FunctionExpression(_) => "function",
+        Expression::TemplateLiteral(_) => "template string",
+        Expression::Identifier(_) => "identifier",
+        Expression::CallExpression(_) => "call expression",
+        _ => "expression",
+    }
+}
+
+fn window_config_value_matches(key: &str, expr: &Expression<'_>) -> bool {
+    // `parent: null` is the explicit spelling of "independent window"; the
+    // parser leaves the default empty parent for it.
+    if key == "parent" && matches!(expr, Expression::NullLiteral(_)) {
+        return true;
+    }
+    match window_config_expected(key) {
+        Some("string") => matches!(expr, Expression::StringLiteral(_)),
+        Some("number") => matches!(expr, Expression::NumericLiteral(_)),
+        Some("boolean") => matches!(expr, Expression::BooleanLiteral(_)),
+        _ => true,
+    }
+}
+
+/// `windowConfig` lowers straight into native window parameters, so keys
+/// and literal value types are part of the language surface. Unknown keys
+/// and coercible-looking values are rejected instead of being silently
+/// ignored by the two copies of the lowering switch.
+fn lint_window_config(
+    program: &Program<'_>,
+    offsets: &[usize],
+    file_path: &str,
+    out: &mut Vec<LintError>,
+) {
+    for stmt in &program.body {
+        let Statement::ExportDeclaration(export) = stmt else { continue };
+        let Declaration::VariableDeclaration(vd) = &export.declaration else { continue };
+        for decl in &vd.declarations {
+            if binding_ident_name(&decl.id).as_deref() != Some("windowConfig") {
+                continue;
+            }
+            let Some(obj) = decl.init.as_ref().and_then(window_config_object) else { continue };
+            for prop in &obj.properties {
+                let ObjectPropertyKind::ObjectProperty(p) = prop else { continue };
+                let Some((key, start)) = property_key_text(&p.key) else { continue };
+                let (line, col) = offset_to_line_col_fast(offsets, start);
+                if !WINDOW_CONFIG_KEYS.contains(&key.as_str()) {
+                    let mut best: Option<(String, f64)> = None;
+                    for candidate in WINDOW_CONFIG_KEYS {
+                        let sim = strsim::jaro_winkler(&key, candidate);
+                        if sim > 0.7 && best.as_ref().is_none_or(|(_, b)| sim > *b) {
+                            best = Some(((*candidate).to_string(), sim));
+                        }
+                    }
+                    let suggestion = match best {
+                        Some((name, _)) => format!(
+                            "Did you mean `{name}`? Valid keys: {}",
+                            WINDOW_CONFIG_KEYS.join(", ")
+                        ),
+                        None => format!("Valid keys: {}", WINDOW_CONFIG_KEYS.join(", ")),
+                    };
+                    out.push(LintError {
+                        severity: "error".into(),
+                        code: "mx-windowconfig-key".into(),
+                        message: format!("Unknown windowConfig key `{key}`"),
+                        suggestion: Some(suggestion),
+                        file_path: file_path.into(),
+                        line,
+                        col,
+                    });
+                    continue;
+                }
+                if !window_config_value_matches(&key, &p.value) {
+                    let expected = window_config_expected(&key).unwrap_or("value");
+                    out.push(LintError {
+                        severity: "error".into(),
+                        code: "mx-windowconfig-type".into(),
+                        message: format!(
+                            "windowConfig `{key}` must be a {expected}, got {}",
+                            expression_type_name(&p.value)
+                        ),
+                        suggestion: Some(format!("Use a literal {expected} value for `{key}`")),
+                        file_path: file_path.into(),
+                        line,
+                        col,
+                    });
+                } else if key == "role" {
+                    if let Expression::StringLiteral(s) = &p.value {
+                        let role = s.value.as_str();
+                        if !role.is_empty() && !matches!(role, "default" | "dialog" | "popup") {
+                            out.push(LintError {
+                                severity: "error".into(),
+                                code: "mx-windowconfig-type".into(),
+                                message: format!(
+                                    "windowConfig `role` must be \"default\", \"dialog\", or \"popup\", got \"{role}\""
+                                ),
+                                suggestion: Some(
+                                    "Use `role: \"dialog\"` (or \"popup\"/\"default\")".into(),
+                                ),
+                                file_path: file_path.into(),
+                                line,
+                                col,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// First argument shapes the effect lifter can turn into a native closure.
+fn effect_callback_is_callable(expr: &Expression<'_>) -> bool {
+    match expr {
+        Expression::ArrowFunctionExpression(_) | Expression::FunctionExpression(_) => true,
+        // The effect lifter emits the callback as a standalone callable.
+        // A receiver-qualified method (`cleaner.cleanup`) would need a bound
+        // object, which it cannot express, so keep those out of check-clean
+        // programs until codegen supports them.
+        Expression::Identifier(id) => !matches!(id.name.as_str(), "undefined" | "NaN" | "Infinity"),
+        // Both branches must be callable: the effect lifter stores the
+        // selected value in a native closure and calls it immediately.
+        Expression::ConditionalExpression(cond) => {
+            effect_callback_is_callable(&cond.consequent)
+                && effect_callback_is_callable(&cond.alternate)
+        }
+        Expression::ParenthesizedExpression(p) => effect_callback_is_callable(&p.expression),
+        Expression::TSAsExpression(e) => effect_callback_is_callable(&e.expression),
+        Expression::TSSatisfiesExpression(e) => effect_callback_is_callable(&e.expression),
+        Expression::TSNonNullExpression(e) => effect_callback_is_callable(&e.expression),
+        _ => false,
+    }
+}
+
+struct EffectCallbacks {
+    invalid: Vec<(u32, bool)>,
+}
+
+impl<'a> Visit<'a> for EffectCallbacks {
+    fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+        if matches!(&call.callee, Expression::Identifier(id) if id.name.as_str() == "morphEffect") {
+            match call.arguments.first().and_then(Argument::as_expression) {
+                Some(arg) => {
+                    if !effect_callback_is_callable(arg) {
+                        self.invalid.push((arg.span().start, true));
+                    }
+                }
+                None => self.invalid.push((call.span.start, false)),
+            }
+        }
+        oxc_ast_visit::walk::walk_call_expression(self, call);
+    }
+}
+
+fn lint_effect_callbacks(
+    program: &Program<'_>,
+    offsets: &[usize],
+    file_path: &str,
+    out: &mut Vec<LintError>,
+) {
+    let mut v = EffectCallbacks { invalid: Vec::new() };
+    v.visit_program(program);
+    for (start, has_arg) in v.invalid {
+        let (line, col) = offset_to_line_col_fast(offsets, start);
+        out.push(LintError {
+            severity: "error".into(),
+            code: "mx-effect-cb".into(),
+            message: "`morphEffect` first argument must be a function".into(),
+            suggestion: Some(if has_arg {
+                "Pass `morphEffect(() => { ... }, [deps])` instead of calling the function".into()
+            } else {
+                "Pass `morphEffect(() => { ... }, [deps])`".into()
+            }),
+            file_path: file_path.into(),
+            line,
+            col,
+        });
+    }
 }
 
 /// State initializer shapes the signal emitter implements: plain data
@@ -4653,6 +5281,251 @@ mod tests {
     }
 
     #[test]
+    fn img_requires_a_source() {
+        let errs = check(
+            "export default function App() { return (<div><img alt=\"photo\" /></div>) }",
+            "App.mx",
+        );
+        assert!(codes(&errs).contains(&"mx-img-src"), "{errs:?}");
+        let err = errs.iter().find(|e| e.code == "mx-img-src").unwrap();
+        assert_eq!(err.severity, "error");
+        assert!(err.suggestion.as_deref().unwrap().contains("src"));
+
+        let errs = check(
+            "export default function App() { return (<div><img src=\"./a.png\" alt=\"photo\" /></div>) }",
+            "App.mx",
+        );
+        assert!(!codes(&errs).contains(&"mx-img-src"), "{errs:?}");
+
+        let errs = check(
+            "export default function App() { return (<div><img src=\"\" alt=\"photo\" /></div>) }",
+            "App.mx",
+        );
+        assert!(codes(&errs).contains(&"mx-img-src"), "{errs:?}");
+
+        for bad in ["null", "undefined", "() => \"./a.png\"", "{}"] {
+            let content = format!(
+                "export default function App() {{ return (<div><img src={{{bad}}} alt=\"photo\" /></div>) }}"
+            );
+            let errs = check(&content, "App.mx");
+            assert!(codes(&errs).contains(&"mx-img-src"), "{bad}: {errs:?}");
+        }
+
+        let errs = check(
+            "export default function App() { const getSrc = () => \"./a.png\"; return (<div><img src={getSrc()} alt=\"photo\" /></div>) }",
+            "App.mx",
+        );
+        assert!(!codes(&errs).contains(&"mx-img-src"), "{errs:?}");
+    }
+
+    #[test]
+    fn event_handlers_must_be_functions() {
+        let base = "export default function App() { const save = () => console.log(\"s\"); const cancel = () => console.log(\"c\"); const cond = true; return (<div><button onClick={%VALUE%}>Save</button></div>) }";
+        for bad in [
+            "save()",
+            "(save())",
+            "\"save\"",
+            "true",
+            "{}",
+            "[]",
+            "1 + 2",
+            "cond ? save : undefined",
+        ] {
+            let content = base.replace("%VALUE%", bad);
+            let errs = check(&content, "App.mx");
+            assert!(codes(&errs).contains(&"mx-event-value"), "{bad} should be rejected: {errs:?}");
+        }
+        for good in ["save", "() => save()", "(save)", "cond ? save : cancel"] {
+            let content = base.replace("%VALUE%", good);
+            let errs = check(&content, "App.mx");
+            assert!(
+                !codes(&errs).contains(&"mx-event-value"),
+                "{good} should be accepted: {errs:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn key_is_only_allowed_on_list_roots() {
+        let errs = check(
+            "export default function App() { return (<div><span key=\"x\">x</span></div>) }",
+            "App.mx",
+        );
+        assert!(codes(&errs).contains(&"mx-key-misuse"), "{errs:?}");
+
+        let errs = check(
+            "export default function App() { const items = [\"a\", \"b\"]; return (<div>{items.map((item) => (<div key={item}>{item}</div>))}</div>) }",
+            "App.mx",
+        );
+        assert!(!codes(&errs).contains(&"mx-key-misuse"), "{errs:?}");
+    }
+
+    #[test]
+    fn class_and_classname_together_are_flagged() {
+        let errs = check(
+            "export default function App() { return (<div class=\"card\" className=\"active\">x</div>) }",
+            "App.mx",
+        );
+        assert!(codes(&errs).contains(&"mx-dup-class"), "{errs:?}");
+        assert!(!codes(&errs).contains(&"mx-prop"), "{errs:?}");
+
+        let errs = check(
+            "export default function App() { return (<div class=\"card\">x</div>) }",
+            "App.mx",
+        );
+        assert!(codes(&errs).contains(&"mx-prop"), "{errs:?}");
+        assert!(!codes(&errs).contains(&"mx-dup-class"), "{errs:?}");
+    }
+
+    #[test]
+    fn morph_imports_and_import_kinds_are_validated() {
+        let errs = check(
+            "import { morphStore } from 'morph'\nexport default function App() { return (<div/>) }",
+            "App.mx",
+        );
+        assert!(codes(&errs).contains(&"mx-import-morph"), "{errs:?}");
+        let err = errs.iter().find(|e| e.code == "mx-import-morph").unwrap();
+        assert!(err.message.contains("morphStore"), "{err:?}");
+        assert!(err.suggestion.as_deref().unwrap().contains("morphState"), "{err:?}");
+
+        let errs = check(
+            "import { morphEffect as effect } from 'morph'\nexport default function App() { effect(() => {}, []); return (<div/>) }",
+            "App.mx",
+        );
+        let err = errs.iter().find(|e| e.code == "mx-import-morph").unwrap();
+        assert!(err.message.contains("alias"), "{err:?}");
+        assert!(err.suggestion.as_deref().unwrap().contains("morphEffect"), "{err:?}");
+
+        let errs = check(
+            "import config from './config.json'\nexport default function App() { console.log(config); return (<div/>) }",
+            "App.mx",
+        );
+        assert!(codes(&errs).contains(&"mx-import-type"), "{errs:?}");
+        let err = errs.iter().find(|e| e.code == "mx-import-type").unwrap();
+        assert_eq!(err.severity, "error");
+        assert!(err.message.contains("config.json"), "{err:?}");
+
+        let errs = check(
+            "import './data.json'\nexport default function App() { return (<div/>) }",
+            "App.mx",
+        );
+        let err = errs.iter().find(|e| e.code == "mx-import-type").unwrap();
+        assert_eq!(err.severity, "warning", "{err:?}");
+
+        let errs = check(
+            "import { load } from 'https://cdn.example.com/lib.js'\nexport default function App() { console.log(load); return (<div/>) }",
+            "App.mx",
+        );
+        let err = errs.iter().find(|e| e.code == "mx-import-type").unwrap();
+        assert_eq!(err.severity, "error", "{err:?}");
+
+        // A URL is still a URL when its path happens to end in a source extension.
+        let errs = check(
+            "import { load } from 'https://cdn.example.com/lib.ts'\nexport default function App() { console.log(load); return (<div/>) }",
+            "App.mx",
+        );
+        assert!(codes(&errs).contains(&"mx-import-type"), "{errs:?}");
+
+        let errs = check(
+            "export { x } from './style.css'\nexport default function App() { return (<div/>) }",
+            "App.mx",
+        );
+        assert!(codes(&errs).contains(&"mx-import-type"), "{errs:?}");
+
+        let errs = check(
+            "export { morphStore } from 'morph'\nexport default function App() { return (<div/>) }",
+            "App.mx",
+        );
+        assert!(codes(&errs).contains(&"mx-import-morph"), "{errs:?}");
+
+        let errs = check(
+            "import 'https://cdn.example.com/app.css'\nexport default function App() { return (<div/>) }",
+            "App.mx",
+        );
+        assert!(!codes(&errs).contains(&"mx-import-type"), "{errs:?}");
+    }
+
+    #[test]
+    fn window_config_keys_and_types_are_validated() {
+        let errs = check(
+            "export const windowConfig = { titel: \"App\", width: 800, height: 600 }\nexport default function App() { return (<div/>) }",
+            "App.mx",
+        );
+        assert!(codes(&errs).contains(&"mx-windowconfig-key"), "{errs:?}");
+        let err = errs.iter().find(|e| e.code == "mx-windowconfig-key").unwrap();
+        assert_eq!(err.severity, "error");
+        assert!(err.suggestion.as_deref().unwrap().contains("title"), "{err:?}");
+
+        let errs = check(
+            "export const windowConfig = { title: \"App\", width: \"800\", visible: \"yes\" }\nexport default function App() { return (<div/>) }",
+            "App.mx",
+        );
+        assert_eq!(errs.iter().filter(|e| e.code == "mx-windowconfig-type").count(), 2, "{errs:?}");
+        assert!(errs.iter().any(|e| e.message.contains("`width` must be a number")));
+
+        let errs = check(
+            "export const windowConfig = { title: \"App\", role: \"modal\" }\nexport default function App() { return (<div/>) }",
+            "App.mx",
+        );
+        assert!(codes(&errs).contains(&"mx-windowconfig-type"), "{errs:?}");
+
+        // Conventional TS wrappers and quoted keys keep the same object
+        // semantics; check must validate through them, not skip them.
+        let errs = check(
+            "export const windowConfig = ({ titel: \"App\" } as const)\nexport default function App() { return (<div/>) }",
+            "App.mx",
+        );
+        assert!(codes(&errs).contains(&"mx-windowconfig-key"), "{errs:?}");
+        assert!(!codes(&errs).contains(&"mx-window-missing"), "{errs:?}");
+
+        let errs = check(
+            "export const windowConfig = { \"title\": \"App\", \"width\": \"800\" } satisfies Record<string, unknown>\nexport default function App() { return (<div/>) }",
+            "App.mx",
+        );
+        assert!(codes(&errs).contains(&"mx-windowconfig-type"), "{errs:?}");
+        assert!(!codes(&errs).contains(&"mx-window-missing"), "{errs:?}");
+
+        let errs = check(
+            "export const windowConfig = { title: \"App\", parent: null }\nexport default function App() { return (<div/>) }",
+            "App.mx",
+        );
+        assert!(!codes(&errs).contains(&"mx-windowconfig-type"), "{errs:?}");
+    }
+
+    #[test]
+    fn effect_callback_must_not_be_called_during_render() {
+        let errs = check(
+            "import { morphEffect } from 'morph'\nexport default function App() { const load = () => 1; morphEffect(load(), []); return (<div/>) }",
+            "App.mx",
+        );
+        assert!(codes(&errs).contains(&"mx-effect-cb"), "{errs:?}");
+        let err = errs.iter().find(|e| e.code == "mx-effect-cb").unwrap();
+        assert_eq!(err.severity, "error");
+
+        for bad in [
+            "cond && load",
+            "cond ? load : 1",
+            "cond ? load : undefined",
+            "console.log",
+            "(console.log)",
+        ] {
+            let content = format!(
+                "import {{ morphEffect }} from 'morph'\nexport default function App() {{ const load = () => 1; const cond = true; morphEffect({bad}, []); return (<div/>) }}"
+            );
+            let errs = check(&content, "App.mx");
+            assert!(codes(&errs).contains(&"mx-effect-cb"), "{bad}: {errs:?}");
+        }
+
+        for good in ["() => { console.log(\"ok\") }", "load", "(load)", "cond ? load : (() => 2)"] {
+            let content = format!(
+                "import {{ morphEffect }} from 'morph'\nexport default function App() {{ const load = () => 1; const cond = true; morphEffect({good}, []); return (<div/>) }}"
+            );
+            let errs = check(&content, "App.mx");
+            assert!(!codes(&errs).contains(&"mx-effect-cb"), "{good}: {errs:?}");
+        }
+    }
+
+    #[test]
     fn top_level_effect_is_clean() {
         let content = "import { morphState, morphEffect } from 'morph'\nexport default function App() {\n  const [count, setCount] = morphState(0)\n  morphEffect(() => { console.log(count) })\n  return (<div><span>{count}</span></div>)\n}\n";
         let errs = check(content, "App.mx");
@@ -5244,6 +6117,32 @@ mod tests {
             let errs = check(&content, "App.mx");
             assert!(!errs.iter().any(|e| e.code == "mx-js-syntax"), "{init}: {errs:?}");
         }
+    }
+
+    #[test]
+    fn function_valued_object_props_error() {
+        for body in [
+            "const handlers = { cleanup: () => 1 };",
+            "const cleanup = () => 1; const handlers = { cleanup };",
+            "const handlers = { cleanup() { return 1 } };",
+            "const handlers = { nested: { cleanup: () => 1 } };",
+        ] {
+            let content = format!(
+                "import {{ morphState }} from 'morph'\nexport default function App() {{\n  {body}\n  return (<div/>)\n}}\n"
+            );
+            let errs = check(&content, "App.mx");
+            let err = errs
+                .iter()
+                .find(|e| e.code == "mx-js-syntax")
+                .unwrap_or_else(|| panic!("{body} should be rejected: {errs:?}"));
+            assert!(err.message.contains("function-valued object property"), "{err:?}");
+        }
+
+        let errs = check(
+            "import { morphState } from 'morph'\nexport default function App() {\n  const handlers = { name: \"a\", nested: { count: 1 } };\n  return (<div>{handlers.name}</div>)\n}\n",
+            "App.mx",
+        );
+        assert!(!codes(&errs).contains(&"mx-js-syntax"), "{errs:?}");
     }
 
     #[test]

@@ -225,7 +225,7 @@ Example:
 | `mx-import-morph` | Imported name is exported by `morph` | error |
 | `mx-no-morph-import` | Morph API (`morphState`, `morphEffect`, `morphShared`, `morphEvent`, `useWindow`, `Window`, `CSS`) is imported from `'morph'` before use | error |
 | `mx-undefined` | Referenced name is declared, imported, or a supported native global | error |
-| `mx-import-type` | Import is `.css` / `.cpp` / `morph` | warning |
+| `mx-import-type` | Import is `.css` / `.cpp` / `morph` (bound unsupported imports error; bare imports warn) | error / warning |
 | `mx-state-scope` | `morphState` is called inside a component body | error |
 | `mx-shared-scope` | `morphShared` is exported at module scope | error |
 | `mx-event-scope` | `morphEvent` is exported at module scope | error |

@@ -44,6 +44,20 @@ fn cache_path(cwd: &Path) -> PathBuf {
     }
 }
 
+/// Cache entries are valid only for the linter that produced them. Include
+/// the executable's modification time so rebuilding `morph` with changed
+/// rules cannot reuse stale diagnostics. The explicit version still covers
+/// filesystems with coarse or missing timestamps.
+fn lint_cache_namespace() -> String {
+    let stamp = std::env::current_exe()
+        .ok()
+        .and_then(|path| std::fs::metadata(path).ok())
+        .and_then(|meta| meta.modified().ok())
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |duration| duration.as_nanos());
+    format!("v14:{stamp}")
+}
+
 fn load_cache(path: &Path) -> HashMap<String, (String, Vec<LintError>)> {
     if let Ok(data) = std::fs::read_to_string(path) {
         if let Ok(map) = serde_json::from_str(&data) {
@@ -134,6 +148,16 @@ pub(crate) fn run(path: Option<&PathBuf>, entry: Option<String>, _migrate: bool)
     let mut mx_files: Vec<PathBuf> = Vec::new();
     let mut project_root: Option<PathBuf> = None;
 
+    // Load project lint policy early so both the cache path and the graph
+    // pass report through the same suppression/severity rules.
+    let config_path = cwd.join("morph.config.json");
+    let mut lint_config = morph_config::LintConfig::default();
+    if config_path.exists() {
+        let config = morph_config::MorphConfig::from_file(&config_path)?;
+        crate::lint_config::validate(&config.lint)?;
+        lint_config = config.lint;
+    }
+
     if let Some(p) = path {
         let resolved = if p.is_absolute() { p.clone() } else { cwd.join(p) };
         if !resolved.exists() {
@@ -157,7 +181,7 @@ pub(crate) fn run(path: Option<&PathBuf>, entry: Option<String>, _migrate: bool)
         let config_path = cwd.join("morph.config.json");
         if config_path.exists() {
             let config = morph_config::MorphConfig::from_file(&config_path)?;
-            let entry_val = entry.unwrap_or(config.entry);
+            let entry_val = entry.clone().unwrap_or_else(|| config.entry.clone());
             let src_dir = cwd.join("src");
             if src_dir.exists() {
                 for e in
@@ -169,10 +193,15 @@ pub(crate) fn run(path: Option<&PathBuf>, entry: Option<String>, _migrate: bool)
                 }
             }
             let entry_path = cwd.join(&entry_val);
-            if entry_path.exists()
-                && is_checkable_file(&entry_path)
-                && !mx_files.contains(&entry_path)
-            {
+            // An explicit or configured entry is a build requirement: check
+            // must not report success when the entry cannot build.
+            if !entry_path.is_file() {
+                anyhow::bail!("Entry file not found: {}", entry_path.display());
+            }
+            if let Err(msg) = morph_config::validate_entry_ext(&entry_path) {
+                anyhow::bail!(msg);
+            }
+            if is_checkable_file(&entry_path) && !mx_files.contains(&entry_path) {
                 mx_files.push(entry_path);
             }
             project_root = Some(cwd.clone());
@@ -254,7 +283,9 @@ pub(crate) fn run(path: Option<&PathBuf>, entry: Option<String>, _migrate: bool)
                     }
                 }
             }
-            all_errors.extend(morph_parser::css_lint::check_css_imports(f, &content, &cwd));
+            let mut css_errors = morph_parser::css_lint::check_css_imports(f, &content, &cwd);
+            crate::lint_config::apply(&mut css_errors, &lint_config);
+            all_errors.extend(css_errors);
         }
     }
 
@@ -264,18 +295,18 @@ pub(crate) fn run(path: Option<&PathBuf>, entry: Option<String>, _migrate: bool)
     let mut cache_dirty = false;
     let mut contents: HashMap<String, String> = HashMap::new();
     let mut ok_files = Vec::new();
+    let cache_namespace = lint_cache_namespace();
 
     for f in &mx_files {
         let content = std::fs::read_to_string(f)?;
-        // Bump when lint rules change so stale diagnostics are re-computed.
-        let hash = morph_cache::sha256_bytes(format!("v12:{content}").as_bytes());
+        let hash = morph_cache::sha256_bytes(format!("{cache_namespace}:{content}").as_bytes());
         let key = f.display().to_string();
         contents.insert(key.clone(), content.clone());
 
         // Stylesheets get the CSS lint (unknown dropped properties);
         // everything else goes through the module checker.
         let is_css = f.extension().and_then(|e| e.to_str()).is_some_and(|e| e == "css");
-        let errors = if let Some((cached_hash, cached_errors)) = cache.get(&key) {
+        let mut errors = if let Some((cached_hash, cached_errors)) = cache.get(&key) {
             if cached_hash == &hash {
                 // cache hit — reuse
                 cached_errors.clone()
@@ -299,6 +330,7 @@ pub(crate) fn run(path: Option<&PathBuf>, entry: Option<String>, _migrate: bool)
             cache_dirty = true;
             errs
         };
+        crate::lint_config::apply(&mut errors, &lint_config);
 
         if errors.is_empty() {
             ok_files.push(f.clone());
@@ -316,8 +348,9 @@ pub(crate) fn run(path: Option<&PathBuf>, entry: Option<String>, _migrate: bool)
     // pass resolves them to declarations so prop mismatches surface here.
     let mut resolved_graph: Option<morph_parser::ModuleGraph> = None;
     let mut graph_error: Option<anyhow::Error> = None;
-    if let Some(entry_path) = resolve_check_entry(&cwd, path) {
-        match morph_parser::resolve_graph(&entry_path, &cwd) {
+    let check_entry = resolve_check_entry(&cwd, path, entry.as_deref());
+    if let Some(entry_path) = &check_entry {
+        match morph_parser::resolve_graph(entry_path, &cwd) {
             Ok(graph) => {
                 // Only the entry module renders as a window; component files
                 // must not carry `windowConfig`, so drop that hint for them.
@@ -332,7 +365,9 @@ pub(crate) fn run(path: Option<&PathBuf>, entry: Option<String>, _migrate: bool)
                         .unwrap_or_else(|_| PathBuf::from(&e.file_path));
                     canon == graph.entry
                 });
-                for err in morph_parser::linter::lint_graph(&graph) {
+                let mut graph_errors = morph_parser::linter::lint_graph(&graph);
+                crate::lint_config::apply(&mut graph_errors, &lint_config);
+                for err in graph_errors {
                     let duplicate = all_errors.iter().any(|e| {
                         e.code == err.code
                             && e.file_path == err.file_path
@@ -399,10 +434,11 @@ pub(crate) fn run(path: Option<&PathBuf>, entry: Option<String>, _migrate: bool)
     // mismatches, mid rules, …) must surface here, never after a green check.
     // Only a project entry has a meaningful build IR; checking one component
     // file from a larger project must stay a lint-only operation.
-    let project_entry = project_entry(&cwd);
+    let project_entry = project_entry(&cwd, entry.as_deref());
     let preflight_entry = match (path, &project_entry) {
         (Some(_), Some(project)) => {
-            let same = resolve_check_entry(&cwd, path)
+            let same = check_entry
+                .as_ref()
                 .and_then(|p| std::fs::canonicalize(p).ok())
                 .zip(std::fs::canonicalize(project).ok())
                 .is_some_and(|(a, b)| a == b);
@@ -438,16 +474,18 @@ pub(crate) fn run(path: Option<&PathBuf>, entry: Option<String>, _migrate: bool)
 
 /// The configured project entry, when `cwd` contains a project config.
 /// Used to distinguish `morph check` (preflight the app) from
-/// `morph check src/components/Card.mx` (lint one file).
-fn project_entry(cwd: &Path) -> Option<PathBuf> {
+/// `morph check src/components/Card.mx` (lint one file). An explicit
+/// `--entry` wins over the config value.
+fn project_entry(cwd: &Path, entry: Option<&str>) -> Option<PathBuf> {
     let config = morph_config::MorphConfig::from_file(&cwd.join("morph.config.json")).ok()?;
-    let entry = cwd.join(&config.entry);
+    let entry = entry.unwrap_or(&config.entry);
+    let entry = cwd.join(entry);
     (is_source_file(&entry) && entry.is_file()).then_some(entry)
 }
 
 /// Entry file for graph-aware checks: an explicitly selected supported source
-/// wins, otherwise the project config entry.
-fn resolve_check_entry(cwd: &Path, path: Option<&PathBuf>) -> Option<PathBuf> {
+/// wins, otherwise the project config entry (or the `--entry` override).
+fn resolve_check_entry(cwd: &Path, path: Option<&PathBuf>, entry: Option<&str>) -> Option<PathBuf> {
     if let Some(p) = path {
         let resolved = if p.is_absolute() { p.clone() } else { cwd.join(p) };
         if is_source_file(&resolved) && resolved.is_file() {
@@ -456,7 +494,7 @@ fn resolve_check_entry(cwd: &Path, path: Option<&PathBuf>) -> Option<PathBuf> {
     }
     let config_path = cwd.join("morph.config.json");
     let config = morph_config::MorphConfig::from_file(&config_path).ok()?;
-    let entry_path = cwd.join(&config.entry);
+    let entry_path = cwd.join(entry.unwrap_or(&config.entry));
     if is_source_file(&entry_path) && entry_path.is_file() {
         Some(entry_path)
     } else {
@@ -496,8 +534,26 @@ mod tests {
         std::fs::write(&ts_entry, "export default function App() { return <div/> }\n").unwrap();
         std::fs::write(&js_entry, "let x = 1;\n").unwrap();
         std::fs::write(root.join("morph.config.json"), r#"{"entry": "src/app.js"}"#).unwrap();
-        assert_eq!(resolve_check_entry(&root, Some(&PathBuf::from("src/App.tsx"))), Some(ts_entry));
-        assert_eq!(resolve_check_entry(&root, Some(&PathBuf::from("src/app.js"))), None);
+        assert_eq!(
+            resolve_check_entry(&root, Some(&PathBuf::from("src/App.tsx")), None),
+            Some(ts_entry)
+        );
+        assert_eq!(resolve_check_entry(&root, Some(&PathBuf::from("src/app.js")), None), None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn entry_override_applies_to_graph_and_preflight() {
+        let root = scratch_check_project("override");
+        let configured = root.join("src/App.tsx");
+        let overridden = root.join("src/Other.tsx");
+        std::fs::write(&configured, "export default function App() { return <div/> }\n").unwrap();
+        std::fs::write(&overridden, "export default function App() { return <div/> }\n").unwrap();
+        std::fs::write(root.join("morph.config.json"), r#"{"entry": "src/App.tsx"}"#).unwrap();
+
+        assert_eq!(project_entry(&root, None), Some(configured));
+        assert_eq!(project_entry(&root, Some("src/Other.tsx")), Some(overridden.clone()));
+        assert_eq!(resolve_check_entry(&root, None, Some("src/Other.tsx")), Some(overridden));
         let _ = std::fs::remove_dir_all(&root);
     }
 }

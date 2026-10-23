@@ -2,7 +2,8 @@
 
 **Severity:** error | **Blocks `morph build`:** yes
 
-> **Status:** documented rule — `morph check` does not report this code yet. The underlying problem still breaks your build or your UI; the cause and fix below apply when you hit it.
+> **Status:** enforced by `morph check`. The rule reports at the source site
+> before codegen, so unsupported code cannot reach the C++ compiler.
 
 ## What this error means
 
@@ -21,6 +22,11 @@ Native image nodes decode and upload a texture at build/layout time from
 decode — a blank box that still costs layout and (on some drivers) logs
 low-level errors. The web tolerates `<img>` without `src`; native code has no
 sensible default, so Morph requires it up front.
+
+The value must be a string/template literal or an expression that can produce
+one at runtime. `src={null}`, `{undefined}`, `{NaN}`, `{Infinity}`, objects,
+arrays, and inline function literals are rejected — none of them can name an
+asset. A call that returns a path (`src={getSrc()}`) is allowed.
 
 ## Example that triggers it
 

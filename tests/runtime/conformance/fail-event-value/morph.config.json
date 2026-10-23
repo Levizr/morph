@@ -1,0 +1,7 @@
+{
+  "name": "fail-event-value",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "fail-event-value" },
+  "dependencies": {},
+  "cpp_sources": []
+}

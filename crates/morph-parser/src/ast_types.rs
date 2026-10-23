@@ -128,6 +128,8 @@ impl MxImportKind {
 pub struct MxImport {
     pub kind: MxImportKind,
     pub style: String, // "import" | "css_load"
+    pub line: usize,
+    pub col: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -290,6 +292,8 @@ pub struct ReExport {
     pub names: Vec<(String, String)>,
     pub star: bool,
     pub star_as: Option<String>,
+    pub line: usize,
+    pub col: usize,
 }
 
 #[derive(Debug, Clone)]

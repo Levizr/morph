@@ -63,6 +63,8 @@ run_pass pass-arrow-default
 run_pass pass-export-spellings
 run_pass pass-const-inits
 run_pass pass-async
+run_pass pass-rule-warnings
+run_pass pass-lint-config
 
 run_fail fail-math-member mx-js-member
 run_fail fail-pow-op mx-js-op
@@ -88,6 +90,15 @@ run_fail fail-state-init mx-state-init
 run_fail fail-state-pattern mx-state-pattern
 run_fail fail-const-init mx-js-syntax
 run_fail fail-effect-nested mx-effect-nested
+run_fail fail-img-src mx-img-src
+run_fail fail-event-value mx-event-value
+run_fail fail-windowconfig-key mx-windowconfig-key
+run_fail fail-windowconfig-type mx-windowconfig-type
+run_fail fail-import-morph mx-import-morph
+run_fail fail-import-type mx-import-type
+run_fail fail-effect-cb mx-effect-cb
+run_fail fail-object-fn mx-js-syntax
+run_fail fail-lint-severity mx-key-misuse
 
 echo "[conformance] $checks checks, $failures failures"
 [ "$failures" -eq 0 ]

@@ -1,0 +1,15 @@
+import { morphEffect } from 'morph'
+
+export const windowConfig = { title: "fail-effect-cb", width: 800, height: 600 }
+
+export default function App() {
+  const load = () => console.log("load")
+  const cond = true
+  // Calls load during render and registers its return value as the effect.
+  morphEffect(load(), [])
+  // A logical expression is not a callable value for the effect lifter.
+  morphEffect(cond && load, [])
+  // A receiver-qualified method cannot be lifted into a standalone callable.
+  morphEffect(console.log, [])
+  return (<body><text>effect callback</text></body>)
+}

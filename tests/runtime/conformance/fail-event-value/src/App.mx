@@ -1,0 +1,18 @@
+export const windowConfig = { title: "fail-event-value", width: 800, height: 600 }
+
+export default function App() {
+  const save = () => console.log("saved")
+  const cancel = () => console.log("cancelled")
+  // Calls save during render and wires its return value.
+  return (
+    <body>
+      <button onClick={save()}>Save</button>
+      {/* Parentheses must not hide the call. */}
+      <button onClick={(save())}>Save (parenthesized)</button>
+      {/* Object literals and arithmetic are values, not callbacks. */}
+      <button onClick={{}}>Object</button>
+      <button onClick={1 + 2}>Arithmetic</button>
+      <button onClick={true ? save : cancel}>Conditional</button>
+    </body>
+  )
+}

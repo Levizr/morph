@@ -1,0 +1,7 @@
+{
+  "name": "pass-rule-warnings",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "pass-rule-warnings" },
+  "dependencies": {},
+  "cpp_sources": []
+}

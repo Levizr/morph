@@ -24,6 +24,7 @@ pub(crate) fn run(
     }
 
     let config = morph_config::MorphConfig::from_file(&config_path)?;
+    crate::lint_config::validate(&config.lint)?;
     let entry = entry.unwrap_or_else(|| config.entry.clone());
     let output_raw = output.unwrap_or_else(|| config.output.clone());
     let type_mode = type_mode.unwrap_or_else(|| config.type_mode.clone());
@@ -125,7 +126,9 @@ pub(crate) fn run(
                 Ok(content) => content,
                 Err(e) => anyhow::bail!("reading {}: {e}", mod_path.display()),
             };
-            for err in morph_parser::linter::check(&content, &mod_path.display().to_string()) {
+            let mut errors = morph_parser::linter::check(&content, &mod_path.display().to_string());
+            crate::lint_config::apply(&mut errors, &config.lint);
+            for err in errors {
                 if err.severity == "error" {
                     lint_errors += 1;
                     report(&err, mod_path);
@@ -133,7 +136,10 @@ pub(crate) fn run(
             }
             // Imported stylesheets must resolve too — a missing file ships
             // the app unstyled, so it blocks here exactly like in check.
-            for err in morph_parser::css_lint::check_css_imports(mod_path, &content, &cwd) {
+            let mut css_errors =
+                morph_parser::css_lint::check_css_imports(mod_path, &content, &cwd);
+            crate::lint_config::apply(&mut css_errors, &config.lint);
+            for err in css_errors {
                 if err.severity == "error" {
                     lint_errors += 1;
                     report(&err, mod_path);
@@ -251,7 +257,10 @@ pub(crate) fn run(
                 Ok(content) => content,
                 Err(e) => anyhow::bail!("reading {}: {e}", route.file.display()),
             };
-            for err in morph_parser::linter::check(&content, &route.file.display().to_string()) {
+            let mut errors =
+                morph_parser::linter::check(&content, &route.file.display().to_string());
+            crate::lint_config::apply(&mut errors, &config.lint);
+            for err in errors {
                 if err.severity == "error" {
                     lint_errors += 1;
                     crate::logger::log_error(&format!(

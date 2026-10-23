@@ -1,0 +1,7 @@
+export const windowConfig = { title: "pass-lint-config", width: 800, height: 600 }
+
+export default function App() {
+  // mx-img-src is suppressed by morph.config.json; the native blank image
+  // node still compiles, so check and build both pass.
+  return (<body><img alt="source disabled for this prototype" /></body>)
+}

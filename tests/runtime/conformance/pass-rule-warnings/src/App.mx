@@ -1,0 +1,31 @@
+import { morphEffect } from 'morph'
+// Bare unsupported imports are side-effect-only: a warning, not a build gate.
+import './data.json'
+
+// Conventional TS wrappers, quoted keys, and `parent: null` all keep the
+// same runtime window configuration.
+export const windowConfig = ({
+  "title": "pass-rule-warnings",
+  width: 800,
+  height: 600,
+  parent: null,
+} as const) satisfies Record<string, unknown>
+
+export default function App() {
+  const save = () => console.log("saved")
+  const cancel = () => console.log("cancelled")
+  const cond = true
+  morphEffect(save, [])
+
+  return (
+    <body>
+      <div className="card">both spellings are a warning</div>
+      <div class="card" className="active">duplicate class source</div>
+      <span key="stray">key outside a list</span>
+      <button onClick={(save)}>Parenthesized reference</button>
+      <button onClick={cond ? save : cancel}>Conditional reference</button>
+      <button onClick={save as () => void}>Type-asserted reference</button>
+      <img src="./icon.png" alt="valid source" />
+    </body>
+  )
+}

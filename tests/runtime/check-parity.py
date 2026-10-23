@@ -4,11 +4,13 @@
 For every case: write a fresh fixture, run `morph check`. If check is clean
 (no errors, exit 0), run `morph build --no-upx`. A `BUILD-FAIL` line is a
 check/build parity gap: check said the program was valid, but codegen or the
-C++ compiler rejected it.
+C++ compiler rejected it. Cases in `EXPECTED_REJECTIONS` must fail check with
+the listed codes; any other check error is an `UNEXPECTED-CHECK-ERROR` gap —
+supported syntax must not be rejected.
 
 Usage (from the repo root, after `cargo build --bin morph`):
 
-    python3 tests/runtime/check-parity.py [name-filter]
+    python3 tests/runtime/check-parity.py [name-filter ...]
 
 Fixtures are generated under the system temp directory (override with
 MORPH_PARITY_DIR).
@@ -41,6 +43,33 @@ def app(body, imports=""):
 
 
 CASES = {}
+
+# Constructs check must reject before build. Every other case must pass
+# check: a supported spelling regressing to a check error is a parity bug.
+# Values are the error codes check must report.
+EXPECTED_REJECTIONS = {
+    "array_sort": {"mx-js-method"},
+    "class_expr_const": {"mx-js-syntax"},
+    "cpp_keyword_fn": {"mx-js-syntax"},
+    "cpp_keyword_name": {"mx-js-syntax"},
+    "date_now": {"mx-js-member"},
+    "delete_op": {"mx-js-op"},
+    "enum_decl": {"mx-js-syntax"},
+    "filter_non_jsx": {"mx-js-method"},
+    "find_non_jsx": {"mx-js-method"},
+    "forEach_body": {"mx-js-method"},
+    "instanceof_op": {"mx-js-member", "mx-js-op"},
+    "map_non_jsx": {"mx-js-method"},
+    "namespace_import": {"mx-js-syntax"},
+    "object_method": {"mx-js-method"},
+    "pow_op": {"mx-js-op"},
+    "promise_static": {"mx-js-member"},
+    "reduce_non_jsx": {"mx-js-method"},
+    "regex_literal": {"mx-js-syntax"},
+    "rest_param_helper": {"mx-js-syntax"},
+    "some_every": {"mx-js-method"},
+    "typeof_op": {"mx-js-op"},
+}
 
 
 def case(name, body, imports=""):
@@ -833,14 +862,25 @@ def check_case(name):
     root = prepare(name, CASES[name])
     rc, out = run([MORPH, "check"], root)
     clean = rc == 0 and "All " in out and "passed." in out
-    if not clean:
-        codes = sorted(set(re.findall(r"error : (mx-[a-z-]+)", out)))
-        detail = ""
-        if not codes:
-            lines = [l.strip() for l in out.splitlines() if "error" in l.lower()]
-            detail = lines[-1] if lines else "check failed"
-        return (name, "check-error", ",".join(codes) or detail, "")
-    return (name, "check-clean", "", root)
+    if clean:
+        return (name, "check-clean", "", root)
+    codes = set(re.findall(r"error : (mx-[a-z-]+)", out))
+    expected = EXPECTED_REJECTIONS.get(name)
+    if expected:
+        missing = expected - codes
+        if not missing:
+            return (name, "rejected", ",".join(sorted(codes)), "")
+        return (
+            name,
+            "WRONG-ERROR",
+            f"want {','.join(sorted(expected))} got {','.join(sorted(codes)) or 'no code'}",
+            "",
+        )
+    detail = ""
+    if not codes:
+        lines = [l.strip() for l in out.splitlines() if "error" in l.lower()]
+        detail = lines[-1] if lines else "check failed"
+    return (name, "UNEXPECTED-CHECK-ERROR", ",".join(sorted(codes)) or detail, "")
 
 
 def build_case(result):
@@ -855,8 +895,8 @@ def build_case(result):
 
 
 def main():
-    filt = sys.argv[1] if len(sys.argv) > 1 else ""
-    names = sorted(n for n in CASES if filt in n)
+    filters = sys.argv[1:]
+    names = sorted(n for n in CASES if not filters or any(f in n for f in filters))
     print(f"{len(names)} cases", flush=True)
     results = []
     with cf.ThreadPoolExecutor(max_workers=8) as ex:
@@ -865,15 +905,21 @@ def main():
     with cf.ThreadPoolExecutor(max_workers=2) as ex:
         results = list(ex.map(build_case, results))
     print("\n===== SUMMARY =====")
-    gaps = []
+    build_gaps = []
+    check_gaps = []
     for name, status, codes, tail in results:
-        print(f"{status:12} {name:28} {codes}")
+        print(f"{status:20} {name:28} {codes}")
         if status == "BUILD-FAIL":
-            gaps.append((name, tail))
-    print(f"\n{len(gaps)} check-pass/build-fail gaps")
-    for name, tail in gaps:
+            build_gaps.append((name, tail))
+        elif status in ("UNEXPECTED-CHECK-ERROR", "WRONG-ERROR"):
+            check_gaps.append((status, name, codes))
+    print(f"\n{len(build_gaps)} check-pass/build-fail gaps")
+    print(f"{len(check_gaps)} unexpected check rejections")
+    for name, tail in build_gaps:
         print(f"\n--- {name} ---\n{tail}")
-    return 1 if gaps else 0
+    for status, name, codes in check_gaps:
+        print(f"\n--- {status}: {name} ---\n{codes}")
+    return 1 if build_gaps or check_gaps else 0
 
 
 if __name__ == "__main__":

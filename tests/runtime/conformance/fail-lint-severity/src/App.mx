@@ -1,0 +1,6 @@
+export const windowConfig = { title: "fail-lint-severity", width: 800, height: 600 }
+
+export default function App() {
+  // mx-key-misuse is a warning by default; this project escalates it.
+  return (<body><span key="stray">key outside a list</span></body>)
+}

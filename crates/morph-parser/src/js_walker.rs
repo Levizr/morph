@@ -90,6 +90,22 @@ fn extract_string_lit(expr: &Expression) -> Option<String> {
     }
 }
 
+/// The object literal behind `windowConfig`, unwrapping the TypeScript
+/// spellings that do not change the runtime value (`as const`, `satisfies`,
+/// `!`, and parentheses).
+pub(crate) fn window_config_object<'a, 'b>(
+    expr: &'b Expression<'a>,
+) -> Option<&'b ObjectExpression<'a>> {
+    match expr {
+        Expression::ObjectExpression(obj) => Some(obj),
+        Expression::ParenthesizedExpression(paren) => window_config_object(&paren.expression),
+        Expression::TSAsExpression(ts) => window_config_object(&ts.expression),
+        Expression::TSSatisfiesExpression(ts) => window_config_object(&ts.expression),
+        Expression::TSNonNullExpression(ts) => window_config_object(&ts.expression),
+        _ => None,
+    }
+}
+
 fn binding_ident_name(bp: &BindingPattern) -> Option<String> {
     if let BindingPattern::BindingIdentifier(id) = bp {
         Some(id.name.to_string())
@@ -463,8 +479,8 @@ impl<'src> MxWalker<'src> {
                 let value = match &attr.value {
                     Some(JSXAttributeValue::ExpressionContainer(ec)) if name != "style" => {
                         match ec.expression.as_expression() {
-                            Some(Expression::ObjectExpression(_)) => {
-                                JsxPropValue::Expr(self.span_text(ec.span).to_string())
+                            Some(Expression::ObjectExpression(obj)) => {
+                                JsxPropValue::Expr(self.span_text(obj.span).to_string())
                             }
                             _ => self.jsx_prop_value(attr.value.as_ref().unwrap()),
                         }
@@ -676,6 +692,7 @@ impl<'src> MxWalker<'src> {
         if matches!(decl.import_kind, ImportOrExportKind::Type) {
             return;
         }
+        let (line, col) = self.line_col(decl.span.start);
         let source = decl.source.value.to_string();
         let mut default: Option<String> = None;
         let mut namespace: Option<String> = None;
@@ -712,15 +729,31 @@ impl<'src> MxWalker<'src> {
                 .and_then(|e| e.to_str())
                 .is_some_and(|e| e.eq_ignore_ascii_case(ext))
         };
-        if source.starts_with("http://") || source.starts_with("https://") {
+        let is_url = source.starts_with("http://") || source.starts_with("https://");
+        if is_url && default.is_none() && namespace.is_none() && specifiers.is_empty() {
+            // Side-effect URL imports are stylesheets fetched at build time.
             self.imports.push(MxImport {
                 kind: MxImportKind::CssUrl { url: source },
                 style: "import".to_string(),
+                line,
+                col,
+            });
+        } else if is_url {
+            // A URL with bindings is not a stylesheet; keep it a component
+            // import so mx-import-type reports it instead of silently
+            // dropping the imported names.
+            self.imports.push(MxImport {
+                kind: MxImportKind::Component { path: source, default, namespace, specifiers },
+                style: "import".to_string(),
+                line,
+                col,
             });
         } else if ext_is("css") {
             self.imports.push(MxImport {
                 kind: MxImportKind::CssLocal { path: source },
                 style: "import".to_string(),
+                line,
+                col,
             });
         } else if ext_is("cpp") || ext_is("cc") || ext_is("cxx") || ext_is("h") || ext_is("hpp") {
             // Native imports keep local names only (no cross-file rewrite).
@@ -729,11 +762,15 @@ impl<'src> MxWalker<'src> {
             self.imports.push(MxImport {
                 kind: MxImportKind::CppLocal { path: source, specifiers: local },
                 style: "import".to_string(),
+                line,
+                col,
             });
         } else {
             self.imports.push(MxImport {
                 kind: MxImportKind::Component { path: source, default, namespace, specifiers },
                 style: "import".to_string(),
+                line,
+                col,
             });
         }
     }
@@ -744,7 +781,7 @@ impl<'src> MxWalker<'src> {
             if name != "windowConfig" {
                 continue;
             }
-            let Some(Expression::ObjectExpression(obj)) = &decl.init else { continue };
+            let Some(obj) = decl.init.as_ref().and_then(window_config_object) else { continue };
             let mut config = WindowConfig {
                 title: String::new(),
                 width: 800,
@@ -762,6 +799,8 @@ impl<'src> MxWalker<'src> {
                 let ObjectPropertyKind::ObjectProperty(p) = prop else { continue };
                 let key = match &p.key {
                     PropertyKey::StaticIdentifier(id) => id.name.to_string(),
+                    PropertyKey::Identifier(id) => id.name.to_string(),
+                    PropertyKey::StringLiteral(s) => s.value.to_string(),
                     _ => continue,
                 };
                 match key.as_str() {
@@ -1443,15 +1482,20 @@ impl<'src> MxWalker<'src> {
         }
         if let Some(arg) = call.arguments.first().and_then(|a| a.as_expression()) {
             if let Some(url) = extract_string_lit(arg) {
+                let (line, col) = self.line_col(call.span.start);
                 if url.starts_with("http://") || url.starts_with("https://") {
                     out.push(MxImport {
                         kind: MxImportKind::CssUrl { url },
                         style: "css_load".to_string(),
+                        line,
+                        col,
                     });
                 } else {
                     out.push(MxImport {
                         kind: MxImportKind::CssLocal { path: url },
                         style: "css_load".to_string(),
+                        line,
+                        col,
                     });
                 }
             }
@@ -1847,11 +1891,14 @@ impl<'a> Visit<'a> for MxWalker<'_> {
                     if names.is_empty() {
                         continue;
                     }
+                    let (line, col) = self.line_col(d.span.start);
                     self.re_exports.push(ReExport {
                         path: d.source.value.to_string(),
                         names,
                         star: false,
                         star_as: None,
+                        line,
+                        col,
                     });
                 }
                 Statement::ExportAllDeclaration(d) => {
@@ -1865,11 +1912,14 @@ impl<'a> Visit<'a> for MxWalker<'_> {
                         ModuleExportName::IdentifierReference(r) => Some(r.name.to_string()),
                         ModuleExportName::StringLiteral(_) => None,
                     });
+                    let (line, col) = self.line_col(d.span.start);
                     self.re_exports.push(ReExport {
                         path: d.source.value.to_string(),
                         names: Vec::new(),
                         star: true,
                         star_as,
+                        line,
+                        col,
                     });
                 }
                 Statement::ClassDeclaration(c) => {

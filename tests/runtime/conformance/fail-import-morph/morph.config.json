@@ -1,0 +1,7 @@
+{
+  "name": "fail-import-morph",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "fail-import-morph" },
+  "dependencies": {},
+  "cpp_sources": []
+}
