@@ -207,7 +207,7 @@ Morph is in **early development** and actively being built. Here's where things 
 | **`position: relative/fixed`** | Medium | Offset and viewport-relative positioning |
 | **Tests** | Easy | Increase coverage for layout, translator, runtime |
 
-For a full breakdown, see the [development guide](help/development.md) or browse the [docs](docs/).
+For a full breakdown, see [CONTRIBUTING.md](CONTRIBUTING.md) or browse the [docs](docs/).
 
 ---
 
