@@ -39,7 +39,7 @@
           "curl install morph",
           "cargo install morphc"
         ],
-        "lastUpdated": "2026-09-14",
+        "lastUpdated": "2026-09-25",
         "publishedAt": "2026-08-18",
         "priority": 0.9,
         "changefreq": "weekly"
@@ -79,7 +79,7 @@
           "morph build options",
           "morph config reference"
         ],
-        "lastUpdated": "2026-09-11",
+        "lastUpdated": "2026-10-23",
         "publishedAt": "2026-08-19",
         "priority": 0.9,
         "changefreq": "weekly"
@@ -99,7 +99,7 @@
           "morph dist output",
           "morph project layout"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-18",
         "publishedAt": "2026-09-05",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -183,7 +183,7 @@
           "morph signals",
           "morph coroutines"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-10-06",
         "publishedAt": "2026-09-05",
         "priority": 0.6,
         "changefreq": "monthly"
@@ -228,7 +228,7 @@
           "morph source to binary",
           "how morph works"
         ],
-        "lastUpdated": "2026-09-14",
+        "lastUpdated": "2026-09-18",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -291,7 +291,7 @@
           "morph crate structure",
           "morph version system"
         ],
-        "lastUpdated": "2026-09-14",
+        "lastUpdated": "2026-10-06",
         "publishedAt": "2026-09-05",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -316,7 +316,7 @@
           "morph native ui nodes",
           "morph jsx elements"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -376,7 +376,7 @@
           "morph keyboard events",
           "morph event attributes"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-16",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -397,7 +397,7 @@
           "morphEvent",
           "morph component state"
         ],
-        "lastUpdated": "2026-10-20",
+        "lastUpdated": "2026-10-21",
         "publishedAt": "2026-09-15",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -422,7 +422,7 @@
           "morph layout css",
           "morph styling css"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-10-16",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -462,7 +462,7 @@
           "morph smooth style change",
           "morph css animation"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-10-16",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -522,7 +522,7 @@
           "morph atomic css",
           "morph tailwind css"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-10-10",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -547,7 +547,7 @@
           "morph js runtime",
           "morph translator coverage"
         ],
-        "lastUpdated": "2026-10-19",
+        "lastUpdated": "2026-10-23",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -690,7 +690,7 @@
           "morphState morphShared morphEvent",
           "morph api overview"
         ],
-        "lastUpdated": "2026-09-28",
+        "lastUpdated": "2026-09-29",
         "publishedAt": "2026-09-16",
         "priority": "0.9",
         "changefreq": "monthly"
@@ -726,7 +726,7 @@
           "morph shared state",
           "morph window store"
         ],
-        "lastUpdated": "2026-09-28",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-09-16",
         "priority": "0.9",
         "changefreq": "monthly"
@@ -744,7 +744,7 @@
           "morph events",
           "morph event channels"
         ],
-        "lastUpdated": "2026-09-28",
+        "lastUpdated": "2026-09-29",
         "publishedAt": "2026-09-16",
         "priority": "0.9",
         "changefreq": "monthly"
@@ -762,7 +762,7 @@
           "morph effects",
           "morph side effects"
         ],
-        "lastUpdated": "2026-09-16",
+        "lastUpdated": "2026-09-27",
         "publishedAt": "2026-09-16",
         "priority": 0.9,
         "changefreq": "monthly"
@@ -808,7 +808,7 @@
           "morph window role",
           "morph window ownership"
         ],
-        "lastUpdated": "2026-09-28",
+        "lastUpdated": "2026-09-29",
         "publishedAt": "2026-09-21",
         "priority": 0.9,
         "changefreq": "monthly"
@@ -826,7 +826,7 @@
           "morphState vs morphShared",
           "morphEvent vs shared state"
         ],
-        "lastUpdated": "2026-09-28",
+        "lastUpdated": "2026-09-29",
         "publishedAt": "2026-09-16",
         "priority": "0.9",
         "changefreq": "monthly"
@@ -844,7 +844,7 @@
           "morph state not updating",
           "morph hooks rules"
         ],
-        "lastUpdated": "2026-09-16",
+        "lastUpdated": "2026-10-10",
         "publishedAt": "2026-09-16",
         "priority": "0.9",
         "changefreq": "monthly"
@@ -862,7 +862,7 @@
           "morph shared state questions",
           "morph ambiguous import"
         ],
-        "lastUpdated": "2026-09-28",
+        "lastUpdated": "2026-09-29",
         "publishedAt": "2026-09-16",
         "priority": "0.9",
         "changefreq": "monthly"
@@ -923,7 +923,7 @@
           "morph native cpp",
           "morph ffi free cpp"
         ],
-        "lastUpdated": "2026-09-14",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-08-18",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -1006,7 +1006,7 @@
           "morph 162KB",
           "morph upx_flags"
         ],
-        "lastUpdated": "2026-09-23",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-09-23",
         "priority": 0.9,
         "changefreq": "monthly"
@@ -1031,7 +1031,7 @@
           "morph modal",
           "morph window parent"
         ],
-        "lastUpdated": "2026-09-28",
+        "lastUpdated": "2026-09-29",
         "publishedAt": "2026-09-21",
         "priority": 0.8,
         "changefreq": "monthly"
@@ -1096,7 +1096,7 @@
           "morph repaint highlight",
           "morph flash forge switch"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-10-06",
         "publishedAt": "2026-08-22",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -1161,7 +1161,7 @@
           "pick morph renderer",
           "morph flash vs forge"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-10-06",
         "publishedAt": "2026-08-22",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -1201,7 +1201,7 @@
           "morph compositor",
           "morph forge opt-in"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-10-06",
         "publishedAt": "2026-08-22",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -1226,7 +1226,7 @@
           "morph update command",
           "morph command reference"
         ],
-        "lastUpdated": "2026-09-14",
+        "lastUpdated": "2026-10-06",
         "publishedAt": "2026-08-19",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -1251,7 +1251,7 @@
           "morph check errors",
           "morph build failed"
         ],
-        "lastUpdated": "2026-09-21",
+        "lastUpdated": "2026-10-23",
         "publishedAt": "2026-09-21",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -1359,7 +1359,7 @@
           "morph windowConfig keys",
           "morph window config"
         ],
-        "lastUpdated": "2026-09-21",
+        "lastUpdated": "2026-10-23",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -1377,7 +1377,7 @@
           "morph windowConfig types",
           "morph window width type"
         ],
-        "lastUpdated": "2026-09-21",
+        "lastUpdated": "2026-10-23",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -1395,7 +1395,7 @@
           "morph unknown tag",
           "morph supported elements"
         ],
-        "lastUpdated": "2026-09-21",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -1413,7 +1413,7 @@
           "morph select textarea",
           "morph input element"
         ],
-        "lastUpdated": "2026-09-21",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -1449,7 +1449,7 @@
           "morph img src",
           "morph image not showing"
         ],
-        "lastUpdated": "2026-09-21",
+        "lastUpdated": "2026-10-23",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -1467,7 +1467,7 @@
           "morph onClick not working",
           "morph event handler function"
         ],
-        "lastUpdated": "2026-09-21",
+        "lastUpdated": "2026-10-23",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -1485,7 +1485,7 @@
           "morph key prop",
           "morph list key"
         ],
-        "lastUpdated": "2026-09-21",
+        "lastUpdated": "2026-10-23",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -1503,7 +1503,7 @@
           "morph class className",
           "morph duplicate class"
         ],
-        "lastUpdated": "2026-09-21",
+        "lastUpdated": "2026-10-23",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -1521,7 +1521,7 @@
           "morph unsupported style",
           "morph css float flexbox"
         ],
-        "lastUpdated": "2026-09-21",
+        "lastUpdated": "2026-10-11",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -1575,7 +1575,7 @@
           "morph css property unsupported",
           "morph stylesheet"
         ],
-        "lastUpdated": "2026-09-21",
+        "lastUpdated": "2026-10-11",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -1593,7 +1593,7 @@
           "morph css file not found",
           "morph css import"
         ],
-        "lastUpdated": "2026-09-21",
+        "lastUpdated": "2026-10-11",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -1647,7 +1647,7 @@
           "morph import error",
           "morph morphState import"
         ],
-        "lastUpdated": "2026-09-21",
+        "lastUpdated": "2026-10-23",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -1701,7 +1701,7 @@
           "morph import json",
           "morph import unsupported"
         ],
-        "lastUpdated": "2026-09-21",
+        "lastUpdated": "2026-10-23",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -1719,7 +1719,7 @@
           "morph module naming",
           "morph namespace collision"
         ],
-        "lastUpdated": "2026-09-21",
+        "lastUpdated": "2026-09-29",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -1737,7 +1737,7 @@
           "morph morphState outside component",
           "morph state scope"
         ],
-        "lastUpdated": "2026-10-20",
+        "lastUpdated": "2026-10-21",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -1755,7 +1755,7 @@
           "morph morphShared scope",
           "morph shared state export"
         ],
-        "lastUpdated": "2026-10-20",
+        "lastUpdated": "2026-10-21",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -1773,7 +1773,7 @@
           "morph morphEvent scope",
           "morph event channel export"
         ],
-        "lastUpdated": "2026-10-20",
+        "lastUpdated": "2026-10-21",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -1809,8 +1809,27 @@
           "morph morphState destructure",
           "morph usestate pattern"
         ],
-        "lastUpdated": "2026-09-21",
+        "lastUpdated": "2026-10-11",
         "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-state-init — Non-Literal State Initializer",
+        "sidebarTitle": "mx-state-init",
+        "slug": "errors/mx-state-init",
+        "file": "errors/mx-state-init",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-state-init: morphState and morphShared initializers must be plain data literals — strings, numbers, booleans, arrays, or negative integers.",
+        "keywords": [
+          "mx-state-init",
+          "morph state initializer",
+          "morph morphState literal",
+          "morph state object error"
+        ],
+        "lastUpdated": "2026-10-11",
+        "publishedAt": "2026-10-11",
         "priority": 0.7,
         "changefreq": "monthly"
       },
@@ -1827,7 +1846,7 @@
           "morph morphEffect function",
           "morph useEffect callback"
         ],
-        "lastUpdated": "2026-09-21",
+        "lastUpdated": "2026-10-23",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -1881,7 +1900,7 @@
           "morph cannot translate to C++",
           "morph js not supported"
         ],
-        "lastUpdated": "2026-09-21",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -1917,7 +1936,7 @@
           "morph JSON.parse",
           "morph Math Date unsupported"
         ],
-        "lastUpdated": "2026-09-21",
+        "lastUpdated": "2026-10-10",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -1935,7 +1954,7 @@
           "morph method not implemented",
           "morph string array methods"
         ],
-        "lastUpdated": "2026-09-21",
+        "lastUpdated": "2026-10-11",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -1953,7 +1972,7 @@
           "morph typeof instanceof",
           "morph operator not supported"
         ],
-        "lastUpdated": "2026-09-21",
+        "lastUpdated": "2026-10-11",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -1972,7 +1991,7 @@
           "morph namespace import",
           "morph regex literal"
         ],
-        "lastUpdated": "2026-10-22",
+        "lastUpdated": "2026-10-23",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -2044,7 +2063,7 @@
           "morph route module scope",
           "morph route state props"
         ],
-        "lastUpdated": "2026-09-27",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-09-27",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -2144,7 +2163,7 @@
           "morph flash renderer demo",
           "morph static app example"
         ],
-        "lastUpdated": "2026-10-03",
+        "lastUpdated": "2026-10-04",
         "publishedAt": "2026-10-03",
         "priority": 0.6,
         "changefreq": "monthly"
@@ -2162,7 +2181,7 @@
           "morph forge renderer demo",
           "morph scroll shift example"
         ],
-        "lastUpdated": "2026-10-03",
+        "lastUpdated": "2026-10-04",
         "publishedAt": "2026-10-03",
         "priority": 0.6,
         "changefreq": "monthly"
@@ -2187,7 +2206,7 @@
           "morph current work",
           "morph roadmap now"
         ],
-        "lastUpdated": "2026-09-14",
+        "lastUpdated": "2026-10-06",
         "publishedAt": "2026-08-18",
         "priority": 0.7,
         "changefreq": "weekly"
@@ -2207,7 +2226,7 @@
           "morph feature priorities",
           "whats next in morph"
         ],
-        "lastUpdated": "2026-09-29",
+        "lastUpdated": "2026-10-07",
         "publishedAt": "2026-08-20",
         "priority": 0.7,
         "changefreq": "weekly"
@@ -2231,7 +2250,7 @@
           "morph css inheritance",
           "morph css cascade model"
         ],
-        "lastUpdated": "2026-09-14",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2250,7 +2269,7 @@
           "morph margin collapse",
           "morph more css properties"
         ],
-        "lastUpdated": "2026-09-27",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2271,7 +2290,7 @@
           "morph beam border",
           "morph future css"
         ],
-        "lastUpdated": "2026-09-29",
+        "lastUpdated": "2026-10-09",
         "publishedAt": "2026-09-29",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2290,7 +2309,7 @@
           "morph springs",
           "morph shared element"
         ],
-        "lastUpdated": "2026-09-28",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-09-28",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2328,7 +2347,7 @@
           "dynamic className",
           "keyword parse wrapper"
         ],
-        "lastUpdated": "2026-09-27",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-09-19",
         "priority": 0.6,
         "changefreq": "monthly"
@@ -2347,7 +2366,7 @@
           "morph 2d 3d element",
           "morph embedded canvas"
         ],
-        "lastUpdated": "2026-09-14",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2367,7 +2386,7 @@
           "morph native windows",
           "morph window manager"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2387,7 +2406,7 @@
           "morph jsx routing",
           "morph typo safety"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2407,7 +2426,7 @@
           "morph route props",
           "morph page cache"
         ],
-        "lastUpdated": "2026-09-27",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-09-27",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2427,7 +2446,7 @@
           "morph window navigation",
           "morph window handles"
         ],
-        "lastUpdated": "2026-09-14",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2447,7 +2466,7 @@
           "morph drag drop",
           "morph desktop integration"
         ],
-        "lastUpdated": "2026-09-29",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-09-28",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2466,7 +2485,7 @@
           "cross-window events",
           "morph keyboard listener"
         ],
-        "lastUpdated": "2026-09-29",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-09-29",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2505,7 +2524,7 @@
           "morph npm packages",
           "morph server native"
         ],
-        "lastUpdated": "2026-09-09",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-09-09",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2524,7 +2543,7 @@
           "morph cross-language interop",
           "morph second runtime"
         ],
-        "lastUpdated": "2026-09-14",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2543,7 +2562,7 @@
           "morph_api header",
           "mid instance descriptor"
         ],
-        "lastUpdated": "2026-09-16",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-09-16",
         "priority": "0.9",
         "changefreq": "monthly"
@@ -2562,7 +2581,7 @@
           "re-export alias",
           "native function call"
         ],
-        "lastUpdated": "2026-10-20",
+        "lastUpdated": "2026-10-21",
         "publishedAt": "2026-09-17",
         "priority": "0.9",
         "changefreq": "monthly"
@@ -2581,7 +2600,7 @@
           "morph scroll shift",
           "morph gpu rendering future"
         ],
-        "lastUpdated": "2026-10-03",
+        "lastUpdated": "2026-10-04",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2600,7 +2619,7 @@
           "morph rendering speed",
           "morph compositor-safe properties"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2620,7 +2639,7 @@
           "morph graphics api backend",
           "morph opengl alternative"
         ],
-        "lastUpdated": "2026-09-29",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2638,7 +2657,7 @@
           "morph long lists",
           "morph list performance"
         ],
-        "lastUpdated": "2026-09-28",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-09-28",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2658,7 +2677,7 @@
           "morph keyboard input",
           "morph input field"
         ],
-        "lastUpdated": "2026-09-27",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2677,7 +2696,7 @@
           "morph-icons package",
           "morph vector icons"
         ],
-        "lastUpdated": "2026-09-28",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-09-28",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2715,7 +2734,7 @@
           "morph desktop modules",
           "morph tray icon"
         ],
-        "lastUpdated": "2026-09-29",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2735,7 +2754,7 @@
           "morph keyboard navigation",
           "morph uia at-spi"
         ],
-        "lastUpdated": "2026-09-29",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2754,7 +2773,7 @@
           "morph tauri hybrid",
           "morph webview element"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2774,7 +2793,7 @@
           "morph store packaging",
           "morph security"
         ],
-        "lastUpdated": "2026-09-29",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2794,7 +2813,7 @@
           "morph apk ipa",
           "morph smartphones"
         ],
-        "lastUpdated": "2026-09-29",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-09-29",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2815,7 +2834,7 @@
           "morph feature flags",
           "morph per-app optimization"
         ],
-        "lastUpdated": "2026-09-22",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-09-22",
         "priority": 0.9,
         "changefreq": "weekly"
@@ -2834,7 +2853,7 @@
           "morph package build bridge",
           "morph library reuse"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2874,7 +2893,7 @@
           "morph icons",
           "morph animate"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2893,7 +2912,7 @@
           "morph devtools timeline",
           "morph session recording"
         ],
-        "lastUpdated": "2026-09-28",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-09-28",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2912,7 +2931,7 @@
           "morph headless tests",
           "morph screenshots"
         ],
-        "lastUpdated": "2026-09-29",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-09-28",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2931,7 +2950,7 @@
           "morph feedback",
           "morph roadmap ideas"
         ],
-        "lastUpdated": "2026-09-14",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2952,7 +2971,7 @@
           "morph popup",
           "morph owner cascade"
         ],
-        "lastUpdated": "2026-09-21",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-09-21",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2971,7 +2990,7 @@
           "morph cross-platform",
           "morph platform roadmap"
         ],
-        "lastUpdated": "2026-09-29",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2990,7 +3009,7 @@
           "morph native cli",
           "morph python removed"
         ],
-        "lastUpdated": "2026-09-14",
+        "lastUpdated": "2026-09-27",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -3009,7 +3028,7 @@
           "NodeType",
           "JsObject unordered_map"
         ],
-        "lastUpdated": "2026-09-17",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-09-17",
         "priority": "0.9",
         "changefreq": "monthly"
@@ -3034,7 +3053,7 @@
           "who built morph",
           "morph about"
         ],
-        "lastUpdated": "2026-08-20",
+        "lastUpdated": "2026-09-14",
         "publishedAt": "2026-08-20",
         "priority": 0.7,
         "changefreq": "yearly"
@@ -3091,7 +3110,7 @@
           "morph why python",
           "morph early development"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-27",
         "publishedAt": "2026-08-20",
         "priority": 0.7,
         "changefreq": "yearly"
@@ -3110,7 +3129,7 @@
           "morph binary size",
           "morph runtime language choice"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-08-20",
         "priority": 0.7,
         "changefreq": "yearly"
@@ -3130,7 +3149,7 @@
           "morph cross-platform rendering",
           "morph no gpu"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-08-20",
         "priority": 0.7,
         "changefreq": "yearly"
@@ -3208,7 +3227,7 @@
           "morphc oxc",
           "morph compiler rewrite"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-14",
         "publishedAt": "2026-08-25",
         "priority": 0.9,
         "changefreq": "weekly"
@@ -3232,7 +3251,7 @@
           "morph answered questions",
           "morph help"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-20",
         "publishedAt": "2026-08-20",
         "priority": 0.7,
         "changefreq": "yearly"
@@ -3349,7 +3368,7 @@
           "morph desktop apps",
           "morph ui framework"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-08-20",
         "priority": 0.7,
         "changefreq": "yearly"
@@ -3387,7 +3406,7 @@
           "morph no jit",
           "morph js to native"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-08-20",
         "priority": 0.7,
         "changefreq": "yearly"
@@ -3406,7 +3425,7 @@
           "morph cm++ modules",
           "morph package security"
         ],
-        "lastUpdated": "2026-09-09",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-08-20",
         "priority": 0.7,
         "changefreq": "yearly"
@@ -3425,7 +3444,7 @@
           "morph hot swap logic",
           "morph no restart dev"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-09-27",
         "publishedAt": "2026-08-20",
         "priority": 0.7,
         "changefreq": "yearly"
@@ -3444,7 +3463,7 @@
           "morph commercial use",
           "morph roadmap gaps"
         ],
-        "lastUpdated": "2026-09-29",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-08-20",
         "priority": 0.7,
         "changefreq": "yearly"
@@ -3465,7 +3484,7 @@
           "cargo install morphc",
           "curl install morph"
         ],
-        "lastUpdated": "2026-09-14",
+        "lastUpdated": "2026-09-25",
         "publishedAt": "2026-09-05",
         "priority": 0.9,
         "changefreq": "weekly"
@@ -3485,7 +3504,7 @@
           "morph file morphing",
           "morph version system"
         ],
-        "lastUpdated": "2026-09-14",
+        "lastUpdated": "2026-10-22",
         "publishedAt": "2026-09-05",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -3529,7 +3548,7 @@
           "morph valgrind",
           "morph sanitizers"
         ],
-        "lastUpdated": "2026-09-14",
+        "lastUpdated": "2026-10-06",
         "publishedAt": "2026-09-05",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -3575,7 +3594,7 @@
           "morph navigation cache",
           "morph windowConfig optional"
         ],
-        "lastUpdated": "2026-09-20",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-09-20",
         "priority": 0.7,
         "changefreq": "monthly"

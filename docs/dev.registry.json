@@ -16,7 +16,7 @@
           "morph dev docs",
           "how morph works"
         ],
-        "lastUpdated": "2026-09-09",
+        "lastUpdated": "2026-09-20",
         "publishedAt": "2026-09-09",
         "priority": 0.8,
         "changefreq": "monthly"
@@ -35,7 +35,7 @@
           "morph codebase map",
           "morph source layout"
         ],
-        "lastUpdated": "2026-09-09",
+        "lastUpdated": "2026-10-06",
         "publishedAt": "2026-09-09",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -54,7 +54,7 @@
           "morph build internals",
           "morph parity harness"
         ],
-        "lastUpdated": "2026-09-09",
+        "lastUpdated": "2026-09-23",
         "publishedAt": "2026-09-09",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -73,7 +73,7 @@
           "morph IRBuilder",
           "mx to cpp internals"
         ],
-        "lastUpdated": "2026-09-19",
+        "lastUpdated": "2026-09-20",
         "publishedAt": "2026-09-19",
         "priority": 0.8,
         "changefreq": "monthly"
@@ -92,7 +92,7 @@
           "morph_devrt",
           "morph loopback IPC"
         ],
-        "lastUpdated": "2026-09-19",
+        "lastUpdated": "2026-09-20",
         "publishedAt": "2026-09-19",
         "priority": 0.8,
         "changefreq": "monthly"
@@ -111,7 +111,7 @@
           "morph fingerprint UPX static",
           "morph compile flags"
         ],
-        "lastUpdated": "2026-09-19",
+        "lastUpdated": "2026-09-20",
         "publishedAt": "2026-09-19",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -136,7 +136,7 @@
           "morph module graph",
           "morph linter codes"
         ],
-        "lastUpdated": "2026-10-20",
+        "lastUpdated": "2026-10-22",
         "publishedAt": "2026-09-19",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -156,7 +156,7 @@
           "morph Tailwind resolver",
           "morph IR serializer"
         ],
-        "lastUpdated": "2026-10-20",
+        "lastUpdated": "2026-10-22",
         "publishedAt": "2026-09-19",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -200,7 +200,7 @@
           "morph escape analysis code",
           "extend morph translator"
         ],
-        "lastUpdated": "2026-09-09",
+        "lastUpdated": "2026-09-20",
         "publishedAt": "2026-09-09",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -219,7 +219,7 @@
           "morph EscapeKind",
           "morph smart pointer decisions"
         ],
-        "lastUpdated": "2026-09-19",
+        "lastUpdated": "2026-09-20",
         "publishedAt": "2026-09-19",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -238,7 +238,7 @@
           "morph js_cmp",
           "morph JsValue JsString"
         ],
-        "lastUpdated": "2026-09-19",
+        "lastUpdated": "2026-09-20",
         "publishedAt": "2026-09-19",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -286,7 +286,7 @@
           "morph runtime headers",
           "add morph runtime helper"
         ],
-        "lastUpdated": "2026-09-09",
+        "lastUpdated": "2026-10-06",
         "publishedAt": "2026-09-09",
         "priority": 0.6,
         "changefreq": "monthly"
@@ -324,7 +324,7 @@
           "morph render frame snapshot",
           "morph damage tracking"
         ],
-        "lastUpdated": "2026-09-19",
+        "lastUpdated": "2026-10-06",
         "publishedAt": "2026-09-19",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -343,7 +343,7 @@
           "morph dirty flags",
           "morph hover transition style"
         ],
-        "lastUpdated": "2026-09-19",
+        "lastUpdated": "2026-09-20",
         "publishedAt": "2026-09-19",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -362,7 +362,7 @@
           "morph HttpAwaitable",
           "morph Response"
         ],
-        "lastUpdated": "2026-09-19",
+        "lastUpdated": "2026-09-20",
         "publishedAt": "2026-09-19",
         "priority": 0.6,
         "changefreq": "monthly"
@@ -386,7 +386,7 @@
           "morph new command code",
           "add morph subcommand"
         ],
-        "lastUpdated": "2026-09-19",
+        "lastUpdated": "2026-09-20",
         "publishedAt": "2026-09-19",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -405,7 +405,7 @@
           "morph.lock versions",
           "morph release workflow"
         ],
-        "lastUpdated": "2026-09-19",
+        "lastUpdated": "2026-10-06",
         "publishedAt": "2026-09-19",
         "priority": 0.6,
         "changefreq": "monthly"
@@ -429,7 +429,7 @@
           "morph self test",
           "add morph fixture"
         ],
-        "lastUpdated": "2026-09-19",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-09-19",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -473,7 +473,7 @@
           "morph feature set position",
           "morph effect cleanup"
         ],
-        "lastUpdated": "2026-09-19",
+        "lastUpdated": "2026-09-27",
         "publishedAt": "2026-09-19",
         "priority": 0.8,
         "changefreq": "monthly"
@@ -497,7 +497,7 @@
           "morph PR workflow",
           "morph code conventions"
         ],
-        "lastUpdated": "2026-09-09",
+        "lastUpdated": "2026-09-20",
         "publishedAt": "2026-09-09",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -516,7 +516,7 @@
           "write morph docs",
           "morph.levizr.com docs"
         ],
-        "lastUpdated": "2026-09-09",
+        "lastUpdated": "2026-09-30",
         "publishedAt": "2026-09-09",
         "priority": 0.6,
         "changefreq": "monthly"
