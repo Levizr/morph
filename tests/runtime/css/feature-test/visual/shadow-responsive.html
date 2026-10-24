@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CSSFeatureTest — shadow + responsive parity</title>
+<!-- Reuses the fixture stylesheet so Chrome and Morph cannot drift. -->
+<link rel="stylesheet" href="../src/style.css">
+<style>
+html { margin: 0; padding: 0; background: #10141c; }
+/* Match Morph's defaults for a like-for-like feature comparison. */
+body {
+  margin: 8px;
+  padding: 0;
+  line-height: 1.4;
+  font-family: "DejaVu Sans", sans-serif;
+}
+</style>
+</head>
+<body>
+<div class="screen">
+  <div class="card">Responsive outline card</div>
+  <div class="spaced">LETTER SPACING</div>
+  <div class="shadowed">TEXT SHADOW</div>
+</div>
+</body>
+</html>
