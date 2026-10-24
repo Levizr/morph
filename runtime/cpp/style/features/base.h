@@ -175,6 +175,8 @@ struct StyleBase {
     CssLength borderBottomRightRadius;
     CssLength borderBottomLeftRadius;
     CssLength fontSize = pxLen(16.0f);
+    CssLength letterSpacing = pxLen(0.0f);
+    bool letterSpacingSet = false;
     CssLength padding[4] = {pxLen(0.0f), pxLen(0.0f), pxLen(0.0f), pxLen(0.0f)};
     CssLength margin[4] = {pxLen(0.0f), pxLen(0.0f), pxLen(0.0f), pxLen(0.0f)};
     bool marginAuto[4] = {false,false,false,false};

@@ -2633,8 +2633,6 @@ impl IRBuilder {
                 }
                 let node_id = self.next_id();
                 let mut node = IRNode { node_id, node_type: tag.clone(), ..Default::default() };
-                let mut style = IRStyle::new();
-                apply_ua_defaults(&mut style, tag);
                 let mut hover_style = IRStyle::new();
                 for (prop, val) in ua_hover_defaults(tag) {
                     apply_css_prop(&mut hover_style, prop, val);
@@ -2647,9 +2645,17 @@ impl IRBuilder {
                 // Cascade: collect every matching declaration with its
                 // specificity and source order, then apply weakest-first so
                 // the winner writes last. Stable sort keeps source order
-                // among equal specificities (later sheets win ties).
-                let mut declarations: Vec<(Specificity, usize, String, String, PseudoKind)> =
-                    Vec::new();
+                // among equal specificities (later sheets win ties). Media
+                // rules keep their width condition; the base bucket skips
+                // them and full breakpoint variants are built below.
+                let mut declarations: Vec<(
+                    Specificity,
+                    usize,
+                    String,
+                    String,
+                    PseudoKind,
+                    Option<morph_parser::CssMedia>,
+                )> = Vec::new();
                 for (order, (selector, rule)) in css_rules.iter().enumerate() {
                     if let Some((pseudo, specificity)) =
                         match_selector_detailed(tag, &classes, id.as_deref(), ancestors, selector)
@@ -2661,45 +2667,150 @@ impl IRBuilder {
                                 prop.clone(),
                                 val.clone(),
                                 pseudo,
+                                rule.media.clone(),
                             ));
                         }
                     }
                 }
-                declarations.sort();
+                declarations.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
                 // Winning declarations per bucket, for animation parsing
                 // (Python: matched CSS merged before tailwind/attrs/inline).
                 let mut base_props: HashMap<String, String> = HashMap::new();
                 let mut hover_props: HashMap<String, String> = HashMap::new();
-                for (_, _, prop, val, pseudo) in &declarations {
+                for (_, _, prop, val, pseudo, media) in &declarations {
+                    if media.is_some() {
+                        continue;
+                    }
                     let target = match pseudo {
-                        PseudoKind::Base => &mut style,
+                        PseudoKind::Base => continue,
                         PseudoKind::Hover => &mut hover_style,
                         PseudoKind::Active => &mut active_style,
                     };
                     apply_css_prop(target, prop, val);
-                    match pseudo {
-                        PseudoKind::Base => {
-                            base_props.insert(prop.clone(), val.clone());
-                        }
-                        PseudoKind::Hover => {
-                            hover_props.insert(prop.clone(), val.clone());
-                        }
-                        PseudoKind::Active => {}
+                    if *pseudo == PseudoKind::Hover {
+                        hover_props.insert(prop.clone(), val.clone());
                     }
                 }
+                for (_, _, prop, val, pseudo, media) in &declarations {
+                    if media.is_none() && *pseudo == PseudoKind::Base {
+                        base_props.insert(prop.clone(), val.clone());
+                    }
+                }
+
+                // Compose the complete static base style for one viewport
+                // width (`None` = no media rules). Every breakpoint variant is
+                // a full style, so the runtime can swap variants on resize
+                // without replaying declarations and losing cascade order.
+                let build_static_style = |width: Option<f32>| -> IRStyle {
+                    let mut st = IRStyle::new();
+                    apply_ua_defaults(&mut st, tag);
+                    for (_, _, prop, val, pseudo, media) in &declarations {
+                        if *pseudo != PseudoKind::Base {
+                            continue;
+                        }
+                        if let Some(condition) = media {
+                            if !condition.supported {
+                                continue;
+                            }
+                            let Some(w) = width else {
+                                continue;
+                            };
+                            if !condition.matches(w) {
+                                continue;
+                            }
+                        }
+                        apply_css_prop(&mut st, prop, val);
+                    }
+                    if let Some(morph_parser::JsxPropValue::String(cls)) =
+                        props.get("className").or_else(|| props.get("class"))
+                    {
+                        for (prop, val) in self.tailwind.resolve_many(cls) {
+                            apply_css_prop(&mut st, &prop, &val);
+                        }
+                    }
+                    // Presentational hints lose to every stylesheet rule:
+                    // HTML width/height attributes apply only when the
+                    // cascade left the property unset.
+                    if tag != "a" && st.width.is_none() {
+                        if let Some(morph_parser::JsxPropValue::String(raw)) = props.get("width") {
+                            if let Some(len) = parse_length(raw) {
+                                if matches!(len, Length::Px(_) | Length::Pct(_)) {
+                                    st.width = Some(len);
+                                }
+                            }
+                        }
+                    }
+                    if tag != "a" && st.height.is_none() {
+                        if let Some(morph_parser::JsxPropValue::String(raw)) = props.get("height") {
+                            if let Some(len) = parse_length(raw) {
+                                if matches!(len, Length::Px(_) | Length::Pct(_)) {
+                                    st.height = Some(len);
+                                }
+                            }
+                        }
+                    }
+                    if let Some(morph_parser::JsxPropValue::Style(map)) = props.get("style") {
+                        for (prop, val) in map {
+                            if let morph_parser::StyleValue::Static(s) = val {
+                                apply_css_prop(&mut st, prop, s);
+                            }
+                        }
+                    }
+                    st
+                };
+                let mut style = build_static_style(None);
+
+                // Build breakpoint intervals from supported width conditions.
+                // Conditions are monotonic in viewport width, so every region
+                // between threshold starts has a constant truth vector.
+                let media_conditions: Vec<morph_parser::CssMedia> = declarations
+                    .iter()
+                    .filter_map(|(_, _, _, _, _, media)| media.clone())
+                    .filter(|media| media.supported)
+                    .collect();
+                if !media_conditions.is_empty() {
+                    let mut starts: Vec<u32> = vec![0];
+                    for condition in &media_conditions {
+                        if let Some(max) = condition.max_width {
+                            let cut = max.floor() as i64 + 1;
+                            if cut > 0 {
+                                starts.push(cut as u32);
+                            }
+                        }
+                        if let Some(min) = condition.min_width {
+                            let cut = min.ceil() as i64;
+                            if cut > 0 {
+                                starts.push(cut as u32);
+                            }
+                        }
+                    }
+                    starts.sort_unstable();
+                    starts.dedup();
+                    let mut variants = Vec::new();
+                    for (idx, start) in starts.iter().enumerate() {
+                        let min_width = *start;
+                        let max_width = starts.get(idx + 1).map(|next| next.saturating_sub(1));
+                        if max_width.is_some_and(|max| min_width > max) {
+                            continue;
+                        }
+                        variants.push(crate::IRMediaStyle {
+                            min_width,
+                            max_width,
+                            style: build_static_style(Some(min_width as f32)),
+                        });
+                    }
+                    node.media_styles = variants;
+                }
+
+                // Presentational hints / Tailwind / inline style also feed
+                // animation parsing, independent of the resolved style above.
                 if let Some(morph_parser::JsxPropValue::String(cls)) =
                     props.get("className").or_else(|| props.get("class"))
                 {
                     for (prop, val) in self.tailwind.resolve_many(cls) {
-                        apply_css_prop(&mut style, &prop, &val);
                         base_props.insert(prop, val);
                     }
                 }
-                // Presentational hints lose to every stylesheet rule: HTML
-                // width/height attributes apply only when the cascade left
-                // the property unset (browsers treat them as weakest).
-                // Never for links: their width/height/parent/modal/role
-                // configure the opened window, not the element box.
                 if tag != "a" && style.width.is_none() {
                     if let Some(morph_parser::JsxPropValue::String(raw)) = props.get("width") {
                         if let Some(len) = parse_length(raw) {
@@ -2722,14 +2833,8 @@ impl IRBuilder {
                 }
                 if let Some(morph_parser::JsxPropValue::Style(map)) = props.get("style") {
                     for (prop, val) in map {
-                        match val {
-                            morph_parser::StyleValue::Static(s) => {
-                                apply_css_prop(&mut style, prop, s);
-                                base_props.insert(prop.clone(), s.clone());
-                            }
-                            morph_parser::StyleValue::Expr(e) => {
-                                node.reactive_style.insert(prop.clone(), capture_raw(e, frame));
-                            }
+                        if let morph_parser::StyleValue::Static(s) = val {
+                            base_props.insert(prop.clone(), s.clone());
                         }
                     }
                 }
@@ -5632,6 +5737,17 @@ fn apply_css_prop(style: &mut IRStyle, prop: &str, val: &str) -> Option<&'static
             style.text_align = val.to_string();
             Some("text_align")
         }
+        "letter-spacing" => {
+            if val.trim().eq_ignore_ascii_case("normal") {
+                style.letter_spacing = Some(Length::Px(0.0));
+                Some("letter_spacing")
+            } else if let Some(v) = parse_length_no_pct(val) {
+                style.letter_spacing = Some(v);
+                Some("letter_spacing")
+            } else {
+                None
+            }
+        }
         "display" => {
             style.display = val.to_string();
             Some("display")
@@ -6116,6 +6232,56 @@ fn apply_css_prop(style: &mut IRStyle, prop: &str, val: &str) -> Option<&'static
                 None
             }
         }
+        "outline" => {
+            parse_outline_shorthand(style, val);
+            Some("outline")
+        }
+        "outline-width" => {
+            if let Some(v) = parse_outline_width(val) {
+                style.outline_width = Some(v);
+                Some("outline_width")
+            } else {
+                None
+            }
+        }
+        "outline-color" => {
+            if val.trim().eq_ignore_ascii_case("currentcolor") {
+                style.outline_color = None;
+                style.outline_color_current = true;
+                Some("outline_color")
+            } else if let Some(c) = parse_color(val) {
+                style.outline_color = Some(c);
+                style.outline_color_current = false;
+                Some("outline_color")
+            } else {
+                None
+            }
+        }
+        "outline-style" => {
+            let v = val.trim().to_ascii_lowercase();
+            if matches!(v.as_str(), "none" | "solid" | "dashed" | "dotted" | "double") {
+                style.outline_style = Some(v);
+                Some("outline_style")
+            } else {
+                None
+            }
+        }
+        "outline-offset" => {
+            if let Some(v) = parse_length_no_pct(val) {
+                style.outline_offset = Some(v);
+                Some("outline_offset")
+            } else {
+                None
+            }
+        }
+        "text-shadow" => {
+            if let Some(shadows) = crate::text_shadow::parse_text_shadow(val) {
+                style.text_shadows = Some(shadows);
+                Some("text_shadows")
+            } else {
+                None
+            }
+        }
         // ── Grid ──
         "grid-template-columns" => {
             if let Some(list) = crate::grid::parse_track_list(val) {
@@ -6337,6 +6503,48 @@ fn parse_flex_shorthand(style: &mut IRStyle, val: &str) {
             }
         },
     }
+}
+
+/// `outline-width` keywords map to the CSS initial medium scale.
+fn parse_outline_width(s: &str) -> Option<Length> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "thin" => Some(Length::Px(1.0)),
+        "medium" => Some(Length::Px(3.0)),
+        "thick" => Some(Length::Px(5.0)),
+        _ => parse_length_no_pct(s),
+    }
+}
+
+/// Parse the `outline` shorthand. Omitted width/style/color reset to their
+/// initial values (medium 3px, none, currentcolor), matching CSS shorthand rules.
+/// `outline-offset` is a separate longhand and is left untouched.
+fn parse_outline_shorthand(style: &mut IRStyle, val: &str) {
+    let mut width: Option<Length> = None;
+    let mut outline_style: Option<String> = None;
+    let mut color: Option<[f32; 4]> = None;
+    // CSS initial `outline-color` is `currentcolor`.
+    let mut color_current = true;
+    for part in val.split_whitespace() {
+        let lower = part.to_ascii_lowercase();
+        if lower == "none" || matches!(lower.as_str(), "solid" | "dashed" | "dotted" | "double") {
+            outline_style = Some(lower);
+        } else if part.eq_ignore_ascii_case("currentcolor") {
+            color = None;
+            color_current = true;
+        } else if let Some(w) = parse_outline_width(part) {
+            width = Some(w);
+        } else if let Some(c) = parse_color(part) {
+            color = Some(c);
+            color_current = false;
+        }
+    }
+    let effective_style = outline_style.unwrap_or_else(|| "none".to_string());
+    style.outline_style = Some(effective_style);
+    // The shorthand resets omitted width to the initial `medium` even when
+    // the style is `none`; the style alone controls whether it paints.
+    style.outline_width = Some(width.unwrap_or(Length::Px(3.0)));
+    style.outline_color = color;
+    style.outline_color_current = color_current;
 }
 
 /// Split the CSS `border` shorthand (`1px solid #232b3d`) into
@@ -7021,6 +7229,7 @@ mod tests {
             morph_parser::CssRule {
                 selector: ".wide".to_string(),
                 properties: [("width".to_string(), "100px".to_string())].into_iter().collect(),
+                media: None,
             },
         )];
         props.insert("className".to_string(), JsxPropValue::String("wide".to_string()));
@@ -7400,6 +7609,7 @@ mod tests {
                 )]
                 .into_iter()
                 .collect(),
+                media: None,
             },
         )];
         let mut keyframes = HashMap::new();
@@ -7439,6 +7649,7 @@ mod tests {
                 properties: [("animation".to_string(), "nope 1s linear infinite".to_string())]
                     .into_iter()
                     .collect(),
+                media: None,
             },
         )];
         let mut props = HashMap::new();
@@ -8701,5 +8912,106 @@ export default function App() {
             namespace_aliases: HashMap::new(),
         };
         assert_eq!(subst_props_refs("props.title + y.props.z", &frame2), "title + y.props.z");
+    }
+
+    #[test]
+    fn outline_letter_spacing_and_text_shadow_parse() {
+        let mut s = IRStyle::default();
+        assert_eq!(apply_css_prop(&mut s, "outline", "2px solid #ff0000"), Some("outline"));
+        assert_eq!(s.outline_style.as_deref(), Some("solid"));
+        assert_eq!(s.outline_width, Some(Length::Px(2.0)));
+        assert_eq!(s.outline_color, Some([1.0, 0.0, 0.0, 1.0]));
+        assert_eq!(apply_css_prop(&mut s, "outline-offset", "3px"), Some("outline_offset"));
+        assert_eq!(s.outline_offset, Some(Length::Px(3.0)));
+        assert_eq!(apply_css_prop(&mut s, "outline-style", "none"), Some("outline_style"));
+        assert_eq!(s.outline_style.as_deref(), Some("none"));
+        // Shorthand resets unspecified parts to their initials.
+        assert_eq!(apply_css_prop(&mut s, "outline", "dotted"), Some("outline"));
+        assert_eq!(s.outline_width, Some(Length::Px(3.0)));
+        assert_eq!(s.outline_color, None);
+        assert!(s.outline_color_current);
+        assert_eq!(apply_css_prop(&mut s, "outline-color", "#00ff00"), Some("outline_color"));
+        assert_eq!(s.outline_color, Some([0.0, 1.0, 0.0, 1.0]));
+        assert!(!s.outline_color_current);
+        assert_eq!(apply_css_prop(&mut s, "outline", "none"), Some("outline"));
+        assert_eq!(s.outline_style.as_deref(), Some("none"));
+        assert_eq!(s.outline_width, Some(Length::Px(3.0)));
+        assert_eq!(s.outline_color, None);
+        assert!(s.outline_color_current);
+        assert_eq!(apply_css_prop(&mut s, "letter-spacing", "0.12em"), Some("letter_spacing"));
+        assert_eq!(s.letter_spacing, Some(Length::Em(0.12)));
+        assert_eq!(apply_css_prop(&mut s, "letter-spacing", "normal"), Some("letter_spacing"));
+        assert_eq!(s.letter_spacing, Some(Length::Px(0.0)));
+        assert_eq!(apply_css_prop(&mut s, "text-shadow", "1px 2px 4px red"), Some("text_shadows"));
+        assert_eq!(s.text_shadows.as_ref().map(Vec::len), Some(1));
+        assert_eq!(apply_css_prop(&mut s, "text-shadow", "none"), Some("text_shadows"));
+        assert_eq!(s.text_shadows.as_deref(), Some(&[][..]));
+    }
+
+    #[test]
+    fn media_rules_build_full_breakpoint_variants() {
+        use morph_parser::CssMedia;
+        let builder = IRBuilder::new();
+        let mut props = HashMap::new();
+        props.insert(
+            "className".to_string(),
+            morph_parser::JsxPropValue::String("card".to_string()),
+        );
+        let rule = |props: &[(&str, &str)], media: Option<CssMedia>| {
+            (
+                ".card".to_string(),
+                morph_parser::CssRule {
+                    selector: ".card".to_string(),
+                    properties: props
+                        .iter()
+                        .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+                        .collect(),
+                    media,
+                },
+            )
+        };
+        let rules = vec![
+            rule(&[("width", "100px"), ("background-color", "#111111")], None),
+            rule(
+                &[("width", "200px"), ("background-color", "#222222")],
+                Some(CssMedia { min_width: None, max_width: Some(600.0), supported: true }),
+            ),
+            rule(
+                &[("width", "300px")],
+                Some(CssMedia { min_width: Some(601.0), max_width: None, supported: true }),
+            ),
+            // Unsupported conditions never contribute a variant.
+            rule(
+                &[("width", "999px")],
+                Some(CssMedia { min_width: None, max_width: None, supported: false }),
+            ),
+        ];
+        let node = builder.build_node(
+            &morph_parser::JsxNode::Element {
+                tag: "div".to_string(),
+                props,
+                children: Vec::new(),
+                self_closing: true,
+                line: 0,
+                col: 0,
+            },
+            &rules,
+            0,
+            &[],
+            &HashMap::new(),
+            &HashMap::new(),
+            &mut Vec::new(),
+            &HashMap::new(),
+        );
+        assert_eq!(node.style.width, Some(Length::Px(100.0)));
+        assert_eq!(node.media_styles.len(), 2);
+        let narrow = &node.media_styles[0];
+        assert_eq!((narrow.min_width, narrow.max_width), (0, Some(600)));
+        assert_eq!(narrow.style.width, Some(Length::Px(200.0)));
+        assert_eq!(narrow.style.bg_color, [0.133_333_34, 0.133_333_34, 0.133_333_34, 1.0]);
+        let wide = &node.media_styles[1];
+        assert_eq!((wide.min_width, wide.max_width), (601, None));
+        assert_eq!(wide.style.width, Some(Length::Px(300.0)));
+        assert_eq!(wide.style.bg_color, [0.066_666_67, 0.066_666_67, 0.066_666_67, 1.0]);
     }
 }

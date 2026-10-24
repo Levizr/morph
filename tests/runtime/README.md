@@ -17,6 +17,7 @@ Fixtures are grouped by the subsystem they hold accountable:
 | `layout/` | Flex and full-UI layout breadth |
 | `reactivity/` | Keyed reconciliation and effects |
 | `widgets/` | Element behavior — `<input>`, the DOM event surface |
+| `css/` | CSS feature breadth — outline, typography, responsive `@media` variants |
 | `animation/` | CSS keyframes |
 | `size/` | Lean-binary budget fixture (gated by `check-size.sh`) |
 | `scratch/` | Throwaway repros. Not gated, not reviewed |
@@ -27,7 +28,8 @@ Put a new fixture in the group matching what broke. A one-off repro goes in
 ## Scripts
 
 ```bash
-./tests/runtime/run-selftests.sh   # build + run --morph-self-test on app/ fixtures
+./tests/runtime/run-selftests.sh   # build + run --morph-self-test on gated fixtures
+./tests/runtime/check-responsive-style.sh  # headless width-breakpoint variant selection
 ./tests/runtime/check-size.sh      # assert size/hello-size stays under the byte budget
 ./tests/runtime/check-forge-math.sh  # forge DamageSet/TilePool/scroll-shift unit tests (g++-14, headless)
 ./tests/runtime/bench-forge.sh     # forge damage-model benchmarks + TU-exclusion nm checks

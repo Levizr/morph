@@ -380,11 +380,36 @@ pub enum StyleValue {
     Expr(String),
 }
 
-/// A single CSS style rule: its selector plus its declarations.
+/// A width-based media query resolved at parse time.
+///
+/// `None` bounds are unbounded; `supported == false` marks conditions this
+/// engine cannot evaluate (orientation, pointer, `not`, `or`, ...), whose
+/// rules are skipped rather than applied unconditionally.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CssMedia {
+    pub min_width: Option<f32>,
+    pub max_width: Option<f32>,
+    pub supported: bool,
+}
+
+impl CssMedia {
+    /// Whether a viewport width (CSS px) satisfies this condition.
+    pub fn matches(&self, width: f32) -> bool {
+        if !self.supported {
+            return false;
+        }
+        self.min_width.is_none_or(|v| width >= v) && self.max_width.is_none_or(|v| width <= v)
+    }
+}
+
+/// A single CSS style rule: its selector plus its declarations. `media`
+/// is `None` for top-level rules and carries the enclosing `@media`
+/// condition for nested rules.
 #[derive(Debug, Clone)]
 pub struct CssRule {
     pub selector: String,
     pub properties: HashMap<String, String>,
+    pub media: Option<CssMedia>,
 }
 
 /// A single `@keyframes` entry: a selector offset (0..1) plus its declarations.

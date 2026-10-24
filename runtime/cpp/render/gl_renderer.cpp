@@ -587,7 +587,8 @@ void GLRenderer::shapeText(const std::string &text, FontAtlas &atlas,
 }
 
 float GLRenderer::measureTextWidth(const std::string &text, float fontSize,
-                                   CSS::FontWeight fontWeight)
+                                   CSS::FontWeight fontWeight,
+                                   float letterSpacing)
 {
     if (text.empty() || fontSize < 1)
         return 0;
@@ -598,8 +599,11 @@ float GLRenderer::measureTextWidth(const std::string &text, float fontSize,
     shapeText(text, atlas, shaped);
 
     float w = 0;
-    for (auto &sg : shaped)
-        w += sg.ax;
+    for (size_t i = 0; i < shaped.size(); i++) {
+        w += shaped[i].ax;
+        if (i + 1 < shaped.size())
+            w += letterSpacing;
+    }
     return w;
 }
 
@@ -607,7 +611,8 @@ void GLRenderer::drawText(const std::string &text, float x, float y,
                           float color[4], TextAlign align,
                           float fontSize,
                           CSS::FontWeight fontWeight,
-                          bool centerInk)
+                          bool centerInk,
+                          float letterSpacing)
 {
     if (text.empty() || fontSize < 1)
         return;
@@ -673,8 +678,11 @@ void GLRenderer::drawText(const std::string &text, float x, float y,
 
     // Measure total width for alignment
     float totalW = 0;
-    for (auto &sg : shaped)
-        totalW += sg.ax;
+    for (size_t i = 0; i < shaped.size(); i++) {
+        totalW += shaped[i].ax;
+        if (i + 1 < shaped.size())
+            totalW += letterSpacing;
+    }
 
     if (align == TextAlign::Center)
         penX -= totalW * 0.5f;
@@ -683,15 +691,17 @@ void GLRenderer::drawText(const std::string &text, float x, float y,
 
     auto &batch = m_textBatches[AtlasKey{fs, fontWeight}];
 
-    for (auto &sg : shaped)
+    for (size_t si = 0; si < shaped.size(); si++)
     {
+        auto &sg = shaped[si];
+        float advance = (si + 1 < shaped.size()) ? letterSpacing : 0.0f;
         // Ensure glyph is rendered (may route to emoji atlas)
         ensureGlyph(atlas, sg.codepoint);
 
         auto it = atlas.glyphs.find(sg.codepoint);
         if (it == atlas.glyphs.end())
         {
-            penX += sg.ax;
+            penX += sg.ax + advance;
             continue;
         }
         auto &g = it->second;
@@ -718,7 +728,7 @@ void GLRenderer::drawText(const std::string &text, float x, float y,
             applyModel(batch.back());
 #endif
         }
-        penX += es != 1.0f ? g.ax * es : sg.ax;
+        penX += (es != 1.0f ? g.ax * es : sg.ax) + advance;
     }
 }
 #endif

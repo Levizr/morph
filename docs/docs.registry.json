@@ -420,9 +420,14 @@
           "morph supported css units",
           "morph css px rem vh",
           "morph layout css",
-          "morph styling css"
+          "morph styling css",
+          "css outline",
+          "css letter spacing",
+          "css text shadow",
+          "css media queries",
+          "responsive css"
         ],
-        "lastUpdated": "2026-10-16",
+        "lastUpdated": "2026-10-24",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"

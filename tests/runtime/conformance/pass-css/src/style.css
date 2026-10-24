@@ -8,7 +8,8 @@ body { margin: 0; }
   from { opacity: 0; }
   to { opacity: 1; }
 }
-.box { color: red; animation: fade 1s; }
+.box { color: red; animation: fade 1s; outline: 2px solid #4cc2ff; outline-offset: 3px; letter-spacing: 1px; text-shadow: 1px 1px 2px #000; }
+@media (max-width: 600px) { .box { outline-color: #ff6ac1; letter-spacing: 0; } }
 .grid { display: grid; grid-template-columns: 100px 1fr; grid-template-rows: 40px auto; grid-auto-flow: row dense; gap: 8px; row-gap: 4px; align-content: start; justify-items: stretch; }
 .cell-a { grid-column: 1 / -1; justify-self: center; }
 .cell-b { grid-row: 2 / span 1; }

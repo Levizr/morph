@@ -88,13 +88,124 @@ inline void borderRingBox(const MorphStyle& style, float sx, float sy,
     }
 }
 
+#ifdef MORPH_FEATURE_OUTLINE
+// Resolve the outline ring box. Outline sits outside the border edge, offset
+// by `outline-offset`, and never participates in layout.
+inline bool outlineRingBox(const MorphStyle& style, const UnitEnv& env,
+                           float sx, float sy, float sw, float sh, bool snap,
+                           float& ox, float& oy, float& ow, float& oh,
+                           float outRadii[4])
+{
+    if (!style.outlineSet || style.outlineStyle == CSS::BorderStyle::None)
+        return false;
+    float width = resolveUnits(style.outlineWidth, env);
+    if (width <= 0.0f)
+        return false;
+    if (snap)
+        width = std::round(width);
+    float offset = resolveUnits(style.outlineOffset, env);
+    float pad = width + offset;
+    float w[4];
+    snappedBorderWidths(style, env, snap, w);
+    float bx, by, bw, bh;
+    borderRingBox(style, sx, sy, sw, sh, w, bx, by, bw, bh);
+    ox = bx - pad;
+    oy = by - pad;
+    ow = bw + 2.0f * pad;
+    oh = bh + 2.0f * pad;
+    if (ow <= 0.0f || oh <= 0.0f)
+        return false;
+    resolveBorderRadii(style, env, snap, outRadii);
+    for (int i = 0; i < 4; i++)
+    {
+        outRadii[i] = outRadii[i] + pad;
+        if (outRadii[i] < 0.0f)
+            outRadii[i] = 0.0f;
+    }
+    float limit = 0.5f * (ow < oh ? ow : oh);
+    for (int i = 0; i < 4; i++)
+    {
+        if (outRadii[i] > limit)
+            outRadii[i] = limit;
+    }
+    return true;
+}
+
+inline void recordOutlineOps(std::vector<DrawOp>& out, MorphStyle& style,
+                             const UnitEnv& env, float sx, float sy, float sw,
+                             float sh, bool snap, const float* currentColor)
+{
+    float ox, oy, ow, oh, radii[4];
+    if (!outlineRingBox(style, env, sx, sy, sw, sh, snap, ox, oy, ow, oh, radii))
+        return;
+    float width = resolveUnits(style.outlineWidth, env);
+    if (snap)
+        width = std::round(width);
+    const float* color = style.outlineColorCurrent
+                             ? (currentColor ? currentColor : style.color)
+                             : style.outlineColor;
+    DrawOp ring;
+    ring.setBorderRing(ox, oy, ow, oh, radii, width, const_cast<float*>(color),
+                       (float)(int)style.outlineStyle, width, width);
+    ring.data[5] = 1.0f; // outline marker: never resolve a border gradient
+    out.push_back(ring);
+}
+
+inline void paintOutlineDirect(Renderer& r, MorphStyle& style, const UnitEnv& env,
+                               float sx, float sy, float sw, float sh, bool snap,
+                               const float* currentColor)
+{
+    float ox, oy, ow, oh, radii[4];
+    if (!outlineRingBox(style, env, sx, sy, sw, sh, snap, ox, oy, ow, oh, radii))
+        return;
+    float width = resolveUnits(style.outlineWidth, env);
+    if (snap)
+        width = std::round(width);
+    float* color = style.outlineColorCurrent
+                       ? const_cast<float*>(currentColor ? currentColor : style.color)
+                       : style.outlineColor;
+    r.drawBorderRing(ox, oy, ow, oh, radii, width, color,
+                     (float)(int)style.outlineStyle, width, width);
+}
+
+// Destruction order appends the outline after every border return path.
+struct OutlineRecorder {
+    std::vector<DrawOp>& out;
+    MorphStyle& style;
+    const UnitEnv& env;
+    float sx, sy, sw, sh;
+    bool snap;
+    const float* currentColor;
+    ~OutlineRecorder()
+    {
+        recordOutlineOps(out, style, env, sx, sy, sw, sh, snap, currentColor);
+    }
+};
+struct OutlinePainter {
+    Renderer& r;
+    MorphStyle& style;
+    const UnitEnv& env;
+    float sx, sy, sw, sh;
+    bool snap;
+    const float* currentColor;
+    ~OutlinePainter()
+    {
+        paintOutlineDirect(r, style, env, sx, sy, sw, sh, snap, currentColor);
+    }
+};
+#endif
+
 // Record the fill op plus border ops for a box. plainRounded selects the
 // no-border fill shape (buttons/inputs always round, rects only when a
 // corner radius is set).
 inline void recordBoxOps(std::vector<DrawOp>& out, MorphStyle& style, const UnitEnv& env,
                          float sx, float sy, float sw, float sh,
-                         bool snap, bool plainRounded)
+                         bool snap, bool plainRounded,
+                         const float* currentColor = nullptr)
 {
+#ifdef MORPH_FEATURE_OUTLINE
+    OutlineRecorder outlineGuard{out, style, env, sx, sy, sw, sh, snap, currentColor};
+#endif
     float widths[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     const float* colors[4] = {nullptr, nullptr, nullptr, nullptr};
     float modes[4] = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -266,8 +377,12 @@ inline void paintBoxRings(Renderer& r, MorphStyle& style, const UnitEnv& env,
 // Immediate-mode twin of recordBoxOps for the legacy draw() path.
 inline void paintBoxDirect(Renderer& r, MorphStyle& style, const UnitEnv& env,
                            float sx, float sy, float sw, float sh,
-                           bool snap, bool plainRounded)
+                           bool snap, bool plainRounded,
+                           const float* currentColor = nullptr)
 {
+#ifdef MORPH_FEATURE_OUTLINE
+    OutlinePainter outlineGuard{r, style, env, sx, sy, sw, sh, snap, currentColor};
+#endif
     float widths[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     const float* colors[4] = {nullptr, nullptr, nullptr, nullptr};
     float modes[4] = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -393,7 +508,7 @@ inline void paintBoxDirect(Renderer& r, MorphStyle& style, const UnitEnv& env,
 inline void execBorderRingOp(Renderer& r, DrawOp& op, MorphStyle& style)
 {
 #ifdef MORPH_FEATURE_GRADIENT
-    if (borderImageGradActive(style))
+    if (op.data[5] == 0.0f && borderImageGradActive(style))
     {
         float clear[4] = {0.0f, 0.0f, 0.0f, 0.0f};
         r.drawGradRect(op.x, op.y, op.w, op.h, op.radii, clear, nullptr,

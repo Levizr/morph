@@ -72,6 +72,23 @@ struct HoverTransition {
     bool active = false;
 };
 
+#ifdef MORPH_FEATURE_MEDIA
+// One responsive `@media` breakpoint variant. Bounds are inclusive CSS
+// pixels; `maxWidth < 0` means unbounded. The style is complete.
+struct MediaStyle {
+    int minWidth = 0;
+    int maxWidth = -1;
+    MorphStyle style;
+    // Base element has no own color declaration. Restored with the variant
+    // so descendant text and currentcolor keep following the live ancestor
+    // color instead of stopping at a stale baked value.
+    bool colorInherited = false;
+    // Text nodes only: the variant carries its own `color`, so it must not
+    // fall back to the parent's paint-time color after a resize.
+    bool colorOverridden = false;
+};
+#endif
+
 // ── Ancestor-hover rule (built at codegen / deserialization) ──
 struct AncestorHoverRule {
     std::string ancestorTag;
@@ -134,6 +151,48 @@ public:
     float resolvedFontSize(Renderer* r) const {
         return m_computedFontSize >= 0.0f ? m_computedFontSize : computeFontSize(r);
     }
+    // Effective letter-spacing in px. Letter-spacing inherits, but the text
+    // node usually carries no own declaration, so look up the chain at paint
+    // time. This also makes responsive/hover changes on an ancestor visible
+    // to descendant text without emitting per-text breakpoint variants.
+    float resolvedLetterSpacing(Renderer* r) const {
+        const MorphNode* src = this;
+        while (src) {
+            if (src->style.letterSpacingSet) {
+                // Resolve em/rem against the declaring element, not the text
+                // run, while still using this node's width as the pct base.
+                return resolveUnits(src->style.letterSpacing, src->unitEnv(w, r));
+            }
+            src = src->parent;
+        }
+        return 0.0f;
+    }
+    // Font-weight inherits. Text runs resolve it at paint time so a
+    // responsive/hover weight on a wrapper reaches descendant text.
+    CSS::FontWeight resolvedFontWeight() const {
+        const MorphNode* src = this;
+        while (src) {
+            if (src->style.fontWeight != CSS::FontWeight::Normal)
+                return src->style.fontWeight;
+            src = src->parent;
+        }
+        return CSS::FontWeight::Normal;
+    }
+    // Nearest explicitly declared color on the live ancestor chain. Baked
+    // inherited colors carry m_colorInherited and are skipped, so outline
+    // currentcolor follows a parent that changed color via @media/hover.
+    const float* effectiveColor() const {
+        const float* fallback = style.color;
+        for (const MorphNode* src = this; src; src = src->parent) {
+            const float* c = src->style.color;
+            fallback = c;
+            bool nonDefault = c[0] != 0.0f || c[1] != 0.0f
+                              || c[2] != 0.0f || c[3] != 1.0f;
+            if (nonDefault && !src->m_colorInherited)
+                return c;
+        }
+        return fallback;
+    }
     // Paint-time resolutions (flatten/paint run post-layout, so the
     // computed font is fresh; ch/ex measure without a renderer falls
     // back to 0.5em). `%` radii resolve against the own box width.
@@ -144,6 +203,21 @@ public:
     void resolvedControlRadii(float out[4], bool snap) const;
     MorphStyle* hoverStyle = nullptr; // allocated only when :hover rules exist
     MorphStyle* activeStyle = nullptr; // allocated only when :active rules exist
+#ifdef MORPH_FEATURE_MEDIA
+    // Width-based @media variants (empty for non-responsive nodes). The
+    // runtime picks one at layout time and re-picks when the window resizes.
+    std::vector<MediaStyle> mediaStyles;
+    int m_mediaStyleIndex = -2;
+    void applyResponsiveStyles(float viewportWidth);
+    // Cached computed font sizes depend on ancestor styles. Responsive
+    // variant swaps invalidate the subtree so text re-inherits a changed
+    // font-size/font-weight from its wrapper.
+    void invalidateFontCacheSubtree() {
+        m_computedFontSize = -1.0f;
+        for (MorphNode* child : children)
+            child->invalidateFontCacheSubtree();
+    }
+#endif
 
 #ifdef MORPH_FEATURE_POSITION
     // ── Positioned-element layout context ──────────────────
@@ -214,6 +288,9 @@ public:
     std::vector<MorphNode*> children;
     bool focused = false;
     bool m_colorInherited = false;
+    // Text nodes only: paint with this node's own color instead of walking
+    // ancestors. Restored per responsive variant.
+    bool m_colorOverridden = false;
     // False when this text run shares its line with other text runs: the
     // renderer then uses one content-independent (em-box) baseline for all
     // of them instead of optically centering each run's own ink (which puts

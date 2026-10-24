@@ -1,65 +1,45 @@
 # More CSS — `box-shadow`, `outline`, Margin Collapse
 
-**Status:** future · **Priority:** low · **Depends on:** [CSS Cascade](cascade.md)
+**Status:** shipped · **Priority:** done · **Depends on:** [CSS Cascade](cascade.md)
 
-> **Note:** This is a future plan, not a commitment. The syntax and API shown here are proposals — they can be completely different when actually implemented.
-
-Three CSS features — one shipped, two with dormant scaffolding.
+All three proposals in this record have landed. The notes below are retained as the design record; user-facing syntax lives in [CSS Properties](../../css/properties.md).
 
 ## `box-shadow`
 
-**Scaffold exists:** `runtime/cpp/style/features/shadow.h` declares `BoxShadow` / `ShadowStyle` structs, guarded by `MORPH_FEATURE_SHADOW` — but the header is **never included** by `style.h` and the define is **never emitted** by the Rust `feature_set.rs` in `morph-codegen`. Purely dormant.
-
-```cpp
-// style/features/shadow.h (future wiring)
-struct BoxShadow {
-    float offsetX, offsetY, blur, spread;
-    Color color;
-    bool inset;
-};
-```
-
-**Planned behavior:**
+**Shipped.** Parsed into `IRStyle.box_shadows` (up to four layers, `inset` supported) and painted through the runtime shadow path behind `MORPH_FEATURE_SHADOW`.
 
 - `box-shadow: 2px 2px 8px rgba(0,0,0,0.3)` and the inset variant
-- Rendering approach: SDF shader extension — the same rounded-rect SDF that renders borders can compute shadow blurs cheaply
-- Tailwind utilities (`shadow-sm`, `shadow-md`, …) as a bonus once the property lands
+- Rounded-rect SDF rendering, verified against Chrome within 2/255 per channel
+- Tailwind shadow utilities resolve through the same IR path
 
 ## `outline`
 
-**Scaffold exists:** `runtime/cpp/style/features/outline.h` declares `OutlineStyle`, guarded by `MORPH_FEATURE_OUTLINE` — same dormancy: not included, not emitted.
+**Shipped.** `outline`, `outline-color`, `outline-width`, `outline-style`, and `outline-offset` are parsed into `IRStyle` and painted as a ring outside the border edge behind `MORPH_FEATURE_OUTLINE` (which implies the border paint path).
 
-**Planned behavior:**
-
-- `outline` / `outline-color` / `outline-width` / `outline-offset`
-- Unlike `border`, outline does **not** affect layout (drawn outside the box)
-- Natural companion to the [Text Input](../elements/text-input.md) focus model — a focus ring via `outline` on `:focus`
+- Unlike `border`, outline does **not** affect layout
+- Supports `none`, `solid`, `dashed`, `dotted`, and `double`
+- `outline-offset` moves the ring outward (positive) or inward (negative)
+- Natural companion to the focus model for [Text Input](../elements/text-input.md), though `:focus` state wiring is still future work
 
 ## Margin collapse
 
-~~Already on the v0.1.0 list.~~ **Shipped** — implemented in `runtime/cpp/core/node/layout.cpp` behind `MORPH_FEATURE_MARGIN_COLLAPSE` (CSS 2.1 §8.3.1):
+**Shipped** behind `MORPH_FEATURE_MARGIN_COLLAPSE` in `runtime/cpp/core/node/layout.cpp` (CSS 2.1 §8.3.1):
 
 - Adjacent vertical margins collapse to the larger of the two
-- Parent–child collapse-through via `m_computedMargin` (boundary-less block parents pass first-child top / last-child bottom margins up)
+- Parent–child collapse-through via `m_computedMargin`
 - Collapsing suppressed by padding/border, inline content before/after, and flex containers
-- Provisional-then-final child layout keeps the first pass correct (no stale margins)
-
-## Why low priority
-
-- Shadows and outlines are polish — no API or architecture impact
-- Margin collapse changes layout math for every existing app and needs a browser-parity test suite (flexbox margins must *not* collapse per spec — the two systems interact)
+- Provisional-then-final child layout keeps the first pass correct
 
 ## Current state
 
 | Feature | State |
 |---|---|
-| `BoxShadow` / `ShadowStyle` structs | ✅ Declared, dormant |
-| `OutlineStyle` struct | ✅ Declared, dormant |
-| Margin collapse | ✅ Shipped (`MORPH_FEATURE_MARGIN_COLLAPSE` in `layout.cpp`) |
-| SDF shadow rendering | ❌ Not started |
+| `box-shadow` parsing + painting | ✅ Shipped |
+| `outline` parsing + ring painting | ✅ Shipped |
+| Margin collapse | ✅ Shipped |
+| Focus rings via outline | ❌ Not started (`:focus` state not modeled) |
 
-## Build steps (remaining)
+## Remaining work
 
-1. `box-shadow`: include `shadow.h` in `style.h`, emit `MORPH_FEATURE_SHADOW` in `feature_set.py`, add parser + SDF shader path
-2. `outline`: same wiring + draw outside the box
-3. ~~Margin collapse: implement in the Python layout engine, mirror in C++, add collapse suppression cases to the flexbox tests~~ ✅ Shipped (Rust + C++, feature-gated)
+1. `:focus` / `:focus-visible` selectors so outline can serve as a focus ring
+2. Optional shader-accelerated text-shadow blur refinement (currently a soft multi-pass approximation)

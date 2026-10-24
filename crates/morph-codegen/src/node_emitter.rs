@@ -1131,6 +1131,7 @@ pub fn emit_node_with_state(
         lines.push(format!("{}{}->w = {};", indent, node.node_id, fmt(node.w)));
         lines.push(format!("{}{}->h = {};", indent, node.node_id, fmt(node.h)));
         lines.push(set_style(node, indent, parent_style, features, true));
+        lines.push(emit_media_styles(node, indent, parent_style, features, true));
         if let Some(pid) = parent_id {
             lines.push(format!("{pid}->addChild({});", node.node_id));
         }
@@ -1239,6 +1240,7 @@ pub fn emit_node_with_state(
         ));
     }
     lines.push(set_style(node, indent, parent_style, features, false));
+    lines.push(emit_media_styles(node, indent, parent_style, features, false));
     lines.push(emit_hover_style(node, indent, features, false));
     lines.push(emit_active_style(node, indent, features));
     lines.push(emit_transition(node, indent));
@@ -1497,6 +1499,56 @@ pub(crate) fn translate_list_key(expr: &str, item_param: &str, index_param: &str
     s.to_string()
 }
 
+/// Emit full breakpoint style variants. Each variant is complete, so the
+/// runtime only has to select its range on resize.
+fn emit_media_styles(
+    node: &IRNode,
+    indent: &str,
+    parent: Option<&IRStyle>,
+    features: &std::collections::HashSet<String>,
+    is_text: bool,
+) -> String {
+    if node.media_styles.is_empty() {
+        return String::new();
+    }
+    let mut lines = Vec::new();
+    for media in &node.media_styles {
+        lines.push(format!("{}{}->mediaStyles.push_back(MediaStyle{{}});", indent, node.node_id));
+        lines.push(format!(
+            "{}{}->mediaStyles.back().minWidth = {};",
+            indent, node.node_id, media.min_width
+        ));
+        lines.push(format!(
+            "{}{}->mediaStyles.back().maxWidth = {};",
+            indent,
+            node.node_id,
+            media.max_width.map_or_else(|| "-1".to_string(), |v| v.to_string())
+        ));
+        let (_, color_inherited) = resolved_style_color(&media.style, parent, is_text);
+        let color_overridden = is_text && media.style.color != [0.0, 0.0, 0.0, 1.0];
+        lines.push(format!(
+            "{}{}->mediaStyles.back().colorInherited = {};",
+            indent, node.node_id, color_inherited
+        ));
+        lines.push(format!(
+            "{}{}->mediaStyles.back().colorOverridden = {};",
+            indent, node.node_id, color_overridden
+        ));
+        let access = format!("{}->mediaStyles.back().style", node.node_id);
+        lines.push(set_style_at(
+            node,
+            &media.style,
+            indent,
+            parent,
+            features,
+            is_text,
+            &access,
+            true,
+        ));
+    }
+    lines.join("\n")
+}
+
 /// Port of Python `_set_style`: emits every style field whose feature is on.
 /// `is_text` controls the color-override/m_colorOverridden behavior for TextNode.
 fn set_style(
@@ -1506,10 +1558,46 @@ fn set_style(
     features: &std::collections::HashSet<String>,
     is_text: bool,
 ) -> String {
-    let s = &node.style;
-    let prefix = format!("{}->style", node.node_id);
+    let access = format!("{}->style", node.node_id);
+    set_style_at(node, &node.style, indent, parent, features, is_text, &access, false)
+}
+
+/// Resolve the emitted `color` for a node/variant and whether it came from
+/// an ancestor. Inherited colors carry `m_colorInherited` on the node so
+/// text/currentcolor resolution can walk past them to the live ancestor.
+fn resolved_style_color(s: &IRStyle, parent: Option<&IRStyle>, is_text: bool) -> ([f32; 4], bool) {
+    let c = if is_text {
+        s.color
+    } else if s.color != [0.0, 0.0, 0.0, 1.0] {
+        s.color
+    } else {
+        parent
+            .map(|p| p.color)
+            .filter(|&pc| pc != [0.0, 0.0, 0.0, 1.0])
+            .unwrap_or([0.0, 0.0, 0.0, 1.0])
+    };
+    // Any non-text node without its own color is an inheritance hop, even
+    // when the parent's *base* color is the default: the parent may only
+    // become colored in another @media variant, and text below this node
+    // must keep walking to the live ancestor.
+    let inherited = !is_text && s.color == [0.0, 0.0, 0.0, 1.0];
+    (c, inherited)
+}
+
+/// Emit one style object at `access`. Base styles use `node->style`;
+/// responsive breakpoint variants use `node->mediaStyles.back().style`.
+fn set_style_at(
+    node: &IRNode,
+    s: &IRStyle,
+    indent: &str,
+    parent: Option<&IRStyle>,
+    features: &std::collections::HashSet<String>,
+    is_text: bool,
+    access: &str,
+    is_variant: bool,
+) -> String {
     let mut lines = Vec::new();
-    let ind = format!("{indent}{}->style", node.node_id);
+    let ind = format!("{indent}{access}");
 
     // ── StyleBase (always available) ──
     if s.bg_color != [0.0, 0.0, 0.0, 0.0] {
@@ -1533,6 +1621,33 @@ fn set_style(
             lines.extend(emit_box_shadows(&format!("{ind}."), &s.box_shadows));
         }
     }
+    if features.contains("outline") {
+        if s.outline_style.is_some() || s.outline_width.is_some() {
+            lines.push(format!("{ind}.outlineSet = true;"));
+        }
+        if let Some(v) = s.outline_width {
+            lines.extend(emit_length(&format!("{ind}.outlineWidth"), v));
+        }
+        if s.outline_color_current {
+            lines.push(format!("{ind}.outlineColorCurrent = true;"));
+        } else if let Some(c) = s.outline_color {
+            lines.push(format!("{ind}.outlineColorCurrent = false;"));
+            lines.push(format!("{ind}.outlineColor[0] = {:.4}f;", c[0]));
+            lines.push(format!("{ind}.outlineColor[1] = {:.4}f;", c[1]));
+            lines.push(format!("{ind}.outlineColor[2] = {:.4}f;", c[2]));
+            lines.push(format!("{ind}.outlineColor[3] = {:.4}f;", c[3]));
+        }
+        if let Some(ref style) = s.outline_style {
+            let lit = keyword_literal("borderStyle", style).unwrap();
+            lines.push(format!("{ind}.outlineStyle = {lit};"));
+        }
+        if let Some(v) = s.outline_offset {
+            lines.extend(emit_length(&format!("{ind}.outlineOffset"), v));
+        }
+    }
+    if features.contains("textshadow") && s.text_shadows.is_some() {
+        lines.extend(emit_text_shadows(&format!("{ind}."), s.text_shadows.as_deref()));
+    }
     if !s.border_radius.is_zero() {
         lines.extend(emit_length(&format!("{ind}.borderRadius"), s.border_radius));
     }
@@ -1548,49 +1663,44 @@ fn set_style(
     if let Some(v) = s.border_bottom_left_radius {
         lines.extend(emit_length(&format!("{ind}.borderBottomLeftRadius"), v));
     }
-    // font-size is inherited: use the node's own value, else parent's, else 16.
-    let fs = if s.font_size == Length::Px(16.0) {
-        parent.map(|p| p.font_size).filter(|&v| v != Length::Px(16.0)).unwrap_or(Length::Px(16.0))
-    } else {
-        s.font_size
-    };
+    // font-size is inherited. Leave an unset size at the 16px default and
+    // resolve the effective ancestor size at layout/paint time: baking the
+    // inherited value here would freeze it against responsive ancestor
+    // changes (and breakpoint variants are built from the base parent).
+    let fs = s.font_size;
     if fs != Length::Px(16.0) {
         lines.extend(emit_length(&format!("{ind}.fontSize"), fs));
     }
-    // font-weight is inherited similarly.
-    let fw = if s.font_weight != "normal" && !s.font_weight.is_empty() {
-        s.font_weight.clone()
-    } else {
-        parent
-            .map(|p| p.font_weight.clone())
-            .filter(|v| v != "normal" && !v.is_empty())
-            .unwrap_or_else(|| "normal".into())
-    };
+    // letter-spacing inherits at paint time (text runs walk ancestors), so
+    // only an own declaration is emitted here.
+    let ls = s.letter_spacing;
+    if let Some(v) = ls {
+        lines.push(format!("{ind}.letterSpacingSet = true;"));
+        if !v.is_zero() {
+            lines.extend(emit_length(&format!("{ind}.letterSpacing"), v));
+        }
+    }
+    // font-weight is inherited similarly; the nearest non-normal ancestor is
+    // resolved at paint time so responsive wrappers propagate.
+    let fw = s.font_weight.clone();
     if fw != "normal" {
         let lit = keyword_literal("fontWeight", &fw).unwrap();
         lines.push(format!("{ind}.fontWeight = {lit};"));
     }
     // color: text nodes use their own color; others inherit unless explicitly set.
-    let c = if is_text {
-        s.color
-    } else if s.color != [0.0, 0.0, 0.0, 1.0] {
-        s.color
-    } else {
-        parent
-            .map(|p| p.color)
-            .filter(|&pc| pc != [0.0, 0.0, 0.0, 1.0])
-            .unwrap_or([0.0, 0.0, 0.0, 1.0])
-    };
-    let color_inherited = !is_text && s.color == [0.0, 0.0, 0.0, 1.0] && c != [0.0, 0.0, 0.0, 1.0];
+    let (c, color_inherited) = resolved_style_color(s, parent, is_text);
+    if !is_text && color_inherited && !is_variant {
+        lines.push(format!("{}->m_colorInherited = true;", node.node_id));
+    }
     if c != [0.0, 0.0, 0.0, 1.0] {
         lines.push(format!("{ind}.color[0] = {:.4}f;", c[0]));
         lines.push(format!("{ind}.color[1] = {:.4}f;", c[1]));
         lines.push(format!("{ind}.color[2] = {:.4}f;", c[2]));
         if is_text {
             lines.push(format!("{ind}.color[3] = {:.4}f;", c[3]));
-            lines.push(format!("{}->m_colorOverridden = true;", node.node_id));
-        } else if color_inherited {
-            lines.push(format!("{}->m_colorInherited = true;", node.node_id));
+            if !is_variant {
+                lines.push(format!("{}->m_colorOverridden = true;", node.node_id));
+            }
         }
     }
     if s.padding.iter().any(|v| !v.is_zero()) {
@@ -1999,7 +2109,6 @@ fn set_style(
         }
     }
 
-    let _ = prefix;
     if lines.is_empty() {
         String::new()
     } else {
@@ -2050,6 +2159,105 @@ fn emit_border_image_delta(hv: &str, s: &IRStyle, base: &IRStyle, gradient: bool
             Some(g) => o.extend(emit_gradient(&format!("{hv}->borderGradient."), g)),
             None => o.push(format!("{hv}->borderGradient.enabled = false;")),
         }
+    }
+    o
+}
+
+/// Emit `text-shadow` layers into the fixed-size text paint payload.
+fn emit_text_shadows(access: &str, shadows: Option<&[morph_ir::IRTextShadow]>) -> Vec<String> {
+    let mut o = Vec::new();
+    let list = shadows.unwrap_or(&[]);
+    o.push(format!("{access}textShadowSet = true;"));
+    o.push(format!("{access}textShadowCount = {};", list.len()));
+    for (i, shadow) in list.iter().enumerate() {
+        let base = format!("{access}textShadows[{i}]");
+        o.extend(emit_length(&format!("{base}.offsetX"), shadow.offset_x));
+        o.extend(emit_length(&format!("{base}.offsetY"), shadow.offset_y));
+        o.extend(emit_length(&format!("{base}.blur"), shadow.blur));
+        if let Some(c) = shadow.color {
+            o.push(format!("{base}.hasColor = true;"));
+            o.push(format!("{base}.color[0] = {:.4}f;", c[0]));
+            o.push(format!("{base}.color[1] = {:.4}f;", c[1]));
+            o.push(format!("{base}.color[2] = {:.4}f;", c[2]));
+            o.push(format!("{base}.color[3] = {:.4}f;", c[3]));
+        } else {
+            o.push(format!("{base}.hasColor = false;"));
+        }
+    }
+    o
+}
+
+/// Extra properties that participate in `:hover` / `:active` deltas.
+fn emit_interactive_extra(
+    hv: &str,
+    s: &IRStyle,
+    base: &IRStyle,
+    features: &std::collections::HashSet<String>,
+) -> Vec<String> {
+    let mut o = Vec::new();
+    if features.contains("outline")
+        && (s.outline_style != base.outline_style
+            || s.outline_width != base.outline_width
+            || s.outline_color != base.outline_color
+            || s.outline_color_current != base.outline_color_current
+            || s.outline_offset != base.outline_offset)
+    {
+        // The runtime replaces the whole OutlineStyle, so merge every
+        // unset hover field from the base style. A hover rule that only
+        // changes color must not reset width/style/offset.
+        let width = s.outline_width.or(base.outline_width);
+        let outline_style = s.outline_style.as_ref().or(base.outline_style.as_ref());
+        let color_current = if s.outline_color.is_some() {
+            false
+        } else if s.outline_color_current {
+            true
+        } else {
+            // Unset in IR/runtime means the CSS initial currentcolor.
+            base.outline_color.is_none()
+        };
+        let color = if s.outline_color.is_some() {
+            s.outline_color
+        } else if !color_current {
+            base.outline_color
+        } else {
+            None
+        };
+        let offset = s.outline_offset.or(base.outline_offset);
+        o.push(format!("{hv}->outlineSet = true;"));
+        if let Some(v) = width {
+            o.extend(emit_length(&format!("{hv}->outlineWidth"), v));
+        }
+        o.push(format!("{hv}->outlineColorCurrent = {color_current};"));
+        if !color_current {
+            if let Some(c) = color {
+                o.push(format!("{hv}->outlineColor[0] = {:.4}f;", c[0]));
+                o.push(format!("{hv}->outlineColor[1] = {:.4}f;", c[1]));
+                o.push(format!("{hv}->outlineColor[2] = {:.4}f;", c[2]));
+                o.push(format!("{hv}->outlineColor[3] = {:.4}f;", c[3]));
+            }
+        }
+        if let Some(style) = outline_style {
+            if let Some(lit) = keyword_literal("borderStyle", style) {
+                o.push(format!("{hv}->outlineStyle = {lit};"));
+            }
+        }
+        if let Some(v) = offset {
+            o.extend(emit_length(&format!("{hv}->outlineOffset"), v));
+        }
+    }
+    if s.letter_spacing != base.letter_spacing {
+        if let Some(v) = s.letter_spacing {
+            o.push(format!("{hv}->letterSpacingSet = true;"));
+            if !v.is_zero() {
+                o.extend(emit_length(&format!("{hv}->letterSpacing"), v));
+            }
+        }
+    }
+    // Only a hover rule that actually declares text-shadow overrides the
+    // base list. A hover rule for another property leaves the base shadows
+    // alone (None here means "not declared", not "none").
+    if features.contains("textshadow") && s.text_shadows.is_some() {
+        o.extend(emit_text_shadows(&format!("{hv}->"), s.text_shadows.as_deref()));
     }
     o
 }
@@ -2180,6 +2388,7 @@ fn emit_hover_style(
     if features.contains("shadow") && s.box_shadows != base.box_shadows {
         o.extend(emit_box_shadows(&format!("{hv}->"), &s.box_shadows));
     }
+    o.extend(emit_interactive_extra(&hv, s, base, features));
     if s.color != [0.0, 0.0, 0.0, 1.0] && s.color != base.color {
         o.push(format!("{hv}->color[0] = {:.4}f;", s.color[0]));
         o.push(format!("{hv}->color[1] = {:.4}f;", s.color[1]));
@@ -2523,6 +2732,7 @@ fn emit_active_style(
     if features.contains("shadow") && s.box_shadows != base.box_shadows {
         o.extend(emit_box_shadows(&format!("{hv}->"), &s.box_shadows));
     }
+    o.extend(emit_interactive_extra(&hv, s, base, features));
     if s.color != [0.0, 0.0, 0.0, 1.0] && s.color != base.color {
         o.push(format!("{hv}->color[0] = {:.4}f;", s.color[0]));
         o.push(format!("{hv}->color[1] = {:.4}f;", s.color[1]));
@@ -3580,7 +3790,84 @@ fn raw_prop_to_enum(prop: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use morph_ir::IRMediaStyle;
     use std::collections::HashMap;
+
+    #[test]
+    fn hover_text_shadow_only_overrides_when_declared() {
+        let mut base = IRStyle::new();
+        base.text_shadows = Some(vec![morph_ir::IRTextShadow {
+            offset_x: Length::Px(1.0),
+            offset_y: Length::Px(2.0),
+            blur: Length::Px(3.0),
+            color: None,
+        }]);
+        let mut hover = IRStyle::new();
+        hover.color = [1.0, 0.0, 0.0, 1.0];
+        let mut features = std::collections::HashSet::new();
+        features.insert("textshadow".to_string());
+        let out = emit_interactive_extra("hoverStyle", &hover, &base, &features).join("\n");
+        assert!(!out.contains("textShadowSet"), "{out}");
+
+        hover.text_shadows = Some(Vec::new());
+        let out = emit_interactive_extra("hoverStyle", &hover, &base, &features).join("\n");
+        assert!(out.contains("textShadowSet = true"), "{out}");
+        assert!(out.contains("textShadowCount = 0"), "{out}");
+    }
+
+    #[test]
+    fn media_variant_records_inherited_color() {
+        let mut parent = IRStyle::new();
+        parent.color = [1.0, 0.0, 0.0, 1.0];
+        let mut node = IRNode { node_id: "node_0000".to_string(), ..Default::default() };
+        node.media_styles.push(IRMediaStyle {
+            min_width: 0,
+            max_width: Some(599),
+            style: IRStyle::new(),
+        });
+        let features = std::collections::HashSet::new();
+        let out = emit_media_styles(&node, "", Some(&parent), &features, false);
+        assert!(out.contains("colorInherited = true"), "{out}");
+
+        node.media_styles[0].style.color = [0.0, 0.0, 1.0, 1.0];
+        let out = emit_media_styles(&node, "", Some(&parent), &features, false);
+        assert!(out.contains("colorInherited = false"), "{out}");
+
+        // A default-colored node is still an inheritance hop: an ancestor
+        // may only become colored in a different breakpoint.
+        node.media_styles[0].style.color = [0.0, 0.0, 0.0, 1.0];
+        let out = emit_media_styles(&node, "", Some(&parent), &features, false);
+        assert!(out.contains("colorInherited = true"), "{out}");
+
+        // Text nodes also need the own-color marker per variant, otherwise a
+        // wide explicit color would leak past a narrow inherited one.
+        node.media_styles[0].style.color = [1.0, 0.0, 0.0, 1.0];
+        let out = emit_media_styles(&node, "", Some(&parent), &features, true);
+        assert!(out.contains("colorOverridden = true"), "{out}");
+        node.media_styles[0].style.color = [0.0, 0.0, 0.0, 1.0];
+        let out = emit_media_styles(&node, "", Some(&parent), &features, true);
+        assert!(out.contains("colorOverridden = false"), "{out}");
+    }
+
+    #[test]
+    fn hover_outline_color_keeps_base_geometry() {
+        let mut base = morph_ir::IRStyle::new();
+        base.outline_width = Some(morph_ir::Length::Px(4.0));
+        base.outline_style = Some("dashed".to_string());
+        base.outline_offset = Some(morph_ir::Length::Px(3.0));
+        base.outline_color_current = true;
+        let mut hover = morph_ir::IRStyle::new();
+        hover.outline_color = Some([1.0, 0.0, 0.0, 1.0]);
+        let mut features = std::collections::HashSet::new();
+        features.insert("outline".to_string());
+        features.insert("border".to_string());
+        let out = emit_interactive_extra("hoverStyle", &hover, &base, &features).join("\n");
+        assert!(out.contains("outlineWidth"), "{out}");
+        assert!(out.contains("CSS::BorderStyle::Dashed"), "{out}");
+        assert!(out.contains("outlineOffset"), "{out}");
+        assert!(out.contains("outlineColorCurrent = false"), "{out}");
+        assert!(out.contains("outlineColor[0] = 1.0000f"), "{out}");
+    }
 
     #[test]
     fn window_handler_lowers_placeholder_handles() {

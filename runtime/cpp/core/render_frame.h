@@ -167,6 +167,16 @@ inline void resolveNodeRadii(const FlatRenderNode& n, float out[4])
     out[3] = n.cornerRadii[3] >= 0.0f ? n.cornerRadii[3] : n.borderRadius;
 }
 
+#ifdef MORPH_FEATURE_TEXT_SHADOW
+struct FlatTextShadow {
+    float offsetX = 0.0f;
+    float offsetY = 0.0f;
+    float blur = 0.0f;
+    float color[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+    bool hasColor = false; // false = currentColor, resolved at paint time
+};
+#endif
+
 struct FlatTextOp {
     int nodeId;
     std::string text;
@@ -175,7 +185,11 @@ struct FlatTextOp {
     CSS::TextAlign align = CSS::TextAlign::Left;
     float fontSize;
     CSS::FontWeight fontWeight = CSS::FontWeight::Normal;
+    float letterSpacing = 0.0f;
     uint8_t centerInk;  // 0=shared-line em baseline, 1=optical per-run
+#ifdef MORPH_FEATURE_TEXT_SHADOW
+    std::vector<FlatTextShadow> shadows;
+#endif
 };
 
 // ── Event struct for animation completion feedback ──

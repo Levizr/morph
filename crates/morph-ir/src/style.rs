@@ -141,6 +141,24 @@ pub struct IRStyle {
     pub border_gradient: Option<IRGradient>,
     // box-shadow layers (`None` = unmentioned; `Some([])` = explicit `none`).
     pub box_shadows: Option<Vec<crate::shadow::IRBoxShadow>>,
+    // outline (`None` = unmentioned; the whole shorthand is non-layout).
+    #[serde(default)]
+    pub outline_width: Option<Length>,
+    #[serde(default)]
+    pub outline_color: Option<[f32; 4]>,
+    /// True when the outline color is `currentcolor` (the CSS initial).
+    #[serde(default)]
+    pub outline_color_current: bool,
+    #[serde(default)]
+    pub outline_style: Option<String>,
+    #[serde(default)]
+    pub outline_offset: Option<Length>,
+    // Typography: inherited values distinguish unset from explicit zero.
+    #[serde(default)]
+    pub letter_spacing: Option<Length>,
+    /// Text-shadow layers (`None` = unmentioned; `Some([])` = explicit `none`).
+    #[serde(default)]
+    pub text_shadows: Option<Vec<crate::text_shadow::IRTextShadow>>,
     pub box_sizing: String,
     pub z_index: Option<i32>,
     pub opacity: f32,
@@ -242,6 +260,13 @@ impl IRStyle {
             && self.border_image_slice.is_none()
             && self.border_gradient.is_none()
             && self.box_shadows.is_none()
+            && self.outline_width.is_none()
+            && self.outline_color.is_none()
+            && !self.outline_color_current
+            && self.outline_style.is_none()
+            && self.outline_offset.is_none()
+            && self.letter_spacing.is_none()
+            && self.text_shadows.is_none()
             && self.grid_template_columns.is_none()
             && self.grid_template_rows.is_none()
             && self.grid_auto_columns.is_none()

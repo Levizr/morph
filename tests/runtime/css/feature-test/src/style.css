@@ -1,0 +1,47 @@
+body {
+  background-color: #10141c;
+  color: #e6edf3;
+}
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+}
+.card {
+  width: 320px;
+  padding: 16px;
+  background-color: #1b2433;
+  border: 2px solid #2d3b50;
+  border-radius: 12px;
+  outline: 4px dashed currentcolor;
+  outline-offset: 6px;
+}
+.spaced {
+  font-size: 22px;
+  letter-spacing: 6px;
+  color: #8be9fd;
+}
+.shadowed {
+  font-size: 28px;
+  font-weight: bold;
+  color: #ffd866;
+  text-shadow: 3px 4px 6px rgba(0, 0, 0, 0.75), 0 0 10px #ff6ac1;
+}
+@media (max-width: 600px) {
+  .card {
+    width: 160px;
+    background-color: #3a1b24;
+    outline-color: #ff6ac1;
+  }
+  .spaced {
+    font-size: 14px;
+    letter-spacing: 2px;
+  }
+}
+@media screen and (min-width: 601px) {
+  .card {
+    width: 420px;
+    background-color: #163a2a;
+  }
+}

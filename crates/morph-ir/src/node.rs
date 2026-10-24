@@ -10,6 +10,11 @@ pub struct IRNode {
     pub style: IRStyle,
     pub hover_style: Option<IRStyle>,
     pub active_style: Option<IRStyle>,
+    /// Full base-style variants for width-based `@media` queries. Each
+    /// variant covers an inclusive integer viewport range; an empty list
+    /// means the node is not responsive.
+    #[serde(default)]
+    pub media_styles: Vec<IRMediaStyle>,
     pub children: Vec<Self>,
     pub events: Vec<IREvent>,
     pub text_content: String,
@@ -45,6 +50,7 @@ impl Default for IRNode {
             style: IRStyle::new(),
             hover_style: None,
             active_style: None,
+            media_styles: vec![],
             children: vec![],
             events: vec![],
             text_content: String::new(),
@@ -150,6 +156,16 @@ pub struct IRWindow {
     pub module_bindings: Vec<HashMap<String, String>>,
     pub cpp_imports: Vec<HashMap<String, String>>,
     pub keyframes: HashMap<String, Vec<IRKeyframe>>,
+}
+
+/// One breakpoint variant produced by `@media` cascade resolution. The
+/// style is complete (base + every matching media rule), so the runtime
+/// can swap it in without replaying declarations.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IRMediaStyle {
+    pub min_width: u32,
+    pub max_width: Option<u32>,
+    pub style: IRStyle,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

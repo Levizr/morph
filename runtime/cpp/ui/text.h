@@ -8,7 +8,6 @@ class TextNode : public MorphNode {
 public:
     std::string text;
     std::vector<std::string> lines;
-    bool m_colorOverridden = false;
 
     // Display list helpers
     struct TextOp {
@@ -18,9 +17,50 @@ public:
         TextAlign align;
         float fontSize;
         CSS::FontWeight fontWeight = CSS::FontWeight::Normal;
+        float letterSpacing = 0.0f;
         bool centerInk = true;
+#ifdef MORPH_FEATURE_TEXT_SHADOW
+        std::vector<FlatTextShadow> shadows;
+#endif
     };
     std::vector<TextOp> m_textOps;
+
+#ifdef MORPH_FEATURE_TEXT_SHADOW
+    static void paintShadows(Renderer& r, const std::vector<FlatTextShadow>& shadows,
+                             const std::string& text, float x, float y,
+                             const float baseColor[4], TextAlign align,
+                             float fontSize, CSS::FontWeight fontWeight,
+                             bool centerInk, float letterSpacing) {
+        for (const auto& sh : shadows) {
+            float color[4];
+            if (sh.hasColor) {
+                color[0] = sh.color[0]; color[1] = sh.color[1];
+                color[2] = sh.color[2]; color[3] = sh.color[3];
+            } else {
+                color[0] = baseColor[0]; color[1] = baseColor[1];
+                color[2] = baseColor[2]; color[3] = baseColor[3];
+            }
+            // Blur is approximated by a small soft cluster; FreeType has no
+            // cheap per-glyph blur and the contract allows approximation.
+            if (sh.blur > 0.75f) {
+                const float dx[4] = {-0.5f, 0.5f, 0.0f, 0.0f};
+                const float dy[4] = {0.0f, 0.0f, -0.5f, 0.5f};
+                float soft[4] = {color[0], color[1], color[2], color[3] * 0.28f};
+                for (int i = 0; i < 4; i++) {
+                    r.drawText(text, x + sh.offsetX + dx[i] * sh.blur,
+                               y + sh.offsetY + dy[i] * sh.blur, soft, align,
+                               fontSize, fontWeight, centerInk, letterSpacing);
+                }
+                float core[4] = {color[0], color[1], color[2], color[3] * 0.45f};
+                r.drawText(text, x + sh.offsetX, y + sh.offsetY, core, align,
+                           fontSize, fontWeight, centerInk, letterSpacing);
+            } else {
+                r.drawText(text, x + sh.offsetX, y + sh.offsetY, color, align,
+                           fontSize, fontWeight, centerInk, letterSpacing);
+            }
+        }
+    }
+#endif
 
     // Renderer alignment → style alignment at the FlatTextOp boundary
     // (values coincide; Justify never originates here).
@@ -56,6 +96,11 @@ public:
     void recordDisplayList(Renderer& r) override {
         m_displayList.clear();
         m_textOps.clear();
+        float spacing = _effLetterSpacing(&r);
+#ifdef MORPH_FEATURE_TEXT_SHADOW
+        std::vector<FlatTextShadow> shadows;
+        _collectShadows(&r, shadows);
+#endif
         if (!m_frags.empty()) {
             // Word fragments placed by the line breaker: paint each slice
             // at its own box instead of the whole wrapped lines.
@@ -69,7 +114,11 @@ public:
                 top.align = TextAlign::Left;
                 top.fontSize = _effFontSize();
                 top.fontWeight = _effFontWeight();
+                top.letterSpacing = spacing;
                 top.centerInk = m_centerInk;
+#ifdef MORPH_FEATURE_TEXT_SHADOW
+                top.shadows = shadows;
+#endif
                 m_textOps.push_back(top);
             }
             return;
@@ -79,10 +128,10 @@ public:
         for (auto& line : lines) {
             float lx = x;
             if (_effTextAlign() == CSS::TextAlign::Center) {
-                float tw = r.measureTextWidth(line, _effFontSize(), _effFontWeight());
+                float tw = r.measureTextWidth(line, _effFontSize(), _effFontWeight(), spacing);
                 if (tw < w) lx = x + (w - tw) * 0.5f;
             } else if (_effTextAlign() == CSS::TextAlign::Right) {
-                float tw = r.measureTextWidth(line, _effFontSize(), _effFontWeight());
+                float tw = r.measureTextWidth(line, _effFontSize(), _effFontWeight(), spacing);
                 lx = x + w - tw;
             }
             TextOp top;
@@ -94,7 +143,11 @@ public:
             top.align = TextAlign::Left;
             top.fontSize = _effFontSize();
             top.fontWeight = _effFontWeight();
+            top.letterSpacing = spacing;
             top.centerInk = m_centerInk;
+#ifdef MORPH_FEATURE_TEXT_SHADOW
+            top.shadows = shadows;
+#endif
             m_textOps.push_back(top);
             py += lh;
         }
@@ -114,8 +167,14 @@ public:
                 }
                 effectiveColor = src ? src->style.color : parent->style.color;
             }
+#ifdef MORPH_FEATURE_TEXT_SHADOW
+            paintShadows(r, top.shadows, top.text, top.x, top.y, effectiveColor,
+                         top.align, top.fontSize, top.fontWeight, top.centerInk,
+                         top.letterSpacing);
+#endif
             r.drawText(top.text, top.x, top.y, effectiveColor, top.align,
-                       top.fontSize, top.fontWeight, top.centerInk);
+                       top.fontSize, top.fontWeight, top.centerInk,
+                       top.letterSpacing);
         }
         for (auto* child : paintOrder())
             child->executeDisplayList(r);
@@ -158,7 +217,8 @@ public:
 
     void wrapParagraph(const std::string& para, Renderer* r, float lineW) {
         float epsilon = 0.5f;
-        float tw = r->measureTextWidth(para, _effFontSize(), _effFontWeight());
+        float spacing = _effLetterSpacing(r);
+        float tw = r->measureTextWidth(para, _effFontSize(), _effFontWeight(), spacing);
         if (tw <= lineW + epsilon) {
             lines.push_back(para);
             return;
@@ -178,7 +238,8 @@ public:
                 size_t nextSpace = para.find(' ', fitEnd + 1);
                 if (nextSpace == std::string::npos) nextSpace = para.size();
                 std::string candidate = para.substr(start, nextSpace - start);
-                if (r->measureTextWidth(candidate, _effFontSize(), _effFontWeight()) <= lineW + epsilon) {
+                if (r->measureTextWidth(candidate, _effFontSize(), _effFontWeight(), spacing)
+                    <= lineW + epsilon) {
                     fitEnd = nextSpace;
                 } else {
                     break;
@@ -236,6 +297,13 @@ public:
             fto.centerInk = top.centerInk ? (uint8_t)1 : (uint8_t)0;
             fto.fontSize = top.fontSize;
             fto.fontWeight = top.fontWeight;
+            fto.letterSpacing = top.letterSpacing;
+#ifdef MORPH_FEATURE_TEXT_SHADOW
+            fto.shadows = top.shadows;
+            for (auto& sh : fto.shadows) {
+                sh.color[3] *= fn.opacity;
+            }
+#endif
             frame.textOps.push_back(fto);
             count++;
         }
@@ -248,13 +316,18 @@ public:
 #endif
         float lh = _effFontSize() * 1.4f;
         float py = y;
+        float spacing = _effLetterSpacing(&r);
+#ifdef MORPH_FEATURE_TEXT_SHADOW
+        std::vector<FlatTextShadow> shadows;
+        _collectShadows(&r, shadows);
+#endif
         for (auto& line : lines) {
             float lx = x;
             if (_effTextAlign() == CSS::TextAlign::Center) {
-                float tw = r.measureTextWidth(line, _effFontSize(), _effFontWeight());
+                float tw = r.measureTextWidth(line, _effFontSize(), _effFontWeight(), spacing);
                 if (tw < w) lx = x + (w - tw) * 0.5f;
             } else if (_effTextAlign() == CSS::TextAlign::Right) {
-                float tw = r.measureTextWidth(line, _effFontSize(), _effFontWeight());
+                float tw = r.measureTextWidth(line, _effFontSize(), _effFontWeight(), spacing);
                 lx = x + w - tw;
             }
             float* effectiveColor = style.color;
@@ -269,8 +342,13 @@ public:
                 }
                 effectiveColor = src ? src->style.color : parent->style.color;
             }
+#ifdef MORPH_FEATURE_TEXT_SHADOW
+            paintShadows(r, shadows, line, lx, py, effectiveColor,
+                         TextAlign::Left, _effFontSize(), _effFontWeight(),
+                         m_centerInk, spacing);
+#endif
             r.drawText(line, lx, py, effectiveColor, TextAlign::Left,
-                       _effFontSize(), _effFontWeight());
+                       _effFontSize(), _effFontWeight(), m_centerInk, spacing);
             py += lh;
         }
         for (auto* child : paintOrder())
@@ -290,7 +368,8 @@ public:
                 size_t end = text.find('\n', start);
                 if (end == std::string::npos) end = text.size();
                 float lw = r->measureTextWidth(text.substr(start, end - start),
-                                               _effFontSize(), _effFontWeight());
+                                               _effFontSize(), _effFontWeight(),
+                                               _effLetterSpacing(r));
                 if (lw > tw) tw = lw;
                 if (end == text.size()) break;
                 start = end + 1;
@@ -304,15 +383,46 @@ public:
     }
 
 private:
+    float _effLetterSpacing(Renderer* r) const {
+        return resolvedLetterSpacing(r);
+    }
+
+#ifdef MORPH_FEATURE_TEXT_SHADOW
+    void _collectShadows(Renderer* r, std::vector<FlatTextShadow>& out) const {
+        const MorphNode* srcNode = this;
+        while (srcNode && !srcNode->style.textShadowSet)
+            srcNode = srcNode->parent;
+        if (!srcNode) return;
+        int count = srcNode->style.textShadowCount;
+        if (count > 4) count = 4;
+        // Shadow lengths resolve against the element that declared them.
+        UnitEnv env = srcNode->unitEnv(w, r);
+        for (int i = 0; i < count; i++) {
+            const TextShadow& src = srcNode->style.textShadows[i];
+            FlatTextShadow dst;
+            dst.offsetX = resolveUnits(src.offsetX, env);
+            dst.offsetY = resolveUnits(src.offsetY, env);
+            dst.blur = resolveUnits(src.blur, env);
+            dst.hasColor = src.hasColor;
+            dst.color[0] = src.color[0]; dst.color[1] = src.color[1];
+            dst.color[2] = src.color[2]; dst.color[3] = src.color[3];
+            out.push_back(dst);
+        }
+    }
+#endif
+
     float _effFontSize() const {
         return resolvedFontSize(nullptr);
     }
     CSS::FontWeight _effFontWeight() const {
-        if (style.fontWeight != CSS::FontWeight::Normal || !parent) return style.fontWeight;
-        return (parent->style.fontWeight != CSS::FontWeight::Normal) ? parent->style.fontWeight : style.fontWeight;
+        return resolvedFontWeight();
     }
     CSS::TextAlign _effTextAlign() const {
-        if (style.textAlign != CSS::TextAlign::Left || !parent) return style.textAlign;
-        return (parent->style.textAlign != CSS::TextAlign::Left) ? parent->style.textAlign : style.textAlign;
+        if (style.textAlign != CSS::TextAlign::Left) return style.textAlign;
+        for (const MorphNode* src = parent; src; src = src->parent) {
+            if (src->style.textAlign != CSS::TextAlign::Left)
+                return src->style.textAlign;
+        }
+        return style.textAlign;
     }
 };

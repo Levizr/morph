@@ -25,7 +25,7 @@ public:
         // Background rect + border (only rendering ops — no clip/scroll state)
 #ifdef MORPH_FEATURE_BORDER
         recordBoxOps(m_displayList, style, unitEnv(w, nullptr), sx, sy, sw, sh,
-                     !m_isTransitioning, false);
+                     !m_isTransitioning, false, effectiveColor());
 #else
         DrawOp bg;
 #ifdef MORPH_FEATURE_RADIUS
@@ -245,7 +245,7 @@ public:
 #endif
 #ifdef MORPH_FEATURE_BORDER
         paintBoxDirect(r, style, unitEnv(w, nullptr), sx, sy, sw, sh, !m_isTransitioning,
-                       false);
+                       false, effectiveColor());
 #else
 #ifdef MORPH_FEATURE_GRADIENT
         if (style.bgGradient.enabled) {

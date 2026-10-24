@@ -36,6 +36,12 @@
 #ifdef MORPH_FEATURE_SHADOW
 #include "features/shadow.h"
 #endif
+#ifdef MORPH_FEATURE_OUTLINE
+#include "features/outline.h"
+#endif
+#ifdef MORPH_FEATURE_TEXT_SHADOW
+#include "features/text_shadow.h"
+#endif
 
 struct MorphStyle : StyleBase
 #ifdef MORPH_FEATURE_FLEX
@@ -73,6 +79,12 @@ struct MorphStyle : StyleBase
 #endif
 #ifdef MORPH_FEATURE_GRID
     , GridStyle
+#endif
+#ifdef MORPH_FEATURE_OUTLINE
+    , OutlineStyle
+#endif
+#ifdef MORPH_FEATURE_TEXT_SHADOW
+    , TextShadowStyle
 #endif
 {};
 

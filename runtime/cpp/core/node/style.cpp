@@ -122,6 +122,10 @@ static void applyStyleDelta(MorphStyle& target, const MorphStyle& delta) {
         memcpy(target.color, delta.color, sizeof(float)*4);
     if (!delta.borderRadius.isZero()) target.borderRadius = delta.borderRadius;
     if (delta.fontSize != pxLen(16.0f)) target.fontSize = delta.fontSize;
+    if (delta.letterSpacingSet) {
+        target.letterSpacing = delta.letterSpacing;
+        target.letterSpacingSet = true;
+    }
     if (delta.fontWeight != CSS::FontWeight::Normal) target.fontWeight = delta.fontWeight;
     if (delta.textAlign != CSS::TextAlign::Left) target.textAlign = delta.textAlign;
     if (delta.display != CSS::Display::Block) target.display = delta.display;
@@ -220,6 +224,14 @@ static void applyStyleDelta(MorphStyle& target, const MorphStyle& delta) {
         target.borderImageSlice = delta.borderImageSlice;
     }
 #endif
+#ifdef MORPH_FEATURE_OUTLINE
+    if (delta.outlineSet)
+        static_cast<OutlineStyle&>(target) = static_cast<const OutlineStyle&>(delta);
+#endif
+#ifdef MORPH_FEATURE_TEXT_SHADOW
+    if (delta.textShadowSet)
+        static_cast<TextShadowStyle&>(target) = static_cast<const TextShadowStyle&>(delta);
+#endif
 #ifdef MORPH_FEATURE_GRADIENT
     if (delta.borderGradientSet)
     {
@@ -253,6 +265,31 @@ static void applyStyleDelta(MorphStyle& target, const MorphStyle& delta) {
 // runtime change must invalidate the parent's cached paint order.
 static void invalidatePaintOrderOnZ(MorphNode* n) {
     if (n && n->parent) n->parent->invalidatePaintOrder();
+}
+#endif
+
+#ifdef MORPH_FEATURE_TEXT_SHADOW
+// Compare every field of the shadow style, not just set/count: a hover rule
+// may change offsets, blur, or color without changing the layer count.
+static bool textShadowStyleEqual(const MorphStyle& a, const MorphStyle& b) {
+    const auto& x = static_cast<const TextShadowStyle&>(a);
+    const auto& y = static_cast<const TextShadowStyle&>(b);
+    if (x.textShadowSet != y.textShadowSet || x.textShadowCount != y.textShadowCount)
+        return false;
+    if (!x.textShadowSet)
+        return true;
+    int count = x.textShadowCount;
+    if (count < 0) count = 0;
+    if (count > 4) count = 4;
+    for (int i = 0; i < count; i++) {
+        const TextShadow& s = x.textShadows[i];
+        const TextShadow& t = y.textShadows[i];
+        if (s.offsetX != t.offsetX || s.offsetY != t.offsetY || s.blur != t.blur
+            || s.hasColor != t.hasColor
+            || std::memcmp(s.color, t.color, sizeof(float) * 4) != 0)
+            return false;
+    }
+    return true;
 }
 #endif
 
@@ -316,6 +353,8 @@ static void buildReleaseStyle(MorphStyle& target, const MorphStyle& current,
         target.field = preState.field
     SCALAR_REVERT(borderRadius);
     SCALAR_REVERT(fontSize);
+    SCALAR_REVERT(letterSpacing);
+    SCALAR_REVERT(letterSpacingSet);
     SCALAR_REVERT(fontWeight);
     SCALAR_REVERT(textAlign);
     SCALAR_REVERT(display);
@@ -347,6 +386,21 @@ static void buildReleaseStyle(MorphStyle& target, const MorphStyle& current,
     SCALAR_REVERT(borderImageEnabled);
     SCALAR_REVERT(borderImageIsGradient);
     SCALAR_REVERT(borderImageSlice);
+#ifdef MORPH_FEATURE_OUTLINE
+    SCALAR_REVERT(outlineSet);
+    SCALAR_REVERT(outlineWidth);
+    SCALAR_REVERT(outlineStyle);
+    SCALAR_REVERT(outlineOffset);
+    SCALAR_REVERT(outlineColorCurrent);
+    if (arrDiff(pressStyle.outlineColor, preState.outlineColor)
+        && arrSame(current.outlineColor, pressStyle.outlineColor))
+        memcpy(target.outlineColor, preState.outlineColor, sizeof(float) * 4);
+#endif
+#ifdef MORPH_FEATURE_TEXT_SHADOW
+    if (!textShadowStyleEqual(pressStyle, preState)
+        && textShadowStyleEqual(current, pressStyle))
+        static_cast<TextShadowStyle&>(target) = static_cast<const TextShadowStyle&>(preState);
+#endif
     if (arrDiff(pressStyle.borderColor, preState.borderColor) && arrSame(current.borderColor, pressStyle.borderColor))
         memcpy(target.borderColor, preState.borderColor, sizeof(float) * 4);
     if (arrDiff(pressStyle.borderTopColor, preState.borderTopColor) && arrSame(current.borderTopColor, pressStyle.borderTopColor))
@@ -439,6 +493,45 @@ static void buildReleaseStyle(MorphStyle& target, const MorphStyle& current,
 #endif
 #undef SCALAR_REVERT
 }
+
+#ifdef MORPH_FEATURE_MEDIA
+void MorphNode::applyResponsiveStyles(float viewportWidth) {
+    if (!mediaStyles.empty()) {
+        int width = (int)std::floor(viewportWidth);
+        int chosen = -1;
+        for (size_t i = 0; i < mediaStyles.size(); i++) {
+            const MediaStyle& media = mediaStyles[i];
+            if (width >= media.minWidth &&
+                (media.maxWidth < 0 || width <= media.maxWidth)) {
+                chosen = (int)i;
+                break;
+            }
+        }
+        if (chosen != m_mediaStyleIndex) {
+            if (chosen >= 0) {
+                style = mediaStyles[(size_t)chosen].style;
+                m_colorInherited = mediaStyles[(size_t)chosen].colorInherited;
+                m_colorOverridden = mediaStyles[(size_t)chosen].colorOverridden;
+            }
+            m_mediaStyleIndex = chosen;
+            invalidateFontCacheSubtree();
+            // A resize while hovered/active keeps the state delta on top of
+            // the newly selected breakpoint base.
+            if (m_hoverState && hoverStyle) {
+                applyStyleDelta(style, *hoverStyle);
+            }
+            if (m_activeState && activeStyle) {
+                applyStyleDelta(style, *activeStyle);
+            }
+            markDirty(LayoutDirty);
+            markDirty(PaintDirty);
+        }
+    }
+    for (MorphNode* child : children) {
+        child->applyResponsiveStyles(viewportWidth);
+    }
+}
+#endif
 
 static void _retargetState(MorphNode* node, bool hover, bool on) {
     MorphStyle* delta = hover ? node->hoverStyle : node->activeStyle;

@@ -1,0 +1,15 @@
+import "./style.css"
+
+export const windowConfig = { title: "CSSFeatureTest", width: 800, height: 600 }
+
+export default function App() {
+  return (
+    <body>
+      <div className="screen">
+        <div className="card">Responsive outline card</div>
+        <div className="spaced">LETTER SPACING</div>
+        <div className="shadowed">TEXT SHADOW</div>
+      </div>
+    </body>
+  )
+}

@@ -24,7 +24,7 @@ pub struct IRBoxShadow {
 }
 
 /// Split on commas that are not inside `(...)` (colors carry commas).
-fn split_top_commas(s: &str) -> Vec<String> {
+pub(crate) fn split_top_commas(s: &str) -> Vec<String> {
     let mut parts = Vec::new();
     let mut depth: i32 = 0;
     let mut cur = String::new();
@@ -52,7 +52,7 @@ fn split_top_commas(s: &str) -> Vec<String> {
 }
 
 /// Split on whitespace that is not inside `(...)` (`rgba(0, 0, 0, .5)`).
-fn split_top_ws(s: &str) -> Vec<String> {
+pub(crate) fn split_top_ws(s: &str) -> Vec<String> {
     let mut parts = Vec::new();
     let mut depth: i32 = 0;
     let mut cur = String::new();

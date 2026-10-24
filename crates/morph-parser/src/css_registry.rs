@@ -46,6 +46,8 @@ pub static KNOWN_PROPERTIES: &[&str] = &[
     "font-size",
     "font-weight",
     "text-align",
+    "letter-spacing",
+    "text-shadow",
     "border",
     "border-width",
     "border-color",
@@ -74,6 +76,11 @@ pub static KNOWN_PROPERTIES: &[&str] = &[
     "border-image",
     "border-image-slice",
     "box-shadow",
+    "outline",
+    "outline-width",
+    "outline-color",
+    "outline-style",
+    "outline-offset",
     "grid-template-columns",
     "grid-template-rows",
     "grid-auto-columns",
@@ -133,6 +140,8 @@ pub static CSS_TO_IR: &[(&str, &str)] = &[
     ("font-size", "font_size"),
     ("font-weight", "font_weight"),
     ("text-align", "text_align"),
+    ("letter-spacing", "letter_spacing"),
+    ("text-shadow", "text_shadows"),
     ("display", "display"),
     ("flex-direction", "flex_dir"),
     ("flex-grow", "flex_grow"),
@@ -168,6 +177,11 @@ pub static CSS_TO_IR: &[(&str, &str)] = &[
     ("border-image", "border_image"),
     ("border-image-slice", "border_image_slice"),
     ("box-shadow", "box_shadow"),
+    ("outline", "outline"),
+    ("outline-width", "outline_width"),
+    ("outline-color", "outline_color"),
+    ("outline-style", "outline_style"),
+    ("outline-offset", "outline_offset"),
     ("grid-template-columns", "grid_template_columns"),
     ("grid-template-rows", "grid_template_rows"),
     ("grid-auto-columns", "grid_auto_columns"),
@@ -207,6 +221,11 @@ pub fn property_feature(prop: &str) -> Option<&'static str> {
         | "border-bottom-right-radius"
         | "border-bottom-left-radius" => Some("radius"),
         "opacity" => Some("opacity"),
+        "outline" | "outline-width" | "outline-color" | "outline-style" | "outline-offset" => {
+            Some("outline")
+        }
+        "letter-spacing" => Some("text"),
+        "text-shadow" => Some("textshadow"),
         "transform" | "transform-origin" => Some("transform"),
         "animation" | "animation-duration" => Some("animation"),
         "scrollbar-width"

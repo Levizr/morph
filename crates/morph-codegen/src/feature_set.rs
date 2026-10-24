@@ -130,6 +130,14 @@ impl FeatureSet {
         if s.box_shadows.is_some() {
             self.features.insert("shadow".into());
         }
+        if s.outline_style.is_some() || s.outline_width.is_some() {
+            self.features.insert("outline".into());
+            self.features.insert("border".into());
+        }
+        if s.text_shadows.is_some() {
+            self.features.insert("textshadow".into());
+            self.features.insert("text".into());
+        }
     }
 
     fn scan_reactive(&mut self, reactive_style: &std::collections::HashMap<String, String>) {
@@ -207,6 +215,11 @@ impl FeatureSet {
             "overflow" | "overflow-x" | "overflow-y" => vec!["scroll"],
             "display" => vec!["flex", "grid", "display_none", "inline"],
             "font-weight" => vec!["bold"],
+            "letter-spacing" => vec!["text"],
+            "text-shadow" => vec!["textshadow"],
+            "outline" | "outline-width" | "outline-color" | "outline-style" | "outline-offset" => {
+                vec!["outline", "border"]
+            }
             "border-radius" => vec!["radius"],
             "min-width" | "max-width" | "min-height" | "max-height" => vec!["min_max"],
             "box-sizing" => vec!["border_box"],
@@ -242,6 +255,14 @@ impl FeatureSet {
             // clears without emitting anything.
             if prop == "box-shadow" && !val.trim().eq_ignore_ascii_case("none") {
                 self.features.insert("shadow".into());
+            }
+            if prop.starts_with("outline") {
+                self.features.insert("outline".into());
+                // Outline geometry reuses the border-box/paint path.
+                self.features.insert("border".into());
+            }
+            if prop == "text-shadow" && !val.trim().eq_ignore_ascii_case("none") {
+                self.features.insert("textshadow".into());
             }
             if prop == "display" && val.trim() == "none" {
                 self.features.insert("display_none".into());
@@ -423,6 +444,12 @@ impl FeatureSet {
                     self.features.insert("list".into());
                 }
                 self.scan_style(&node.style);
+                if !node.media_styles.is_empty() {
+                    self.features.insert("media".into());
+                }
+                for media in &node.media_styles {
+                    self.scan_style(&media.style);
+                }
                 if let Some(ref hs) = node.hover_style {
                     self.features.insert("hover".into());
                     self.scan_style(hs);
@@ -681,6 +708,15 @@ impl FeatureSet {
         }
         if self.features.contains("animation") {
             d.push("MORPH_FEATURE_ANIMATION".into());
+        }
+        if self.features.contains("media") {
+            d.push("MORPH_FEATURE_MEDIA".into());
+        }
+        if self.features.contains("outline") {
+            d.push("MORPH_FEATURE_OUTLINE".into());
+        }
+        if self.features.contains("textshadow") {
+            d.push("MORPH_FEATURE_TEXT_SHADOW".into());
         }
         if self.features.contains("display_none") {
             d.push("MORPH_FEATURE_DISPLAY_NONE".into());

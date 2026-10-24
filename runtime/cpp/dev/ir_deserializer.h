@@ -13,6 +13,9 @@
 #include "../ui/input.h"
 #include "../ui/morph_list.h"
 
+// Defined below; style-array decoders near the top use it.
+static void setLengthOpt(CssLength& dst, const JsonValue& val);
+
 static void deleteNodeTree(MorphNode* node) {
     delete node;
 }
@@ -98,6 +101,34 @@ static void setShadowsFromJson(MorphStyle& s, const JsonValue& arr) {
         setColorFromJson(dst.color, sh["color"]);
         dst.inset = !sh["inset"].isNull() && sh["inset"].asBool();
         s.boxShadowCount++;
+    }
+}
+#endif
+
+#ifdef MORPH_FEATURE_TEXT_SHADOW
+static void setTextShadowsFromJson(MorphStyle& s, const JsonValue& arr) {
+    if (arr.type() != JsonType::Array) return;
+    s.textShadowSet = true;
+    s.textShadowCount = 0;
+    for (size_t i = 0; i < arr.size() && s.textShadowCount < 4; i++) {
+        const JsonValue& sh = arr[i];
+        if (sh.type() != JsonType::Object) continue;
+        TextShadow& dst = s.textShadows[s.textShadowCount];
+        dst.offsetX = pxLen(0.0f);
+        dst.offsetY = pxLen(0.0f);
+        dst.blur = pxLen(0.0f);
+        if (!sh["offset_x"].isNull()) setLengthOpt(dst.offsetX, sh["offset_x"]);
+        if (!sh["offset_y"].isNull()) setLengthOpt(dst.offsetY, sh["offset_y"]);
+        if (!sh["blur"].isNull()) setLengthOpt(dst.blur, sh["blur"]);
+        if (!sh["color"].isNull()) {
+            dst.hasColor = true;
+            setColorFromJson(dst.color, sh["color"]);
+        } else {
+            dst.hasColor = false;
+            dst.color[0] = 0.0f; dst.color[1] = 0.0f;
+            dst.color[2] = 0.0f; dst.color[3] = 1.0f;
+        }
+        s.textShadowCount++;
     }
 }
 #endif
@@ -600,6 +631,42 @@ static void applyStyle(MorphStyle& s, const JsonValue& styleVal) {
 
     if (!styleVal["border_image_slice"].isNull())
         s.borderImageSlice = styleVal["border_image_slice"].asFloat();
+
+#ifdef MORPH_FEATURE_OUTLINE
+    if (!styleVal["outline_width"].isNull()) {
+        setLengthOpt(s.outlineWidth, styleVal["outline_width"]);
+        s.outlineSet = true;
+    }
+    if (!styleVal["outline_color"].isNull()) {
+        setColorFromJson(s.outlineColor, styleVal["outline_color"]);
+        s.outlineColorCurrent = false;
+        s.outlineSet = true;
+    }
+    if (styleVal.has("outline_color_current") && styleVal["outline_color_current"].asBool()) {
+        s.outlineColorCurrent = true;
+        s.outlineSet = true;
+    }
+    if (!styleVal["outline_style"].isNull()) {
+        s.outlineStyle = CSS::parseBorderStyle(styleVal["outline_style"].asString());
+        s.outlineSet = true;
+    }
+    if (!styleVal["outline_offset"].isNull()) {
+        setLengthOpt(s.outlineOffset, styleVal["outline_offset"]);
+        s.outlineSet = true;
+    }
+#endif
+    if (!styleVal["letter_spacing"].isNull()) {
+        setLengthOpt(s.letterSpacing, styleVal["letter_spacing"]);
+        s.letterSpacingSet = true;
+    }
+#ifdef MORPH_FEATURE_TEXT_SHADOW
+    if (styleVal.has("text_shadow_set") && styleVal["text_shadow_set"].asBool()) {
+        s.textShadowSet = true;
+        s.textShadowCount = 0;
+    }
+    if (styleVal.has("text_shadows") && !styleVal["text_shadows"].isNull())
+        setTextShadowsFromJson(s, styleVal["text_shadows"]);
+#endif
 }
 
 // ── Node deserialization with inheritance ──────────────────────
@@ -679,8 +746,9 @@ static MorphNode* deserializeNode(const JsonValue& val,
     } else {
         bool colorWasDefault = isDefaultColor(node->style.color);
         inheritStyle(node->style, parentStyle);
-        if (colorWasDefault && !isDefaultColor(node->style.color))
-            node->m_colorInherited = true;
+        // No own color means text below this node must keep resolving
+        // through the live ancestor chain, even if the base color is black.
+        node->m_colorInherited = colorWasDefault;
     }
 
     // Apply hover style if present
@@ -705,6 +773,37 @@ static MorphNode* deserializeNode(const JsonValue& val,
         // Copy base as starting point, then override with active properties
         *node->activeStyle = node->style;
         applyStyle(*node->activeStyle, val["active_style"]);
+    }
+
+    // Responsive breakpoint variants (full styles, not deltas).
+    if (val.has("media_styles") && val["media_styles"].type() == JsonType::Array) {
+        for (size_t i = 0; i < val["media_styles"].size(); i++) {
+            const JsonValue& mv = val["media_styles"][i];
+            if (mv.type() != JsonType::Object) continue;
+            MediaStyle media;
+            if (!mv["min_width"].isNull()) media.minWidth = mv["min_width"].asInt();
+            if (!mv["max_width"].isNull()) media.maxWidth = mv["max_width"].asInt();
+            if (mv.has("style") && mv["style"].type() == JsonType::Object) {
+                bool isText = type == "__text__" || type == "__expr__";
+                applyStyle(media.style, mv["style"]);
+                // Mirrors codegen: text variants resolve color at paint time,
+                // while base-element variants record whether the color was
+                // inherited so descendants keep following the live ancestor.
+                bool colorWasDefault = isDefaultColor(media.style.color);
+                if (isText) {
+                    InheritedStyle noColor = parentStyle;
+                    noColor.color[0] = 0; noColor.color[1] = 0;
+                    noColor.color[2] = 0; noColor.color[3] = 1;
+                    inheritStyle(media.style, noColor);
+                    media.colorOverridden = !isDefaultColor(media.style.color);
+                } else {
+                    inheritStyle(media.style, parentStyle);
+                    media.colorInherited = colorWasDefault;
+                }
+            }
+            node->mediaStyles.push_back(media);
+        }
+        node->m_mediaStyleIndex = -2;
     }
 
     // Transition config

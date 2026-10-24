@@ -47,8 +47,8 @@ float MorphNode::computeFontSize(Renderer* r) const {
     e.vh = m_winH;
 #endif
     if (r && parentF > 0.0f) {
-        e.chW = r->measureTextWidth("0", parentF, style.fontWeight);
-        e.exW = r->measureTextWidth("x", parentF, style.fontWeight);
+        e.chW = r->measureTextWidth("0", parentF, resolvedFontWeight());
+        e.exW = r->measureTextWidth("x", parentF, resolvedFontWeight());
     }
     m_computedFontSize = resolveUnits(style.fontSize, e);
     return m_computedFontSize;
@@ -65,8 +65,8 @@ UnitEnv MorphNode::unitEnv(float pctBase, Renderer* r) const {
     e.vh = m_winH;
 #endif
     if (r && e.fontSize > 0.0f) {
-        e.chW = r->measureTextWidth("0", e.fontSize, style.fontWeight);
-        e.exW = r->measureTextWidth("x", e.fontSize, style.fontWeight);
+        e.chW = r->measureTextWidth("0", e.fontSize, resolvedFontWeight());
+        e.exW = r->measureTextWidth("x", e.fontSize, resolvedFontWeight());
     }
     return e;
 }

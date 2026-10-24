@@ -179,13 +179,15 @@ static bool trySplitInlineItem(std::vector<InlineItem>& items, size_t i,
     size_t total = (it.fwn == 0) ? words.size() : it.fwn;
     if (total < 2 || start + total > words.size()) return false;
     float fontSize = n->resolvedFontSize(r);
-    float spaceW = r->measureTextWidth(" ", fontSize, n->style.fontWeight);
+    float letterSpacing = n->resolvedLetterSpacing(r);
+    float spaceW = r->measureTextWidth(" ", fontSize, n->resolvedFontWeight(), letterSpacing);
     float acc = 0.0f;
     size_t take = 0;
     for (size_t k = 0; k < total; k++)
     {
-        float ww = r->measureTextWidth(words[start + k], fontSize, n->style.fontWeight);
-        float add = (k == 0) ? ww : (spaceW + ww);
+        float ww = r->measureTextWidth(words[start + k], fontSize, n->resolvedFontWeight(),
+                                       letterSpacing);
+        float add = (k == 0) ? ww : (spaceW + letterSpacing + ww);
         if (acc + add <= availW + 0.01f) { acc += add; take = k + 1; }
         else break;
     }
@@ -197,7 +199,7 @@ static bool trySplitInlineItem(std::vector<InlineItem>& items, size_t i,
     // The boundary space belongs to the prefix box (it separates the frags
     // visually when both land on one row) while staying invisible at a line
     // end when the remainder wraps, like browsers.
-    it.w = acc + spaceW;
+    it.w = acc + spaceW + letterSpacing;
     it.h = fragH;
     it.fw0 = start;
     it.fwn = take;
@@ -217,8 +219,9 @@ static bool trySplitInlineItem(std::vector<InlineItem>& items, size_t i,
     rest.w = 0.0f;
     for (size_t k = 0; k < rest.fwn; k++)
     {
-        float ww = r->measureTextWidth(words[rest.fw0 + k], fontSize, n->style.fontWeight);
-        rest.w += (k == 0) ? ww : (spaceW + ww);
+        float ww = r->measureTextWidth(words[rest.fw0 + k], fontSize, n->resolvedFontWeight(),
+                                       letterSpacing);
+        rest.w += (k == 0) ? ww : (spaceW + letterSpacing + ww);
     }
     items.insert(items.begin() + (ptrdiff_t)(i + 1), std::move(rest));
     return true;
@@ -384,6 +387,14 @@ static CSS::AlignItems effCrossAlign(const MorphStyle& container, const MorphSty
 
 void MorphNode::layout(float px, float py, float parentW, float parentH,
                        Renderer* r) {
+#ifdef MORPH_FEATURE_MEDIA
+    // Root pass: reselect responsive variants before resolving any units.
+    // The resize callback marks the tree subtree-dirty, so this runs after
+    // every window-size change.
+    if (!parent) {
+        applyResponsiveStyles(parentW);
+    }
+#endif
 #ifdef MORPH_FEATURE_POSITION
     // Root node: establish the viewport + initial containing block before
     // anything resolves viewport units below.
@@ -1315,7 +1326,13 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
             }
             for (size_t i = (size_t)firstVis; i <= (size_t)lastVis; i++) {
                 if (items[i].ws) {
-                    items[i].w = r ? r->measureTextWidth(" ", items[i].node->resolvedFontSize(r), items[i].node->style.fontWeight) : 4.0f;
+                    if (r)
+                        items[i].w = r->measureTextWidth(
+                            " ", items[i].node->resolvedFontSize(r),
+                            items[i].node->resolvedFontWeight(),
+                            items[i].node->resolvedLetterSpacing(r));
+                    else
+                        items[i].w = 4.0f;
                     items[i].h = 0.0f;
                 }
             }

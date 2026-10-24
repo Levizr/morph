@@ -42,10 +42,12 @@ public:
                           TextAlign align = TextAlign::Left,
                           float fontSize = 16,
                           CSS::FontWeight fontWeight = CSS::FontWeight::Normal,
-                          bool centerInk = true) {}
+                          bool centerInk = true,
+                          float letterSpacing = 0.0f) {}
     virtual float measureTextWidth(const std::string& text,
                                     float fontSize,
-                                    CSS::FontWeight fontWeight = CSS::FontWeight::Normal) { return 0; }
+                                    CSS::FontWeight fontWeight = CSS::FontWeight::Normal,
+                                    float letterSpacing = 0.0f) { return 0; }
     virtual void beginClip(float x, float y, float w, float h) {}
     virtual void endClip() {}
     virtual void beginRoundedClip(float x, float y, float w, float h, const float radii[4]) {}

@@ -18,7 +18,7 @@ public:
         resolvedControlRadii(radii, !m_isTransitioning);
 #ifdef MORPH_FEATURE_BORDER
         recordBoxOps(m_displayList, style, unitEnv(w, nullptr), sx, sy, sw, sh,
-                     !m_isTransitioning, true);
+                     !m_isTransitioning, true, effectiveColor());
 #else
         DrawOp bg;
         {
@@ -223,7 +223,7 @@ public:
 #endif
 #ifdef MORPH_FEATURE_BORDER
         paintBoxDirect(r, style, unitEnv(w, nullptr), sx, sy, sw, sh, !m_isTransitioning,
-                       true);
+                       true, effectiveColor());
 #else
 #ifdef MORPH_FEATURE_GRADIENT
         if (style.bgGradient.enabled) {

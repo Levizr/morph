@@ -510,12 +510,14 @@ public:
 
 #ifdef MORPH_FEATURE_TEXT
     float measureTextWidth(const std::string &text, float fontSize,
-                           CSS::FontWeight fontWeight) override;
+                           CSS::FontWeight fontWeight,
+                           float letterSpacing = 0.0f) override;
     void drawText(const std::string &text, float x, float y,
                   float color[4], TextAlign align,
                   float fontSize,
                   CSS::FontWeight fontWeight,
-                  bool centerInk = true) override;
+                  bool centerInk = true,
+                  float letterSpacing = 0.0f) override;
 #endif
 
     void drawTexture(unsigned int tex, float x, float y, float w, float h,

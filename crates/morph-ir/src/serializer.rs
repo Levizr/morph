@@ -328,6 +328,36 @@ impl IRSerializer {
             }),
         );
         out.insert("box_shadow_set".to_string(), Value::from(s.box_shadows.is_some()));
+        out.insert("outline_width".to_string(), opt_length(s.outline_width));
+        out.insert(
+            "outline_color".to_string(),
+            s.outline_color.map_or(Value::Null, |c| floats(&c)),
+        );
+        out.insert("outline_color_current".to_string(), Value::from(s.outline_color_current));
+        out.insert("outline_style".to_string(), opt_string(&s.outline_style));
+        out.insert("outline_offset".to_string(), opt_length(s.outline_offset));
+        out.insert("letter_spacing".to_string(), opt_length(s.letter_spacing));
+        out.insert(
+            "text_shadows".to_string(),
+            s.text_shadows.as_ref().map_or(Value::Null, |list| {
+                Value::Array(
+                    list.iter()
+                        .map(|sh| {
+                            let mut m = Map::new();
+                            m.insert("offset_x".to_string(), length(sh.offset_x));
+                            m.insert("offset_y".to_string(), length(sh.offset_y));
+                            m.insert("blur".to_string(), length(sh.blur));
+                            m.insert(
+                                "color".to_string(),
+                                sh.color.map_or(Value::Null, |c| floats(&c)),
+                            );
+                            Value::Object(m)
+                        })
+                        .collect(),
+                )
+            }),
+        );
+        out.insert("text_shadow_set".to_string(), Value::from(s.text_shadows.is_some()));
         out.insert("box_sizing".to_string(), Value::String(s.box_sizing.clone()));
         out.insert("z_index".to_string(), s.z_index.map_or(Value::Null, Value::from));
         out.insert("opacity".to_string(), num(s.opacity));
@@ -454,6 +484,24 @@ impl IRSerializer {
         }
     }
 
+    fn media_styles(n: &IRNode) -> Value {
+        Value::Array(
+            n.media_styles
+                .iter()
+                .map(|media| {
+                    let mut m = Map::new();
+                    m.insert("min_width".to_string(), Value::from(media.min_width));
+                    m.insert(
+                        "max_width".to_string(),
+                        media.max_width.map_or(Value::Null, Value::from),
+                    );
+                    m.insert("style".to_string(), Self::style(&media.style));
+                    Value::Object(m)
+                })
+                .collect(),
+        )
+    }
+
     fn node(n: &IRNode) -> Value {
         let mut out = Map::new();
         out.insert("id".to_string(), Value::String(n.node_id.clone()));
@@ -536,6 +584,9 @@ impl IRSerializer {
         }
         if let Some(active) = n.active_style.as_ref() {
             out.insert("active_style".to_string(), Self::style(active));
+        }
+        if !n.media_styles.is_empty() {
+            out.insert("media_styles".to_string(), Self::media_styles(n));
         }
         if n.transition_duration > 0.0 {
             out.insert("transition_duration".to_string(), num(n.transition_duration));
@@ -664,6 +715,7 @@ fn fallback_declared(style: &IRStyle) -> HashSet<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::node::IRMediaStyle;
 
     fn sample_window() -> IRWindow {
         let mut window = IRWindow {
@@ -727,6 +779,24 @@ mod tests {
         assert!(node.get("reactive_text").is_none());
         assert!(node.get("hover_style").is_none());
         assert!(node.get("animations").is_none());
+    }
+
+    #[test]
+    fn responsive_styles_and_currentcolor_serialize() {
+        let mut window = sample_window();
+        let node = &mut window.nodes[0];
+        node.style.outline_color_current = true;
+        let mut variant = IRStyle::new();
+        variant.outline_style = Some("solid".to_string());
+        variant.outline_width = Some(Length::Px(2.0));
+        variant.outline_color_current = true;
+        node.media_styles.push(IRMediaStyle { min_width: 0, max_width: Some(599), style: variant });
+        let value = IRSerializer::to_dict(&[window], None);
+        let node = &value["windows"][0]["nodes"][0];
+        assert_eq!(node["style"]["outline_color_current"], Value::from(true));
+        assert_eq!(node["media_styles"][0]["min_width"], Value::from(0));
+        assert_eq!(node["media_styles"][0]["max_width"], Value::from(599));
+        assert_eq!(node["media_styles"][0]["style"]["outline_color_current"], Value::from(true));
     }
 
     #[test]

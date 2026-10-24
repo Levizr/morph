@@ -43,6 +43,11 @@ Lengths accept: `px`, bare numbers (treated as px), `%`, `em`, `rem` (1rem = 16p
 | `background`, `background-image` | gradients | — | `linear-gradient()`, `radial-gradient()`, `conic-gradient()` and their `repeating-*` variants, with full stop/hint/position syntax. Verified against Chrome (≤5/255 per channel). |
 | `border-image` | gradient + slice | — | Gradient border-images evaluate directly in border space; the slice value is accepted but does not change rendering. Linear gradients match Chrome; radial/conic ring evaluation is Morph's simplification of slice-and-stretch. |
 | `box-shadow` | shadow list | `none` | `offset-x offset-y blur spread color` + `inset`, comma-separated, up to 4 layers. Verified against Chrome (≤2/255 per channel). |
+| `outline` | shorthand | — | Non-layout ring painted outside the border edge: `outline: 2px dashed #4cc2ff`. |
+| `outline-width` | px, `thin`, `medium`, `thick` | `3px` | Initial `medium`; only paints with a non-`none` style. |
+| `outline-color` | hex, rgb, named, `currentcolor` | `currentcolor` | Resolved from the element's text color at paint time. |
+| `outline-style` | `none`, `solid`, `dashed`, `dotted`, `double` | `none` | |
+| `outline-offset` | px | `0` | Positive values push the ring outward; negative values pull it inward. |
 | `color` | hex, rgb, named | `#000000` | Text color. Inherits from parent. |
 | `border-radius` | px | `0` | Clamped to `[0, 100]` in the SDF shader. |
 | `opacity` | 0–1 | `1` | Multiplies with parent opacity. |
@@ -64,8 +69,41 @@ Lengths accept: `px`, bare numbers (treated as px), `%`, `em`, `rem` (1rem = 16p
 | `font-size` | px, %, em, rem, bare number | `16px` | Inherits from parent. |
 | `font-weight` | `normal`, `bold`, `lighter`, `bolder`, 100–900 | `normal` | Bold uses `DejaVuSans-Bold.ttf`. |
 | `text-align` | `left`, `center`, `right`, `justify` | `left` | Inherits from parent. `justify` behaves like `left`. |
+| `letter-spacing` | px, em, rem, `normal` | `normal` (`0`) | Inherits. Applied to measurement, wrapping, alignment, and glyph advances. |
+| `text-shadow` | shadow list | `none` | `offset-x offset-y [blur] [color]`, comma-separated, up to 4 layers. Omitted color means `currentcolor`; blur is approximated by a soft multi-pass draw. |
 
-Style inheritance: `color`, `font-size`, `font-weight`, and `text-align` cascade from parent to children.
+Style inheritance: `color`, `font-size`, `font-weight`, `text-align`, `letter-spacing`, and `text-shadow` cascade from parent to children.
+
+## Responsive Media Queries
+
+Width-based `@media` blocks are resolved at build time into complete style variants. Each node stores one variant per integer breakpoint interval, and the runtime reselects the matching variant when the window is resized, so styles react live rather than only at startup.
+
+```css
+.card {
+  width: 420px;
+  background-color: #1b2433;
+}
+
+@media (max-width: 600px) {
+  .card {
+    width: 160px;
+    background-color: #3a1b24;
+  }
+}
+
+@media screen and (min-width: 601px) {
+  .card { background-color: #163a2a; }
+}
+```
+
+Supported conditions:
+
+- `min-width` and `max-width` (inclusive bounds)
+- `width:` / range syntax such as `(600px <= width <= 900px)`
+- multiple width conditions joined with `and`
+- `screen` and `all` media types, with an optional `only` qualifier
+
+Conditions outside this subset — `orientation`, `pointer`, `prefers-*`, `not`, `or`, or comma-separated query lists — are treated as non-matching rather than applied unconditionally. Responsive variants cover base-element declarations; `:hover` and `:active` rules inside `@media` are currently not represented in breakpoint variants.
 
 ## Layout
 
