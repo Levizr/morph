@@ -144,11 +144,30 @@ inline void recordOutlineOps(std::vector<DrawOp>& out, MorphStyle& style,
     const float* color = style.outlineColorCurrent
                              ? (currentColor ? currentColor : style.color)
                              : style.outlineColor;
-    DrawOp ring;
-    ring.setBorderRing(ox, oy, ow, oh, radii, width, const_cast<float*>(color),
-                       (float)(int)style.outlineStyle, width, width);
-    ring.data[5] = 1.0f; // outline marker: never resolve a border gradient
-    out.push_back(ring);
+    const bool patterned = style.outlineStyle == CSS::BorderStyle::Dotted ||
+                           style.outlineStyle == CSS::BorderStyle::Dashed;
+    if (!patterned)
+    {
+        DrawOp ring;
+        ring.setBorderRing(ox, oy, ow, oh, radii, width,
+                           const_cast<float*>(color),
+                           (float)(int)style.outlineStyle, width, width);
+        ring.data[5] = 1.0f; // outline marker: never resolve a border gradient
+        out.push_back(ring);
+        return;
+    }
+    // Dotted/dashed rings restart their motif per side. A full-ring op
+    // carries no edge length, so the shader would fall back to solid.
+    for (int side = 1; side <= 4; side++)
+    {
+        DrawOp ring;
+        ring.setBorderRing(ox, oy, ow, oh, radii, width,
+                           const_cast<float*>(color),
+                           (float)(side * 16 + (int)style.outlineStyle),
+                           width, width);
+        ring.data[5] = 1.0f;
+        out.push_back(ring);
+    }
 }
 
 inline void paintOutlineDirect(Renderer& r, MorphStyle& style, const UnitEnv& env,
@@ -164,8 +183,22 @@ inline void paintOutlineDirect(Renderer& r, MorphStyle& style, const UnitEnv& en
     float* color = style.outlineColorCurrent
                        ? const_cast<float*>(currentColor ? currentColor : style.color)
                        : style.outlineColor;
-    r.drawBorderRing(ox, oy, ow, oh, radii, width, color,
-                     (float)(int)style.outlineStyle, width, width);
+    const bool patterned = style.outlineStyle == CSS::BorderStyle::Dotted ||
+                           style.outlineStyle == CSS::BorderStyle::Dashed;
+    if (!patterned)
+    {
+        r.drawBorderRing(ox, oy, ow, oh, radii, width, color,
+                         (float)(int)style.outlineStyle, width, width);
+        return;
+    }
+    // Dotted/dashed rings restart their motif per side. A full-ring op
+    // carries no edge length, so the shader would fall back to solid.
+    for (int side = 1; side <= 4; side++)
+    {
+        r.drawBorderRing(ox, oy, ow, oh, radii, width, color,
+                         (float)(side * 16 + (int)style.outlineStyle), width,
+                         width);
+    }
 }
 
 // Destruction order appends the outline after every border return path.

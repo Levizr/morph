@@ -4,6 +4,9 @@
 // MorphStyle, and the runtime reselects one when the root layout width
 // crosses a boundary.
 #include "../node.h"
+#ifdef MORPH_FEATURE_OUTLINE
+#include "../../ui/border_paint.h"
+#endif
 
 #include <cmath>
 #include <cstdio>
@@ -138,6 +141,39 @@ int main()
     const float* inherited = colorChild->effectiveColor();
     CHECK(near(inherited[0], 1.0f) && near(inherited[1], 0.25f),
           "currentcolor walks past inherited hops");
+
+#ifdef MORPH_FEATURE_OUTLINE
+    // Patterned outlines must become per-side rings: the shader cannot
+    // pattern a full-ring op because it has no per-edge run length.
+    MorphStyle dashedOutline;
+    dashedOutline.outlineSet = true;
+    dashedOutline.outlineStyle = CSS::BorderStyle::Dashed;
+    dashedOutline.outlineWidth = pxLen(4.0f);
+    dashedOutline.outlineOffset = pxLen(6.0f);
+    std::vector<DrawOp> dashedOps;
+    UnitEnv env;
+    recordOutlineOps(dashedOps, dashedOutline, env, 10.0f, 20.0f, 200.0f,
+                     80.0f, false, nullptr);
+    CHECK(dashedOps.size() == 4, "dashed outline records four side rings");
+    if (dashedOps.size() == 4)
+    {
+        bool modesOk = true;
+        for (int i = 0; i < 4; i++)
+        {
+            float expected = (float)((i + 1) * 16 + (int)CSS::BorderStyle::Dashed);
+            modesOk = modesOk && dashedOps[(size_t)i].type == DrawOp::BorderRing &&
+                      near(dashedOps[(size_t)i].data[2], expected);
+        }
+        CHECK(modesOk, "dashed outline side modes pack side + style");
+    }
+    MorphStyle solidOutline = dashedOutline;
+    solidOutline.outlineStyle = CSS::BorderStyle::Solid;
+    std::vector<DrawOp> solidOps;
+    recordOutlineOps(solidOps, solidOutline, env, 10.0f, 20.0f, 200.0f,
+                     80.0f, false, nullptr);
+    CHECK(solidOps.size() == 1 && near(solidOps[0].data[2], 1.0f),
+          "solid outline keeps the full-ring fast path");
+#endif
 
     std::printf("[responsive-style-test] %d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

@@ -6,6 +6,9 @@
 #ifdef MORPH_FEATURE_INPUT
 #include "../ui/input.h"
 #endif
+#ifdef MORPH_FEATURE_TEXT_SHADOW
+#include "../ui/text.h"
+#endif
 #ifdef MORPH_FEATURE_SHADOW
 #include "../ui/shadow_paint.h"
 #endif
@@ -1451,43 +1454,9 @@ void MorphWindow::renderNode(const RenderFrame *frame, int nodeIdx,
         else if (to.align == CSS::TextAlign::Right)
             align = TextAlign::Right;
 #ifdef MORPH_FEATURE_TEXT_SHADOW
-        for (const auto &sh : to.shadows)
-        {
-            float sc[4];
-            if (sh.hasColor)
-            {
-                sc[0] = sh.color[0]; sc[1] = sh.color[1];
-                sc[2] = sh.color[2]; sc[3] = sh.color[3];
-            }
-            else
-            {
-                sc[0] = to.color[0]; sc[1] = to.color[1];
-                sc[2] = to.color[2]; sc[3] = to.color[3];
-            }
-            if (sh.blur > 0.75f)
-            {
-                const float dx[4] = {-0.5f, 0.5f, 0.0f, 0.0f};
-                const float dy[4] = {0.0f, 0.0f, -0.5f, 0.5f};
-                float soft[4] = {sc[0], sc[1], sc[2], sc[3] * 0.28f};
-                for (int k = 0; k < 4; k++)
-                {
-                    m_renderer.drawText(to.text, tx + sh.offsetX + dx[k] * sh.blur,
-                                        ty + sh.offsetY + dy[k] * sh.blur, soft,
-                                        align, to.fontSize, to.fontWeight,
-                                        to.centerInk != 0, to.letterSpacing);
-                }
-                float core[4] = {sc[0], sc[1], sc[2], sc[3] * 0.45f};
-                m_renderer.drawText(to.text, tx + sh.offsetX, ty + sh.offsetY,
-                                    core, align, to.fontSize, to.fontWeight,
-                                    to.centerInk != 0, to.letterSpacing);
-            }
-            else
-            {
-                m_renderer.drawText(to.text, tx + sh.offsetX, ty + sh.offsetY,
-                                    sc, align, to.fontSize, to.fontWeight,
-                                    to.centerInk != 0, to.letterSpacing);
-            }
-        }
+        paintTextShadows(m_renderer, to.shadows, to.text, tx, ty, to.color,
+                         align, to.fontSize, to.fontWeight, to.centerInk != 0,
+                         to.letterSpacing);
 #endif
         m_renderer.drawText(to.text, tx, ty, const_cast<float *>(to.color),
                             align, to.fontSize,

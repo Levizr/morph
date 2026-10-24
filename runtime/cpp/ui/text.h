@@ -4,6 +4,64 @@
 #include <cctype>
 #include "../core/node.h"
 
+#ifdef MORPH_FEATURE_TEXT_SHADOW
+// Approximate CSS text-shadow blur with a 7x7 Gaussian-weighted text pass.
+// CSS blur-radius is 2*sigma; samples sit 0.6*sigma apart and span
+// +/-1.8*sigma. FreeType has no cheap per-glyph blur, so this soft cluster
+// is the contract's approximation. The small alpha boost keeps the shadow
+// core from washing out under source-over compositing.
+inline void paintTextShadows(Renderer& r,
+                             const std::vector<FlatTextShadow>& shadows,
+                             const std::string& text, float x, float y,
+                             const float baseColor[4], TextAlign align,
+                             float fontSize, CSS::FontWeight fontWeight,
+                             bool centerInk, float letterSpacing)
+{
+    static constexpr float kWeights[7] = {
+        0.0489866f, 0.1204881f, 0.2067575f, 0.2475357f,
+        0.2067575f, 0.1204881f, 0.0489866f,
+    };
+    static constexpr float kAlphaBoost = 1.2f;
+    for (const auto& sh : shadows)
+    {
+        float color[4];
+        if (sh.hasColor)
+        {
+            color[0] = sh.color[0]; color[1] = sh.color[1];
+            color[2] = sh.color[2]; color[3] = sh.color[3];
+        }
+        else
+        {
+            color[0] = baseColor[0]; color[1] = baseColor[1];
+            color[2] = baseColor[2]; color[3] = baseColor[3];
+        }
+        if (sh.blur <= 0.75f)
+        {
+            r.drawText(text, x + sh.offsetX, y + sh.offsetY, color, align,
+                       fontSize, fontWeight, centerInk, letterSpacing);
+            continue;
+        }
+        const float step = sh.blur * 0.3f;
+        for (int gy = -3; gy <= 3; ++gy)
+        {
+            for (int gx = -3; gx <= 3; ++gx)
+            {
+                float alpha = color[3] * kWeights[gy + 3] * kWeights[gx + 3] *
+                              kAlphaBoost;
+                if (alpha > 1.0f)
+                    alpha = 1.0f;
+                if (alpha < 0.002f)
+                    continue;
+                float pass[4] = {color[0], color[1], color[2], alpha};
+                r.drawText(text, x + sh.offsetX + (float)gx * step,
+                           y + sh.offsetY + (float)gy * step, pass, align,
+                           fontSize, fontWeight, centerInk, letterSpacing);
+            }
+        }
+    }
+}
+#endif
+
 class TextNode : public MorphNode {
 public:
     std::string text;
@@ -24,43 +82,6 @@ public:
 #endif
     };
     std::vector<TextOp> m_textOps;
-
-#ifdef MORPH_FEATURE_TEXT_SHADOW
-    static void paintShadows(Renderer& r, const std::vector<FlatTextShadow>& shadows,
-                             const std::string& text, float x, float y,
-                             const float baseColor[4], TextAlign align,
-                             float fontSize, CSS::FontWeight fontWeight,
-                             bool centerInk, float letterSpacing) {
-        for (const auto& sh : shadows) {
-            float color[4];
-            if (sh.hasColor) {
-                color[0] = sh.color[0]; color[1] = sh.color[1];
-                color[2] = sh.color[2]; color[3] = sh.color[3];
-            } else {
-                color[0] = baseColor[0]; color[1] = baseColor[1];
-                color[2] = baseColor[2]; color[3] = baseColor[3];
-            }
-            // Blur is approximated by a small soft cluster; FreeType has no
-            // cheap per-glyph blur and the contract allows approximation.
-            if (sh.blur > 0.75f) {
-                const float dx[4] = {-0.5f, 0.5f, 0.0f, 0.0f};
-                const float dy[4] = {0.0f, 0.0f, -0.5f, 0.5f};
-                float soft[4] = {color[0], color[1], color[2], color[3] * 0.28f};
-                for (int i = 0; i < 4; i++) {
-                    r.drawText(text, x + sh.offsetX + dx[i] * sh.blur,
-                               y + sh.offsetY + dy[i] * sh.blur, soft, align,
-                               fontSize, fontWeight, centerInk, letterSpacing);
-                }
-                float core[4] = {color[0], color[1], color[2], color[3] * 0.45f};
-                r.drawText(text, x + sh.offsetX, y + sh.offsetY, core, align,
-                           fontSize, fontWeight, centerInk, letterSpacing);
-            } else {
-                r.drawText(text, x + sh.offsetX, y + sh.offsetY, color, align,
-                           fontSize, fontWeight, centerInk, letterSpacing);
-            }
-        }
-    }
-#endif
 
     // Renderer alignment → style alignment at the FlatTextOp boundary
     // (values coincide; Justify never originates here).
@@ -168,9 +189,9 @@ public:
                 effectiveColor = src ? src->style.color : parent->style.color;
             }
 #ifdef MORPH_FEATURE_TEXT_SHADOW
-            paintShadows(r, top.shadows, top.text, top.x, top.y, effectiveColor,
-                         top.align, top.fontSize, top.fontWeight, top.centerInk,
-                         top.letterSpacing);
+            paintTextShadows(r, top.shadows, top.text, top.x, top.y,
+                             effectiveColor, top.align, top.fontSize,
+                             top.fontWeight, top.centerInk, top.letterSpacing);
 #endif
             r.drawText(top.text, top.x, top.y, effectiveColor, top.align,
                        top.fontSize, top.fontWeight, top.centerInk,
@@ -343,9 +364,9 @@ public:
                 effectiveColor = src ? src->style.color : parent->style.color;
             }
 #ifdef MORPH_FEATURE_TEXT_SHADOW
-            paintShadows(r, shadows, line, lx, py, effectiveColor,
-                         TextAlign::Left, _effFontSize(), _effFontWeight(),
-                         m_centerInk, spacing);
+            paintTextShadows(r, shadows, line, lx, py, effectiveColor,
+                             TextAlign::Left, _effFontSize(), _effFontWeight(),
+                             m_centerInk, spacing);
 #endif
             r.drawText(line, lx, py, effectiveColor, TextAlign::Left,
                        _effFontSize(), _effFontWeight(), m_centerInk, spacing);
