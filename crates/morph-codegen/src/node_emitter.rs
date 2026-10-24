@@ -2373,17 +2373,23 @@ fn emit_grid_delta(
     o
 }
 
-fn emit_hover_style(
+/// Shared delta emitter for the interactive state layers (`:hover` and
+/// `:active`).
+///
+/// Both states are sparse overlays on top of the active base/media variant, so
+/// they must support exactly the same property set. Keeping one emitter here
+/// prevents hover-only or active-only gaps (for example the grid gap flags).
+/// Base and media styles use `set_style_at` instead: those are complete style
+/// snapshots, not deltas.
+fn emit_state_delta(
     node: &IRNode,
+    state: &str,
+    s: &IRStyle,
     indent: &str,
     features: &std::collections::HashSet<String>,
-    _alloc: bool,
 ) -> String {
-    let Some(s) = &node.hover_style else {
-        return String::new();
-    };
     let base = &node.style;
-    let hv = format!("{}->hoverStyle", node.node_id);
+    let hv = format!("{}->{}", node.node_id, state);
     let mut o: Vec<String> = Vec::new();
     o.extend(emit_grid_delta(&hv, s, base, features));
     if s.bg_color != [0.0, 0.0, 0.0, 0.0] && s.bg_color != base.bg_color {
@@ -2718,6 +2724,18 @@ fn emit_hover_style(
     lines.join("\n")
 }
 
+fn emit_hover_style(
+    node: &IRNode,
+    indent: &str,
+    features: &std::collections::HashSet<String>,
+    _alloc: bool,
+) -> String {
+    let Some(s) = &node.hover_style else {
+        return String::new();
+    };
+    emit_state_delta(node, "hoverStyle", s, indent, features)
+}
+
 fn emit_active_style(
     node: &IRNode,
     indent: &str,
@@ -2726,269 +2744,7 @@ fn emit_active_style(
     let Some(s) = &node.active_style else {
         return String::new();
     };
-    let base = &node.style;
-    let hv = format!("{}->activeStyle", node.node_id);
-    let mut o: Vec<String> = Vec::new();
-    o.extend(emit_grid_delta(&hv, s, base, features));
-    if s.bg_color != [0.0, 0.0, 0.0, 0.0] && s.bg_color != base.bg_color {
-        o.push(format!("{hv}->bgColor[0] = {:.4}f;", s.bg_color[0]));
-        o.push(format!("{hv}->bgColor[1] = {:.4}f;", s.bg_color[1]));
-        o.push(format!("{hv}->bgColor[2] = {:.4}f;", s.bg_color[2]));
-        o.push(format!("{hv}->bgColor[3] = {:.4}f;", s.bg_color[3]));
-    }
-    if features.contains("gradient") && s.bg_gradient != base.bg_gradient {
-        o.push(format!("{hv}->bgGradientSet = true;"));
-        match &s.bg_gradient {
-            Some(g) => o.extend(emit_gradient(&format!("{hv}->bgGradient."), g)),
-            None => o.push(format!("{hv}->bgGradient.enabled = false;")),
-        }
-    }
-    if features.contains("shadow") && s.box_shadows != base.box_shadows {
-        o.extend(emit_box_shadows(&format!("{hv}->"), &s.box_shadows));
-    }
-    o.extend(emit_interactive_extra(&hv, s, base, features));
-    if s.color != [0.0, 0.0, 0.0, 1.0] && s.color != base.color {
-        o.push(format!("{hv}->color[0] = {:.4}f;", s.color[0]));
-        o.push(format!("{hv}->color[1] = {:.4}f;", s.color[1]));
-        o.push(format!("{hv}->color[2] = {:.4}f;", s.color[2]));
-    }
-    if s.border_color != [0.0, 0.0, 0.0, 1.0] && s.border_color != base.border_color {
-        o.push(format!("{hv}->borderColor[0] = {:.4}f;", s.border_color[0]));
-        o.push(format!("{hv}->borderColor[1] = {:.4}f;", s.border_color[1]));
-        o.push(format!("{hv}->borderColor[2] = {:.4}f;", s.border_color[2]));
-        o.push(format!("{hv}->borderColor[3] = {:.4}f;", s.border_color[3]));
-    }
-    if !s.border_radius.is_zero() && s.border_radius != base.border_radius {
-        o.extend(emit_length(&format!("{hv}->borderRadius"), s.border_radius));
-    }
-    if s.border_top_left_radius != base.border_top_left_radius {
-        if let Some(v) = s.border_top_left_radius {
-            o.extend(emit_length(&format!("{hv}->borderTopLeftRadius"), v));
-        } else {
-            o.push(format!("{hv}->borderTopLeftRadius.value = -1e9f;"));
-            o.push(format!("{hv}->borderTopLeftRadius.unit = LengthUnit::Px;"));
-        }
-    }
-    if s.border_top_right_radius != base.border_top_right_radius {
-        if let Some(v) = s.border_top_right_radius {
-            o.extend(emit_length(&format!("{hv}->borderTopRightRadius"), v));
-        } else {
-            o.push(format!("{hv}->borderTopRightRadius.value = -1e9f;"));
-            o.push(format!("{hv}->borderTopRightRadius.unit = LengthUnit::Px;"));
-        }
-    }
-    if s.border_bottom_right_radius != base.border_bottom_right_radius {
-        if let Some(v) = s.border_bottom_right_radius {
-            o.extend(emit_length(&format!("{hv}->borderBottomRightRadius"), v));
-        } else {
-            o.push(format!("{hv}->borderBottomRightRadius.value = -1e9f;"));
-            o.push(format!("{hv}->borderBottomRightRadius.unit = LengthUnit::Px;"));
-        }
-    }
-    if s.border_bottom_left_radius != base.border_bottom_left_radius {
-        if let Some(v) = s.border_bottom_left_radius {
-            o.extend(emit_length(&format!("{hv}->borderBottomLeftRadius"), v));
-        } else {
-            o.push(format!("{hv}->borderBottomLeftRadius.value = -1e9f;"));
-            o.push(format!("{hv}->borderBottomLeftRadius.unit = LengthUnit::Px;"));
-        }
-    }
-    if !s.border_width.is_zero() && s.border_width != base.border_width {
-        o.extend(emit_length(&format!("{hv}->borderWidth"), s.border_width));
-    }
-    // Per-side border widths
-    if s.border_top_width != base.border_top_width {
-        if let Some(v) = s.border_top_width {
-            o.extend(emit_length(&format!("{hv}->borderTopWidth"), v));
-        } else {
-            o.push(format!("{hv}->borderTopWidth.value = -1e9f;"));
-            o.push(format!("{hv}->borderTopWidth.unit = LengthUnit::Px;"));
-        }
-    }
-    if s.border_right_width != base.border_right_width {
-        if let Some(v) = s.border_right_width {
-            o.extend(emit_length(&format!("{hv}->borderRightWidth"), v));
-        } else {
-            o.push(format!("{hv}->borderRightWidth.value = -1e9f;"));
-            o.push(format!("{hv}->borderRightWidth.unit = LengthUnit::Px;"));
-        }
-    }
-    if s.border_bottom_width != base.border_bottom_width {
-        if let Some(v) = s.border_bottom_width {
-            o.extend(emit_length(&format!("{hv}->borderBottomWidth"), v));
-        } else {
-            o.push(format!("{hv}->borderBottomWidth.value = -1e9f;"));
-            o.push(format!("{hv}->borderBottomWidth.unit = LengthUnit::Px;"));
-        }
-    }
-    if s.border_left_width != base.border_left_width {
-        if let Some(v) = s.border_left_width {
-            o.extend(emit_length(&format!("{hv}->borderLeftWidth"), v));
-        } else {
-            o.push(format!("{hv}->borderLeftWidth.value = -1e9f;"));
-            o.push(format!("{hv}->borderLeftWidth.unit = LengthUnit::Px;"));
-        }
-    }
-    // Per-side border colors
-    if s.border_top_color != base.border_top_color {
-        if let Some(c) = s.border_top_color {
-            o.push(format!("{hv}->borderTopColor[0] = {:.4}f;", c[0]));
-            o.push(format!("{hv}->borderTopColor[1] = {:.4}f;", c[1]));
-            o.push(format!("{hv}->borderTopColor[2] = {:.4}f;", c[2]));
-            o.push(format!("{hv}->borderTopColor[3] = {:.4}f;", c[3]));
-        } else {
-            o.push(format!("{hv}->borderTopColor[0] = -1.0f;"));
-            o.push(format!("{hv}->borderTopColor[1] = -1.0f;"));
-            o.push(format!("{hv}->borderTopColor[2] = -1.0f;"));
-            o.push(format!("{hv}->borderTopColor[3] = -1.0f;"));
-        }
-    }
-    if s.border_right_color != base.border_right_color {
-        if let Some(c) = s.border_right_color {
-            o.push(format!("{hv}->borderRightColor[0] = {:.4}f;", c[0]));
-            o.push(format!("{hv}->borderRightColor[1] = {:.4}f;", c[1]));
-            o.push(format!("{hv}->borderRightColor[2] = {:.4}f;", c[2]));
-            o.push(format!("{hv}->borderRightColor[3] = {:.4}f;", c[3]));
-        } else {
-            o.push(format!("{hv}->borderRightColor[0] = -1.0f;"));
-            o.push(format!("{hv}->borderRightColor[1] = -1.0f;"));
-            o.push(format!("{hv}->borderRightColor[2] = -1.0f;"));
-            o.push(format!("{hv}->borderRightColor[3] = -1.0f;"));
-        }
-    }
-    if s.border_bottom_color != base.border_bottom_color {
-        if let Some(c) = s.border_bottom_color {
-            o.push(format!("{hv}->borderBottomColor[0] = {:.4}f;", c[0]));
-            o.push(format!("{hv}->borderBottomColor[1] = {:.4}f;", c[1]));
-            o.push(format!("{hv}->borderBottomColor[2] = {:.4}f;", c[2]));
-            o.push(format!("{hv}->borderBottomColor[3] = {:.4}f;", c[3]));
-        } else {
-            o.push(format!("{hv}->borderBottomColor[0] = -1.0f;"));
-            o.push(format!("{hv}->borderBottomColor[1] = -1.0f;"));
-            o.push(format!("{hv}->borderBottomColor[2] = -1.0f;"));
-            o.push(format!("{hv}->borderBottomColor[3] = -1.0f;"));
-        }
-    }
-    if s.border_left_color != base.border_left_color {
-        if let Some(c) = s.border_left_color {
-            o.push(format!("{hv}->borderLeftColor[0] = {:.4}f;", c[0]));
-            o.push(format!("{hv}->borderLeftColor[1] = {:.4}f;", c[1]));
-            o.push(format!("{hv}->borderLeftColor[2] = {:.4}f;", c[2]));
-            o.push(format!("{hv}->borderLeftColor[3] = {:.4}f;", c[3]));
-        } else {
-            o.push(format!("{hv}->borderLeftColor[0] = -1.0f;"));
-            o.push(format!("{hv}->borderLeftColor[1] = -1.0f;"));
-            o.push(format!("{hv}->borderLeftColor[2] = -1.0f;"));
-            o.push(format!("{hv}->borderLeftColor[3] = -1.0f;"));
-        }
-    }
-    // Per-side border styles
-    if s.border_top_style != base.border_top_style {
-        if let Some(ref st) = s.border_top_style {
-            if let Some(lit) = keyword_literal("borderTopStyle", st) {
-                o.push(format!("{hv}->borderTopStyle = {lit};"));
-            }
-        } else {
-            o.push(format!("{hv}->borderTopStyle = CSS::BorderStyle::None;"));
-        }
-    }
-    if s.border_right_style != base.border_right_style {
-        if let Some(ref st) = s.border_right_style {
-            if let Some(lit) = keyword_literal("borderRightStyle", st) {
-                o.push(format!("{hv}->borderRightStyle = {lit};"));
-            }
-        } else {
-            o.push(format!("{hv}->borderRightStyle = CSS::BorderStyle::None;"));
-        }
-    }
-    if s.border_bottom_style != base.border_bottom_style {
-        if let Some(ref st) = s.border_bottom_style {
-            if let Some(lit) = keyword_literal("borderBottomStyle", st) {
-                o.push(format!("{hv}->borderBottomStyle = {lit};"));
-            }
-        } else {
-            o.push(format!("{hv}->borderBottomStyle = CSS::BorderStyle::None;"));
-        }
-    }
-    if s.border_left_style != base.border_left_style {
-        if let Some(ref st) = s.border_left_style {
-            if let Some(lit) = keyword_literal("borderLeftStyle", st) {
-                o.push(format!("{hv}->borderLeftStyle = {lit};"));
-            }
-        } else {
-            o.push(format!("{hv}->borderLeftStyle = CSS::BorderStyle::None;"));
-        }
-    }
-    if s.border_style != "none" && !s.border_style.is_empty() && s.border_style != base.border_style
-    {
-        let lit = keyword_literal("borderStyle", &s.border_style).unwrap();
-        o.push(format!("{hv}->borderStyle = {lit};"));
-    }
-    o.extend(emit_border_image_delta(&hv, s, base, features.contains("gradient")));
-    if s.width.is_some() && s.width != base.width {
-        if let Some(w) = s.width {
-            o.extend(emit_length(&format!("{hv}->explicitWidth"), w));
-        }
-    }
-    if s.height.is_some() && s.height != base.height {
-        if let Some(h) = s.height {
-            o.extend(emit_length(&format!("{hv}->explicitHeight"), h));
-        }
-    }
-    if features.contains("position") {
-        if s.left.is_some() && s.left != base.left {
-            if let Some(v) = s.left {
-                o.extend(emit_length(&format!("{hv}->left"), v));
-            }
-        }
-        if s.right.is_some() && s.right != base.right {
-            if let Some(v) = s.right {
-                o.extend(emit_length(&format!("{hv}->right"), v));
-            }
-        }
-        if s.top.is_some() && s.top != base.top {
-            if let Some(v) = s.top {
-                o.extend(emit_length(&format!("{hv}->top"), v));
-            }
-        }
-        if s.bottom.is_some() && s.bottom != base.bottom {
-            if let Some(v) = s.bottom {
-                o.extend(emit_length(&format!("{hv}->bottom"), v));
-            }
-        }
-    }
-    if features.contains("opacity")
-        && (s.opacity - 1.0).abs() > f32::EPSILON
-        && s.opacity != base.opacity
-    {
-        o.push(format!("{hv}->opacity = {};", fmt(s.opacity)));
-    }
-    if features.contains("transform") {
-        if let Some(m) = s.transform_matrix {
-            if s.transform_matrix != base.transform_matrix {
-                o.push(format!("{hv}->transformSet = true;"));
-                for (i, v) in m.iter().enumerate() {
-                    o.push(format!("{hv}->matrix[{i}] = {};", fmt(*v)));
-                }
-            }
-        }
-        if let (Some(or), Some(bor)) = (s.transform_origin_resolved, base.transform_origin_resolved)
-        {
-            if or != bor {
-                o.push(format!("{hv}->originSet = true;"));
-                o.push(format!("{hv}->originX = {};", fmt(or.0)));
-                o.push(format!("{hv}->originY = {};", fmt(or.1)));
-            }
-        }
-    }
-    if o.is_empty() {
-        return String::new();
-    }
-    let mut lines = vec![format!("{} = new MorphStyle(); // delta only", hv)];
-    for l in o {
-        lines.push(format!("{indent}{l}"));
-    }
-    lines.join("\n")
+    emit_state_delta(node, "activeStyle", s, indent, features)
 }
 
 fn emit_transition(node: &IRNode, indent: &str) -> String {
@@ -3827,6 +3583,32 @@ mod tests {
             emit_grid_delta("node_0000->hoverStyle", &hover, &node.style, &features).join("\n");
         assert!(out.contains("rowGapSet = true"), "{out}");
         assert!(out.contains("columnGapSet = true"), "{out}");
+    }
+
+    #[test]
+    fn active_state_uses_shared_delta_emitter() {
+        let mut node = IRNode { node_id: "node_0000".to_string(), ..Default::default() };
+        let mut active = IRStyle::new();
+        active.padding = [Length::Px(8.0); 4];
+        active.font_size = Length::Px(20.0);
+        active.row_gap = Some(Length::Px(4.0));
+        active.column_gap = Some(Length::Px(6.0));
+        node.active_style = Some(active);
+        node.hover_style = node.active_style.clone();
+        let mut features = std::collections::HashSet::new();
+        features.insert("grid".to_string());
+
+        let out = emit_active_style(&node, "", &features);
+        assert!(out.contains("activeStyle = new MorphStyle(); // delta only"), "{out}");
+        assert!(out.contains("activeStyle->padding[0]"), "{out}");
+        assert!(out.contains("activeStyle->fontSize"), "{out}");
+        assert!(out.contains("activeStyle->rowGapSet = true"), "{out}");
+        assert!(out.contains("activeStyle->columnGapSet = true"), "{out}");
+
+        // Both interactive layers must produce the same property deltas.
+        let hover =
+            emit_hover_style(&node, "", &features, false).replace("hoverStyle", "activeStyle");
+        assert_eq!(hover, out);
     }
 
     #[test]
