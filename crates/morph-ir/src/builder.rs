@@ -5757,11 +5757,31 @@ fn apply_css_prop(style: &mut IRStyle, prop: &str, val: &str) -> Option<&'static
             Some("flex_dir")
         }
         "gap" => {
-            if let Some(v) = parse_length(val) {
-                style.gap = v;
-                Some("gap")
-            } else {
-                None
+            // `gap: <row> <column>` is valid for both grid and flex. Grid
+            // keeps the two axes in their longhand fields so it can apply
+            // different row/column values; the legacy single `gap` field
+            // remains the one-value / fallback path. A two-value shorthand
+            // therefore does not populate the single field.
+            let parts: Vec<&str> = val.split_whitespace().collect();
+            match parts.as_slice() {
+                [one] => {
+                    if let Some(v) = parse_length(one) {
+                        style.gap = v;
+                        Some("gap")
+                    } else {
+                        None
+                    }
+                }
+                [row, column] => {
+                    let (Some(row), Some(column)) = (parse_length(row), parse_length(column))
+                    else {
+                        return None;
+                    };
+                    style.row_gap = Some(row);
+                    style.column_gap = Some(column);
+                    Some("gap")
+                }
+                _ => None,
             }
         }
         "position" => {
@@ -7411,6 +7431,21 @@ mod tests {
         assert_eq!(Length::Em(1.5).to_css(), "1.5em");
         assert_eq!(Length::Vw(10.0).to_css(), "10vw");
         assert_eq!(Length::Px(12.0).to_css(), "12");
+    }
+
+    #[test]
+    fn gap_shorthand_keeps_two_axes() {
+        let mut style = IRStyle::default();
+        assert_eq!(apply_css_prop(&mut style, "gap", "10px"), Some("gap"));
+        assert_eq!(style.gap, Length::Px(10.0));
+        assert_eq!(style.row_gap, None);
+        assert_eq!(style.column_gap, None);
+
+        assert_eq!(apply_css_prop(&mut style, "gap", "10px 14px"), Some("gap"));
+        assert_eq!(style.row_gap, Some(Length::Px(10.0)));
+        assert_eq!(style.column_gap, Some(Length::Px(14.0)));
+
+        assert_eq!(apply_css_prop(&mut style, "gap", "10px 14px 20px"), None);
     }
 
     #[test]

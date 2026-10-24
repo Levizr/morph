@@ -1,0 +1,31 @@
+import "style.css"
+
+export const windowConfig = { title: "Grid Test", width: 600, height: 560 }
+
+export default function App() {
+  return (
+    <body>
+      <div className="screen">
+        <div className="grid">
+          <div className="a" id="a"></div>
+          <div className="b" id="b"></div>
+          <div className="c" id="c"></div>
+          <div className="d" id="d"></div>
+          <div className="e" id="e"></div>
+        </div>
+        <div className="grid2">
+          <div className="g2a" id="g2a"></div>
+          <div className="g2b" id="g2b"></div>
+          <div className="g2c" id="g2c"></div>
+          <div className="g2d" id="g2d"></div>
+          <div className="g2e" id="g2e"></div>
+        </div>
+        <div className="grid3">
+          <div className="g3a" id="g3a"></div>
+          <div className="g3b" id="g3b"></div>
+          <div className="g3c" id="g3c"></div>
+        </div>
+      </div>
+    </body>
+  )
+}

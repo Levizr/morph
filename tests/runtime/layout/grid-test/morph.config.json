@@ -1,0 +1,7 @@
+{
+  "name": "grid-test",
+  "entry": "src/App.mx",
+  "window": { "width": 600, "height": 560, "title": "Grid Test" },
+  "dependencies": {},
+  "cpp_sources": []
+}

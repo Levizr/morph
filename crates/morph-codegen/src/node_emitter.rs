@@ -1917,9 +1917,11 @@ fn set_style_at(
         }
         if let Some(g) = s.row_gap {
             lines.extend(emit_length(&format!("{ind}.rowGap"), g));
+            lines.push(format!("{ind}.rowGapSet = true;"));
         }
         if let Some(g) = s.column_gap {
             lines.extend(emit_length(&format!("{ind}.columnGap"), g));
+            lines.push(format!("{ind}.columnGapSet = true;"));
         }
     }
 
@@ -2339,6 +2341,18 @@ fn emit_grid_delta(
     if s.grid_area != base.grid_area {
         if let Some(area) = &s.grid_area {
             o.push(format!("{hv}->gridArea = \"{}\";", area.replace('"', "\\\"")));
+        }
+    }
+    if s.row_gap != base.row_gap {
+        if let Some(g) = s.row_gap {
+            o.extend(emit_length(&format!("{hv}->rowGap"), g));
+            o.push(format!("{hv}->rowGapSet = true;"));
+        }
+    }
+    if s.column_gap != base.column_gap {
+        if let Some(g) = s.column_gap {
+            o.extend(emit_length(&format!("{hv}->columnGap"), g));
+            o.push(format!("{hv}->columnGapSet = true;"));
         }
     }
     if s.align_content != base.align_content && s.align_content != "normal" {
@@ -3792,6 +3806,28 @@ mod tests {
     use super::*;
     use morph_ir::IRMediaStyle;
     use std::collections::HashMap;
+
+    #[test]
+    fn grid_gap_longhands_emit_set_flags() {
+        let mut node = IRNode { node_id: "node_0000".to_string(), ..Default::default() };
+        node.style.display = "grid".to_string();
+        node.style.row_gap = Some(Length::Px(12.0));
+        node.style.column_gap = Some(Length::Px(16.0));
+        let mut features = std::collections::HashSet::new();
+        features.insert("grid".to_string());
+
+        let out = set_style(&node, "", None, &features, false);
+        assert!(out.contains("rowGapSet = true"), "{out}");
+        assert!(out.contains("columnGapSet = true"), "{out}");
+
+        let mut hover = IRStyle::new();
+        hover.row_gap = Some(Length::Px(4.0));
+        hover.column_gap = Some(Length::Px(8.0));
+        let out =
+            emit_grid_delta("node_0000->hoverStyle", &hover, &node.style, &features).join("\n");
+        assert!(out.contains("rowGapSet = true"), "{out}");
+        assert!(out.contains("columnGapSet = true"), "{out}");
+    }
 
     #[test]
     fn hover_text_shadow_only_overrides_when_declared() {
