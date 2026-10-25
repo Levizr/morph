@@ -43,7 +43,7 @@ Hover and `active` transitions share **one** `HoverTransition` (pre/press snapsh
 
 - `buildReleaseStyle` reverts only fields still equal to the press value — **reactive-effect writes are never clobbered** by a transition ending.
 - `interruptStateTransitions()` snaps to target before effects write, so effects always start from a sane baseline.
-- Ancestor-hover rules (`AncestorHoverRule` + `AncestorHoverTransition`) let parents react to descendants' hover.
+- Ancestor-hover rules (`AncestorHoverRule` + `AncestorHoverTransition`) let parents react to descendants' hover in the runtime. Build codegen does not emit those rules yet, so `.parent:hover .child` is not a shipped app feature ([CSS Finalization](../../future/css/finalization.md#1-state-and-selector-coverage)).
 - `interpolateStyles` lerps scalars and matrix transforms (decompose → slerp → recompose, via `core/mat4.h`'s W3C css-transforms-2 §6.1 implementation with 2D QR + full 3D quaternion slerp).
 - `update()` recomputes `m_isTransitioning`/`m_hasLayoutTransition` — the culling guard that keeps animating nodes in the frame (see below).
 
@@ -59,7 +59,7 @@ Under `MORPH_FEATURE_ZINDEX`, lazy `ensurePaintOrder()` builds CSS 2.1 Appendix-
 
 ## The style headers (`style/`)
 
-`css_enums.h` + `style.h` define the computed-style value space; `style/features/` splits it by concern (`base`, `flex`, `border`, `outline`, `shadow`, `position`, `scroll`, `cursor`, `opacity`, `transform`, `animation`, `zindex` — note `shadow.h`/`outline.h` are dormant scaffolding for planned work). This is where a new CSS property lands at runtime; the compile-time side lands in `morph-ir`'s `style.rs` / `tailwind.rs` / `transforms.rs` ([The Compiler Pipeline](../architecture/compiler-pipeline.md)).
+`css_enums.h` + `style.h` define the computed-style value space; `style/features/` splits it by concern (`base`, `flex`, `border`, `outline`, `shadow`, `position`, `scroll`, `cursor`, `opacity`, `transform`, `animation`, `zindex`). `box-shadow` and `outline` are shipped; `text` and `background-image` basics remain tracked in [CSS Finalization](../../future/css/finalization.md). This is where a new CSS property lands at runtime; the compile-time side lands in `morph-ir`'s `style.rs` / `tailwind.rs` / `transforms.rs` ([The Compiler Pipeline](../architecture/compiler-pipeline.md)).
 
 ## UI and widgets (`ui/`, `widgets/`, `viewport/`)
 
@@ -67,7 +67,7 @@ Node subclasses live here: Button, Input, Text, Image, List (`MorphNode` consume
 
 ## Input model, briefly
 
-Click focuses `<input>`, click-elsewhere blurs; keys go to `s_focusedNode->onKeyEvent` first (consume stops propagation), chars to the focused node only; drag capture (`s_mouseCapture`) keeps MouseMove/MouseUp flowing past edges; release-outside-capture ends drags. Text input boxes exist; caret/focus/selection/keyboard full behavior is planned work (see the text-input future doc) — today's `input-test` fixture (controlled `value`+`onChange`, `maxLength` in UTF-16 units, validation, password masking, `onFocus`/`onBlur`, mouse selection) is the honest boundary of what works.
+Click focuses `<input>`, click-elsewhere blurs; keys go to `s_focusedNode->onKeyEvent` first (consume stops propagation), chars to the focused node only; drag capture (`s_mouseCapture`) keeps MouseMove/MouseUp flowing past edges; release-outside-capture ends drags. Caret, focus lifecycle, selection, editing, `onFocus`/`onBlur`, and keyboard routing are shipped; `select`/`textarea` and CSS `:focus` styling remain in the [text-input future doc](../../future/elements/text-input.md). Today's `input-test` fixture (controlled `value`+`onChange`, `maxLength` in UTF-16 units, validation, password masking, mouse selection) is the honest boundary of what works.
 
 ## Where to cut
 

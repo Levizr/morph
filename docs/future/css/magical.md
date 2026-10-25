@@ -6,13 +6,13 @@
 
 ## Read this first — basics come first
 
-Morph's basics now cover solid/dotted/dashed borders, per-side widths/colors, `border-image` gradients, AA'd per-side miter joints (all pixel-verified against Chrome), per-corner radius, and border hover/active/transitions/keyframes including gradients; still missing: `background-image` on boxes, radial/conic gradients, scoop/concave corners.
+Morph's basics now cover solid/dotted/dashed borders, per-side widths/colors, `border-image` gradients, AA'd per-side miter joints (all pixel-verified against Chrome), per-corner radius, linear/radial/conic gradients, and border hover/active/transitions/keyframes including gradients. Still missing: URL `background-image` on boxes for basic apps, and scoop/concave corners for the magic below. URL backgrounds are tracked in [CSS Finalization for Basic Apps](finalization.md#3-background-images-and-image-fitting).
 
 An honest question this page must answer first: *why explore magical CSS when Morph doesn't yet support browser basics?*
 
 **The team is building the basics first. This page is not a priority list — it is a possibility showcase. It records what becomes possible once Morph owns its own GPU shader and layout engine, free of decades of web compatibility baggage.**
 
-Build order stays: solid basics first (linear gradients → dotted/dashed → `border-image` → per-side borders → per-corner radius → border state/animation — all shipped; remaining basics: `background-image`, radial/conic gradients, scoop) *before* any magic below. Magic items reuse the same gradient/SDF plumbing, so designing them now keeps the basics from painting us into a corner.
+Build order stays: solid basics first (linear gradients → radial/conic → dotted/dashed → `border-image` → per-side borders → per-corner radius → border state/animation — all shipped; remaining basics: URL `background-image`, scoop) *before* any magic below. Magic items reuse the same gradient/SDF plumbing, so designing them now keeps the basics from painting us into a corner.
 
 ## How to read each entry
 
@@ -260,7 +260,7 @@ Rule: any `hungry` effect must ship with an automatic static fallback (window bl
 | Feature | State |
 |---|---|
 | Gradients (linear + `repeating-linear`, static) | ✅ Shipped (IR `gradient.rs`, `MORPH_FEATURE_GRADIENT`, SDF shader) |
-| Gradients (radial / conic) | ❌ Not started (parser + shader N/A yet) |
+| Gradients (radial / conic) | ✅ Shipped (parser + SDF shader; `tests/runtime/render/gradient-test`) |
 | Gradient hover/active/transitions | ✅ Shipped (`lerpGradient`, state revert, `transition` support; removal via explicit `bgGradientSet` flag since deltas can't distinguish unset from cleared) |
 | Gradient `@keyframes` animation | ✅ Shipped (css-string payloads, stop-lerp or discrete flip) |
 | `background-image` on boxes | ❌ Not started (image pipeline is `<img>`-only) |
@@ -268,13 +268,14 @@ Rule: any `hungry` effect must ship with an automatic static fallback (window bl
 | `border-image` with gradients | ✅ Shipped (standard syntax, sampled on the ring band; parity-covered) |
 | Scoop / concave corners | ❌ Not started (convex `sdRoundedBox` only; per-corner radius shipped) |
 | Position (static/relative/absolute/fixed/sticky) + CSS units | ✅ Shipped (CSS 2.1 §10.3.7/§10.6.7 solver; px/%/em/rem/vw/vh/vmin/vmax/ch/ex + physical fold at 96dpi; `tests/runtime/position` parity vs Chrome, boxes within 1–2px, text deltas are font-engine) |
-| Gradient text, patterns, shadows | ❌ Not started (`shadow.h` / `outline.h` dormant, see [More CSS](more-properties.md)) |
+| Gradient text and repeating patterns | ❌ Not started |
+| `box-shadow` / `outline` | ✅ Shipped (see [More CSS](more-properties.md)) |
 | B1–B10 Morph-only magic | ❌ Not started (needs A-group plumbing first) |
 
 ## Build order (basics first, magic later)
 
-1. Gradients linear → radial → conic (+ repeating), static first then animation lerp. Linear static + state/animation shipped; radial/conic open.
-2. `background-image` cover/contain on boxes.
+1. Gradients linear → radial → conic (+ repeating), static first then animation lerp. ✅ Shipped.
+2. URL `background-image` with cover/contain on boxes — tracked in [CSS Finalization](finalization.md#3-background-images-and-image-fitting).
 3. ~~Dotted/dashed, then per-side width/color, then `border-image`.~~ Shipped + pixel-verified.
 4. ~~Per-corner radius~~ shipped + `corner-shape: scoop` open.
 5. Only then: B1–B10 behind `MORPH_FEATURE_*` flags with fixtures + screenshots.

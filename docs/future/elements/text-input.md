@@ -24,13 +24,13 @@ The `<input>` element is registered and fully implemented, so users can type int
 | Keyboard routing to focused node + `onKeyEvent`/`onTextChar` consumption | ✅ Shipped (`window.cpp`) |
 | Text rendering / caret (blink, measurement-positioned) / selection (click-drag, Shift+arrows, highlight) | ✅ Shipped (`drawTextAndCaret`, `measureTextWidth`) |
 | Editing — typing, backspace/delete, arrows, Home/End, Ctrl+A/X/C/V, undo/redo, clipboard, `maxLength`/`password` | ✅ Shipped |
-| `EventType::Focus` / `Blur` | ✅ Declared (`event.h`, `node.h`) — **never dispatched** |
+| `EventType::Focus` / `Blur` + `onFocus`/`onBlur` | ✅ Dispatched through `requestFocus()` (`event.h`, `node.h`) |
 | `:focus` CSS pseudo-class | ❌ Not built |
 | `select` / `textarea` elements | ❌ Same stub status (`STUB_TAGS` in `morph-parser`) |
 
 ## Planned behavior (remaining)
 
-1. ~~**Focus model** — clicking an input sets `focused`; a `focus()`/`blur()` API; `Focus`/`Blur` events dispatched through the existing event system; keyboard events route to the focused node instead of the hovered one~~ ✅ Shipped (events still never dispatched)
+1. ~~**Focus model** — clicking an input sets `focused`; a `focus()`/`blur()` API; `Focus`/`Blur` events dispatched through the existing event system; keyboard events route to the focused node instead of the hovered one~~ ✅ Shipped
 2. ~~**Text rendering** — reuse the FreeType text pipeline (`morph_text.h`) for the input value~~ ✅ Shipped
 3. ~~**Caret** — blinking cursor at the insertion point, positioned via the same text-measurement used for layout~~ ✅ Shipped
 4. ~~**Selection** — click-drag + Shift+arrow selection with a highlight rect~~ ✅ Shipped
@@ -53,6 +53,6 @@ Plain fields cover forms; docs, notes, and chat need *rich* text — bold/italic
 1. ~~Focus model: `focused` lifecycle, Focus/Blur events, key routing to focused node~~ ✅ (except event dispatch)
 2. ~~Text + caret rendering in `InputNode`~~ ✅
 3. ~~Selection + editing shortcuts~~ ✅
-4. `:focus` CSS pseudo-class + Focus/Blur event dispatch
+4. `:focus` CSS pseudo-class (Focus/Blur event dispatch is already shipped)
 5. `textarea` (multi-line) + `select` (dropdown)
 6. `<richtext>` document model + structured clipboard (full support, later)

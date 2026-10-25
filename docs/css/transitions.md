@@ -2,6 +2,8 @@
 
 CSS transitions animate style changes when a property value changes — typically triggered by `:hover`.
 
+Morph applies **one duration and one easing to the whole changed style delta**. It does not model a separate timeline per property.
+
 ## Basic Usage
 
 ```css
@@ -24,15 +26,14 @@ This makes every property change on `.btn` animate smoothly over 0.3 seconds.
 ## Transition Shorthand
 
 ```css
-/* all properties, 0.3s, ease-in-out */
+/* all changed properties, 0.3s, ease-in-out */
 transition: all 0.3s ease-in-out;
 
-/* specific property */
+/* the property name is parsed for compatibility, but timing still applies to the whole delta */
 transition: background-color 0.2s ease;
-
-/* multiple transitions */
-transition: color 0.3s ease, background-color 0.5s ease-in-out;
 ```
+
+Per-property durations and multiple independently timed transitions are parsed but not represented separately: the first duration and easing token win for the whole delta. Use one transition timing for the card/button rather than expecting `color` and `background-color` to run on different clocks.
 
 ## Easing Functions
 
@@ -87,7 +88,7 @@ These properties **snap instantly** (no interpolation):
 ```css
 .card {
   border: 1px solid #334155;
-  transition: border-color 0.3s ease, transform 0.3s ease;
+  transition: all 0.3s ease;
 }
 
 .card:hover {
@@ -96,19 +97,28 @@ These properties **snap instantly** (no interpolation):
 }
 ```
 
-## Ancestor Hover Transitions
+## Hover Scope
 
-`.parent:hover .child` transitions work — when the parent is hovered, the child's style changes animate:
+Hover transitions work on the element being hovered:
 
 ```css
-.card:hover .card-title {
-  color: #6366f1;
-}
-
 .card-title {
   transition: color 0.3s ease;
 }
+
+.card-title:hover {
+  color: #6366f1;
+}
 ```
+
+Ancestor/group hover (`.card:hover .card-title`) and hover/active rules inside `@media` are **not emitted in build output yet**; they currently do nothing without a warning. The runtime has ancestor-hover machinery, but the build path does not generate the rules. Track this in [CSS Finalization for Basic Apps](../future/css/finalization.md#1-state-and-selector-coverage).
+
+## Limitations
+
+- `transition-property` and `transition-delay` are informational only; the runtime interpolates the whole state delta with no delay.
+- `cubic-bezier()` and `steps()` fall back to the default easing.
+- `:hover`/`:active` only apply to the final matched element, not an ancestor or sibling.
+- Grid tracks, placement, and alignment do not interpolate; keyframes flip them discretely at the midpoint.
 
 ## How It Works Internally
 

@@ -29,17 +29,17 @@ The `forge` renderer is **complete and opt-in**. Damage tracking + retained FBO 
 
 **`flash` remains the default renderer; `forge` is selected per app via `"renderer": "forge"`.** X/Y animations now flow through damage (old box at commit, new box present-side); only transformed movers escalate to fullscreen.
 
-## CSS Cascade Resolver
+## CSS Selector Coverage & Cascade Resolver
 
-The selector engine (`crates/morph-parser/`, CSS side) parses descendant / child (`>`) / adjacent (`+`) / sibling (`~`) combinators, compounds, pseudo-classes, and specificity. Runtime `:hover` / `:active` and ancestor-hover rules work. The **full cascade** — merging all matched rules by specificity and origin into a final computed style — is still being built out.
+Build output matches tag/class/id/universal selectors, descendant/child combinators, comma groups, trailing `:hover`/`:active`, and specificity. Sibling (`+`/`~`), attribute, structural pseudo-class, and ancestor-hover rules are accepted by the parser but do not match in the IR builder or emit in build output yet. The **full cascade** — merging all matched rules by specificity and origin into a final computed style — is still being built out.
 
-**Status:** Partial. Parse + specificity exist; full rule-merging cascade in progress.
+**Status:** Partial. The basic selector subset and specificity are shipped; broader selectors and full rule merging are tracked in [CSS Finalization for Basic Apps](../future/css/finalization.md).
 
 ## `position: relative` / `fixed` / `sticky`
 
-`position`, `left`, `right`, `top`, `bottom` parse and feature-gated runtime fields exist (`MORPH_FEATURE_POSITION`). Offset positioning is functional; **sticky is still in progress**.
+`position`, `left`, `right`, `top`, `bottom`, `fixed`, and `sticky` parse and run behind `MORPH_FEATURE_POSITION`. Relative offsets and sticky clamping are covered by `tests/runtime/position` and the position layout tests.
 
-**Status:** Partial.
+**Status:** Shipped for the supported positioning subset.
 
 ## Multi-Window Navigation
 

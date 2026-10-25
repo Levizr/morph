@@ -30,7 +30,7 @@ At 6,300+ lines, `builder.rs` is the largest single file in the Rust workspace. 
 
 ## The registries (`css_registry.rs`, `tailwind.rs`)
 
-**`css_registry.rs`** is the single source of truth for supported CSS: ~86 `KNOWN_PROPERTIES`, the `CSS_TO_IR` name map (`background-color` → `bg_color`, `flex-direction` → `flex_dir`, …), and `property_feature` mapping properties to `MORPH_FEATURE_*` flags (flex, radius, opacity, transform, animation, scroll, positioning). Unknown properties are rejected here, not deep in layout code.
+**`css_registry.rs`** is the single source of truth for supported CSS: 117 `KNOWN_PROPERTIES`, the `CSS_TO_IR` name map (`background-color` → `bg_color`, `flex-direction` → `flex_dir`, …), and `property_feature` mapping properties to `MORPH_FEATURE_*` flags (flex, radius, opacity, transform, animation, scroll, positioning). Unknown property names are rejected here, not deep in layout code; value-level validation is a separate gap tracked in [CSS Finalization](../../future/css/finalization.md#7-diagnostics-must-stop-lying).
 
 **`tailwind.rs`** (`TailwindResolver::resolve` / `resolve_many`) lowers 500+ utility classes to style values with no Node.js involved: a `static_map` for the plain cases, `resolve_negative` for `-mt-4`-style negation (numeric negation, not string fiddling), `parse_arbitrary` for `w-[37px]`-style escapes (every prefix covered, pinned by tests), and `transform_fn` + `negate_value` for transform utilities. Test names tell you the guarantees: `static_entries_cover_all_tiers`, `negative_utilities_negate_numerically`, `arbitrary_values_cover_every_prefix`, `unknown_and_malformed_classes_resolve_empty`. If a Tailwind class silently does nothing, this file (or the class spelling) is the suspect — never the renderer.
 

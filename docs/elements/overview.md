@@ -27,16 +27,18 @@ Morph renders native elements using OpenGL. Not all HTML elements are supported 
 | Element | Notes |
 |---|---|
 | `<strong>`, `<b>` | Bold text. |
-| `<em>`, `<i>` | Italic text. |
+| `<em>`, `<i>` | Inline text. Italic styling is not implemented yet; they currently render upright. |
 | `<small>` | Small text. |
-| `<code>`, `<kbd>`, `<samp>` | Monospace text. |
+| `<code>`, `<kbd>`, `<samp>` | Inline text. Monospace styling is not implemented yet; they use the default font. |
 | `<mark>` | Highlighted text. |
-| `<sub>`, `<sup>` | Subscript / superscript. |
-| `<ins>`, `<u>` | Underline. |
-| `<del>`, `` | Strikethrough. |
+| `<sub>`, `<sup>` | Smaller inline text. Baseline shift is not implemented yet. |
+| `<ins>`, `<u>` | Inline text. Underline is not implemented yet. |
+| `<del>`, `<s>` | Inline text. Strikethrough is not implemented yet. |
 | `<q>` | Inline quotation (styled as inline text). |
 | `<label>` | Inline label text. |
-| `<a>` | Link. `href="/route"` navigates the current window, `target="_blank"` opens a new window, external URLs open in the OS browser. |
+| `<a>` | Link. `href="/route"` navigates the current window, `target="_blank"` opens a new window, external URLs open in the OS browser. Links are colored but not underlined yet. |
+
+The missing italic, monospace, underline, strikethrough, and baseline effects depend on `font-style`, `font-family`, `text-decoration`, and vertical-align support. Track them in [CSS Finalization for Basic Apps](../future/css/finalization.md#2-typography-and-text-layout).
 
 ## Interactive Elements
 

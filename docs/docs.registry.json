@@ -316,7 +316,7 @@
           "morph native ui nodes",
           "morph jsx elements"
         ],
-        "lastUpdated": "2026-09-30",
+        "lastUpdated": "2026-10-25",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -427,7 +427,7 @@
           "css media queries",
           "responsive css"
         ],
-        "lastUpdated": "2026-10-24",
+        "lastUpdated": "2026-10-25",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -447,7 +447,7 @@
           "morph animate element",
           "morph css keyframes"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-10-25",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -467,7 +467,7 @@
           "morph smooth style change",
           "morph css animation"
         ],
-        "lastUpdated": "2026-10-16",
+        "lastUpdated": "2026-10-25",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -507,7 +507,7 @@
           "arrange elements morph",
           "morph flexbox example"
         ],
-        "lastUpdated": "2026-09-05",
+        "lastUpdated": "2026-10-25",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -527,7 +527,7 @@
           "morph atomic css",
           "morph tailwind css"
         ],
-        "lastUpdated": "2026-10-10",
+        "lastUpdated": "2026-10-25",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -2211,7 +2211,7 @@
           "morph current work",
           "morph roadmap now"
         ],
-        "lastUpdated": "2026-10-06",
+        "lastUpdated": "2026-10-25",
         "publishedAt": "2026-08-18",
         "priority": 0.7,
         "changefreq": "weekly"
@@ -2255,26 +2255,48 @@
           "morph css inheritance",
           "morph css cascade model"
         ],
-        "lastUpdated": "2026-09-30",
+        "lastUpdated": "2026-10-25",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
       },
       {
-        "title": "Morph box-shadow, outline & Margin Collapse (Planned)",
+        "title": "CSS Finalization for Basic Apps (Planned)",
+        "sidebarTitle": "Basic App Finalization",
+        "slug": "future/css/finalization",
+        "file": "future/css/finalization",
+        "status": "future",
+        "author": "PIYUSH",
+        "description": "The CSS gaps that still make basic apps fight the stylesheet: form states and selectors, typography and truncation, URL backgrounds and object-fit, calc/aspect-ratio, flex order/gaps, diagnostics, and the implementation order.",
+        "keywords": [
+          "morph css finalization",
+          "morph basic app css",
+          "morph css focus disabled",
+          "morph css line-height ellipsis",
+          "morph css background image",
+          "morph css calc aspect ratio",
+          "morph css diagnostics"
+        ],
+        "lastUpdated": "2026-10-25",
+        "publishedAt": "2026-10-25",
+        "priority": 0.6,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "Morph box-shadow, outline & Margin Collapse (Shipped)",
         "sidebarTitle": "More Properties",
         "slug": "future/css/more-properties",
         "file": "future/css/more-properties",
-        "status": "future",
+        "status": "production",
         "author": "PIYUSH",
-        "description": "More CSS in Morph: margin collapse shipped behind MORPH_FEATURE_MARGIN_COLLAPSE; box-shadow, outline, and SDF shadow rendering remain future.",
+        "description": "Design record: box-shadow, outline, and margin collapse are shipped in Morph; current limits and focus-ring wiring live in CSS Properties and CSS Finalization for Basic Apps.",
         "keywords": [
           "morph box-shadow",
           "morph outline css",
           "morph margin collapse",
           "morph more css properties"
         ],
-        "lastUpdated": "2026-09-30",
+        "lastUpdated": "2026-10-25",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2295,7 +2317,7 @@
           "morph beam border",
           "morph future css"
         ],
-        "lastUpdated": "2026-10-09",
+        "lastUpdated": "2026-10-25",
         "publishedAt": "2026-09-29",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2333,7 +2355,7 @@
           "morph timing functions",
           "morph animation internals"
         ],
-        "lastUpdated": "2026-10-07",
+        "lastUpdated": "2026-10-25",
         "publishedAt": "2026-10-07",
         "priority": 0.5,
         "changefreq": "monthly"
@@ -2682,7 +2704,7 @@
           "morph keyboard input",
           "morph input field"
         ],
-        "lastUpdated": "2026-09-30",
+        "lastUpdated": "2026-10-25",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"

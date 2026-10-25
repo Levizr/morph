@@ -94,7 +94,7 @@ Separate implementation, whole-style snapshots:
 1. `onHover/onActive` → `_retargetState()`: swaps the `animations` list instantly (hover animations run only while hovered), snapshots `pre/pressStyle`, builds `HoverTransition{start=current, target}` when `m_transitionDuration > 0`, else snaps.
 2. Per frame `_updateStateTransition()`: `interpolateStyles(style, start, target, easing(t))` — lerps colors/opacity/padding/radius/font-size, lerps lengths only when units match (else snaps to target, like browsers), lerps matrices via `mat4Interpolate()`, snaps discrete fields (`display`, `flex-direction`, `font-weight`).
 3. Release path `buildReleaseStyle()` unwinds OFF states in reverse delta-stack order; **in-flight transitions snap to target first** so the equality checks unwind cleanly under rapid clicks (`style.cpp:402`).
-4. Ancestor-hover (`.parent:hover .child`) has its own parallel `AncestorHoverTransition` state machine.
+4. The runtime has a parallel `AncestorHoverTransition` state machine for ancestor-hover rules, but build codegen does not emit those rules yet. Treat `.parent:hover .child` as unsupported in built apps until [CSS Finalization](finalization.md#1-state-and-selector-coverage) lands.
 
 ### 3.4 Compositor half-loop (`runtime/cpp/core/compositor.cpp`, `render_frame.h`)
 
@@ -289,7 +289,8 @@ Today: screenshot fixtures (`animation-test`, `animation-test-2.0`) plus `--morp
 | Piece | State |
 |---|---|
 | CSS `@keyframes` + `animation-*`, L2 sampling, easing, fill/direction | ✅ Shipped |
-| `HoverTransition` + ancestor-hover interpolation | ✅ Shipped |
+| `HoverTransition` interpolation | ✅ Shipped |
+| Ancestor-hover interpolation | 🟡 Runtime state machine exists; build emission pending ([Finalization](finalization.md#1-state-and-selector-coverage)) |
 | Compositor vsync interpolation (fixed set) | ✅ Shipped (half-loop, §3.4) |
 | Feature-gated dead-code elimination, baked keyframe values | ✅ Shipped |
 | Consistency test across parallel property maps | ❌ Phase 0, step 1 |

@@ -6,6 +6,8 @@ Morph supports a subset of CSS properties that map to native OpenGL rendering. P
 
 Lengths accept: `px`, bare numbers (treated as px), `%`, `em`, `rem` (1rem = 16px), `vh`, `vw`, and absolute units `pt`, `pc`, `cm`, `mm`, `in` (converted at 96 dpi). `%`, `vh`, and `vw` resolve at layout time against the parent/viewport.
 
+`calc()`, general `min()`/`max()`/`clamp()`, and CSS custom properties are not evaluated yet. Unsupported values on a known property are dropped without a warning today; check the [CSS finalization plan](../future/css/finalization.md) for planned diagnostics.
+
 ## Sizing
 
 | Property | Values | Default | Notes |
@@ -40,7 +42,7 @@ Lengths accept: `px`, bare numbers (treated as px), `%`, `em`, `rem` (1rem = 16p
 | Property | Values | Default | Notes |
 |---|---|---|---|
 | `background-color` | hex, rgb, named | `transparent` | Transparent by default (no white background). |
-| `background`, `background-image` | gradients | — | `linear-gradient()`, `radial-gradient()`, `conic-gradient()` and their `repeating-*` variants, with full stop/hint/position syntax. Verified against Chrome (≤5/255 per channel). |
+| `background`, `background-image` | gradients | — | `linear-gradient()`, `radial-gradient()`, `conic-gradient()` and their `repeating-*` variants, with full stop/hint/position syntax. Verified against Chrome (≤5/255 per channel). URL images and `background-size`/`position`/`repeat` are not supported yet; use an absolutely positioned `<img>` as the current workaround. |
 | `border-image` | gradient + slice | — | Gradient border-images evaluate directly in border space; the slice value is accepted but does not change rendering. Linear gradients match Chrome; radial/conic ring evaluation is Morph's simplification of slice-and-stretch. |
 | `box-shadow` | shadow list | `none` | `offset-x offset-y blur spread color` + `inset`, comma-separated, up to 4 layers. Verified against Chrome (≤2/255 per channel). |
 | `outline` | shorthand | — | Non-layout ring painted outside the border edge: `outline: 2px dashed #4cc2ff`. |
@@ -67,12 +69,14 @@ Lengths accept: `px`, bare numbers (treated as px), `%`, `em`, `rem` (1rem = 16p
 | Property | Values | Default | Notes |
 |---|---|---|---|
 | `font-size` | px, %, em, rem, bare number | `16px` | Inherits from parent. |
-| `font-weight` | `normal`, `bold`, `lighter`, `bolder`, 100–900 | `normal` | Bold uses `DejaVuSans-Bold.ttf`. |
+| `font-weight` | `normal`, `bold`, `lighter`, `bolder`, 100–900 | `normal` | Only two faces render: `bold` and 600–900 use `DejaVuSans-Bold.ttf`; `normal`, 100–500, `lighter`, and `bolder` render regular. |
 | `text-align` | `left`, `center`, `right`, `justify` | `left` | Inherits from parent. `justify` behaves like `left`. |
 | `letter-spacing` | px, em, rem, `normal` | `normal` (`0`) | Inherits. Applied to measurement, wrapping, alignment, and glyph advances. |
 | `text-shadow` | shadow list | `none` | `offset-x offset-y [blur] [color]`, comma-separated, up to 4 layers. Omitted color means `currentcolor`; blur is approximated by a soft multi-pass draw. |
 
 Style inheritance: `color`, `font-size`, `font-weight`, `text-align`, `letter-spacing`, and `text-shadow` cascade from parent to children.
+
+Not yet supported: `line-height`, `font-family`/`@font-face`, `font-style`, `text-decoration`, `text-transform`, `white-space`, `text-overflow`, `word-break`, and `overflow-wrap`. Multi-line spacing and no-wrap/ellipsis layouts therefore need workarounds; see the [CSS finalization plan](../future/css/finalization.md#2-typography-and-text-layout). Related HTML tags are listed in [Elements Overview](../elements/overview.md#text-elements).
 
 ## Responsive Media Queries
 
@@ -109,9 +113,9 @@ Conditions outside this subset — `orientation`, `pointer`, `prefers-*`, `not`,
 
 | Property | Values | Default | Notes |
 |---|---|---|---|
-| `display` | `block`, `inline`, `inline-block`, `flex`, `grid`, `hidden`, `none` | `block` | `none` removes the element from layout and rendering. |
+| `display` | `block`, `inline`, `inline-block`, `flex`, `grid`, `none` | `block` | `none` removes the element from layout and rendering. `inline-flex` is not implemented yet. |
 | `overflow` | `visible`, `hidden`, `scroll`, `auto` | `visible` | `auto`/`scroll` enable scroll containers. |
-| `position` | `static`, `absolute`, `relative`, `fixed` | `static` | `relative`/`fixed` in progress. |
+| `position` | `static`, `absolute`, `relative`, `fixed`, `sticky` | `static` | All five values are implemented; `fixed` and `sticky` are verified by runtime fixtures. |
 | `left` | px | — | |
 | `right` | px | — | |
 | `top` | px | — | |
@@ -130,7 +134,9 @@ Conditions outside this subset — `orientation`, `pointer`, `prefers-*`, `not`,
 | `flex-wrap` | `nowrap`, `wrap`, `wrap-reverse` | `nowrap` | |
 | `justify-content` | `flex-start`, `center`, `flex-end`, `space-between`, `space-around` | `flex-start` | |
 | `align-items` | `flex-start`, `center`, `flex-end`, `stretch` | `stretch` | |
-| `gap` | px | `0` | |
+| `gap` | px | `0` | One value only in flex. Two-value `gap`, `row-gap`, and `column-gap` currently apply to grid, not flex. |
+
+`order` is not implemented; DOM order is used for flex and grid. `display: inline-flex` is also not implemented yet. See [Flexbox](flexbox.md#limitations) for the current limits.
 
 See [Flexbox](flexbox.md) for a deep-dive.
 
@@ -238,11 +244,11 @@ Minimal overlay style like modern browsers: no track background by default, just
 
 | Property | Values | Default | Notes |
 |---|---|---|---|
-| `transition` | shorthand | — | `all 0.3s ease-in-out` |
-| `transition-duration` | seconds | `0` | |
-| `transition-timing-function` | `linear`, `ease`, `ease-in`, `ease-out`, `ease-in-out` | `ease-in-out` | `ease` is an alias for `ease-in-out`. |
+| `transition` | shorthand | — | `all 0.3s ease-in-out`. The first duration and easing token are used for the whole style delta. |
+| `transition-duration` | seconds | `0` | One duration for every changed property. |
+| `transition-timing-function` | `linear`, `ease`, `ease-in`, `ease-out`, `ease-in-out` | `ease-in-out` | `ease` is an alias for `ease-in-out`. `cubic-bezier()` and `steps()` fall back to the default. |
 
-See [Transitions](transitions.md) for details.
+`transition-property`, `transition-delay`, per-property durations, and multiple independently timed transitions are not represented yet. See [Transitions](transitions.md#limitations) for details.
 
 ## Transform
 
@@ -267,3 +273,15 @@ See [Transforms](transforms.md) for details.
 | `animation-fill-mode` | `none`, `forwards`, `backwards`, `both` | `none` | |
 
 See [Animations](animations.md) for details.
+
+## Not yet supported for basic apps
+
+The following gaps are tracked in the [CSS finalization plan](../future/css/finalization.md):
+
+- **Selectors and states:** `:focus`, `:focus-visible`, `:disabled`, `:checked`, standalone structural pseudo-classes, attribute selectors, sibling combinators, and ancestor/group hover. Only `:hover`/`:active` on the matched element are emitted.
+- **Text:** `line-height`, custom fonts, italic, underline/strikethrough, text transform, no-wrap, and ellipsis.
+- **Images:** URL backgrounds, background sizing/position/repeat, and `object-fit`.
+- **Sizing/layout:** `calc()`, general `min()`/`max()`/`clamp()`, `aspect-ratio`, the `inset` shorthand, `inline-flex`, `order`, and two-axis flex gaps.
+- **Polish:** `filter`/`backdrop-filter`/`clip-path`, general `currentColor`, per-property transitions, dark-mode media queries, and cursor values beyond `default`/`pointer`/`text`.
+
+For the app-level triage and implementation order, see [CSS Finalization for Basic Apps](../future/css/finalization.md).

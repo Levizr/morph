@@ -4,7 +4,7 @@
 
 > **Note:** This is a future plan, not a commitment. The syntax and API shown here are proposals — they can be completely different when actually implemented.
 
-A complete runtime CSS cascade: merging every matched rule — across CSS files, Tailwind utilities, inline styles, and defaults — by **specificity and origin** into one final computed style per element. The selector engine exists; the cascade resolver (planned as a Rust stage in the IR pipeline) is not built yet.
+A complete runtime CSS cascade: merging every matched rule — across CSS files, Tailwind utilities, inline styles, and defaults — by **specificity and origin** into one final computed style per element. A selector subset exists; the cascade resolver (planned as a Rust stage in the IR pipeline) is not built yet.
 
 ## Why it matters
 
@@ -18,8 +18,10 @@ Today styles resolve mostly at IR-build time (inline > Tailwind > CSS rules > UA
 
 | Piece | State |
 |---|---|
-| Selector engine (`crates/morph-parser/` CSS side) — descendant/child/adjacent/sibling combinators, compounds, pseudo-classes, specificity | ✅ Shipped |
-| Runtime `:hover` / `:active` / ancestor-hover rules | ✅ Shipped |
+| Selector matching — tag/class/id/universal, descendant/child combinators, comma groups, trailing `:hover`/`:active`, specificity | ✅ Shipped |
+| Sibling/attribute/structural pseudo-class selectors, ancestor hover in build output | ❌ Not built — tracked in [CSS Finalization](finalization.md#1-state-and-selector-coverage) |
+| Runtime `:hover` / `:active` style deltas | ✅ Shipped |
+| Runtime ancestor-hover state machine | 🟡 Runtime path exists; build codegen does not emit rules yet |
 | Builder cascade (inline > Tailwind > CSS rules > defaults) | ✅ Shipped |
 | Cascade resolver | ❌ Not built — planned as a Rust stage in the IR pipeline |
 
@@ -30,7 +32,7 @@ Today styles resolve mostly at IR-build time (inline > Tailwind > CSS rules > UA
 resolve(element, rules) -> computed_style
 ```
 
-1. Collect all matching rules for the element (selector engine)
+1. Collect all matching rules for the element (extend the selector subset first)
 2. Sort by origin + `!important` + specificity + source order
 3. Merge declarations per property into a computed style
 4. Apply inheritance for inherited properties (`color`, `font-size`, `font-weight`, `text-align`)
@@ -40,13 +42,13 @@ The C++ side then deserializes or emits the final computed style — **pixel-ide
 
 ## Open questions
 
-- **Where it runs** — Python at IR-build time (today) vs. C++ at runtime (for dynamic styles). The runtime path is what makes the resolver meaningful
+- **Where it runs** — the Rust IR build (today) vs. C++ at runtime (for dynamic styles). The runtime path is what makes the resolver meaningful
 - **`!important`** — does it belong in `.mx` CSS? (Trivial to support once the cascade sorts by origin)
 - **CSS variables** (`--custom-props`) — natural extension once the cascade exists, currently unsupported
 
 ## Build steps (when picked up)
 
-1. Implement rule collection + specificity sort in `style/resolver.py`
+1. Implement rule collection + specificity sort in the Rust IR pipeline
 2. Merge declarations with inheritance
 3. Wire `!important` and source-order semantics
 4. Extend `morph check` cascade diagnostics

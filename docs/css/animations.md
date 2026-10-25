@@ -23,7 +23,7 @@ CSS animations let you define keyframe-based animations that run automatically �
 animation: pulse 2s ease-in-out 0s 1 normal forwards;
 ```
 
-All properties are optional — omitted values use their defaults.
+All properties are optional — omitted values use their defaults. The supported timing functions are `linear`, `ease`, `ease-in`, `ease-out`, and `ease-in-out`; `cubic-bezier()` and `steps()` fall back to the default easing.
 
 ## Longhand Properties
 
@@ -105,17 +105,23 @@ Or in shorthand:
 | `backwards` | Element applies the first keyframe style during the delay |
 | `both` | Combines `forwards` and `backwards` |
 
-## Easing in Keyframes
+## Timing Functions
 
-Use `animation-timing-function` inside keyframes for per-segment easing:
+Set the easing on the animation, not inside individual keyframes:
 
 ```css
+.box {
+  animation: bounce 1s ease-in-out infinite;
+}
+
 @keyframes bounce {
-  0% { transform: translateY(0); animation-timing-function: ease-out; }
-  50% { transform: translateY(-20px); animation-timing-function: ease-in; }
+  0% { transform: translateY(0); }
+  50% { transform: translateY(-20px); }
   100% { transform: translateY(0); }
 }
 ```
+
+Per-keyframe `animation-timing-function` is not supported yet; the animation-level timing function applies to the whole timeline. Spec-exact keyword curves, `cubic-bezier()`, `steps()`, and per-keyframe easing are tracked in [Animation Engine](../future/css/fixing-animation.md).
 
 ## Multi-Stop Keyframes
 

@@ -2,6 +2,8 @@
 
 Morph includes a built-in Tailwind CSS resolver with 500+ common utility classes. No Node.js or Tailwind installation required.
 
+Tailwind utilities resolve into the same CSS surface documented in [CSS Properties](properties.md). When a utility targets a property or value the IR does not accept, it is skipped; this page marks the known no-op classes below.
+
 ## Usage
 
 Add Tailwind classes directly to `className`:
@@ -56,9 +58,13 @@ Negative values work too:
 | `text-3xl` | 30px |
 | `text-4xl` | 36px |
 
+Tailwind normally pairs these classes with a `line-height`. Morph currently drops that companion value because `line-height` has no IR field yet. Once typography finalization lands, the size utilities can carry their intended line height; until then the renderer uses its font metrics.
+
 ### Font Weight
 
 `font-thin` (100), `font-light` (300), `font-normal` (400), `font-medium` (500), `font-semibold` (600), `font-bold` (700), `font-extrabold` (800)
+
+The runtime has two faces today: 600–800 render bold, while 100–500 render regular. Intermediate weights need additional font faces.
 
 ### Text Align
 
@@ -66,7 +72,9 @@ Negative values work too:
 
 ### Display
 
-`block`, `inline`, `inline-block`, `flex`, `inline-flex`, `hidden`
+`block`, `inline`, `inline-block`, `flex`, `hidden`
+
+`inline-flex` is present in the resolver but has no style-emitter mapping yet, so it currently behaves like the default block display. Use `inline-block` or a wrapper until `inline-flex` lands.
 
 ### Flexbox
 
@@ -112,11 +120,9 @@ Negative values work too:
 
 ### Cursor
 
-`cursor-pointer`, `cursor-default`, `cursor-not-allowed`
+`cursor-pointer`, `cursor-default`
 
-### User Select
-
-`select-none`, `select-text`, `select-all`
+`cursor-not-allowed` is in the resolver but falls back to the default cursor because the runtime only models `default`, `pointer`, and `text`.
 
 ### Transforms
 
@@ -130,7 +136,7 @@ Negative values work too:
 
 All transform utilities also support arbitrary values: `rotate-[45deg]`, `scale-[1.2]`, etc.
 
-## Missing Classes
+## Missing and no-op Classes
 
 If a Tailwind class isn't in the static map, it's silently skipped. Use arbitrary value syntax as a fallback:
 
@@ -138,3 +144,14 @@ If a Tailwind class isn't in the static map, it's silently skipped. Use arbitrar
 {/* bg-orange-500 isn't in the static map */}
 <div className="bg-[#f97316]">Works anyway</div>
 ```
+
+Some names are present but do not reach the runtime today:
+
+| Utility | Current behavior |
+|---|---|
+| `text-*` size classes | Font size applies; companion `line-height` is dropped |
+| `inline-flex` | Resolves to `display: inline-flex`, which is not emitted |
+| `select-none`, `select-text`, `select-all` | `user-select` has no IR field, so these are no-ops |
+| `cursor-not-allowed` | Falls back to the default cursor |
+
+Arbitrary values only help when the underlying property/value is supported; `bg-[url(...)]` still cannot produce a CSS background image. Track the fixes in [CSS Finalization for Basic Apps](../future/css/finalization.md).

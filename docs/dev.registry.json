@@ -156,7 +156,7 @@
           "morph Tailwind resolver",
           "morph IR serializer"
         ],
-        "lastUpdated": "2026-10-22",
+        "lastUpdated": "2026-10-25",
         "publishedAt": "2026-09-19",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -343,7 +343,7 @@
           "morph dirty flags",
           "morph hover transition style"
         ],
-        "lastUpdated": "2026-09-20",
+        "lastUpdated": "2026-10-25",
         "publishedAt": "2026-09-19",
         "priority": 0.7,
         "changefreq": "monthly"

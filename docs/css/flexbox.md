@@ -46,7 +46,9 @@ This makes the element a flex container. Children become flex items laid out in 
 .container { gap: 16px; }
 ```
 
-Adds spacing between flex items without adding margins. Works in both row and column directions.
+Adds spacing between flex items without adding margins. One value works in both row and column directions.
+
+`gap: 8px 16px`, `row-gap`, and `column-gap` currently reach the grid layout only. Flex still reads the single `gap` field, so a two-value gap silently removes flex spacing. Until this lands, use one-value `gap` in flex containers or per-item margins for different axes.
 
 ## Flex Shorthand
 
@@ -127,3 +129,12 @@ body {
   flex: 1;  /* fills remaining space */
 }
 ```
+
+## Limitations
+
+- `display: inline-flex` is not implemented. Use `inline-block` for the outer box and `display: flex` on an inner container, or wait for the finalization pass.
+- `order` is ignored; flex items paint and lay out in DOM order.
+- `row-gap`/`column-gap` and two-value `gap` are grid-only for now (see [Gap](#gap)).
+- Grid is the better choice for two-dimensional layouts; flex remains one-dimensional even when wrapping.
+
+See [CSS Finalization for Basic Apps](../future/css/finalization.md#4-sizing-and-layout-conveniences) for the planned fixes.

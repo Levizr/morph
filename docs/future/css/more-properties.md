@@ -37,9 +37,9 @@ All three proposals in this record have landed. The notes below are retained as 
 | `box-shadow` parsing + painting | ✅ Shipped |
 | `outline` parsing + ring painting | ✅ Shipped |
 | Margin collapse | ✅ Shipped |
-| Focus rings via outline | ❌ Not started (`:focus` state not modeled) |
+| Focus rings via outline | ❌ Not started (`:focus` state not modeled; tracked in [CSS Finalization](finalization.md#1-state-and-selector-coverage)) |
 
 ## Remaining work
 
-1. `:focus` / `:focus-visible` selectors so outline can serve as a focus ring
+1. `:focus` / `:focus-visible` selectors so outline can serve as a focus ring — tracked in [CSS Finalization](finalization.md#1-state-and-selector-coverage)
 2. Optional shader-accelerated text-shadow blur refinement (currently a soft multi-pass approximation)
