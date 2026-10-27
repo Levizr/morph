@@ -1090,6 +1090,12 @@ impl IRBuilder {
             }
         }
         for e in &comp.effects {
+            if let Some(event) = find_event_subscription(&e.callback, &frame.events) {
+                anyhow::bail!(
+                    "mx-event-scope: `{event}.on(...)` inside `morphEffect` in component `{}` has no cleanup scope; move the subscription to the component body so it is removed on unmount\n  hint: subscribe at the top level of `{0}` (or inside the route that owns the window) and keep the callback inline\n  Learn more: https://morph.levizr.com/docs/errors/mx-event-scope",
+                    comp.name
+                );
+            }
             let callback = prepare_source(&e.callback, frame);
             let Some(out) =
                 self.translate_logic(&callback, &frame.vars, &frame.types, &frame.events)
@@ -1123,6 +1129,12 @@ impl IRBuilder {
             for stmt in &comp.body_stmts {
                 src.push_str(stmt);
                 src.push('\n');
+            }
+            if let Some(event) = find_event_subscription(&src, &frame.events) {
+                anyhow::bail!(
+                    "mx-event-scope: `{event}.on(...)` inside a branch/loop in component `{}` has no cleanup scope; move the subscription to the component body so it is removed on unmount\n  Learn more: https://morph.levizr.com/docs/errors/mx-event-scope",
+                    comp.name
+                );
             }
             let src = prepare_source(&src, frame);
             // Mutable locals read through `peek()` inside the setup effect:
@@ -2839,6 +2851,13 @@ impl IRBuilder {
                     }
                 }
                 node.style = style;
+                if let Some(morph_parser::JsxPropValue::Style(map)) = props.get("style") {
+                    for (prop, val) in map {
+                        if let morph_parser::StyleValue::Expr(expr) = val {
+                            node.reactive_style.insert(prop.clone(), capture_raw(expr, frame));
+                        }
+                    }
+                }
                 if !hover_style.is_empty_style() {
                     node.hover_style = Some(hover_style);
                 }
@@ -2997,6 +3016,11 @@ impl IRBuilder {
                     };
                     if let Some(src) = handler_src {
                         if let Some(trigger) = event_trigger(k) {
+                            if let Some(event) = find_event_subscription(&src, &frame.events) {
+                                anyhow::bail!(
+                                    "mx-event-scope: `{event}.on(...)` inside the `{k}` handler on <{tag}> ({line}:{col}) has no cleanup scope; move the subscription to the component body so it is removed on unmount\n  Learn more: https://morph.levizr.com/docs/errors/mx-event-scope"
+                                );
+                            }
                             node.events.push(IREvent {
                                 trigger: trigger.into(),
                                 action: "call".into(),
@@ -4322,6 +4346,80 @@ const fn ident_end(src: &str, start: usize) -> usize {
     i
 }
 
+/// Find an `<event>.on(…)` call for a channel visible in `events`.
+///
+/// Top-level subscriptions are lifted by the parser into `event_subs` and get
+/// lifecycle-managed cleanup. One nested inside an effect/handler has no
+/// such owner, so it would keep running after the component unmounts. Detect
+/// it before translation so the failure is a clear Morph error instead of
+/// undeclared C++ identifiers or a leaked listener.
+fn find_event_subscription<'a>(src: &'a str, events: &HashMap<String, String>) -> Option<&'a str> {
+    let bytes = src.as_bytes();
+    let mut cursor = 0usize;
+    while cursor < bytes.len() {
+        let ch = src[cursor..].chars().next()?;
+        if ch == '"' || ch == '\'' || ch == '`' {
+            cursor = str_lit_end(src, cursor);
+            continue;
+        }
+        if ch == '/'
+            && cursor + 1 < bytes.len()
+            && (bytes[cursor + 1] == b'/' || bytes[cursor + 1] == b'*')
+        {
+            if bytes[cursor + 1] == b'/' {
+                cursor = src[cursor..].find('\n').map_or(bytes.len(), |n| cursor + n);
+            } else {
+                cursor = src[cursor..].find("*/").map_or(bytes.len(), |n| cursor + n + 2);
+            }
+            continue;
+        }
+        // Event names become C++ identifiers, so only ASCII names are
+        // interesting here. Skipping a full char keeps Unicode source safe.
+        if !(ch.is_ascii_alphabetic() || ch == '_' || ch == '$') {
+            cursor += ch.len_utf8();
+            continue;
+        }
+        let name_end = ident_end(src, cursor);
+        let name = &src[cursor..name_end];
+        let before_ok = cursor == 0
+            || src[..cursor].chars().next_back().is_some_and(|before| {
+                !(before.is_alphanumeric() || before == '_' || before == '$' || before == '.')
+            });
+        if before_ok && events.contains_key(name) {
+            let mut dot_cursor = name_end;
+            while let Some(ws) = src[dot_cursor..].chars().next().filter(|ch| ch.is_whitespace()) {
+                dot_cursor += ws.len_utf8();
+            }
+            if bytes.get(dot_cursor) == Some(&b'.') {
+                let mut method_cursor = dot_cursor + 1;
+                while let Some(ws) =
+                    src[method_cursor..].chars().next().filter(|ch| ch.is_whitespace())
+                {
+                    method_cursor += ws.len_utf8();
+                }
+                if src[method_cursor..].starts_with("on") {
+                    let after_on = method_cursor + 2;
+                    let on_boundary = src[after_on..]
+                        .chars()
+                        .next()
+                        .is_none_or(|next| !(next.is_alphanumeric() || next == '_' || next == '$'));
+                    let mut paren_cursor = after_on;
+                    while let Some(ws) =
+                        src[paren_cursor..].chars().next().filter(|ch| ch.is_whitespace())
+                    {
+                        paren_cursor += ws.len_utf8();
+                    }
+                    if on_boundary && bytes.get(paren_cursor) == Some(&b'(') {
+                        return Some(name);
+                    }
+                }
+            }
+        }
+        cursor = name_end;
+    }
+    None
+}
+
 /// Rewrite `morphEmit(a, b)` to a morpher-safe placeholder for the JS
 /// context.
 fn rewrite_emit_for_js(src: &str) -> String {
@@ -5605,7 +5703,13 @@ fn apply_css_prop(style: &mut IRStyle, prop: &str, val: &str) -> Option<&'static
             }
         }
         "color" => {
-            if let Some(c) = parse_color(val) {
+            // `inherit` restores the initial sentinel. Codegen treats a
+            // default-colored non-text node as an inheritance hop, which is
+            // how form controls opt out of their UA `#010101` color.
+            if val.trim().eq_ignore_ascii_case("inherit") {
+                style.color = [0.0, 0.0, 0.0, 1.0];
+                Some("color")
+            } else if let Some(c) = parse_color(val) {
                 style.color = c;
                 Some("color")
             } else {
@@ -7562,6 +7666,42 @@ mod tests {
     }
 
     #[test]
+    fn inline_style_expressions_become_reactive_styles() {
+        use morph_parser::StyleValue;
+        let builder = IRBuilder::new();
+        let mut style = HashMap::new();
+        style.insert(
+            "color".to_string(),
+            StyleValue::Expr("theme == \"dark\" ? \"#ffffff\" : \"#000000\"".to_string()),
+        );
+        style.insert("padding".to_string(), StyleValue::Static("8px".to_string()));
+        let mut props = HashMap::new();
+        props.insert("style".to_string(), JsxPropValue::Style(style));
+        let node = builder.build_node(
+            &morph_parser::JsxNode::Element {
+                tag: "div".to_string(),
+                props,
+                children: Vec::new(),
+                self_closing: true,
+                line: 0,
+                col: 0,
+            },
+            &[],
+            0,
+            &[],
+            &HashMap::new(),
+            &HashMap::new(),
+            &mut Vec::new(),
+            &HashMap::new(),
+        );
+        assert_eq!(
+            node.reactive_style.get("color").map(String::as_str),
+            Some("theme == \"dark\" ? \"#ffffff\" : \"#000000\"")
+        );
+        assert!(!node.reactive_style.contains_key("padding"));
+    }
+
+    #[test]
     fn template_className_analyzes_ternary_branches() {
         use morph_parser::{MxComponent, MxSource, StateVar};
         let mut props = HashMap::new();
@@ -8950,6 +9090,16 @@ export default function App() {
     }
 
     #[test]
+    fn color_inherit_clears_explicit_color() {
+        let mut s = IRStyle::default();
+        s.color = [0.0039, 0.0039, 0.0039, 1.0]; // UA button sentinel
+        assert_eq!(apply_css_prop(&mut s, "color", "inherit"), Some("color"));
+        assert_eq!(s.color, [0.0, 0.0, 0.0, 1.0]);
+        assert_eq!(apply_css_prop(&mut s, "color", "#ff0000"), Some("color"));
+        assert_eq!(s.color, [1.0, 0.0, 0.0, 1.0]);
+    }
+
+    #[test]
     fn outline_letter_spacing_and_text_shadow_parse() {
         let mut s = IRStyle::default();
         assert_eq!(apply_css_prop(&mut s, "outline", "2px solid #ff0000"), Some("outline"));
@@ -9048,5 +9198,85 @@ export default function App() {
         assert_eq!((wide.min_width, wide.max_width), (601, None));
         assert_eq!(wide.style.width, Some(Length::Px(300.0)));
         assert_eq!(wide.style.bg_color, [0.066_666_67, 0.066_666_67, 0.066_666_67, 1.0]);
+    }
+
+    #[test]
+    fn event_subscription_scanner_ignores_strings_comments_and_other_methods() {
+        let events = HashMap::from([("prefs".to_string(), "evt:prefs".to_string())]);
+        assert_eq!(
+            find_event_subscription("morphEffect(() => { prefs.on((p) => {}) })", &events),
+            Some("prefs")
+        );
+        assert_eq!(find_event_subscription("prefs . on (handler)", &events), Some("prefs"));
+        assert_eq!(find_event_subscription("obj.prefs.on(handler)", &events), None);
+        assert_eq!(find_event_subscription("prefs.online(handler)", &events), None);
+        assert_eq!(find_event_subscription("console.log('prefs.on(x)')", &events), None);
+        assert_eq!(find_event_subscription("// prefs.on(x)\nprefs.emit(1)", &events), None);
+        // Non-ASCII source must advance by whole chars; a byte-wise scan
+        // would stall on the continuation byte of `é`.
+        assert_eq!(find_event_subscription("const café = 1; prefs.on(x)", &events), Some("prefs"));
+        assert_eq!(find_event_subscription("const caféprefs.on(x)", &events), None);
+    }
+
+    #[test]
+    fn nested_channel_subscription_in_effect_is_rejected() {
+        let root = scratch("nested-sub");
+        write_file(
+            &root,
+            "store.mx",
+            "import { morphEvent } from 'morph'\nexport const prefs = morphEvent<string>()\n",
+        );
+        write_file(
+            &root,
+            "App.mx",
+            r#"
+import { morphEffect } from 'morph'
+import { prefs } from './store.mx'
+
+export default function App() {
+  morphEffect(() => {
+    prefs.on((p) => {})
+  }, [])
+  return <body />
+}
+"#,
+        );
+        let graph = morph_parser::resolve_graph(&root.join("App.mx"), &root).unwrap();
+        let err = IRBuilder::new()
+            .build_with_graph(&graph, &[], &HashMap::new())
+            .expect_err("nested channel subscription must fail");
+        let msg = err.to_string();
+        assert!(msg.contains("mx-event-scope"), "{msg}");
+        assert!(msg.contains("morphEffect"), "{msg}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn nested_channel_subscription_in_handler_is_rejected() {
+        let root = scratch("nested-handler-sub");
+        write_file(
+            &root,
+            "store.mx",
+            "import { morphEvent } from 'morph'\nexport const prefs = morphEvent<string>()\n",
+        );
+        write_file(
+            &root,
+            "App.mx",
+            r#"
+import { prefs } from './store.mx'
+
+export default function App() {
+  return <button onClick={() => { prefs.on((p) => {}) }}>subscribe</button>
+}
+"#,
+        );
+        let graph = morph_parser::resolve_graph(&root.join("App.mx"), &root).unwrap();
+        let err = IRBuilder::new()
+            .build_with_graph(&graph, &[], &HashMap::new())
+            .expect_err("nested channel subscription must fail");
+        let msg = err.to_string();
+        assert!(msg.contains("mx-event-scope"), "{msg}");
+        assert!(msg.contains("onClick"), "{msg}");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -1,13 +1,11 @@
-/* ── Material authenticator theme ───────────────────────
-   One stylesheet, two themes. The root .app carries theme-dark /
-   theme-light (+ code-normal / code-large); every themed value hangs
-   off those ancestor classes, so switching theme is a className swap
-   with zero style writes. contrast-tested pairs:
-   dark  bg #000 / text #f5f5f5 / code #8fd0f7
-   light bg #fff / text #1f1f1f / code #0b57d0                        */
+/* ── Material authenticator layout ─────────────────────────
+   Dynamic colors and code sizes are inline styles so they travel
+   through Morph's reactive style path. This sheet owns structure and
+   static control resets only.                                      */
 
 body {
   background-color: #000000;
+  padding: 0px;
 }
 
 .app {
@@ -15,14 +13,6 @@ body {
   flex-direction: column;
   width: 100%;
   height: 100%;
-}
-.theme-dark {
-  background-color: #000000;
-  color: #f5f5f5;
-}
-.theme-light {
-  background-color: #ffffff;
-  color: #1f1f1f;
 }
 
 /* ── Home: top bar ──────────────────────────────────────── */
@@ -68,27 +58,53 @@ body {
   border-radius: 26px;
   gap: 10px;
 }
-.theme-dark .searchbar {
-  background-color: #2e2e30;
-}
-.theme-light .searchbar {
-  background-color: #f1f3f4;
-}
 .iconbtn {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0px;
+  border-width: 0px;
   background-color: transparent;
-  font-size: 20px;
   color: #b5b5b5;
   cursor: pointer;
 }
+.hamburger {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  width: 18px;
+  height: 14px;
+}
+.hamburger-line {
+  width: 18px;
+  height: 2px;
+  border-radius: 2px;
+  background-color: #b5b5b5;
+}
 .search-field {
   flex-grow: 1;
+  min-width: 0px;
   height: 40px;
+  margin-left: -10px;
+  padding: 0px;
+  border-width: 0px;
   background-color: transparent;
   font-size: 15px;
 }
 .cloud {
-  font-size: 18px;
-  color: #66bb6a;
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+}
+.cloud-img {
+  width: 19px;
+  height: 14px;
 }
 
 /* ── Home: account list ─────────────────────────────────── */
@@ -96,8 +112,12 @@ body {
   display: flex;
   flex-direction: column;
   flex-grow: 1;
+  min-height: 0px;
   overflow: auto;
-  padding-bottom: 90px;
+  padding-bottom: 74px;
+  scrollbar-width: 0px;
+  scrollbar-thumb-color: transparent;
+  scrollbar-track-color: transparent;
 }
 .acc-wrap {
   display: flex;
@@ -111,52 +131,47 @@ body {
   flex-direction: row;
   align-items: center;
   justify-content: space-between;
-  padding-top: 12px;
+  gap: 16px;
+  min-height: 74px;
   padding-left: 20px;
   padding-right: 20px;
-  padding-bottom: 12px;
 }
 .row-text {
   display: flex;
   flex-direction: column;
+  flex-grow: 1;
+  min-width: 0px;
   gap: 2px;
 }
 .acc-name {
+  position: relative;
+  top: 7px;
   font-size: 15px;
 }
 .acc-code {
+  position: relative;
+  top: 3px;
   font-size: 32px;
-}
-.theme-dark .acc-code {
-  color: #8fd0f7;
-}
-.theme-light .acc-code {
-  color: #0b57d0;
-}
-.code-large .acc-code {
-  font-size: 40px;
 }
 .copybtn {
   display: flex;
+  flex-shrink: 0;
   width: 40px;
   height: 40px;
+  padding: 0px;
+  border-width: 0px;
   background-color: transparent;
   justify-content: center;
   align-items: center;
   cursor: pointer;
 }
 .copybox {
+  box-sizing: border-box;
   width: 13px;
   height: 15px;
   border-width: 2px;
   border-style: solid;
   border-radius: 3px;
-}
-.theme-dark .copybox {
-  border-color: #6aa9e8;
-}
-.theme-light .copybox {
-  border-color: #0b57d0;
 }
 .copied {
   font-size: 18px;
@@ -166,12 +181,6 @@ body {
   height: 1px;
   margin-left: 16px;
   margin-right: 16px;
-}
-.theme-dark .divider {
-  background-color: #262626;
-}
-.theme-light .divider {
-  background-color: #e1e3e1;
 }
 
 /* ── Home: FAB ──────────────────────────────────────────── */
@@ -186,12 +195,6 @@ body {
   justify-content: center;
   align-items: center;
   transition: all 0.15s ease;
-}
-.theme-dark .fab {
-  background-color: #3a3a3c;
-}
-.theme-light .fab {
-  background-color: #dde3ea;
 }
 .fab:active {
   transform: scale(0.94);
@@ -256,31 +259,23 @@ body {
   margin-right: 20px;
   margin-bottom: 6px;
 }
-.theme-dark .section {
-  color: #9aa0a6;
-}
-.theme-light .section {
-  color: #5f6368;
-}
 .opt {
   display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: space-between;
+  box-sizing: border-box;
   width: 100%;
-  background-color: transparent;
+  text-align: left;
   padding-top: 13px;
   padding-left: 20px;
   padding-right: 20px;
   padding-bottom: 13px;
+  border-width: 0px;
+  background-color: transparent;
+  color: inherit;
   cursor: pointer;
   transition: all 0.15s ease;
-}
-.theme-dark .opt:hover {
-  background-color: #1a1a1a;
-}
-.theme-light .opt:hover {
-  background-color: #f1f3f4;
 }
 .opt-label {
   font-size: 15px;
@@ -288,32 +283,8 @@ body {
 .opt-state {
   font-size: 13px;
 }
-.theme-dark .opt-state {
-  color: #9aa0a6;
-}
-.theme-light .opt-state {
-  color: #5f6368;
-}
-.theme-dark .opt.selected {
-  background-color: #14202f;
-}
-.theme-light .opt.selected {
-  background-color: #e8f0fe;
-}
-.theme-dark .opt.selected .opt-state {
-  color: #8fd0f7;
-}
-.theme-light .opt.selected .opt-state {
-  color: #0b57d0;
-}
 .about {
   font-size: 13px;
   margin-left: 20px;
   margin-right: 20px;
-}
-.theme-dark .about {
-  color: #9aa0a6;
-}
-.theme-light .about {
-  color: #5f6368;
 }

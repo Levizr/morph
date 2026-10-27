@@ -3871,7 +3871,7 @@ mod tests {
         assert!(!app.contains("checks, %d failures"), "no test body: {app}");
         assert!(!app.contains("run_pending_effects"), "no effect pump: {app}");
         assert!(!app.contains("process_tasks"), "no task pump: {app}");
-        assert!(!app.contains("inline void setColor"), "no color parser: {app}");
+        assert!(!app.contains("core/color.h"), "no color parser: {app}");
         assert!(!app.contains("reactivity/channel.h"), "no channel include: {app}");
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -89,7 +89,7 @@ rule off or change its severity in `morph.config.json`:
 
 - [mx-state-scope](mx-state-scope.md) — `morphState` outside a component
 - [mx-shared-scope](mx-shared-scope.md) — `morphShared` not at exported module scope
-- [mx-event-scope](mx-event-scope.md) — `morphEvent` not at exported module scope
+- [mx-event-scope](mx-event-scope.md) — `morphEvent` channel or subscription outside component/mount scope
 - [mx-api-removed](mx-api-removed.md) — removed string-key API in use
 - [mx-state-pattern](mx-state-pattern.md) **(rule)** — `morphState` not destructured as pair
 - [mx-state-init](mx-state-init.md) **(rule)** — `morphState` initializer is not a literal

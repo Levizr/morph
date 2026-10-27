@@ -188,6 +188,15 @@ class WindowManager {
         // ~MorphWindow binds its own context for renderer teardown and
         // detaches afterwards — no context work needed here.
         m_windows.erase(it);
+        // Closing a window uncovers whatever was behind it. X11 may hand
+        // back the old GL front-buffer contents instead of repainting the
+        // exposed region, so schedule a full repaint for every survivor.
+        for (auto& [otherWid, other] : m_windows)
+        {
+            (void)otherWid;
+            if (other && other->isVisible())
+                other->requestRepaint();
+        }
     }
 
 public:
@@ -271,6 +280,14 @@ public:
         auto w = get(wid);
         if (w)
             w->hide();
+        // Same reveal problem as close: the pixels under the hidden window
+        // belong to its siblings and must be repainted.
+        for (auto& [otherWid, other] : m_windows)
+        {
+            (void)otherWid;
+            if (other && other->isVisible())
+                other->requestRepaint();
+        }
     }
 
     // Live title (empty when the window doesn't exist).

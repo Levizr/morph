@@ -17,7 +17,7 @@ static int checks = 0;
 struct TestNode : MorphNode
 {
     void draw(Renderer&) override {}
-    void layout(float, float, float, float, Renderer* = nullptr) override {}
+    void layout(float, float, float, float, Renderer* = nullptr, bool = true) override {}
     void update(float) override {}
     float contentWidth(Renderer*) override { return 0.0f; }
     void layoutIfNeeded(float, float, float, float, Renderer* = nullptr,

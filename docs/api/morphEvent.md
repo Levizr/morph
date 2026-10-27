@@ -194,7 +194,7 @@ cartUpdated.on((payload) => {
 
 | Code | Trigger | Fix |
 |------|---------|-----|
-| `mx-event-scope` | `morphEvent` called inside a component body | Move to module scope (top level) |
+| `mx-event-scope` | `morphEvent` inside a component, or `.on()` nested in an effect/handler | Create channels at module scope; subscribe at component body top level |
 | `mx-api-removed` | Using old string-channel APIs (`morphOn`, `morphEmit`, `channel.emit`) | Migrate to `morphEvent` |
 
 ## Cross-Window Communication

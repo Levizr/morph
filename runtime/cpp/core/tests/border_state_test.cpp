@@ -24,7 +24,7 @@ struct TestNode : MorphNode
     void draw(Renderer&) override
     {
     }
-    void layout(float, float, float, float, Renderer* = nullptr) override
+    void layout(float, float, float, float, Renderer* = nullptr, bool = true) override
     {
     }
     void update(float) override

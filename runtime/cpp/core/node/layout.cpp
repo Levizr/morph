@@ -386,7 +386,7 @@ static CSS::AlignItems effCrossAlign(const MorphStyle& container, const MorphSty
 #endif
 
 void MorphNode::layout(float px, float py, float parentW, float parentH,
-                       Renderer* r) {
+                       Renderer* r, bool applyMargins) {
 #ifdef MORPH_FEATURE_MEDIA
     // Root pass: reselect responsive variants before resolving any units.
     // The resize callback marks the tree subtree-dirty, so this runs after
@@ -600,7 +600,13 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
     float mlForWidth = autoL ? 0.0f : ml;
     float mrForWidth = autoR ? 0.0f : mr;
 
-    if (style.explicitWidth.isSet()) {
+    if (m_flexUsedWidth >= 0.0f) {
+        // A flex parent already resolved this item's border-box width.
+        // Explicit width must not reset it here (grow/shrink would be
+        // undone on the final layout pass).
+        w = m_flexUsedWidth;
+        m_flexUsedWidth = -1.0f;
+    } else if (style.explicitWidth.isSet()) {
         // `%` against the containing-block width the parent passed in
         // (same base as the auto fill below); every other unit resolves
         // through the element's own environment.
@@ -635,13 +641,16 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
     m_computedMargin[3] = ml; m_computedMargin[1] = mr;
     m_computedMargin[0] = mt; m_computedMargin[2] = mb;
 
-    x = px + ml;
-    y = py + mt;
+    x = px + (applyMargins ? ml : 0.0f);
+    y = py + (applyMargins ? mt : 0.0f);
 
     // `%` heights resolve against the containing-block height when
     // definite; against an indefinite (auto) height they behave as
     // auto, per spec. Every other unit resolves unconditionally.
-    if (style.explicitHeight.isSet() && (!style.explicitHeight.isPercent() || parentH > 0.0f)) {
+    if (m_flexUsedHeight >= 0.0f) {
+        h = m_flexUsedHeight;
+        m_flexUsedHeight = -1.0f;
+    } else if (style.explicitHeight.isSet() && (!style.explicitHeight.isPercent() || parentH > 0.0f)) {
         UnitEnv hEnv = env;
         hEnv.pctBase = parentH;
         float eh = resolveUnits(style.explicitHeight, hEnv);
@@ -655,6 +664,17 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
         }
     } else {
         h = 0.0f;
+    }
+
+    // The window root is the viewport, not a regular auto-height block.
+    // Percentage-height children (a common `body > .app { height: 100% }`
+    // shell) need a definite containing height on the *first* pass. Leaving
+    // the root at 0 made child layout collapse everything until
+    // layoutIfNeeded's second pass; a later full relayout skipped that pass
+    // and the shell stayed at 0 (hiding fixed-height children like a search
+    // bar). The root's contentH still tracks overflow for page scrolling.
+    if (!parent && parentH > 0.0f && !style.explicitHeight.isSet()) {
+        h = parentH;
     }
 
 #ifdef MORPH_FEATURE_POSITION
@@ -834,8 +854,13 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
             c->layout(0.0f, 0.0f, cw, 0.0f, r);
 
             if (isRow && !c->style.explicitWidth.isSet()) {
+                // A flex item's auto main size is its content size. Keep a
+                // legitimate zero: an empty inline wrapper (e.g. an empty
+                // reactive `<span>`) must not retain the parent-fill width
+                // from the provisional layout above, or flex shrink steals
+                // width from its siblings and wraps their text.
                 float cwVal = c->contentWidth(r);
-                if (cwVal > 0.0f) c->w = cwVal;
+                if (cwVal >= 0.0f) c->w = cwVal;
             }
 
             // CSS flexbox §9.2: a non-`auto` flex-basis sets the hypothetical
@@ -876,6 +901,15 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
         }
 
         float mainAvail = isCol ? ch : cw;
+        // An auto-height column has an indefinite main axis. Do not treat
+        // the provisional 0 height as "no space" and shrink every child to
+        // zero: compute natural child heights and let the auto-height path
+        // below size the container to their sum. A height already assigned
+        // by the parent (e.g. cross-axis stretch) is definite.
+        bool mainDefinite = !isCol || style.explicitHeight.isSet() || h > 0.0f;
+        if (!mainDefinite) {
+            mainAvail = 1.0e9f;
+        }
         // `gap` percentages resolve against the content box on their own
         // axis: main gaps against the inner main size, cross gaps against
         // the inner cross size. Font/viewport units use the container font.
@@ -931,8 +965,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 
         for (auto& line : lines) {
             float extraGap = line.fItems.size() > 1 ? gapMain * (line.fItems.size() - 1) : 0.0f;
-            float remaining = mainAvail - line.totalMain;
-
+            float remaining = mainDefinite ? mainAvail - line.totalMain : 0.0f;
             if (remaining > 0.0f) {
                 float growTotal = 0.0f;
                 for (auto* item : line.fItems) growTotal += item->node->style.flexGrow;
@@ -1038,6 +1071,14 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                 }
             }
 #endif
+            // Grow/shrink and clamps change item main sizes. Recompute the
+            // line total before justify-content, otherwise extra free space
+            // is counted twice: flex-grow consumes it and space-between
+            // distributes it again, pushing trailing items off-screen.
+            line.totalMain = extraGap;
+            for (auto* item : line.fItems) {
+                line.totalMain += item->main;
+            }
         }
 
         float mainStart = isCol ? cy : cx;
@@ -1106,7 +1147,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                 if (definiteCross > lineCross) lineCross = definiteCross;
             }
             float extraGap = line.fItems.size() > 1 ? gapMain * (line.fItems.size() - 1) : 0.0f;
-            float free = mainAvail - line.totalMain;
+            float free = mainDefinite ? mainAvail - line.totalMain : 0.0f;
 
             // Distribute free space to auto margins on main axis
             std::vector<FlexItem*> autoMainItems;
@@ -1133,7 +1174,7 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                 // (totalMain already held the gaps; keep them out).
                 float newTotal = extraGap;
                 for (auto* item : line.fItems) newTotal += item->main;
-                free = mainAvail - newTotal;
+                free = mainDefinite ? mainAvail - newTotal : 0.0f;
             }
 
             float offset = 0.0f;
@@ -1173,7 +1214,12 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
 
                 float childX = isCol ? posCross : posMain;
                 float childY = isCol ? posMain : posCross;
-                float childPW = isCol ? ((effAlign == CSS::AlignItems::Stretch) ? crossSize : crossDim) : childMain;
+                // The child's auto width subtracts its margins from the
+                // containing block, so a row item's parent width must be
+                // its flex-resized border box plus both margins. Passing
+                // only the border box would shrink/grow it a second time.
+                float childPW = isCol ? ((effAlign == CSS::AlignItems::Stretch) ? crossSize : crossDim)
+                                      : (childMain + ci->ml + ci->mr);
                 float childPH = isCol ? childMain : ((effAlign == CSS::AlignItems::Stretch) ? lineCross : crossDim);
 
                 if (effAlign != CSS::AlignItems::Stretch && !ci->node->style.explicitWidth.isSet() && isCol) {
@@ -1196,7 +1242,14 @@ void MorphNode::layout(float px, float py, float parentW, float parentH,
                     ci->node->m_computedMargin[0], ci->node->m_computedMargin[1],
                     ci->node->m_computedMargin[2], ci->node->m_computedMargin[3]
                 };
-                ci->node->layout(childX, childY, childPW, childPH, r);
+                // Flex resolves margins into childX/childY; don't let the child
+                // apply them a second time (which doubled gaps and pushed
+                // trailing items off-screen). The used main size is pinned
+                // too: explicit width/height would otherwise win on this
+                // final pass and undo flex grow/shrink.
+                if (isRow) ci->node->m_flexUsedWidth = ci->node->w;
+                else ci->node->m_flexUsedHeight = ci->node->h;
+                ci->node->layout(childX, childY, childPW, childPH, r, false);
                 ci->node->m_computedMargin[0] = savedCM[0];
                 ci->node->m_computedMargin[1] = savedCM[1];
                 ci->node->m_computedMargin[2] = savedCM[2];

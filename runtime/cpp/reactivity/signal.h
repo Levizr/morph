@@ -121,8 +121,16 @@ struct Signal : SignalBase {
     // React-style updaters read the current value and return the next one.
     // `peek()` keeps the updater from subscribing the running effect to the
     // signal it is about to write.
+    //
+    // JsValue is callable (`value(fn)`) and implicitly converts to string,
+    // so without this exclusion an event payload such as `setQ(e["value"])`
+    // would pick this overload and recursively call itself with the same
+    // JsValue — a stack overflow on the first keystroke. Keep it on the
+    // value overload; typed signals already have `.as_string()`/`.as_int()`
+    // lowering paths for dynamic values.
     template <typename F>
-        requires std::is_invocable_v<F&, T>
+        requires(std::is_invocable_v<F&, T> &&
+                 !std::is_same_v<std::decay_t<F>, JsValue>)
     void set(F&& updater) {
         set(updater(peek()));
     }

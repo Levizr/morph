@@ -30,6 +30,9 @@ Put a new fixture in the group matching what broke. A one-off repro goes in
 ```bash
 ./tests/runtime/run-selftests.sh   # build + run --morph-self-test on gated fixtures
 ./tests/runtime/check-responsive-style.sh  # headless width-breakpoint variant selection
+./tests/runtime/check-flex.sh      # headless flex grow/shrink/margin/layout invariants
+./tests/runtime/check-color.sh     # headless reactive color parser (hex/alpha/transparent)
+./tests/runtime/check-signal.sh    # headless signal overload selection for JsValue writes
 ./tests/runtime/check-size.sh      # assert size/hello-size stays under the byte budget
 ./tests/runtime/check-forge-math.sh  # forge DamageSet/TilePool/scroll-shift unit tests (g++-14, headless)
 ./tests/runtime/bench-forge.sh     # forge damage-model benchmarks + TU-exclusion nm checks

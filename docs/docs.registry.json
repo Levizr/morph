@@ -79,7 +79,7 @@
           "morph build options",
           "morph config reference"
         ],
-        "lastUpdated": "2026-10-23",
+        "lastUpdated": "2026-10-27",
         "publishedAt": "2026-08-19",
         "priority": 0.9,
         "changefreq": "weekly"
@@ -376,7 +376,7 @@
           "morph keyboard events",
           "morph event attributes"
         ],
-        "lastUpdated": "2026-09-16",
+        "lastUpdated": "2026-10-27",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -747,9 +747,10 @@
         "keywords": [
           "morphEvent api",
           "morph events",
-          "morph event channels"
+          "morph event channels",
+          "morph event subscription cleanup"
         ],
-        "lastUpdated": "2026-09-29",
+        "lastUpdated": "2026-10-27",
         "publishedAt": "2026-09-16",
         "priority": "0.9",
         "changefreq": "monthly"
@@ -831,7 +832,7 @@
           "morphState vs morphShared",
           "morphEvent vs shared state"
         ],
-        "lastUpdated": "2026-09-29",
+        "lastUpdated": "2026-10-27",
         "publishedAt": "2026-09-16",
         "priority": "0.9",
         "changefreq": "monthly"
@@ -1766,19 +1767,20 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-event-scope — morphEvent Not at Exported Module Scope",
+        "title": "mx-event-scope — morphEvent Channel or Subscription Out of Scope",
         "sidebarTitle": "mx-event-scope",
         "slug": "errors/mx-event-scope",
         "file": "errors/mx-event-scope",
         "status": "production",
         "author": "PIYUSH",
-        "description": "Fix mx-event-scope: morphEvent channel created inside a component or never exported.",
+        "description": "Fix mx-event-scope: morphEvent channel created inside a component or never exported, or a subscription nested in morphEffect or an event handler without cleanup.",
         "keywords": [
           "mx-event-scope",
           "morph morphEvent scope",
-          "morph event channel export"
+          "morph event channel export",
+          "morph event subscription cleanup"
         ],
-        "lastUpdated": "2026-10-21",
+        "lastUpdated": "2026-10-27",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"

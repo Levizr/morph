@@ -15,22 +15,36 @@ export default function App() {
   // Settings writes its own copy and broadcasts; apply it to this copy.
   prefsChanged.on((p) => { setTheme(p.theme); setCodeSize(p.codeSize) })
 
-  const tcls = theme == "dark" ? "theme-dark" : "theme-light"
-  const ccls = codeSize == "large" ? "code-large" : "code-normal"
+  function markCopied(id: string) {
+    setCopiedId(id)
+    setTimeout(() => setCopiedId(""), 1500)
+  }
 
   return (
     <body>
-      <div className={`app ${tcls} ${ccls}`} id="app">
+      <div className="app" id="app"
+           style={{ backgroundColor: theme == "dark" ? "#000000" : "#ffffff",
+                    color: theme == "dark" ? "#f5f5f5" : "#1f1f1f" }}>
         <div className="topbar" id="topbar">
           <div className="apptitle" id="apptitle">Authenticator</div>
           <div className="avatar" id="avatar">L</div>
         </div>
 
-        <div className="searchbar" id="searchbar">
-          <button className="iconbtn" id="btn-menu" onClick={() => { const s = new Window("/settings", { width: 400, height: 600 }) }}>≡</button>
+        <div className="searchbar" id="searchbar"
+             style={{ backgroundColor: theme == "dark" ? "#2e2e30" : "#f1f3f4" }}>
+          <button className="iconbtn" id="btn-menu" onClick={() => { new Window("/settings", { width: 400, height: 600, data: { theme: theme, codeSize: codeSize } }) }}>
+            <div className="hamburger">
+              <div className="hamburger-line"/>
+              <div className="hamburger-line"/>
+              <div className="hamburger-line"/>
+            </div>
+          </button>
           <input className="search-field" id="search" placeholder="Search..."
+                 style={{ color: theme == "dark" ? "#f5f5f5" : "#1f1f1f" }}
                  value={q} onInput={(e) => { setQ(e.value) }} />
-          <span className="cloud" id="cloud">☁</span>
+          <div className="cloud" id="cloud">
+            <img className="cloud-img" src="src/assets/cloud.png" alt=""/>
+          </div>
         </div>
 
         <div className="list" id="list">
@@ -38,89 +52,118 @@ export default function App() {
             <div className="acc-row">
               <div className="row-text">
                 <div className="acc-name">GitHub 2 factor authentication</div>
-                <div className="acc-code">130 344</div>
+                <div className="acc-code"
+                     style={{ color: theme == "dark" ? "#8fd0f7" : "#0b57d0",
+                              fontSize: codeSize == "large" ? 40.0 : 32.0 }}>130 344</div>
               </div>
-              <button className="copybtn" onClick={() => { setCopiedId("acc1") }}>
-                {copiedId == "acc1" ? (<span className="copied">✓</span>) : (<div className="copybox"/>)}
+              <button className="copybtn" onClick={() => { markCopied("acc1") }}>
+                {copiedId == "acc1" ? (<span className="copied">✓</span>) : (<div className="copybox"
+                     style={{ borderColor: theme == "dark" ? "#6aa9e8" : "#0b57d0" }}/>)}
               </button>
             </div>
-            <div className="divider"/>
+            <div className="divider"
+                 style={{ backgroundColor: theme == "dark" ? "#262626" : "#e1e3e1" }}/>
           </div>
           <div className={(q == "" || "Pypi w step verification".indexOf(q) != -1) ? "acc-wrap" : "acc-wrap hidden"}>
             <div className="acc-row">
               <div className="row-text">
                 <div className="acc-name">Pypi w step verification</div>
-                <div className="acc-code">315 698</div>
+                <div className="acc-code"
+                     style={{ color: theme == "dark" ? "#8fd0f7" : "#0b57d0",
+                              fontSize: codeSize == "large" ? 40.0 : 32.0 }}>315 698</div>
               </div>
-              <button className="copybtn" onClick={() => { setCopiedId("acc2") }}>
-                {copiedId == "acc2" ? (<span className="copied">✓</span>) : (<div className="copybox"/>)}
+              <button className="copybtn" onClick={() => { markCopied("acc2") }}>
+                {copiedId == "acc2" ? (<span className="copied">✓</span>) : (<div className="copybox"
+                     style={{ borderColor: theme == "dark" ? "#6aa9e8" : "#0b57d0" }}/>)}
               </button>
             </div>
-            <div className="divider"/>
+            <div className="divider"
+                 style={{ backgroundColor: theme == "dark" ? "#262626" : "#e1e3e1" }}/>
           </div>
           <div className={(q == "" || "minercraft638@gmail.com".indexOf(q) != -1) ? "acc-wrap" : "acc-wrap hidden"}>
             <div className="acc-row">
               <div className="row-text">
                 <div className="acc-name">minercraft638@gmail.com</div>
-                <div className="acc-code">839 919</div>
+                <div className="acc-code"
+                     style={{ color: theme == "dark" ? "#8fd0f7" : "#0b57d0",
+                              fontSize: codeSize == "large" ? 40.0 : 32.0 }}>839 919</div>
               </div>
-              <button className="copybtn" onClick={() => { setCopiedId("acc3") }}>
-                {copiedId == "acc3" ? (<span className="copied">✓</span>) : (<div className="copybox"/>)}
+              <button className="copybtn" onClick={() => { markCopied("acc3") }}>
+                {copiedId == "acc3" ? (<span className="copied">✓</span>) : (<div className="copybox"
+                     style={{ borderColor: theme == "dark" ? "#6aa9e8" : "#0b57d0" }}/>)}
               </button>
             </div>
-            <div className="divider"/>
+            <div className="divider"
+                 style={{ backgroundColor: theme == "dark" ? "#262626" : "#e1e3e1" }}/>
           </div>
           <div className={(q == "" || "ultrawab@gmail.com".indexOf(q) != -1) ? "acc-wrap" : "acc-wrap hidden"}>
             <div className="acc-row">
               <div className="row-text">
                 <div className="acc-name">ultrawab@gmail.com</div>
-                <div className="acc-code">057 868</div>
+                <div className="acc-code"
+                     style={{ color: theme == "dark" ? "#8fd0f7" : "#0b57d0",
+                              fontSize: codeSize == "large" ? 40.0 : 32.0 }}>057 868</div>
               </div>
-              <button className="copybtn" onClick={() => { setCopiedId("acc4") }}>
-                {copiedId == "acc4" ? (<span className="copied">✓</span>) : (<div className="copybox"/>)}
+              <button className="copybtn" onClick={() => { markCopied("acc4") }}>
+                {copiedId == "acc4" ? (<span className="copied">✓</span>) : (<div className="copybox"
+                     style={{ borderColor: theme == "dark" ? "#6aa9e8" : "#0b57d0" }}/>)}
               </button>
             </div>
-            <div className="divider"/>
+            <div className="divider"
+                 style={{ backgroundColor: theme == "dark" ? "#262626" : "#e1e3e1" }}/>
           </div>
           <div className={(q == "" || "Amazon: service.levizr@gmail.com".indexOf(q) != -1) ? "acc-wrap" : "acc-wrap hidden"}>
             <div className="acc-row">
               <div className="row-text">
                 <div className="acc-name">Amazon: service.levizr@gmail.com</div>
-                <div className="acc-code">679 923</div>
+                <div className="acc-code"
+                     style={{ color: theme == "dark" ? "#8fd0f7" : "#0b57d0",
+                              fontSize: codeSize == "large" ? 40.0 : 32.0 }}>679 923</div>
               </div>
-              <button className="copybtn" onClick={() => { setCopiedId("acc5") }}>
-                {copiedId == "acc5" ? (<span className="copied">✓</span>) : (<div className="copybox"/>)}
+              <button className="copybtn" onClick={() => { markCopied("acc5") }}>
+                {copiedId == "acc5" ? (<span className="copied">✓</span>) : (<div className="copybox"
+                     style={{ borderColor: theme == "dark" ? "#6aa9e8" : "#0b57d0" }}/>)}
               </button>
             </div>
-            <div className="divider"/>
+            <div className="divider"
+                 style={{ backgroundColor: theme == "dark" ? "#262626" : "#e1e3e1" }}/>
           </div>
           <div className={(q == "" || "Cloudflare: ultrawab@gmail.com".indexOf(q) != -1) ? "acc-wrap" : "acc-wrap hidden"}>
             <div className="acc-row">
               <div className="row-text">
                 <div className="acc-name">Cloudflare: ultrawab@gmail.com</div>
-                <div className="acc-code">400 566</div>
+                <div className="acc-code"
+                     style={{ color: theme == "dark" ? "#8fd0f7" : "#0b57d0",
+                              fontSize: codeSize == "large" ? 40.0 : 32.0 }}>400 566</div>
               </div>
-              <button className="copybtn" onClick={() => { setCopiedId("acc6") }}>
-                {copiedId == "acc6" ? (<span className="copied">✓</span>) : (<div className="copybox"/>)}
+              <button className="copybtn" onClick={() => { markCopied("acc6") }}>
+                {copiedId == "acc6" ? (<span className="copied">✓</span>) : (<div className="copybox"
+                     style={{ borderColor: theme == "dark" ? "#6aa9e8" : "#0b57d0" }}/>)}
               </button>
             </div>
-            <div className="divider"/>
+            <div className="divider"
+                 style={{ backgroundColor: theme == "dark" ? "#262626" : "#e1e3e1" }}/>
           </div>
           <div className={(q == "" || "Twitter: @LevizrOfficial".indexOf(q) != -1) ? "acc-wrap" : "acc-wrap hidden"}>
             <div className="acc-row">
               <div className="row-text">
                 <div className="acc-name">Twitter: @LevizrOfficial</div>
-                <div className="acc-code">201 445</div>
+                <div className="acc-code"
+                     style={{ color: theme == "dark" ? "#8fd0f7" : "#0b57d0",
+                              fontSize: codeSize == "large" ? 40.0 : 32.0 }}>201 445</div>
               </div>
-              <button className="copybtn" onClick={() => { setCopiedId("acc7") }}>
-                {copiedId == "acc7" ? (<span className="copied">✓</span>) : (<div className="copybox"/>)}
+              <button className="copybtn" onClick={() => { markCopied("acc7") }}>
+                {copiedId == "acc7" ? (<span className="copied">✓</span>) : (<div className="copybox"
+                     style={{ borderColor: theme == "dark" ? "#6aa9e8" : "#0b57d0" }}/>)}
               </button>
             </div>
-            <div className="divider"/>
+            <div className="divider"
+                 style={{ backgroundColor: theme == "dark" ? "#262626" : "#e1e3e1" }}/>
           </div>
         </div>
 
-        <div className="fab" id="fab">
+        <div className="fab" id="fab"
+             style={{ backgroundColor: theme == "dark" ? "#3a3a3c" : "#dde3ea" }}>
           <div className="plus">
             <div className="arm-v arm-top"/>
             <div className="plus-mid">

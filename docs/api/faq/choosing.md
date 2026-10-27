@@ -33,5 +33,5 @@ A decision guide for the four core APIs. Full references: [`morphState`](../morp
 | You wrote… | Error | Meaning |
 |---|---|---|
 | `morphState` at module scope | `mx-state-scope` | Local state needs a component instance — move it inside |
-| `morphShared` / `morphEvent` inside a component | `mx-shared-scope` / `mx-event-scope` | Shared things live at module scope — move them out |
+| `morphShared` / `morphEvent` inside a component, or `.on()` nested in a callback | `mx-shared-scope` / `mx-event-scope` | Channels live at module scope; subscriptions at component top level |
 | Same name imported from two modules | ambiguous import | Two different identities claim one local name — rename on import |

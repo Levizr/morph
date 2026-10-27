@@ -228,7 +228,7 @@ Example:
 | `mx-import-type` | Import is `.css` / `.cpp` / `morph` (bound unsupported imports error; bare imports warn) | error / warning |
 | `mx-state-scope` | `morphState` is called inside a component body | error |
 | `mx-shared-scope` | `morphShared` is exported at module scope | error |
-| `mx-event-scope` | `morphEvent` is exported at module scope | error |
+| `mx-event-scope` | `morphEvent` is exported at module scope; `.on()` is component top-level | error |
 | `mx-api-removed` | Removed string-key/shared/event APIs are not used | error |
 | `mx-state-pattern` | `morphState` destructured as `[getter, setter]` | error |
 | `mx-effect-cb` | `morphEffect` first arg is a function | error |

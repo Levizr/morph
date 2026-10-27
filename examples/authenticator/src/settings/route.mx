@@ -1,5 +1,5 @@
-import { useWindow } from 'morph'
-import { theme, setTheme, codeSize, setCodeSize, prefsChanged } from '../store.mx'
+import { morphState, useWindow } from 'morph'
+import { prefsChanged } from '../store.mx'
 import '../style.css'
 
 export const windowConfig = {
@@ -8,48 +8,73 @@ export const windowConfig = {
   height: 600
 }
 
-export default function SettingsPage() {
+export default function SettingsPage(props: { theme: string, codeSize: string }) {
+  const [pickedTheme, setPickedTheme] = morphState("")
+  const [pickedCodeSize, setPickedCodeSize] = morphState("")
+
+  function isDark():bool {
+    return pickedTheme == "" ? props.theme != "light" : pickedTheme == "dark"
+  }
+
+  function isLight():bool {
+    return pickedTheme == "" ? props.theme == "light" : pickedTheme == "light"
+  }
+
+  function isLarge():bool {
+    return pickedCodeSize == "" ? props.codeSize == "large" : pickedCodeSize == "large"
+  }
+
+  function isNormal():bool {
+    return pickedCodeSize == "" ? props.codeSize != "large" : pickedCodeSize == "normal"
+  }
+
   function pick(t: string, c: string):int {
-    setTheme(t)
-    setCodeSize(c)
+    setPickedTheme(t)
+    setPickedCodeSize(c)
     prefsChanged.emit({ theme: t, codeSize: c })
     return 0
   }
 
   return (
     <body>
-      <div className={theme == "dark" ? "app theme-dark" : "app theme-light"} id="settings-app">
+      <div className="app" id="settings-app"
+           style={{ backgroundColor: isDark() ? "#000000" : "#ffffff",
+                    color: isDark() ? "#f5f5f5" : "#1f1f1f" }}>
         <div className="header" id="header">
           <button className="iconbtn" id="btn-back" onClick={() => { const w = useWindow(); w.close() }}>←</button>
           <div className="pagetitle" id="pagetitle">Settings</div>
         </div>
 
-        <div className="section">Appearance</div>
-        <button className={theme == "dark" ? "opt selected" : "opt"} id="opt-dark"
-                onClick={() => { pick("dark", codeSize) }}>
+        <div className="section" style={{ color: isDark() ? "#9aa0a6" : "#5f6368" }}>Appearance</div>
+        <button className="opt" id="opt-dark"
+                style={{ backgroundColor: isDark() ? "#14202f" : "transparent" }}
+                onClick={() => { pick("dark", isLarge() ? "large" : "normal") }}>
           <span className="opt-label">Dark theme</span>
-          <span className="opt-state">{theme == "dark" ? "On" : ""}</span>
+          <span className="opt-state" style={{ color: isDark() ? "#8fd0f7" : "#0b57d0" }}>{isDark() ? "On" : ""}</span>
         </button>
-        <button className={theme == "light" ? "opt selected" : "opt"} id="opt-light"
-                onClick={() => { pick("light", codeSize) }}>
+        <button className="opt" id="opt-light"
+                style={{ backgroundColor: isLight() ? "#e8f0fe" : "transparent" }}
+                onClick={() => { pick("light", isLarge() ? "large" : "normal") }}>
           <span className="opt-label">Light theme</span>
-          <span className="opt-state">{theme == "light" ? "On" : ""}</span>
+          <span className="opt-state" style={{ color: isDark() ? "#8fd0f7" : "#0b57d0" }}>{isLight() ? "On" : ""}</span>
         </button>
 
-        <div className="section">Code size</div>
-        <button className={codeSize == "normal" ? "opt selected" : "opt"} id="opt-normal"
-                onClick={() => { pick(theme, "normal") }}>
+        <div className="section" style={{ color: isDark() ? "#9aa0a6" : "#5f6368" }}>Code size</div>
+        <button className="opt" id="opt-normal"
+                style={{ backgroundColor: isNormal() ? (isDark() ? "#14202f" : "#e8f0fe") : "transparent" }}
+                onClick={() => { pick(isDark() ? "dark" : "light", "normal") }}>
           <span className="opt-label">Normal</span>
-          <span className="opt-state">{codeSize == "normal" ? "On" : ""}</span>
+          <span className="opt-state" style={{ color: isDark() ? "#8fd0f7" : "#0b57d0" }}>{isNormal() ? "On" : ""}</span>
         </button>
-        <button className={codeSize == "large" ? "opt selected" : "opt"} id="opt-large"
-                onClick={() => { pick(theme, "large") }}>
+        <button className="opt" id="opt-large"
+                style={{ backgroundColor: isLarge() ? (isDark() ? "#14202f" : "#e8f0fe") : "transparent" }}
+                onClick={() => { pick(isDark() ? "dark" : "light", "large") }}>
           <span className="opt-label">Large</span>
-          <span className="opt-state">{codeSize == "large" ? "On" : ""}</span>
+          <span className="opt-state" style={{ color: isDark() ? "#8fd0f7" : "#0b57d0" }}>{isLarge() ? "On" : ""}</span>
         </button>
 
-        <div className="section">About</div>
-        <div className="about">Material-style authenticator example. Theme and code size apply live via the shared event bus.</div>
+        <div className="section" style={{ color: isDark() ? "#9aa0a6" : "#5f6368" }}>About</div>
+        <div className="about" style={{ color: isDark() ? "#9aa0a6" : "#5f6368" }}>Material-style authenticator example. Theme and code size apply live via the shared event bus.</div>
       </div>
     </body>
   )

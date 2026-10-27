@@ -62,6 +62,7 @@ public:
     static void CharCb(GLFWwindow* win, unsigned int codepoint);
     static void cursorPosCb(GLFWwindow *win, double mx, double my);
     static void windowSizeCb(GLFWwindow *win, int width, int height);
+    static void windowRefreshCb(GLFWwindow *win);
     static void windowPosCb(GLFWwindow *win, int x, int y);
     static void scrollCb(GLFWwindow *win, double dx, double dy);
     static void windowFocusCb(GLFWwindow *win, int focused);
@@ -120,6 +121,14 @@ public:
             glfwSetWindowShouldClose(m_handle, 0);
     }
     bool isVisible() const { return m_visible && m_handle && !glfwWindowShouldClose(m_handle); }
+
+    // Force a full layout + paint on the next pump. Used when pixels may
+    // have been discarded or covered by another window (see close/hide
+    // paths and the GLFW refresh callback).
+    void requestRepaint() {
+        m_pendingRender = true;
+        if (m_root) m_root->markDirty(SubtreeDirty);
+    }
 
     // Docked devtools: the panel occupies the right side of the window and the
     // app's layout is constrained to the remaining content area, so the panel

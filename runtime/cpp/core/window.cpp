@@ -617,6 +617,18 @@ void MorphWindow::windowSizeCb(GLFWwindow *win, int width, int height)
         return;
     self->m_width = width;
     self->m_height = height;
+    self->requestRepaint();
+}
+
+// Refresh is the canonical GLFW hook for "your pixels may have been
+// discarded" (window uncovered, restored from minimize, X11 expose after a
+// child window closes). Mark the tree dirty so the next frame repaints
+// instead of swapping the stale backbuffer back to the screen.
+void MorphWindow::windowRefreshCb(GLFWwindow *win)
+{
+    auto *self = (MorphWindow *)glfwGetWindowUserPointer(win);
+    if (!self)
+        return;
     self->m_pendingRender = true;
     if (self->m_root)
     {
@@ -730,6 +742,7 @@ MorphWindow::MorphWindow(const std::string &title, int width, int height, bool v
         glfwSetScrollCallback(m_handle, scrollCb);
 #endif
         glfwSetWindowSizeCallback(m_handle, windowSizeCb);
+        glfwSetWindowRefreshCallback(m_handle, windowRefreshCb);
         // Modal follow needs position events; unowned apps never
         // register the callback, so the follow chain GC-drops.
 #ifdef MORPH_FEATURE_OWNERSHIP

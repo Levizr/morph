@@ -51,7 +51,7 @@ when unused), dev builds (all-on rule stands).
 1. **Detect** — `FeatureSet::scan` (IR decls, reactive markers, body
    markers) + `note_*` for routes/config + `build.rs` additions.
 2. **Emit** — `required_defines()` arms; template `{% if %}` for loop
-   calls, `channel.h`, `setColor`; codegen plain-path branches
+   calls, `channel.h`, `color.h`; codegen plain-path branches
    (`navigate`, `close`, `create`); mount `MountScope`/teardown gating.
 3. **Build** — `runtime_sources_with_features` skips TUs by defines;
    `strip --strip-unneeded` every release link (~77KB of symtab on

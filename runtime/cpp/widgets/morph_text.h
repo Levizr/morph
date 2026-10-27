@@ -72,8 +72,8 @@ public:
     }
 
     void layout(float px, float py, float parentW, float parentH,
-                Renderer* r = nullptr) override {
-        MorphNode::layout(px, py, parentW, parentH, r);
+                Renderer* r = nullptr, bool applyMargins = true) override {
+        MorphNode::layout(px, py, parentW, parentH, r, applyMargins);
 
         if (r && w > 0.0f) {
             // Constrain wrap width by maxWidth (`%` vs the CB width).

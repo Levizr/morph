@@ -3173,6 +3173,13 @@ pub(crate) fn css_val_to_cpp(
         }
         _ => vec![],
     };
+    let mut out = out;
+    if field_name == "color" && !out.is_empty() {
+        // A reactive color is explicit from now on. Without clearing the
+        // build-time inheritance marker, text paint walks past it to the
+        // immediate parent's stale color.
+        out.push(format!("{indent}        {node_var}->m_colorInherited = false;"));
+    }
     out
 }
 
@@ -3275,9 +3282,15 @@ fn emit_reactive_effects(
                 "color" => {
                     lines.push(open_effect(id, &cpp));
                     lines.push(format!("{indent}    {id}->interruptStateTransitions();"));
-                    lines.push(format!(
-                        "{indent}    morph::setColor({id}->style.{field_name}, morph::str({cpp}));"
-                    ));
+                    if field_name == "color" {
+                        lines.push(format!(
+                            "{indent}    if (morph::set_color({id}->style.{field_name}, morph::str({cpp}))) {id}->m_colorInherited = false;"
+                        ));
+                    } else {
+                        lines.push(format!(
+                            "{indent}    morph::set_color({id}->style.{field_name}, morph::str({cpp}));"
+                        ));
+                    }
                     lines.push(format!("{indent}    {id}->markDirty(PaintDirty);"));
                     lines.push(close_effect.to_string());
                 }
@@ -3301,7 +3314,10 @@ fn emit_reactive_effects(
             if child.node_type != "__text__" {
                 continue;
             }
-            lines.push(open_effect(id, &cpp));
+            let captures = format!("{}, {}", effect_captures(id, &[&cpp]), child.node_id);
+            lines.push(format!(
+                "{indent}{id}->m_associatedEffects.push_back(morph::create_effect([{captures}]() {{"
+            ));
             lines.push(format!("{indent}    {}->interruptStateTransitions();", child.node_id));
             lines.push(format!(
                 "{indent}    {}->style.fontSize.value = (float)({cpp});",
@@ -3797,6 +3813,14 @@ mod tests {
         assert_eq!(node_type_literal("__fragment__"), "NodeType::Fragment");
         assert_eq!(node_type_literal("body"), "NodeType::Custom");
         assert_eq!(node_type_literal(""), "NodeType::Custom");
+    }
+
+    #[test]
+    fn reactive_color_clears_inherited_marker() {
+        let color = css_val_to_cpp("node_0001", "color", "#f5f5f5", "");
+        assert!(color.iter().any(|line| line.contains("m_colorInherited = false")), "{color:?}");
+        let bg = css_val_to_cpp("node_0001", "background-color", "#000000", "");
+        assert!(!bg.iter().any(|line| line.contains("m_colorInherited = false")), "{bg:?}");
     }
 
     #[test]

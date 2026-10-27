@@ -29,8 +29,8 @@ public:
     // Reserve one text line like browsers: without it an empty input is
     // only padding + border tall (content height zero).
     void layout(float px, float py, float parentW, float parentH,
-                Renderer* r = nullptr) override {
-        MorphNode::layout(px, py, parentW, parentH, r);
+                Renderer* r = nullptr, bool applyMargins = true) override {
+        MorphNode::layout(px, py, parentW, parentH, r, applyMargins);
         if (!style.explicitHeight.isSet()) {
             float need = m_computedFontSize * 1.4f + m_computedPadding[0] + m_computedPadding[2];
 #ifdef MORPH_FEATURE_BORDER

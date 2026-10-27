@@ -1,4 +1,4 @@
-# mx-event-scope — morphEvent Not at Exported Module Scope
+# mx-event-scope — morphEvent Channel or Subscription Out of Scope
 
 **Severity:** error | **Blocks `morph build`:** yes
 
@@ -79,9 +79,48 @@ Steps:
 1. Hoist `morphEvent<T>()` to the top of the file, add `export`, take no
    arguments (arguments are the removed API — see
    [mx-api-removed](mx-api-removed.md)).
-2. Keep `emit`/`on` calls where they are — inside components is correct for
-   those.
+2. Keep `emit` calls where they are; move any `on` call to the top level of
+   the component body.
 3. Re-run `morph check`.
+
+## Subscriptions must be top-level too
+
+A subscription also needs a component-owned cleanup point. Put
+`eventName.on(...)` at the **top level of the component body**, where codegen
+can register it and remove it when the window or route unmounts:
+
+```tsx
+export default function SettingsPage() {
+  // ✅ Lifted into the mount lifecycle; removed on unmount.
+  prefsChanged.on((p) => {
+    setPickedTheme(p.theme)
+  })
+
+  return <body>…</body>
+}
+```
+
+Nesting it in `morphEffect` or a DOM event handler has no cleanup scope:
+
+```tsx
+export default function SettingsPage() {
+  morphEffect(() => {
+    // ❌ mx-event-scope — listener outlives the page
+    prefsChanged.on((p) => { setPickedTheme(p.theme) })
+  })
+  return (
+    <button onClick={() => {
+      // ❌ mx-event-scope — every click adds a listener
+      prefsChanged.on((p) => { setPickedTheme(p.theme) })
+    }}>Subscribe</button>
+  )
+}
+```
+
+The effect is destroyed on unmount, but the channel keeps its listener (and
+captured state) alive. A handler subscription is even worse: every click adds
+another listener. Use a top-level subscription instead; the handler can read
+and write component state normally.
 
 ## Tuning this rule
 

@@ -135,6 +135,11 @@ public:
     bool m_gridStretchW = false;
     bool m_gridStretchH = false;
     float m_computedMargin[4] = {0}; // resolved margins after latest layout()
+    // Flex parent resolved a child's used main size after grow/shrink.
+    // The next layout consumes the pending override so re-resolving an
+    // explicit width/height cannot silently undo the flex result.
+    float m_flexUsedWidth = -1.0f;
+    float m_flexUsedHeight = -1.0f;
     // Resolved box metrics after latest layout(): font size, padding and
     // the last relative offset. Relative/font/viewport units in the style
     // resolve against layout context, so paint and intrinsic sizing read
@@ -405,8 +410,10 @@ public:
     void syncPaintDirtyAfterLayout();
 #endif
 
+    // `applyMargins=false` is used by flex after it has already folded the
+    // item's margins into its position; applying them again would double gaps.
     virtual void layout(float px, float py, float parentW, float parentH,
-                        Renderer* r = nullptr);
+                        Renderer* r = nullptr, bool applyMargins = true);
     virtual void draw(Renderer& r) = 0;
     virtual void update(float dt);
     virtual void setText(const std::string&) {}

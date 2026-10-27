@@ -150,7 +150,7 @@ impl FeatureSet {
             if prop == "background" || prop == "background-image" {
                 self.features.insert("gradient".into());
             }
-            // Color-typed props lower through the runtime setColor parser
+            // Color-typed props lower through the runtime set_color parser
             // (node_emitter/logic_emitter "color" arms) — static palettes
             // are constants, only reactive ones need it.
             if prop.contains("color") {

@@ -35,6 +35,7 @@ const LOGIC_PREHEADER: &str = r#"#include <cstdio>
 #include "core/node.h"
 #include "reactivity/signal.h"
 #include "reactivity/channel.h"
+#include "core/color.h"
 #include "core/event.h"
 #include "types/js_value.h"
 #include "ui/image.h"
@@ -42,23 +43,6 @@ const LOGIC_PREHEADER: &str = r#"#include <cstdio>
 // Node registry and signal store (included via -I<runtime>/dev)
 #include "signal_store.h"
 #include "node_registry.h"
-
-// Runtime color parser for reactive style color expressions
-namespace morph {
-inline void setColor(float rgba[4], const std::string& c) {
-    if (c.size() == 7 && c[0] == '#') {
-        rgba[0] = std::stoi(c.substr(1,2), nullptr, 16) / 255.0f;
-        rgba[1] = std::stoi(c.substr(3,2), nullptr, 16) / 255.0f;
-        rgba[2] = std::stoi(c.substr(5,2), nullptr, 16) / 255.0f;
-        rgba[3] = 1.0f;
-    } else if (c.size() == 4 && c[0] == '#') {
-        rgba[0] = std::stoi(c.substr(1,1) + c[1], nullptr, 16) / 255.0f;
-        rgba[1] = std::stoi(c.substr(2,1) + c[2], nullptr, 16) / 255.0f;
-        rgba[2] = std::stoi(c.substr(3,1) + c[3], nullptr, 16) / 255.0f;
-        rgba[3] = 1.0f;
-    }
-}
-}
 
 "#;
 
@@ -522,7 +506,15 @@ fn emit_style_effects(lines: &mut Vec<String>, node: &IRNode, maps: &AmbientMaps
                 "n->style.{field_name}.value = (float)({cpp}); n->style.{field_name}.unit = LengthUnit::Px;"
             ),
             "string" => format!("n->style.{field_name} = morph::str({cpp});"),
-            "color" => format!("morph::setColor(n->style.{field_name}, morph::str({cpp}));"),
+            "color" => {
+                if field_name == "color" {
+                    format!(
+                        "if (morph::set_color(n->style.{field_name}, morph::str({cpp}))) n->m_colorInherited = false;"
+                    )
+                } else {
+                    format!("morph::set_color(n->style.{field_name}, morph::str({cpp}));")
+                }
+            }
             "transform" => {
                 format!("morph::setCssTransform(n->style, morph::str({cpp}), n->w, n->h);")
             }
