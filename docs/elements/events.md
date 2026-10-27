@@ -77,6 +77,11 @@ export function NotificationBell() {
     console.log(payload.message, payload.type)
   })
 
+  // ✓ Correct: object or array destructuring
+  toastEvent.on(({ message, type }) => {
+    console.log(message, type)
+  })
+
   // ✗ Wrong: inside a callback
   // button.onClick = () => toastEvent.on(...)
 
@@ -86,6 +91,11 @@ export function NotificationBell() {
   return <text>Bell</text>
 }
 ```
+
+Destructured payload parameters support aliases (`{ message: text }`) and
+nested patterns (`{ sender: { name } }`). Destructuring defaults and rest
+elements (`{ message = "" }`, `{ ...rest }`) are not supported yet — use a
+plain parameter and read the fields from it.
 
 ## Patterns
 

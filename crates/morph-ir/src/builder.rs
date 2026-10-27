@@ -342,11 +342,29 @@ impl IRBuilder {
         events: &HashMap<String, String>,
         omit_param_defaults: bool,
     ) -> Option<morpher::SnippetOutput> {
+        self.translate_logic_at(source, ambient_vars, ambient_types, events, omit_param_defaults, 0)
+    }
+
+    /// Translate a logic snippet at a C++ scope depth.
+    ///
+    /// Non-zero `indent` marks the snippet as living inside a function or
+    /// lambda, so local declarations must not be emitted as module-scope
+    /// `static` variables.
+    fn translate_logic_at(
+        &self,
+        source: &str,
+        ambient_vars: &HashMap<String, String>,
+        ambient_types: &HashMap<String, String>,
+        events: &HashMap<String, String>,
+        omit_param_defaults: bool,
+        indent: usize,
+    ) -> Option<morpher::SnippetOutput> {
         let options = morpher::TranslateOptions {
             type_mode: self.type_mode,
             state_vars: ambient_vars.clone(),
             state_types: ambient_types.clone(),
             omit_param_defaults,
+            indent,
             ..Default::default()
         };
         let rebased = rewrite_event_emits(source, events);
@@ -1238,10 +1256,14 @@ impl IRBuilder {
         if sub.handler.is_empty() {
             anyhow::bail!("`{}.on(...)` needs a handler (in `{comp_name}`)", sub.event);
         }
-        let (params, body, is_block) = parse_callable_source(&sub.handler).map_err(|e| {
+        let (params_src, body, is_block) = parse_callable_parts(&sub.handler).map_err(|e| {
             anyhow::anyhow!("`{}.on(...)` in `{comp_name}`: {e} (pass an inline arrow)", sub.event)
         })?;
-        if params.len() > 1 {
+        let param_parts: Vec<String> = split_top_level_commas(params_src.trim())
+            .into_iter()
+            .filter(|part| !part.trim().is_empty())
+            .collect();
+        if param_parts.len() > 1 {
             anyhow::bail!(
                 "`{}.on(...)` handler takes at most one parameter (in `{comp_name}`)",
                 sub.event
@@ -1255,22 +1277,62 @@ impl IRBuilder {
         } else {
             body
         };
-        let scoped = match params.first() {
-            Some(p) => {
-                let mut m = HashMap::new();
-                m.insert(p.clone(), ch_param.clone());
-                rename_symbols(&inner_src, &m, frame)
+        let destructured = param_parts.first().is_some_and(|part| {
+            let part = part.trim();
+            part.starts_with('{') || part.starts_with('[')
+        });
+        let pattern = destructured.then(|| destructured_param_pattern(param_parts[0].trim()));
+        let shadowed = pattern.map(destructured_binding_names).unwrap_or_default();
+        // Payload bindings shadow same-named state/props/import aliases for
+        // the callback scope, just like a normal JS parameter.
+        let local_frame = scope_frame(frame, &shadowed);
+        let scoped = if let Some(pattern) = pattern {
+            let prepared_inner = prepare_source(&inner_src, &local_frame);
+            format!("const {pattern} = {ch_param};\n{prepared_inner}")
+        } else {
+            let params = param_names(&params_src).map_err(|e| {
+                anyhow::anyhow!(
+                    "`{}.on(...)` in `{comp_name}`: {e} (pass an inline arrow)",
+                    sub.event
+                )
+            })?;
+            match params.first() {
+                Some(p) => {
+                    let mut m = HashMap::new();
+                    m.insert(p.clone(), ch_param.clone());
+                    rename_symbols(&inner_src, &m, &local_frame)
+                }
+                None => inner_src,
             }
-            None => inner_src,
         };
-        let prepared = prepare_source(&scoped, frame);
-        let Some(out) = self.translate_logic(&prepared, &frame.vars, &frame.types, &frame.events)
-        else {
+        let prepared = if destructured { scoped } else { prepare_source(&scoped, &local_frame) };
+        let mut types = local_frame.types.clone();
+        if destructured {
+            // Seed the synthetic parameter with a dynamic type so the
+            // destructuring declaration lowers to `__ch_N["field"]` reads.
+            types.insert(ch_param.clone(), "JsValue".to_string());
+        }
+        // The handler becomes a lambda body; translate it as function scope
+        // so locals never become module-level `static` variables.
+        let Some(out) = self.translate_logic_at(
+            &prepared,
+            &local_frame.vars,
+            &types,
+            &local_frame.events,
+            false,
+            1,
+        ) else {
             anyhow::bail!(
                 "`{}.on(...)` handler could not be translated (in `{comp_name}`)",
                 sub.event
             );
         };
+        if out.body.contains("/* destructuring not supported */") {
+            anyhow::bail!(
+                "`{}.on(...)` handler uses a destructuring pattern that cannot be lowered (in `{comp_name}`); use a plain parameter and read fields from it",
+                sub.event
+            );
+        }
         extra_headers.extend(include_lines(&out.includes));
         let cpp = out.body.trim().trim_end_matches(';').trim().to_string();
         let stmts = if cpp.is_empty() || cpp.ends_with('}') { cpp } else { format!("{cpp};") };
@@ -3356,6 +3418,7 @@ impl IRBuilder {
 /// Scope frame for JSX expansion. Components are closed over their own
 /// scope + props: parent-scope names stay invisible here and cross-component
 /// data flows exclusively through props.
+#[derive(Clone)]
 struct InstanceFrame {
     module: PathBuf,
     vars: HashMap<String, String>,
@@ -4683,6 +4746,16 @@ fn callable_arity(src: &str) -> Option<usize> {
 }
 
 fn parse_callable_source(src: &str) -> anyhow::Result<(Vec<String>, String, bool)> {
+    let (params_src, body, is_block) = parse_callable_parts(src)?;
+    Ok((param_names(&params_src)?, body, is_block))
+}
+
+/// Parse a callable into its raw parameter source, body, and block flag.
+///
+/// Unlike [`parse_callable_source`], this keeps destructured parameter
+/// patterns intact so callers that can consume a pattern (event
+/// subscriptions) do not have to reject them as function-prop parameters.
+fn parse_callable_parts(src: &str) -> anyhow::Result<(String, String, bool)> {
     let mut s = src.trim();
     if s.starts_with("async ") || s.starts_with("async(") || s.starts_with("async{") {
         anyhow::bail!("async function props are not supported");
@@ -4707,7 +4780,7 @@ fn parse_callable_source(src: &str) -> anyhow::Result<(Vec<String>, String, bool
         let (params_src, body_src) = split_paren_body(&s[open..])
             .ok_or_else(|| anyhow::anyhow!("cannot parse function shape in `{src}`"))?;
         return Ok((
-            param_names(&params_src)?,
+            params_src.trim().to_string(),
             body_src.trim().to_string(),
             is_block_body(&body_src),
         ));
@@ -4721,7 +4794,7 @@ fn parse_callable_source(src: &str) -> anyhow::Result<(Vec<String>, String, bool
     } else {
         left
     };
-    Ok((param_names(params_src)?, right.trim().to_string(), is_block_body(&right)))
+    Ok((params_src.to_string(), right.trim().to_string(), is_block_body(&right)))
 }
 
 fn split_paren_body(src: &str) -> Option<(String, String)> {
@@ -4754,6 +4827,103 @@ fn split_paren_body(src: &str) -> Option<(String, String)> {
 fn is_block_body(body: &str) -> bool {
     let b = body.trim();
     b.starts_with('{') && b.ends_with('}') && b.len() >= 2
+}
+
+/// Clone a frame with identifiers shadowed by a destructured callback
+/// parameter removed from every ambient rewrite map.
+fn scope_frame(frame: &InstanceFrame, shadowed: &HashSet<String>) -> InstanceFrame {
+    if shadowed.is_empty() {
+        return frame.clone();
+    }
+    let mut scoped = frame.clone();
+    for name in shadowed {
+        scoped.renames.remove(name);
+        scoped.prop_binds.remove(name);
+        scoped.namespace_aliases.remove(name);
+        scoped.vars.remove(name);
+        scoped.types.remove(name);
+        scoped.fn_arity.remove(name);
+        scoped.events.remove(name);
+    }
+    if shadowed.contains(&scoped.props_param) {
+        scoped.props_param.clear();
+    }
+    scoped
+}
+
+/// Names bound by a destructured parameter, parsed from a synthetic
+/// declaration so nested patterns and aliases are handled by Oxc rather
+/// than by a hand-rolled scanner.
+fn destructured_binding_names(pattern: &str) -> HashSet<String> {
+    let source = format!("const {pattern} = __morph_destructure_source;");
+    let allocator = Allocator::default();
+    let source_type =
+        SourceType::from_path("destructure.ts").unwrap_or_default().with_typescript(true);
+    let parsed = Parser::new(&allocator, &source, source_type).parse();
+    let mut names = HashSet::new();
+    if parsed.panicked || !parsed.diagnostics.is_empty() {
+        return names;
+    }
+    if let Some(Statement::VariableDeclaration(decl)) = parsed.program.body.first() {
+        for declarator in &decl.declarations {
+            collect_binding_names(&declarator.id, &mut names);
+        }
+    }
+    names
+}
+
+fn collect_binding_names(pattern: &BindingPattern<'_>, out: &mut HashSet<String>) {
+    match pattern {
+        BindingPattern::BindingIdentifier(id) => {
+            out.insert(id.name.to_string());
+        }
+        BindingPattern::ObjectPattern(obj) => {
+            for prop in &obj.properties {
+                collect_binding_names(&prop.value, out);
+            }
+            if let Some(rest) = &obj.rest {
+                collect_binding_names(&rest.argument, out);
+            }
+        }
+        BindingPattern::ArrayPattern(array) => {
+            for element in array.elements.iter().flatten() {
+                collect_binding_names(element, out);
+            }
+            if let Some(rest) = &array.rest {
+                collect_binding_names(&rest.argument, out);
+            }
+        }
+        BindingPattern::AssignmentPattern(assign) => {
+            collect_binding_names(&assign.left, out);
+        }
+    }
+}
+
+/// Strip a destructured parameter's top-level `: Type` annotation and
+/// `= default` initializer, leaving only the binding pattern.
+fn destructured_param_pattern(param: &str) -> &str {
+    let s = param.trim();
+    let bytes = s.as_bytes();
+    let mut depth = 0i32;
+    let mut i = 0usize;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' | b'\'' | b'`' => {
+                i = str_lit_end(s, i);
+                continue;
+            }
+            b'{' | b'[' | b'(' => depth += 1,
+            b'}' | b']' | b')' => {
+                if depth > 0 {
+                    depth -= 1;
+                }
+            }
+            b':' | b'=' if depth == 0 => return s[..i].trim(),
+            _ => {}
+        }
+        i += 1;
+    }
+    s
 }
 
 /// Bare identifier names from a parameter list.
@@ -9216,6 +9386,158 @@ export default function App() {
         // would stall on the continuation byte of `é`.
         assert_eq!(find_event_subscription("const café = 1; prefs.on(x)", &events), Some("prefs"));
         assert_eq!(find_event_subscription("const caféprefs.on(x)", &events), None);
+    }
+
+    #[test]
+    fn event_subscription_supports_destructured_object_param() {
+        let root = scratch("event-destructure-object");
+        write_file(
+            &root,
+            "store.mx",
+            "import { morphEvent } from 'morph'\nexport const prefs = morphEvent<{ a: string, b: string }>()\n",
+        );
+        write_file(
+            &root,
+            "App.mx",
+            r#"
+import { prefs } from './store.mx'
+
+export default function App() {
+  prefs.on(({ a, b }) => {
+    console.log(a, b)
+  })
+  return <body />
+}
+"#,
+        );
+        let graph = morph_parser::resolve_graph(&root.join("App.mx"), &root).unwrap();
+        let win = &IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap()[0];
+        let body = win.channel_subs[0].get("body").expect("channel body");
+        assert!(body.contains(r#"auto a = __ch_0["a"];"#), "{body}");
+        assert!(body.contains(r#"auto b = __ch_0["b"];"#), "{body}");
+        assert!(body.contains("std::println"), "{body}");
+        assert!(!body.contains("static auto"), "locals must not be static: {body}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn event_subscription_supports_destructured_array_param() {
+        let root = scratch("event-destructure-array");
+        write_file(
+            &root,
+            "store.mx",
+            "import { morphEvent } from 'morph'\nexport const pair = morphEvent<[string, string]>()\n",
+        );
+        write_file(
+            &root,
+            "App.mx",
+            r#"
+import { pair } from './store.mx'
+
+export default function App() {
+  pair.on(([a, b]) => console.log(a, b))
+  return <body />
+}
+"#,
+        );
+        let graph = morph_parser::resolve_graph(&root.join("App.mx"), &root).unwrap();
+        let win = &IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap()[0];
+        let body = win.channel_subs[0].get("body").expect("channel body");
+        assert!(body.contains("auto a = __ch_0[0];"), "{body}");
+        assert!(body.contains("auto b = __ch_0[1];"), "{body}");
+        assert!(!body.contains("static auto"), "locals must not be static: {body}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn event_subscription_locals_are_not_static() {
+        let root = scratch("event-locals");
+        write_file(
+            &root,
+            "store.mx",
+            "import { morphEvent } from 'morph'\nexport const prefs = morphEvent<{ a: string }>()\n",
+        );
+        write_file(
+            &root,
+            "App.mx",
+            r#"
+import { prefs } from './store.mx'
+
+export default function App() {
+  prefs.on((p) => {
+    const label = p.a
+    console.log(label)
+  })
+  return <body />
+}
+"#,
+        );
+        let graph = morph_parser::resolve_graph(&root.join("App.mx"), &root).unwrap();
+        let win = &IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap()[0];
+        let body = win.channel_subs[0].get("body").expect("channel body");
+        assert!(body.contains("auto label"), "{body}");
+        assert!(!body.contains("static auto"), "locals must not be static: {body}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn event_subscription_destructured_bindings_shadow_state() {
+        let root = scratch("event-destructure-shadow");
+        write_file(
+            &root,
+            "store.mx",
+            "import { morphEvent } from 'morph'\nexport const prefs = morphEvent<{ a: string, b: string }>()\n",
+        );
+        write_file(
+            &root,
+            "App.mx",
+            r#"
+import { morphState } from 'morph'
+import { prefs } from './store.mx'
+
+export default function App() {
+  const [a, setA] = morphState("state")
+  prefs.on(({ a, b }) => console.log(a, b))
+  return <body><text>{a}</text></body>
+}
+"#,
+        );
+        let graph = morph_parser::resolve_graph(&root.join("App.mx"), &root).unwrap();
+        let win = &IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap()[0];
+        let body = win.channel_subs[0].get("body").expect("channel body");
+        assert!(body.contains(r#"std::println("{} {}", a, b)"#), "{body}");
+        assert!(!body.contains("__st_a"), "payload binding must shadow state: {body}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn event_subscription_rejects_unlowerable_destructuring() {
+        let root = scratch("event-destructure-fallback");
+        write_file(
+            &root,
+            "store.mx",
+            "import { morphEvent } from 'morph'\nexport const prefs = morphEvent<{ a: string }>()\n",
+        );
+        write_file(
+            &root,
+            "App.mx",
+            r#"
+import { prefs } from './store.mx'
+
+export default function App() {
+  prefs.on(({ a = "fallback" }) => console.log(a))
+  return <body />
+}
+"#,
+        );
+        let graph = morph_parser::resolve_graph(&root.join("App.mx"), &root).unwrap();
+        let err = IRBuilder::new()
+            .build_with_graph(&graph, &[], &HashMap::new())
+            .expect_err("unsupported destructuring must fail in Morph, not C++");
+        let msg = err.to_string();
+        assert!(msg.contains("destructuring pattern that cannot be lowered"), "{msg}");
+        assert!(!msg.contains("/*"), "diagnostic leaked a C++ comment: {msg}");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
