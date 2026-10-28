@@ -13,6 +13,7 @@ fn translate_handler_target(
     body: &str,
     state_map: &std::collections::HashMap<String, String>,
     state_types: &std::collections::HashMap<String, String>,
+    shadowed: &[String],
 ) -> Option<String> {
     // Unwrap the arrow and braced block to bare statements first:
     // morpher translates `{ ... }` / `() => ...` into a never-invoked
@@ -27,8 +28,16 @@ fn translate_handler_target(
     }
     let options = morpher::TranslateOptions {
         indent: 1,
-        state_vars: state_map.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
-        state_types: state_types.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        state_vars: state_map
+            .iter()
+            .filter(|(k, _)| !shadowed.contains(k))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
+        state_types: state_types
+            .iter()
+            .filter(|(k, _)| !shadowed.contains(k))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
         ..Default::default()
     };
     morpher::translate_snippet(body, "snippet.ts", options)
@@ -1276,10 +1285,11 @@ pub fn emit_node_with_state(
         } else {
             // Window constructs and callback arguments both need morpher;
             // the textual path below cannot lower either.
-            let cpp = match translate_handler_target(&ev.target, state_map, state_types) {
-                Some(body) => normalize_value_access(&body),
-                None => translate_js(&ev.target, state_map),
-            };
+            let cpp = translate_handler_target(&ev.target, state_map, state_types, &ev.shadowed)
+                .map_or_else(
+                    || translate_js(&ev.target, state_map),
+                    |body| normalize_value_access(&body),
+                );
             // Inside a list-item factory `__it` / `__index` alias the
             // persistent per-row binding (`JsValue& __it = __b.item`), so a
             // handler that references them must capture them — same rule as
@@ -3710,6 +3720,7 @@ mod tests {
             "() => __morph_current_window().navigate(\"/ledger\")",
             &empty,
             &empty,
+            &[],
         )
         .expect("placeholder handler lowers");
         assert!(
@@ -3717,7 +3728,7 @@ mod tests {
             "{out}"
         );
         assert!(
-            translate_handler_target("() => setCount(count + 1)", &empty, &empty).is_some(),
+            translate_handler_target("() => setCount(count + 1)", &empty, &empty, &[]).is_some(),
             "plain handlers also lower through morpher now"
         );
     }

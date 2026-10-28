@@ -12,7 +12,7 @@ function morphEffect(effect: () => void | (() => void), deps?: readonly any[]): 
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `effect` | `() => void` | Effect body function. Can return a cleanup function. |
+| `effect` | `() => void` | Effect body function. Takes **no parameters**; read state directly or close over values. Can return a cleanup function. |
 | `deps` | `readonly any[]` | Optional dependency array. `[]` runs once after the first render. With deps, re-runs when a listed dependency changes. When omitted, subscribes to signals read in the body. |
 
 ## Returns
@@ -85,7 +85,20 @@ export default function Timer() {
 | Must be called inside a component function | convention (no scope lint in v1) |
 | Must be called on every render in same order | convention (positional matching) |
 | First argument must be a function | `mx-effect-cb` error |
+| Effect callback must take no parameters | `mx-effect-cb` error |
 | Deps should be state values | `mx-effect-deps` warning |
+
+The effect callback is invoked by the runtime with no arguments, so a
+parameter has nothing to bind. Read reactive state directly, or close over a
+local value:
+
+```tsx
+// ❌ mx-effect-cb: parameters cannot be supplied by the effect runner
+morphEffect((value) => console.log(value), [])
+
+// ✅ read state / close over values
+morphEffect(() => console.log(count), [count])
+```
 
 ## How It Works
 

@@ -69,6 +69,23 @@ Two textual rewrites, both order-sensitive:
 
 Constraints enforced here (not in the linter): unknown event name, empty/missing handler, non-inline handler, more than one handler param, and destructuring shapes the translator cannot lower (defaults, rest, computed keys) — all hard errors naming the component and module.
 
+### Destructured callable parameters (normal functions and function props)
+
+The same one-argument contract applies outside events. A destructured
+parameter on a function declaration/expression/arrow/method, or on a
+function-prop callback adapted by `synthesize_adapter`, keeps the declared
+arity: the C++ signature receives one synthetic `__argN` (typed from the
+annotation), and the function body opens with `const <pattern> = __argN;`.
+Morpher's declarator destructuring then expands that into field/index
+bindings (`auto a = __arg0["a"];`). Call sites therefore keep passing one
+object/array, matching JavaScript.
+
+Bound names are removed from the frame's ambient rename/type maps before the
+body is translated, so `({ x }) => …` shadows same-named state/props/imports
+instead of reading `__st_x`. Defaults/rest/computed keys inside the pattern
+are not lowered; event handlers reject them at the builder, while
+function-prop adapters reject them with a named diagnostic.
+
 ## Pipeline stage 4 — C++ emission (`morph-codegen`)
 
 - `logic_emitter.rs`: emits each `shared_vars` entry as static + accessor inside its `app::<ns>` block, plus `generate_state_header` / `emit_init` wiring. Subscriptions become `morph::channel("<id>").on(<lambda>)`.

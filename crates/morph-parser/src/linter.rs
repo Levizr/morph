@@ -2671,8 +2671,31 @@ fn effect_callback_is_callable(expr: &Expression<'_>) -> bool {
     }
 }
 
+/// Whether a callable effect callback declares parameters. The effect lifter
+/// invokes the callback with no arguments, so a parameterised arrow cannot be
+/// called and would fail later in C++.
+fn effect_callback_has_params(expr: &Expression<'_>) -> bool {
+    fn callable_has_params(params: &FormalParameters<'_>) -> bool {
+        !params.items.is_empty() || params.rest.is_some()
+    }
+    match expr {
+        Expression::ArrowFunctionExpression(a) => callable_has_params(&a.params),
+        Expression::FunctionExpression(f) => callable_has_params(&f.params),
+        Expression::ConditionalExpression(cond) => {
+            effect_callback_has_params(&cond.consequent)
+                || effect_callback_has_params(&cond.alternate)
+        }
+        Expression::ParenthesizedExpression(p) => effect_callback_has_params(&p.expression),
+        Expression::TSAsExpression(e) => effect_callback_has_params(&e.expression),
+        Expression::TSSatisfiesExpression(e) => effect_callback_has_params(&e.expression),
+        Expression::TSNonNullExpression(e) => effect_callback_has_params(&e.expression),
+        _ => false,
+    }
+}
+
 struct EffectCallbacks {
-    invalid: Vec<(u32, bool)>,
+    /// `(span, has_arg, bad_params)`
+    invalid: Vec<(u32, bool, bool)>,
 }
 
 impl<'a> Visit<'a> for EffectCallbacks {
@@ -2681,10 +2704,12 @@ impl<'a> Visit<'a> for EffectCallbacks {
             match call.arguments.first().and_then(Argument::as_expression) {
                 Some(arg) => {
                     if !effect_callback_is_callable(arg) {
-                        self.invalid.push((arg.span().start, true));
+                        self.invalid.push((arg.span().start, true, false));
+                    } else if effect_callback_has_params(arg) {
+                        self.invalid.push((arg.span().start, true, true));
                     }
                 }
-                None => self.invalid.push((call.span.start, false)),
+                None => self.invalid.push((call.span.start, false, false)),
             }
         }
         oxc_ast_visit::walk::walk_call_expression(self, call);
@@ -2699,17 +2724,30 @@ fn lint_effect_callbacks(
 ) {
     let mut v = EffectCallbacks { invalid: Vec::new() };
     v.visit_program(program);
-    for (start, has_arg) in v.invalid {
+    for (start, has_arg, bad_params) in v.invalid {
         let (line, col) = offset_to_line_col_fast(offsets, start);
+        let (message, suggestion) = if bad_params {
+            (
+                "`morphEffect` callback must take no parameters".to_string(),
+                "Remove the callback parameter; effects run after render with no arguments"
+                    .to_string(),
+            )
+        } else {
+            (
+                "`morphEffect` first argument must be a function".to_string(),
+                if has_arg {
+                    "Pass `morphEffect(() => { ... }, [deps])` instead of calling the function"
+                        .to_string()
+                } else {
+                    "Pass `morphEffect(() => { ... }, [deps])`".to_string()
+                },
+            )
+        };
         out.push(LintError {
             severity: "error".into(),
             code: "mx-effect-cb".into(),
-            message: "`morphEffect` first argument must be a function".into(),
-            suggestion: Some(if has_arg {
-                "Pass `morphEffect(() => { ... }, [deps])` instead of calling the function".into()
-            } else {
-                "Pass `morphEffect(() => { ... }, [deps])`".into()
-            }),
+            message,
+            suggestion: Some(suggestion),
             file_path: file_path.into(),
             line,
             col,
@@ -2904,6 +2942,67 @@ fn report_nested_effects(
             "mx-effect-nested",
             "`morphEffect` must be a top-level statement of the component body".into(),
             "Move the effect out of the branch/loop and guard its work with `if` on state".into(),
+            file_path,
+            offsets,
+            start,
+            out,
+        );
+    }
+}
+
+/// `morphState(...)` calls nested anywhere inside one top-level component
+/// statement. State is collected only from top-level `const [value, setter]`
+/// declarations; nested calls have no instance slot and would otherwise leak
+/// into C++ as an unknown function (mx-state-scope).
+#[derive(Default)]
+struct NestedStateCalls {
+    spans: Vec<u32>,
+}
+
+impl<'a> Visit<'a> for NestedStateCalls {
+    fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+        if matches!(&call.callee, Expression::Identifier(id) if id.name.as_str() == "morphState") {
+            self.spans.push(call.span.start);
+        }
+        oxc_ast_visit::walk::walk_call_expression(self, call);
+    }
+}
+
+fn is_morph_state_call(expr: &Expression) -> bool {
+    matches!(
+        expr,
+        Expression::CallExpression(call)
+            if matches!(&call.callee, Expression::Identifier(id) if id.name.as_str() == "morphState")
+    )
+}
+
+/// A top-level declarator whose initializer *is* the state call is the one
+/// supported shape; deeper calls (including in the same statement) are
+/// rejected. Pattern/init shape is handled by `mx-state-pattern` and
+/// `mx-state-init`, so skip the statement here to avoid duplicate errors.
+fn is_top_level_state_declaration(stmt: &Statement) -> bool {
+    let Statement::VariableDeclaration(vd) = stmt else {
+        return false;
+    };
+    vd.declarations.iter().any(|decl| decl.init.as_ref().is_some_and(is_morph_state_call))
+}
+
+fn check_nested_states(
+    stmt: &Statement,
+    offsets: &[usize],
+    file_path: &str,
+    out: &mut Vec<LintError>,
+) {
+    if is_top_level_state_declaration(stmt) {
+        return;
+    }
+    let mut finder = NestedStateCalls::default();
+    finder.visit_statement(stmt);
+    for start in finder.spans {
+        scope_error(
+            "mx-state-scope",
+            "`morphState` must be a top-level declaration in the component body".into(),
+            "Move `const [value, setValue] = morphState(...)` to the top level of the component; use `morphShared` for module-level state".into(),
             file_path,
             offsets,
             start,
@@ -3607,6 +3706,7 @@ fn scope_function(
         for s in &body.statements {
             if in_component && body_top {
                 check_nested_effects(s, offsets, file_path, out);
+                check_nested_states(s, offsets, file_path, out);
             }
             scope_stmt(
                 s,
@@ -3637,6 +3737,7 @@ fn scope_arrow(
         for s in &body.statements {
             if in_component && body_top {
                 check_nested_effects(s, offsets, file_path, out);
+                check_nested_states(s, offsets, file_path, out);
             }
             scope_stmt(
                 s,
@@ -3655,6 +3756,20 @@ fn scope_arrow(
             let mut finder = NestedEffectCalls::default();
             finder.visit_expression(expr);
             report_nested_effects(finder.spans, offsets, file_path, out);
+
+            let mut state_finder = NestedStateCalls::default();
+            state_finder.visit_expression(expr);
+            for start in state_finder.spans {
+                scope_error(
+                    "mx-state-scope",
+                    "`morphState` must be a top-level declaration in the component body".into(),
+                    "Move `const [value, setValue] = morphState(...)` to the top level of the component; use `morphShared` for module-level state".into(),
+                    file_path,
+                    offsets,
+                    start,
+                    out,
+                );
+            }
         }
         scope_expr(expr, components, in_component, false, func_depth + 1, offsets, file_path, out);
     }
@@ -5523,6 +5638,50 @@ mod tests {
             let errs = check(&content, "App.mx");
             assert!(!codes(&errs).contains(&"mx-effect-cb"), "{good}: {errs:?}");
         }
+    }
+
+    #[test]
+    fn effect_callback_must_take_no_parameters() {
+        for bad in [
+            "morphEffect((x) => { console.log(x) }, [])",
+            "morphEffect(({ a }) => { console.log(a) }, [])",
+            "morphEffect(function (x) { console.log(x) }, [])",
+        ] {
+            let content = format!(
+                "import {{ morphEffect }} from 'morph'\nexport default function App() {{ {bad}; return (<div/>) }}"
+            );
+            let errs = check(&content, "App.mx");
+            assert!(codes(&errs).contains(&"mx-effect-cb"), "{bad}: {errs:?}");
+            let err = errs.iter().find(|e| e.code == "mx-effect-cb").unwrap();
+            assert!(err.message.contains("no parameters"), "{bad}: {err:?}");
+        }
+
+        let content = "import { morphEffect } from 'morph'\nexport default function App() { morphEffect(() => {}, []); return (<div/>) }";
+        let errs = check(content, "App.mx");
+        assert!(!codes(&errs).contains(&"mx-effect-cb"), "{errs:?}");
+    }
+
+    #[test]
+    fn nested_state_calls_are_flagged() {
+        for body in [
+            "const [n, setN] = morphState(0); if (n > 0) { const [x, setX] = morphState(1); }",
+            "function setup() { const [x, setX] = morphState(1); }",
+            "const [n, setN] = morphState(0); return (<button onClick={() => { const [x, setX] = morphState(1); }}>{n}</button>)",
+            "const [n, setN] = morphState(0); const make = () => morphState(1);",
+        ] {
+            let content = format!(
+                "import {{ morphState }} from 'morph'\nexport default function App() {{ {body} }}"
+            );
+            let errs = check(&content, "App.mx");
+            assert!(codes(&errs).contains(&"mx-state-scope"), "{body}: {errs:?}");
+        }
+    }
+
+    #[test]
+    fn top_level_state_declarations_are_not_flagged_as_nested() {
+        let content = "import { morphState } from 'morph'\nexport default function App() { const [count, setCount] = morphState(0); return (<div>{count}</div>) }";
+        let errs = check(content, "App.mx");
+        assert!(!codes(&errs).contains(&"mx-state-scope"), "{errs:?}");
     }
 
     #[test]

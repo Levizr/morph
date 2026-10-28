@@ -4,8 +4,9 @@
 
 ## What this error means
 
-`morphState` was called somewhere other than directly inside a component
-function body — at module scope, inside a helper, or inside an event handler:
+`morphState` was called somewhere other than at the top level of a component
+function body — at module scope, inside a helper, event handler, loop,
+conditional, or nested block:
 
 ```
 error : mx-state-scope : `morphState` may only be called inside a component body

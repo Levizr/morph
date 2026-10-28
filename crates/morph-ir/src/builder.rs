@@ -1410,6 +1410,15 @@ impl IRBuilder {
             Self::seed_frame_name(frame, module_path, &fd.name, &qualified)?;
             seeded.insert(fd.name.clone());
         }
+        // Plain top-level consts (including arrow helpers) are emitted as
+        // values inside the same namespace; without these mappings their use
+        // sites stay unqualified and C++ cannot see them.
+        for name in &module.global_var_names {
+            Self::register_module_binding(module_path, &ns, "var", name, ctx);
+            let qualified = format!("::{MODULE_NS_ROOT}::{ns}::{}", binding_ident(name));
+            Self::seed_frame_name(frame, module_path, name, &qualified)?;
+            seeded.insert(name.clone());
+        }
         // Identifier handler refs call zero-param functions as `f()`.
         for fd in module
             .function_declarations
@@ -2566,39 +2575,108 @@ impl IRBuilder {
         let (sig_params, ret) = parse_fn_type(&prop.prop_type).map_err(|e| {
             anyhow::anyhow!("function prop `{}` on <{tag}> ({}:{}): {e}", prop.name, line, col)
         })?;
-        let (arrow_params, body, is_block) = parse_callable_source(arrow_src).map_err(|e| {
+        let (params_src, body, is_block) = parse_callable_parts(arrow_src).map_err(|e| {
             anyhow::anyhow!("function prop `{}` on <{tag}> ({}:{}): {e}", prop.name, line, col)
         })?;
-        if arrow_params.len() > sig_params.len() {
+        let callback_params: Vec<String> = if params_src.trim().is_empty() {
+            Vec::new()
+        } else {
+            split_top_level_commas(params_src.trim())
+                .into_iter()
+                .filter(|part| !part.trim().is_empty())
+                .collect()
+        };
+        if callback_params.len() > sig_params.len() {
             anyhow::bail!(
                 "function prop `{}` on <{tag}> ({}:{}) takes {} parameter(s) but the callback declares {}",
-                prop.name, line, col, sig_params.len(), arrow_params.len()
+                prop.name, line, col, sig_params.len(), callback_params.len()
             );
         }
-        // Signature: arrow names (what the body references) with declared
-        // types positionally; pad missing trailing params as unused.
+        // Signature: callback names (what the body references) with declared
+        // types positionally; pad missing trailing params as unused. A
+        // destructured parameter lowers to one synthetic argument plus a
+        // `const <pattern> = __argN;` prelude, matching event payloads.
         let mut params: Vec<String> = Vec::new();
-        for (i, (pname, ptype, _)) in sig_params.iter().enumerate() {
-            let name = arrow_params.get(i).cloned().unwrap_or_else(|| format!("_unused{i}"));
-            params.push(format!("{name}: {ptype}"));
-            let _ = pname;
+        let mut prelude: Vec<String> = Vec::new();
+        let mut shadowed = HashSet::new();
+        for (i, (_, ptype, _)) in sig_params.iter().enumerate() {
+            let Some(raw) = callback_params.get(i) else {
+                params.push(format!("_unused{i}: {ptype}"));
+                continue;
+            };
+            let raw = raw.trim();
+            if raw.starts_with("...") {
+                anyhow::bail!(
+                    "function prop `{}` on <{tag}> ({}:{}): rest parameters are not supported",
+                    prop.name,
+                    line,
+                    col
+                );
+            }
+            if raw.starts_with('{') || raw.starts_with('[') {
+                if has_top_level_default(raw) {
+                    anyhow::bail!(
+                        "function prop `{}` on <{tag}> ({}:{}): default destructured parameters are not supported",
+                        prop.name,
+                        line,
+                        col
+                    );
+                }
+                let pattern = destructured_param_pattern(raw);
+                let arg = format!("__arg{i}");
+                params.push(format!("{arg}: {ptype}"));
+                prelude.push(format!("const {pattern} = {arg};"));
+                shadowed.extend(destructured_binding_names(pattern));
+            } else {
+                let name = simple_param_name(raw).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "function prop `{}` on <{tag}> ({}:{}): unsupported parameter `{raw}`",
+                        prop.name,
+                        line,
+                        col
+                    )
+                })?;
+                shadowed.insert(name.clone());
+                params.push(format!("{name}: {ptype}"));
+            }
         }
+        // Payload bindings shadow same-named state/props/import aliases for
+        // the callback scope, just like a normal JS parameter.
+        let local_frame = scope_frame(parent_frame, &shadowed);
         let ret_ann = if ret.is_empty() { "void".to_string() } else { ret };
         let body_src = if is_block {
-            body
+            let inner = body.trim();
+            let inner =
+                inner.strip_prefix('{').and_then(|s| s.strip_suffix('}')).map_or(inner, str::trim);
+            let prepared = prepare_source(inner, &local_frame);
+            if prelude.is_empty() {
+                prepared
+            } else {
+                format!("{}\n{prepared}", prelude.join("\n"))
+            }
         } else if ret_ann.trim() == "void" {
-            format!("{body};")
+            let prepared = prepare_source(&body, &local_frame);
+            if prelude.is_empty() {
+                format!("{prepared};")
+            } else {
+                format!("{}\n{prepared};", prelude.join("\n"))
+            }
         } else {
-            format!("return ({body});")
+            let prepared = prepare_source(&body, &local_frame);
+            if prelude.is_empty() {
+                format!("return ({prepared});")
+            } else {
+                format!("{}\nreturn ({prepared});", prelude.join("\n"))
+            }
         };
         let mangled = format!("{prefix}_prop_{}", prop.name);
         let ts_src =
             format!("function {mangled}({}): {ret_ann} {{ {body_src} }}", params.join(", "));
         let Some(out) = self.translate_logic(
             &ts_src,
-            &parent_frame.vars,
-            &parent_frame.types,
-            &parent_frame.events,
+            &local_frame.vars,
+            &local_frame.types,
+            &local_frame.events,
         ) else {
             anyhow::bail!(
                 "function prop `{}` on <{tag}> ({}:{}) could not be translated",
@@ -2608,6 +2686,14 @@ impl IRBuilder {
             );
         };
         let cpp = strip_static_linkage(&out.body);
+        if cpp.contains("/* destructuring not supported */") {
+            anyhow::bail!(
+                "function prop `{}` on <{tag}> ({}:{}): destructured parameters with defaults, rest, or computed keys are not supported",
+                prop.name,
+                line,
+                col
+            );
+        }
         if cpp.is_empty() {
             anyhow::bail!(
                 "function prop `{}` on <{tag}> ({}:{}) translated to nothing",
@@ -3046,6 +3132,7 @@ impl IRBuilder {
                         trigger: "click".into(),
                         action: "call".into(),
                         target: capture_raw(&body, frame),
+                        shadowed: vec!["e".into()],
                     });
                 }
                 for (k, v) in props {
@@ -3064,19 +3151,19 @@ impl IRBuilder {
                     }
                     // Bare identifier refs (`onChange={handleChange}`) wire
                     // like arrows; a Ref synthesizes the event call.
-                    let handler_src: Option<String> = match v {
-                        morph_parser::JsxPropValue::Fn(f) => Some(capture_raw(f, frame)),
+                    let handler_src: Option<(String, Vec<String>)> = match v {
+                        morph_parser::JsxPropValue::Fn(f) => Some(capture_event_handler(f, frame)),
                         morph_parser::JsxPropValue::Ref(r) => {
                             let call = if frame.fn_arity.get(r) == Some(&0) {
                                 format!("{r}()")
                             } else {
                                 format!("{r}(e)")
                             };
-                            Some(capture_raw(&call, frame))
+                            Some((capture_raw(&call, frame), vec!["e".into()]))
                         }
                         _ => None,
                     };
-                    if let Some(src) = handler_src {
+                    if let Some((src, shadowed)) = handler_src {
                         if let Some(trigger) = event_trigger(k) {
                             if let Some(event) = find_event_subscription(&src, &frame.events) {
                                 anyhow::bail!(
@@ -3087,6 +3174,7 @@ impl IRBuilder {
                                 trigger: trigger.into(),
                                 action: "call".into(),
                                 target: src,
+                                shadowed,
                             });
                             continue;
                         }
@@ -3768,6 +3856,128 @@ fn rename_symbols(src: &str, renames: &HashMap<String, String>, frame: &Instance
         i += c.len_utf8();
     }
     out
+}
+
+/// Normalize a JSX event handler to the codegen contract: one `e` parameter
+/// (the DOM event is always passed as `e`) plus a local binding for the
+/// user's parameter name/pattern. Both build and dev emitters strip the
+/// arrow and wrap the remaining body in `[](JsObject e) { … }`, so without
+/// this pass `(evt) => evt.key` or `({ key }) => key` leaves `evt`/`key`
+/// unbound in the generated lambda.
+///
+/// `evt.type` → `evt["type"]` for a plain JSX handler parameter. The DOM
+/// event is a `JsObject`/`JsValue` with no C++ members; the codegen
+/// normalizer only knows the reserved `e` name, so alias-bound parameters
+/// need the same treatment before they reach it. Method calls and property
+/// names after a dot stay untouched.
+fn normalize_event_param_members(src: &str, name: &str) -> String {
+    if name == "e" || name.is_empty() {
+        return src.to_string();
+    }
+    let mut needle = String::with_capacity(name.len() + 1);
+    needle.push_str(name);
+    needle.push('.');
+    let bytes = src.as_bytes();
+    let mut out = String::with_capacity(src.len());
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'"' || bytes[i] == b'\'' || bytes[i] == b'`' {
+            let end = str_lit_end(src, i);
+            out.push_str(&src[i..end]);
+            i = end;
+            continue;
+        }
+        if src[i..].starts_with(&needle)
+            && (i == 0 || (!is_ident_char_at(src, i - 1) && bytes[i - 1] != b'.'))
+        {
+            let mut j = i + needle.len();
+            while j < bytes.len() && is_ident_char_at(src, j) {
+                j += 1;
+            }
+            let is_call = j < bytes.len() && bytes[j] == b'(';
+            if !is_call {
+                out.push_str(name);
+                out.push_str("[\"");
+                out.push_str(&src[i + needle.len()..j]);
+                out.push_str("\"]");
+                i = j;
+                continue;
+            }
+        }
+        let Some(ch) = src[i..].chars().next() else {
+            break;
+        };
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
+}
+
+fn capture_event_handler(raw: &str, frame: &InstanceFrame) -> (String, Vec<String>) {
+    let fallback = || (capture_raw(raw, frame), vec!["e".to_string()]);
+    let Ok((params_src, body, is_block)) = parse_callable_parts(raw) else {
+        return fallback();
+    };
+    let params: Vec<String> = if params_src.trim().is_empty() {
+        Vec::new()
+    } else {
+        split_top_level_commas(params_src.trim())
+            .into_iter()
+            .filter(|part| !part.trim().is_empty())
+            .collect()
+    };
+    if params.len() != 1 {
+        return fallback();
+    }
+    let raw_param = params[0].trim();
+    if raw_param.starts_with("...") {
+        return fallback();
+    }
+    let mut shadowed: HashSet<String> = HashSet::from(["e".to_string()]);
+    let mut payload_name: Option<String> = None;
+    let prelude = if raw_param.starts_with('{') || raw_param.starts_with('[') {
+        if has_top_level_default(raw_param) {
+            return fallback();
+        }
+        let pattern = destructured_param_pattern(raw_param);
+        shadowed.extend(destructured_binding_names(pattern));
+        Some(format!("const {pattern} = e;"))
+    } else if let Some(name) = simple_param_name(raw_param) {
+        shadowed.insert(name.clone());
+        payload_name = Some(name.clone());
+        if name == "e" {
+            None
+        } else {
+            Some(format!("const {name} = e;"))
+        }
+    } else {
+        return fallback();
+    };
+    // The DOM event parameter itself shadows any same-named outer binding.
+    let local_frame = scope_frame(frame, &shadowed);
+    let inner = if is_block {
+        let trimmed = body.trim();
+        trimmed.strip_prefix('{').and_then(|s| s.strip_suffix('}')).map_or(trimmed, str::trim)
+    } else {
+        body.trim()
+    };
+    let captured = capture_raw(inner, &local_frame);
+    let captured = if let Some(name) = payload_name {
+        normalize_event_param_members(&captured, &name)
+    } else {
+        captured
+    };
+    let prelude = prelude.unwrap_or_default();
+    let target = if is_block {
+        if prelude.is_empty() {
+            format!("(e) => {{ {captured} }}")
+        } else {
+            format!("(e) => {{ {prelude} {captured} }}")
+        }
+    } else {
+        format!("(e) => {{ {prelude} {captured}; }}")
+    };
+    (target, shadowed.into_iter().collect())
 }
 
 /// Prepare a raw JSX-captured expression for emit-time translation.
@@ -4924,6 +5134,55 @@ fn destructured_param_pattern(param: &str) -> &str {
         i += 1;
     }
     s
+}
+
+/// Bare identifier name from one callable parameter, with an optional
+/// `: Type`, `?`, or `= default` suffix. Returns `None` for patterns or
+/// anything that cannot be mapped to one C++ name.
+fn simple_param_name(param: &str) -> Option<String> {
+    let part = param.trim().trim_start_matches("...").trim();
+    let name_end = part
+        .char_indices()
+        .take_while(|(_, c)| c.is_alphanumeric() || *c == '_' || *c == '$')
+        .map(|(i, c)| i + c.len_utf8())
+        .last()
+        .unwrap_or(0);
+    let name = part[..name_end].trim();
+    if name.is_empty() {
+        return None;
+    }
+    let rest = part[name_end..].trim_start();
+    if rest.is_empty() || rest.starts_with(':') || rest.starts_with('=') || rest.starts_with('?') {
+        Some(name.to_string())
+    } else {
+        None
+    }
+}
+
+/// Whether a parameter has a top-level `= default` (ignoring `=>` tokens in
+/// a type annotation). Defaults are not part of the declared prop signature.
+fn has_top_level_default(param: &str) -> bool {
+    let bytes = param.as_bytes();
+    let mut depth = 0i32;
+    let mut i = 0usize;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' | b'\'' | b'`' => {
+                i = str_lit_end(param, i);
+                continue;
+            }
+            b'{' | b'[' | b'(' => depth += 1,
+            b'}' | b']' | b')' => {
+                if depth > 0 {
+                    depth -= 1;
+                }
+            }
+            b'=' if depth == 0 && bytes.get(i + 1) != Some(&b'>') => return true,
+            _ => {}
+        }
+        i += 1;
+    }
+    false
 }
 
 /// Bare identifier names from a parameter list.
@@ -9024,6 +9283,118 @@ export default function App() {
             targets.iter().any(|t| t.contains("inst0_prop_onStep") && t.contains("inst0_count")),
             "{targets:?}"
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn jsx_handlers_normalize_params_and_shadow_outer_state() {
+        fn collect_events<'a>(node: &'a IRNode, out: &mut Vec<&'a IREvent>) {
+            out.extend(&node.events);
+            for child in &node.children {
+                collect_events(child, out);
+            }
+        }
+
+        let root = scratch("jsxhandlers");
+        write_file(
+            &root,
+            "App.mx",
+            r"
+import { morphState } from 'morph'
+export default function App() {
+  const [x, setX] = morphState(0)
+  return <body>
+    <button onClick={({ x }) => console.log(x)}>destructured</button>
+    <button onClick={(evt) => console.log(evt.type)}>plain</button>
+    <text>{x}</text>
+  </body>
+}
+",
+        );
+        let graph = morph_parser::resolve_graph(&root.join("App.mx"), &root).unwrap();
+        let win = &IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap()[0];
+        let mut events = Vec::new();
+        collect_events(&win.nodes[0], &mut events);
+        let destructured = events[0];
+        assert!(destructured.target.contains("const { x } = e;"), "{}", destructured.target);
+        assert!(!destructured.target.contains("__st_x"), "{}", destructured.target);
+        assert!(destructured.shadowed.iter().any(|s| s == "x"));
+
+        let plain = events[1];
+        assert!(plain.target.contains("const evt = e;"), "{}", plain.target);
+        assert!(plain.target.contains("evt[\"type\"]"), "{}", plain.target);
+        assert!(!plain.target.contains("__st_evt"));
+        assert!(plain.shadowed.iter().any(|s| s == "evt"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn event_param_normalization_preserves_unicode() {
+        let src = "console.log('café', evt.type, \"évt.type\", `evt.type`)";
+        let out = normalize_event_param_members(src, "evt");
+        assert_eq!(out, "console.log('café', evt[\"type\"], \"évt.type\", `evt.type`)");
+    }
+
+    #[test]
+    fn module_level_const_helpers_are_namespaced_at_call_sites() {
+        let root = scratch("modconst");
+        write_file(
+            &root,
+            "App.mx",
+            r"
+const sum2 = ({ a, b }: { a: number, b: number }) => a + b
+const label = 'total'
+export default function App() {
+  const [x, setX] = morphState(0)
+  return <body><text>{label}: {x + sum2({ a: 1, b: 2 })}</text></body>
+}
+",
+        );
+        let graph = morph_parser::resolve_graph(&root.join("App.mx"), &root).unwrap();
+        let win = &IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap()[0];
+        let premain = win.premain_functions.join("\n");
+        assert!(premain.contains("auto sum2 ="), "{premain}");
+        for name in ["sum2", "label"] {
+            assert!(
+                win.module_bindings.iter().any(|b| {
+                    b.get("kind").map(String::as_str) == Some("var")
+                        && b.get("ns").map(String::as_str) == Some("app")
+                        && b.get("name").map(String::as_str) == Some(name)
+                }),
+                "missing var binding for {name}: {:?}",
+                win.module_bindings
+            );
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn destructured_adapter_params_bind_payload_fields() {
+        let root = scratch("adapterdestructure");
+        write_file(
+            &root,
+            "App.mx",
+            r"
+function Child(props: { onHit: (p: { x: number, y: number }) => void }) {
+  return <button onClick={() => props.onHit({ x: 1, y: 2 })}>hit</button>
+}
+export default function App() {
+  const [x, setX] = morphState(0)
+  return <body><Child onHit={({ x, y }) => console.log(x + y)} /><text>{x}</text></body>
+}
+",
+        );
+        let graph = morph_parser::resolve_graph(&root.join("App.mx"), &root).unwrap();
+        let win = &IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap()[0];
+        let premain = win.premain_functions.join("\n");
+        let adapter = premain
+            .split("\n\n")
+            .find(|p| p.contains("inst0_prop_onHit"))
+            .expect("adapter emitted");
+        assert!(adapter.contains("JsObject __arg0"), "{adapter}");
+        assert!(adapter.contains("auto x = __arg0[\"x\"];"), "{adapter}");
+        assert!(adapter.contains("auto y = __arg0[\"y\"];"), "{adapter}");
+        assert!(!adapter.contains("__st_x"), "payload shadows state: {adapter}");
         let _ = std::fs::remove_dir_all(&root);
     }
 

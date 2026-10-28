@@ -36,6 +36,9 @@ This module is provided by `node_modules/morph/index.d.ts` — it ships with eve
 - Arrow/function expressions assigned to consts (inside components and at
   module scope)
 - `async` / `await` (C++20 coroutines; see [Async & Networking](async.md))
+- Destructured object/array parameters in function declarations, expressions,
+  arrows, methods, function-prop callbacks, and `.on()` event handlers
+  (lowered to one synthetic argument plus local bindings)
 - Object/array literal consts, including nested object member access
 - Classes with constructors, methods, `super()`, `this`
 - Interfaces and type aliases
@@ -80,6 +83,8 @@ Binary (`+`, `-`, `*`, `/`, `===`, `!==`, `==`, `!=`, `<`, `>`, etc.), unary (`!
 ## What's Not Supported Yet
 
 - Object spread (`{ ...base }`) and rest parameters (`...args`)
+- Defaults, rest elements, or computed keys in a destructured
+  parameter/event payload pattern
 - Promise static helpers (`Promise.resolve`, `Promise.all`, …); `await`
   and `new Promise(...)` lower to C++ coroutines
 - Regular expression literals
@@ -121,9 +126,12 @@ codegen. Errors block `morph build`; warnings are reported but do not:
 - **Literal window config** — `windowConfig` keys are known and values are
   literals of the documented type (`mx-windowconfig-key`,
   `mx-windowconfig-type`).
-- **Effects receive functions** — the first `morphEffect` argument is a
-  function, never a call result or a receiver-qualified method
-  (`mx-effect-cb`).
+- **Effects receive no-argument functions** — the first `morphEffect`
+  argument is a function, never a call result or a receiver-qualified method,
+  and its callback declares no parameters (`mx-effect-cb`).
+- **State is declared at component top level** — `morphState` inside a
+  helper, handler, loop, conditional, or nested block is rejected
+  (`mx-state-scope`).
 
 Each rule links to its full explanation and fix in the
 [error reference](../errors/index.md).

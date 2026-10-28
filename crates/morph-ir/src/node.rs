@@ -173,6 +173,12 @@ pub struct IREvent {
     pub trigger: String,
     pub action: String,
     pub target: String,
+    /// Handler-local bindings that shadow ambient state/prop/import names.
+    /// Codegen filters these out of `state_vars`/`state_types` so a DOM
+    /// handler parameter or destructured payload field is not rewritten to
+    /// the outer signal accessor.
+    #[serde(default)]
+    pub shadowed: Vec<String>,
 }
 
 /// A conditional class style effect: when `condition` (a C++ bool expr) is true,

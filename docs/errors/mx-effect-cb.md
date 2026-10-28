@@ -1,4 +1,4 @@
-# mx-effect-cb — morphEffect First Argument Must Be a Function
+# mx-effect-cb — Invalid morphEffect Callback
 
 **Severity:** error | **Blocks `morph build`:** yes
 
@@ -7,11 +7,18 @@
 
 ## What this error means
 
-The first argument to `morphEffect` is not a function:
+The first argument to `morphEffect` is not a valid effect callback. There are
+two cases:
 
 ```
 error : mx-effect-cb : `morphEffect` first argument must be a function
   hint: Pass `morphEffect(() => { ... }, [deps])`
+  Learn more: https://morph.levizr.com/docs/errors/mx-effect-cb
+```
+
+```
+error : mx-effect-cb : `morphEffect` callback must take no parameters
+  hint: Remove the callback parameter; effects run after render with no arguments
   Learn more: https://morph.levizr.com/docs/errors/mx-effect-cb
 ```
 
@@ -29,7 +36,12 @@ Method references (`morphEffect(cleaner.cleanup, [])`) are also rejected: the
 lifter emits a standalone callable and cannot bind the receiver object. Move
 the effect body into an arrow that calls the method instead.
 
-## Example that triggers it
+Effect callbacks also take **no parameters**. The runtime invokes the lifted
+callback with no arguments, so a parameter would stay unbound in the generated
+C++ closure (or produce an invalid native call). Read state directly inside
+the effect, or close over a local value.
+
+## Examples that trigger it
 
 ```tsx
 import { morphEffect } from 'morph';
@@ -37,6 +49,10 @@ import { morphEffect } from 'morph';
 export default function App() {
   // ❌ Calls fetchData during render, registers undefined — mx-effect-cb
   morphEffect(fetchData(), []);
+
+  // ❌ The effect runner has no argument to pass — mx-effect-cb
+  morphEffect((value) => console.log(value), []);
+
   return <div>Hello</div>;
 }
 ```
@@ -68,8 +84,9 @@ morphEffect(() => {
 Steps:
 
 1. Wrap the work in `() => { ... }` as the first argument.
-2. If the effect needs arguments, close over them or read state inside — do
-   not call the function in the argument position.
+2. Leave the callback parameter list empty. If the effect needs values,
+   close over them or read state inside — do not call the function in the
+   argument position.
 3. Re-run `morph check`.
 
 ## Tuning this rule

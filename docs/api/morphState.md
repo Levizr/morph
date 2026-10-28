@@ -69,10 +69,16 @@ const [items, setItems] = morphState<string[]>([]) // string[]
 
 | Rule | Enforcement |
 |------|-------------|
-| Must be called inside a component function | `mx-state-scope` error |
+| Must be declared at the top level of a component body | `mx-state-scope` error |
 | Cannot be called at module scope | `mx-state-scope` error |
-| Cannot be called in loops/conditionals | Runtime error (hook rules) |
+| Cannot be called inside an event handler, helper function, loop, or conditional | `mx-state-scope` error |
 | Must be called on every render in same order | Runtime error (hook rules) |
+
+The declaration must be the whole initializer:
+`const [value, setValue] = morphState(init)`. Wrapping the call in another
+expression, or placing it inside a nested block/handler, is rejected before
+codegen because state slots are collected from top-level component-body
+declarations only.
 
 ## How It Works
 

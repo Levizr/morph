@@ -293,7 +293,7 @@ fn translate_expr(js: &str, maps: &AmbientMaps) -> String {
 }
 
 /// Translate an event handler target to a `void(JsObject)` lambda body.
-fn translate_handler(target: &str, maps: &AmbientMaps) -> String {
+fn translate_handler(target: &str, maps: &AmbientMaps, shadowed: &[String]) -> String {
     let trimmed = target.trim_start();
     if trimmed.starts_with("[&]") || trimmed.starts_with("[]") {
         return target.to_string();
@@ -307,7 +307,21 @@ fn translate_handler(target: &str, maps: &AmbientMaps) -> String {
             after.to_string()
         };
     }
-    let cpp = translate_expr(&body, maps);
+    let local_maps = AmbientMaps {
+        vars: maps
+            .vars
+            .iter()
+            .filter(|(k, _)| !shadowed.contains(k))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
+        types: maps
+            .types
+            .iter()
+            .filter(|(k, _)| !shadowed.contains(k))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
+    };
+    let cpp = translate_expr(&body, &local_maps);
     // Same capture rule as the build emitter (see node_emitter.rs): a handler
     // inside a list-item factory that references `__it` / `__index` must
     // capture the persistent per-row binding or it won't compile.
@@ -380,7 +394,7 @@ fn emit_node_events(
         }
         match event.action.as_str() {
             "call" => {
-                let rhs = translate_handler(&event.target, maps);
+                let rhs = translate_handler(&event.target, maps, &event.shadowed);
                 lines.push(format!("{indent}if (auto* n = nodes.get(\"{}\")) {{", node.node_id));
                 lines.push(format!("{indent}    n->{member} = {rhs};"));
                 lines.push(format!("{indent}}}"));
@@ -1879,6 +1893,7 @@ mod tests {
                 trigger: "click".to_string(),
                 action: "call".to_string(),
                 target: "() => pressClear()".to_string(),
+                shadowed: vec![],
             }],
             ..Default::default()
         };
@@ -1905,6 +1920,7 @@ mod tests {
                 action: "call".to_string(),
                 target: "() => setBodyWidth(bodyWidth > 60 ? bodyWidth - 20 : bodyWidth)"
                     .to_string(),
+                shadowed: vec![],
             }],
             ..Default::default()
         };
@@ -1935,6 +1951,7 @@ mod tests {
                 trigger: "input".to_string(),
                 action: "call".to_string(),
                 target: "(e) => setUser(e.value)".to_string(),
+                shadowed: vec!["e".into()],
             }],
             ..Default::default()
         };
@@ -1946,6 +1963,32 @@ mod tests {
             "raw member access must not survive: {}",
             output.source
         );
+    }
+
+    #[test]
+    fn handler_payload_shadows_state_maps() {
+        use morph_ir::{IREvent, IRNode};
+        let mut sv = HashMap::new();
+        sv.insert("getter".to_string(), "x".to_string());
+        sv.insert("setter".to_string(), "setX".to_string());
+        sv.insert("init".to_string(), "0".to_string());
+        let node = IRNode {
+            node_id: "node_0030".to_string(),
+            node_type: "button".to_string(),
+            events: vec![IREvent {
+                trigger: "click".to_string(),
+                action: "call".to_string(),
+                target: "(e) => { const { x } = e; console.log(x); }".to_string(),
+                shadowed: vec!["e".into(), "x".into()],
+            }],
+            ..Default::default()
+        };
+        let window = IRWindow { nodes: vec![node], state_vars: vec![sv], ..Default::default() };
+        let output = emit_logic(&[window]);
+        let start = output.source.find("n->onClick").expect("handler emitted");
+        let handler = &output.source[start..];
+        assert!(handler.contains("auto x = e[\"x\"];"), "{handler}");
+        assert!(!handler.contains("__st_x.get()"), "{handler}");
     }
 
     #[test]
@@ -1964,6 +2007,25 @@ mod tests {
         let window = IRWindow { nodes: vec![node], state_vars: vec![sv], ..Default::default() };
         let output = emit_logic(&[window]);
         assert!(output.source.contains("n->setText(morph::str(__st_acc.get()));"));
+    }
+
+    #[test]
+    fn reactive_text_qualifies_module_var_bindings() {
+        use morph_ir::IRNode;
+        let mut binding = HashMap::new();
+        binding.insert("kind".to_string(), "var".to_string());
+        binding.insert("ns".to_string(), "app".to_string());
+        binding.insert("name".to_string(), "sum2".to_string());
+        let node = IRNode {
+            node_id: "node_0009".to_string(),
+            node_type: "__expr__".to_string(),
+            reactive_text: "sum2(1)".to_string(),
+            ..Default::default()
+        };
+        let window =
+            IRWindow { nodes: vec![node], module_bindings: vec![binding], ..Default::default() };
+        let output = emit_logic(&[window]);
+        assert!(output.source.contains("morph::str(::app::app::sum2(1))"), "{}", output.source);
     }
 
     fn shared_window() -> IRWindow {

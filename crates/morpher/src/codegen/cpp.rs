@@ -2154,7 +2154,8 @@ impl<'a> CppTranslator<'a> {
         // discards them (the old Python transpiler dropped nested ones too).
         let old_drop = self.ctx.drop_return_value;
         self.ctx.drop_return_value = false;
-        let mut body = self.emit_function_body(f.body.as_ref().unwrap());
+        let mut body =
+            self.emit_function_body_with_params(f.body.as_ref().unwrap(), Some(&f.params));
         self.ctx.drop_return_value = old_drop;
         if is_async {
             self.ctx.is_async_fn -= 1;
@@ -2411,7 +2412,7 @@ impl<'a> CppTranslator<'a> {
         let outer_fn = self.ctx.current_fn.clone();
         let main_name = f.id.as_ref().map(|id| id.name.to_string()).unwrap_or_default();
         self.ctx.current_fn = Some(main_name);
-        let body = self.emit_function_body(f.body.as_ref().unwrap());
+        let body = self.emit_function_body_with_params(f.body.as_ref().unwrap(), Some(&f.params));
         self.ctx.current_fn = outer_fn;
         self.ctx.drop_return_value = old_drop;
         self.ctx.is_async_fn -= 1;
@@ -2428,12 +2429,26 @@ impl<'a> CppTranslator<'a> {
     }
 
     fn emit_function_body(&mut self, body: &FunctionBody<'a>) -> String {
-        if body.statements.is_empty() {
+        self.emit_function_body_with_params(body, None)
+    }
+
+    /// Like [`Self::emit_function_body`], but emits destructuring bindings
+    /// for `params` before the first user statement. The parameter list itself
+    /// carries one synthetic argument per destructured pattern.
+    fn emit_function_body_with_params(
+        &mut self,
+        body: &FunctionBody<'a>,
+        params: Option<&FormalParameters<'a>>,
+    ) -> String {
+        if body.statements.is_empty() && params.is_none() {
             return "{}".to_string();
         }
         let mut lines = vec!["{".to_string()];
         let old = self.ctx.indent_level;
         self.ctx.indent_level = old + 1;
+        if let Some(prelude) = params.and_then(|params| self.destructured_param_prelude(params)) {
+            lines.push(prelude);
+        }
         for stmt in &body.statements {
             if let Some(code) = self.emit_statement(stmt) {
                 lines.push(code);
@@ -2458,10 +2473,9 @@ impl<'a> CppTranslator<'a> {
         include_defaults: bool,
     ) -> String {
         let mut parts = Vec::new();
-        for p in &params.items {
-            let destructured = self.expand_destructured_param(&p.pattern);
-            if !destructured.is_empty() {
-                parts.extend(destructured);
+        for (index, p) in params.items.iter().enumerate() {
+            if let Some(decl) = self.destructured_param_decl(p, index, include_defaults) {
+                parts.push(decl);
                 continue;
             }
             let (name, _) = self.binding_to_identifier(&p.pattern);
@@ -2511,58 +2525,124 @@ impl<'a> CppTranslator<'a> {
         parts.join(", ")
     }
 
-    fn expand_destructured_param(&mut self, pattern: &BindingPattern<'a>) -> Vec<String> {
-        let mut out = Vec::new();
-        match pattern {
-            BindingPattern::ObjectPattern(obj) => {
-                for prop in &obj.properties {
-                    if prop.computed {
-                        continue;
-                    }
-                    let Some(_key) = EscapeAnalyzer::pattern_key_name(&prop.key) else {
-                        continue;
-                    };
-                    if let Some(bound_name) = self.binding_name_from_pattern(&prop.value) {
-                        let cpp_type = "auto".to_string();
-                        let cpp_type = self.wrap_type(&cpp_type);
-                        self.ctx.need(&cpp_type);
-                        self.ctx.var_types.insert(bound_name.clone(), cpp_type.clone());
-                        let param_cpp = param_type(&cpp_type);
-                        let mut decl = format!("{} {}", param_cpp, bound_name);
-                        if let BindingPattern::AssignmentPattern(a) = &prop.value {
-                            decl.push_str(&format!(" = {}", self.emit_expression(&a.right)));
-                        }
-                        out.push(decl);
-                    }
-                }
-            }
-            BindingPattern::ArrayPattern(arr) => {
-                for element in arr.elements.iter().flatten() {
-                    if let Some(bound_name) = self.binding_name_from_pattern(element) {
-                        let cpp_type = "auto".to_string();
-                        let cpp_type = self.wrap_type(&cpp_type);
-                        self.ctx.need(&cpp_type);
-                        self.ctx.var_types.insert(bound_name.clone(), cpp_type.clone());
-                        let param_cpp = param_type(&cpp_type);
-                        let mut decl = format!("{} {}", param_cpp, bound_name);
-                        if let BindingPattern::AssignmentPattern(a) = element {
-                            decl.push_str(&format!(" = {}", self.emit_expression(&a.right)));
-                        }
-                        out.push(decl);
-                    }
-                }
-            }
-            _ => {}
+    /// One C++ parameter for a destructured parameter. The pattern is
+    /// lowered at the top of the function body (see
+    /// [`Self::destructured_param_prelude`]) so a call site still passes one
+    /// object/array argument, matching JavaScript semantics.
+    fn destructured_param_decl(
+        &mut self,
+        p: &FormalParameter<'a>,
+        index: usize,
+        include_defaults: bool,
+    ) -> Option<String> {
+        if !matches!(p.pattern, BindingPattern::ObjectPattern(_) | BindingPattern::ArrayPattern(_))
+        {
+            return None;
         }
-        out
+        let cpp_type = self.destructured_param_cpp_type(p);
+        let name = format!("__arg{index}");
+        self.ctx.var_types.insert(name.clone(), cpp_type.clone());
+        let param_cpp = param_type(&cpp_type);
+        if param_cpp == "std::string_view" {
+            self.ctx.need("std::string_view");
+        }
+        let mut decl = format!("{param_cpp} {name}");
+        if include_defaults && let Some(init) = &p.initializer {
+            decl.push_str(" = ");
+            decl.push_str(&self.emit_expression(init));
+        }
+        Some(decl)
     }
 
-    fn binding_name_from_pattern(&self, pattern: &BindingPattern<'a>) -> Option<String> {
+    fn params_bind_name(params: &FormalParameters<'a>, name: &str) -> bool {
+        params.items.iter().any(|p| Self::pattern_binds_name(&p.pattern, name))
+            || params
+                .rest
+                .as_ref()
+                .is_some_and(|rest| Self::pattern_binds_name(&rest.rest.argument, name))
+    }
+
+    fn pattern_binds_name(pattern: &BindingPattern<'a>, name: &str) -> bool {
         match pattern {
-            BindingPattern::BindingIdentifier(id) => Some(id.name.to_string()),
-            BindingPattern::AssignmentPattern(a) => self.binding_name_from_pattern(&a.left),
-            _ => None,
+            BindingPattern::BindingIdentifier(id) => id.name.as_str() == name,
+            BindingPattern::ObjectPattern(obj) => {
+                obj.properties.iter().any(|prop| Self::pattern_binds_name(&prop.value, name))
+                    || obj
+                        .rest
+                        .as_ref()
+                        .is_some_and(|rest| Self::pattern_binds_name(&rest.argument, name))
+            }
+            BindingPattern::ArrayPattern(array) => {
+                array
+                    .elements
+                    .iter()
+                    .flatten()
+                    .any(|element| Self::pattern_binds_name(element, name))
+                    || array
+                        .rest
+                        .as_ref()
+                        .is_some_and(|rest| Self::pattern_binds_name(&rest.argument, name))
+            }
+            BindingPattern::AssignmentPattern(assign) => {
+                Self::pattern_binds_name(&assign.left, name)
+            }
         }
+    }
+
+    fn destructured_param_cpp_type(&mut self, p: &FormalParameter<'a>) -> String {
+        let cpp_type = if let Some(ta) = &p.type_annotation {
+            resolve_type_annotation(
+                Some(ta),
+                "auto",
+                &self.ctx.template_params,
+                false,
+                &self.ctx.class_names,
+            )
+        } else {
+            "auto".to_string()
+        };
+        let cpp_type = self.wrap_type(&cpp_type);
+        self.ctx.need(&cpp_type);
+        cpp_type
+    }
+
+    /// Statements binding every name in a destructured parameter to its
+    /// field/index on the synthetic argument. Emitted at function-body scope.
+    fn destructured_param_prelude(&mut self, params: &FormalParameters<'a>) -> Option<String> {
+        let mut lines = Vec::new();
+        for (index, p) in params.items.iter().enumerate() {
+            if !matches!(
+                p.pattern,
+                BindingPattern::ObjectPattern(_) | BindingPattern::ArrayPattern(_)
+            ) {
+                continue;
+            }
+            let cpp_type = self.destructured_param_cpp_type(p);
+            let mut raw: Vec<RawBinding> = Vec::new();
+            if !Self::collect_access(&p.pattern, &mut Vec::new(), &mut raw) {
+                continue;
+            }
+            let Some(dot) = Self::destructure_dot(&cpp_type, &self.ctx.class_names) else {
+                continue;
+            };
+            if !dot
+                && (cpp_type.starts_with("std::vector<") || cpp_type == "JsArray")
+                && raw.iter().any(|binding| {
+                    binding.steps.iter().any(|step| matches!(step, AccessStep::Key(_)))
+                })
+            {
+                continue;
+            }
+            let base = format!("__arg{index}");
+            for binding in raw {
+                let access = Self::render_access(&base, dot, &binding.steps);
+                let elem_type = Self::access_elem_type(&cpp_type, &binding.steps);
+                self.ctx.need(&elem_type);
+                self.ctx.var_types.insert(binding.name.clone(), elem_type);
+                lines.push(format!("{}auto {} = {};", self.indent(), binding.name, access));
+            }
+        }
+        if lines.is_empty() { None } else { Some(lines.join("\n")) }
     }
 
     fn wrap_type(&mut self, cpp_type: &str) -> String {
@@ -2726,7 +2806,11 @@ impl<'a> CppTranslator<'a> {
 
     fn format_constructor_params(&mut self, params: &FormalParameters<'a>) -> String {
         let mut parts = Vec::new();
-        for p in &params.items {
+        for (index, p) in params.items.iter().enumerate() {
+            if let Some(decl) = self.destructured_param_decl(p, index, false) {
+                parts.push(decl);
+                continue;
+            }
             let (name, _) = self.binding_to_identifier(&p.pattern);
             if name.starts_with("/*") {
                 continue;
@@ -2774,6 +2858,12 @@ impl<'a> CppTranslator<'a> {
                 };
                 if m.kind == MethodDefinitionKind::Constructor {
                     // Use constructor-specific formatting with p_ prefix and initializer list (like Python)
+                    let has_destructured = m.value.params.items.iter().any(|p| {
+                        matches!(
+                            p.pattern,
+                            BindingPattern::ObjectPattern(_) | BindingPattern::ArrayPattern(_)
+                        )
+                    });
                     let params_str = self.format_constructor_params(&m.value.params);
                     let param_names: std::collections::HashSet<String> = m
                         .value
@@ -2854,11 +2944,12 @@ impl<'a> CppTranslator<'a> {
                                                 } else {
                                                     self.emit_expression(&assign.right)
                                                 };
-                                                init_entries.push(format!(
-                                                    "{}(std::move({}))",
-                                                    prop, rhs_str
-                                                ));
-                                                is_this_assign = true;
+                                                if !has_destructured {
+                                                    init_entries.push(format!(
+                                                        "{prop}(std::move({rhs_str}))"
+                                                    ));
+                                                    is_this_assign = true;
+                                                }
                                             }
                                         }
                                     }
@@ -2875,14 +2966,21 @@ impl<'a> CppTranslator<'a> {
                     } else {
                         format!("\n{}{}: {}", self.indent(), INDENT, init_entries.join(", "))
                     };
-                    // Build body with remaining statements
-                    let body_str = if remaining.is_empty() {
+                    // Build body with remaining statements. Destructured
+                    // constructor params bind after the initializer list
+                    // because the prelude names are locals, not parameters.
+                    let body_str = if remaining.is_empty() && !has_destructured {
                         "{}".to_string()
                     } else {
                         let mut lines = vec!["{".to_string()];
                         let old_indent = self.ctx.indent_level;
                         self.ctx.indent_level = old_indent + 1;
                         self.ctx.fn_body_depth += 1;
+                        if has_destructured
+                            && let Some(prelude) = self.destructured_param_prelude(&m.value.params)
+                        {
+                            lines.push(prelude);
+                        }
                         for stmt in remaining {
                             if let Some(code) = self.emit_statement(stmt) {
                                 lines.push(code);
@@ -2946,7 +3044,8 @@ impl<'a> CppTranslator<'a> {
                             // arrows capture `this` via `[&]`, and nested
                             // declarations lower to lambdas.
                             self.ctx.fn_body_depth += 1;
-                            let body = self.emit_function_body(b);
+                            let body =
+                                self.emit_function_body_with_params(b, Some(&m.value.params));
                             self.ctx.fn_body_depth -= 1;
                             self.ctx.drop_return_value = saved_drop;
                             body
@@ -4287,8 +4386,17 @@ impl<'a> CppTranslator<'a> {
         }
         let left = self.emit_assignment_target(&a.left);
         let right = self.emit_expression(&a.right);
-        // Check if we need to convert JsValue from array element to int
-        let right = if self.is_jsvalue_var(&a.right) {
+        // Check if we need to convert JsValue from array element to int.
+        // A `this.field = <JsValue>` assignment is left alone: class fields
+        // are Js* runtime types and their operator= accepts JsValue, while
+        // coercing to int makes the assignment ambiguous (notably for a
+        // destructured constructor binding).
+        let assign_this_field = matches!(
+            &a.left,
+            AssignmentTarget::StaticMemberExpression(mem)
+                if matches!(&mem.object, Expression::ThisExpression(_))
+        );
+        let right = if self.is_jsvalue_var(&a.right) && !assign_this_field {
             format!("std::get<JsNumber>({}.inner).as_int()", right)
         } else if let AssignmentTarget::AssignmentTargetIdentifier(left_id) = &a.left {
             match self.ctx.var_types.get(left_id.name.as_str()).cloned() {
@@ -5423,15 +5531,38 @@ impl<'a> CppTranslator<'a> {
         }
         if is_expr {
             if let Some(expr) = f.body.as_expression() {
+                // A destructured parameter still needs its binding prelude
+                // before the expression; compute it inside the lambda scope.
+                let prelude = {
+                    let old = self.ctx.indent_level;
+                    self.ctx.indent_level = old + 1;
+                    let prelude = self.destructured_param_prelude(&f.params);
+                    self.ctx.indent_level = old;
+                    prelude
+                };
                 let e = self.emit_expression(expr);
                 // `() => clearInterval(id)` lowers to the void runtime call
                 // `morph::clear_timer(id)`: `-> auto { return <void>; }` is
                 // ill-formed, so these arrows are `-> void` with a bare
                 // call instead (docs/dev/bugs#4).
                 if !is_async && is_void_timer_call(expr) {
+                    if let Some(prelude) = prelude {
+                        let inner = format!("{}{}", self.indent(), INDENT);
+                        return format!(
+                            "{capture}({params}) -> void {{\n{prelude}\n{inner}{e};\n{}}}",
+                            self.indent()
+                        );
+                    }
                     return format!("{capture}({params}) -> void {{ {e}; }}");
                 }
                 let kw = if is_async { "co_return" } else { "return" };
+                if let Some(prelude) = prelude {
+                    let inner = format!("{}{}", self.indent(), INDENT);
+                    return format!(
+                        "{capture}({params}) -> {ret} {{\n{prelude}\n{inner}{kw} {e};\n{}}}",
+                        self.indent()
+                    );
+                }
                 return format!("{}({}) -> {} {{ {} {}; }}", capture, params, ret, kw, e);
             }
             return format!("{}({}) -> {} {{}}", capture, params, ret);
@@ -5440,11 +5571,17 @@ impl<'a> CppTranslator<'a> {
             self.ctx.drop_return_value = false;
             let body = if is_async {
                 self.ctx.is_async_fn += 1;
-                let b = self.emit_function_body(f.body.as_function_body().unwrap());
+                let b = self.emit_function_body_with_params(
+                    f.body.as_function_body().unwrap(),
+                    Some(&f.params),
+                );
                 self.ctx.is_async_fn -= 1;
                 b
             } else {
-                self.emit_function_body(f.body.as_function_body().unwrap())
+                self.emit_function_body_with_params(
+                    f.body.as_function_body().unwrap(),
+                    Some(&f.params),
+                )
             };
             self.ctx.drop_return_value = saved_drop;
             return format!("{}({}) -> {} {}", capture, params, ret, body);
@@ -5473,12 +5610,7 @@ impl<'a> CppTranslator<'a> {
             .unwrap_or_default()
             .into_iter()
             .filter(|var| self.ctx.shared_ptr_vars.contains(var))
-            .filter(|var| {
-                !params.items.iter().any(|param| {
-                    let (param_name, _) = self.binding_to_identifier(&param.pattern);
-                    param_name == *var
-                })
-            })
+            .filter(|var| !Self::params_bind_name(params, var))
             .collect();
         held.sort();
         if held.is_empty() {
@@ -5524,11 +5656,11 @@ impl<'a> CppTranslator<'a> {
         let body = if let Some(b) = &f.body {
             if is_async {
                 self.ctx.is_async_fn += 1;
-                let code = self.emit_function_body(b);
+                let code = self.emit_function_body_with_params(b, Some(&f.params));
                 self.ctx.is_async_fn -= 1;
                 code
             } else {
-                self.emit_function_body(b)
+                self.emit_function_body_with_params(b, Some(&f.params))
             }
         } else {
             "{}".to_string()

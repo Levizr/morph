@@ -117,6 +117,50 @@ def test_destructured_object_param_kept(tmp_path: Path):
     assert ok, f"generated C++ does not compile:\n{err}\n{cpp}"
 
 
+def test_destructured_param_call_site_keeps_one_argument(tmp_path: Path):
+    """A destructured parameter must lower to one synthetic C++ argument and
+    a local binding prelude; flattening it into multiple parameters breaks
+    every call site, which still passes one object/array."""
+    src = (
+        "function sum({ a, b }: { a: number, b: number }): number { return a + b; }\n"
+        "function first([x, y]: [number, number]): number { return x + y; }\n"
+        "async function main(): Promise<void> {\n"
+        "    console.log(sum({ a: 1, b: 2 }));\n"
+        "    console.log(first([3, 4]));\n"
+        "}\n"
+        "main();\n"
+    )
+    cpp = translate_source(src, tmp_path, "fn_destr_call")
+    assert 'auto a = __arg0["a"];' in cpp, f"missing object prelude:\n{cpp}"
+    assert "auto x = __arg0[0];" in cpp, f"missing array prelude:\n{cpp}"
+    assert "sum(JsObject" in cpp, f"call site should pass one object:\n{cpp}"
+    assert "first(JsArray" in cpp, f"call site should pass one array:\n{cpp}"
+    ok, err = compiles(cpp, tmp_path, "fn_destr_call")
+    assert ok, f"generated C++ does not compile:\n{err}\n{cpp}"
+
+
+def test_destructured_method_and_constructor_params(tmp_path: Path):
+    """Methods and constructors keep JS arity too. Constructor field
+    assignments must stay in the body (after the binding prelude), not move
+    into an initializer list that cannot see destructured locals."""
+    src = (
+        "class Point {\n"
+        "  x: number;\n"
+        "  constructor({ x }: { x: number }) { this.x = x; }\n"
+        "  shifted({ dx }: { dx: number }): number { return this.x + dx; }\n"
+        "}\n"
+        "const p = new Point({ x: 3 });\n"
+        "console.log(p.shifted({ dx: 2 }));\n"
+    )
+    cpp = translate_source(src, tmp_path, "ctor_destr")
+    assert "Point(JsObject __arg0)" in cpp, f"constructor should keep one argument:\n{cpp}"
+    assert 'auto x = __arg0["x"];' in cpp, f"missing constructor prelude:\n{cpp}"
+    assert "x(std::move(x))" not in cpp, f"initializer list cannot see the binding:\n{cpp}"
+    assert 'auto dx = __arg0["dx"];' in cpp, f"missing method prelude:\n{cpp}"
+    ok, err = compiles(cpp, tmp_path, "ctor_destr")
+    assert ok, f"generated C++ does not compile:\n{err}\n{cpp}"
+
+
 def test_generator_rejected_or_lowered(tmp_path: Path):
     """BUG-6 `function* gen()` emits `Generator<T>` + bare `co_yield` in a
     non-coroutine: `Generator does not name a type`. Must error or lower."""

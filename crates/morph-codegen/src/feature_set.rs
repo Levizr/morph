@@ -971,6 +971,7 @@ mod tests {
                 trigger: "click".to_string(),
                 action: "call".to_string(),
                 target: target.to_string(),
+                shadowed: vec![],
             });
             let mut fs = FeatureSet::new();
             fs.scan(std::slice::from_ref(&win));
@@ -1000,6 +1001,7 @@ mod tests {
                 trigger: "click".to_string(),
                 action: "call".to_string(),
                 target: target.to_string(),
+                shadowed: vec![],
             });
             let mut fs = FeatureSet::new();
             fs.scan(std::slice::from_ref(&win));

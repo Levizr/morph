@@ -548,11 +548,12 @@
         "keywords": [
           "morph javascript to c++",
           "morph typescript compile",
+          "morph destructured parameters",
           "morph no interpreter",
           "morph js runtime",
           "morph translator coverage"
         ],
-        "lastUpdated": "2026-10-23",
+        "lastUpdated": "2026-10-28",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -707,13 +708,14 @@
         "file": "api/morphState",
         "status": "production",
         "author": "PIYUSH",
-        "description": "morphState API: local per-instance reactive component state, updater forms, typing, and rules.",
+        "description": "morphState API: local per-instance reactive component state, updater forms, typing, and top-level declaration rules.",
         "keywords": [
           "morphState api",
+          "morphState top level",
           "morph local state",
           "morph component state"
         ],
-        "lastUpdated": "2026-09-16",
+        "lastUpdated": "2026-10-28",
         "publishedAt": "2026-09-16",
         "priority": "0.9",
         "changefreq": "monthly"
@@ -1737,13 +1739,14 @@
         "file": "errors/mx-state-scope",
         "status": "production",
         "author": "PIYUSH",
-        "description": "Fix mx-state-scope: morphState called at module scope or in handlers, move it or switch to morphShared.",
+        "description": "Fix mx-state-scope: morphState called at module scope or nested in handlers/helpers/conditions, move it to component top level or switch to morphShared.",
         "keywords": [
           "mx-state-scope",
           "morph morphState outside component",
+          "morphState nested handler",
           "morph state scope"
         ],
-        "lastUpdated": "2026-10-21",
+        "lastUpdated": "2026-10-28",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -1841,19 +1844,20 @@
         "changefreq": "monthly"
       },
       {
-        "title": "mx-effect-cb — morphEffect First Argument Must Be a Function",
+        "title": "mx-effect-cb — Invalid morphEffect Callback",
         "sidebarTitle": "mx-effect-cb",
         "slug": "errors/mx-effect-cb",
         "file": "errors/mx-effect-cb",
         "status": "production",
         "author": "PIYUSH",
-        "description": "Fix mx-effect-cb: wrapping effect work in a callback instead of calling it in argument position.",
+        "description": "Fix mx-effect-cb: pass a no-argument function to morphEffect instead of a call result or a parameterised callback.",
         "keywords": [
           "mx-effect-cb",
           "morph morphEffect function",
+          "morphEffect callback parameters",
           "morph useEffect callback"
         ],
-        "lastUpdated": "2026-10-23",
+        "lastUpdated": "2026-10-28",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"

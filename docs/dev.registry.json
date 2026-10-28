@@ -255,14 +255,15 @@
         "file": "dev/state/state-events-internals",
         "status": "production",
         "author": "PIYUSH",
-        "description": "How morphState/morphShared/morphEvent travel from .mx source to C++: module-path identity, per-module namespaces, the shared_vars IR contract, and the emit/subscribe rewrite pipeline.",
+        "description": "How morphState/morphShared/morphEvent travel from .mx source to C++: module-path identity, per-module namespaces, the shared_vars IR contract, destructured callable parameters, and the emit/subscribe rewrite pipeline.",
         "keywords": [
           "morph shared state internals",
           "morph event channel codegen",
+          "destructured parameter lowering",
           "app namespace",
           "morph IR shared_vars"
         ],
-        "lastUpdated": "2026-10-19",
+        "lastUpdated": "2026-10-28",
         "publishedAt": "2026-09-16",
         "priority": 0.7,
         "changefreq": "monthly"
