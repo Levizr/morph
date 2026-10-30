@@ -67,7 +67,7 @@ Two textual rewrites, both order-sensitive:
 
 **Subscribe** — `translate_event_sub` converts `name.on(handler)` into *only* a lambda: `[](const JsValue& __ch_N) { … }`. A plain handler param is renamed to a fresh `__ch_N` (avoids capture collisions), `p.field` reads become `p["field"]` (JsValue has no members), and the body is translated through `translate_logic` with the frame's maps. A destructured object/array param is kept as a pattern, lowered through a synthetic `const <pattern> = __ch_N;` declaration (seeded with `__ch_N: JsValue`), and its bound names are removed from the frame's ambient rename/type maps so payload fields shadow same-named state, props, and imports. Handler locals are translated at function scope so they never become module-level `static` variables. The caller pairs `{channel: id, body: lambda}` into `ctx.channels`; **codegen adds the single `.on(...)` wrap**. If you ever see a doubled `.on(`, the bug is that this function started emitting the wrap itself — the contract is "lambda only".
 
-Constraints enforced here (not in the linter): unknown event name, empty/missing handler, non-inline handler, more than one handler param, and destructuring shapes the translator cannot lower (defaults, rest, computed keys) — all hard errors naming the component and module.
+Constraints enforced here (not in the linter): unknown event name, empty/missing handler, non-inline handler, and more than one handler param — all hard errors naming the component and module. Defaults (including a whole-pattern `({ a } = {})`, whose default is unreachable for a real event), rest, and computed keys are lowered inside the pattern.
 
 ### Destructured callable parameters (normal functions and function props)
 
@@ -82,9 +82,20 @@ object/array, matching JavaScript.
 
 Bound names are removed from the frame's ambient rename/type maps before the
 body is translated, so `({ x }) => …` shadows same-named state/props/imports
-instead of reading `__st_x`. Defaults/rest/computed keys inside the pattern
-are not lowered; event handlers reject them at the builder, while
-function-prop adapters reject them with a named diagnostic.
+instead of reading `__st_x`. The pattern itself is prepared with the ambient
+prop/state/import rewrites, so defaults and computed keys can read outer
+values.
+
+Morpher lowers static patterns through its fast field/index path. Patterns
+containing `AssignmentPattern`, rest elements, or computed keys go through a
+recursive emitter instead: the source is staged once, defaults become a lazy
+`is_undefined()` conditional (so they fire exactly for `undefined`, never for
+`null` or another falsy value), object/array rest call the runtime
+`js_object_rest` / `js_array_rest` helpers, and computed key expressions are
+evaluated once into a `std::string` used for both the read and the rest
+exclusion list. A whole-pattern default (`({ x } = {})`) is supported by
+normal functions and stripped for JSX event payloads and function-prop
+adapters, whose single payload argument is supplied by the call site.
 
 ## Pipeline stage 4 — C++ emission (`morph-codegen`)
 

@@ -56,6 +56,23 @@ def compiles(cpp: str, tmp_path: Path, name: str) -> tuple[bool, str]:
     return r.returncode == 0, r.stderr
 
 
+def run_cpp(cpp: str, tmp_path: Path, name: str) -> tuple[bool, str]:
+    """Compile and run generated C++ with its embedded main()."""
+    src = tmp_path / f"{name}.run.cpp"
+    exe = tmp_path / name
+    src.write_text(cpp, encoding="utf-8")
+    build = subprocess.run(
+        ["g++", "-std=c++23", str(src), "-o", str(exe)],
+        capture_output=True,
+        text=True,
+        timeout=90,
+    )
+    if build.returncode != 0:
+        return False, build.stderr
+    run = subprocess.run([str(exe)], capture_output=True, text=True, timeout=30)
+    return run.returncode == 0, run.stdout + run.stderr
+
+
 # ── Function creation ────────────────────────────────────────────────
 
 FN_EXPR = "const add = function(a: number, b: number): number { return a + b; };\n"
@@ -159,6 +176,51 @@ def test_destructured_method_and_constructor_params(tmp_path: Path):
     assert 'auto dx = __arg0["dx"];' in cpp, f"missing method prelude:\n{cpp}"
     ok, err = compiles(cpp, tmp_path, "ctor_destr")
     assert ok, f"generated C++ does not compile:\n{err}\n{cpp}"
+
+
+def test_destructured_defaults_rest_and_computed_keys(tmp_path: Path):
+    """Advanced destructuring must lower recursively in declarations and
+    callable params: defaults apply only for undefined, object/array rest
+    keep the unconsumed tail, and computed keys read by their runtime key."""
+    src = (
+        'const key = "a";\n'
+        "function f({ a = 1, b = a + 1, [key]: av = 2, ...rest }: any): number {\n"
+        "  return a + b + av + rest.c;\n"
+        "}\n"
+        "function g([x = 3, ...tail]: any): number {\n"
+        "  return x + tail.length;\n"
+        "}\n"
+        "const { n = 4, ...ns } = { m: 5 };\n"
+        "console.log(f({ c: 6 }), g([7, 8]), n, ns.m);\n"
+    )
+    cpp = translate_source(src, tmp_path, "advanced_destr")
+    assert "/* destructuring not supported */" not in cpp, cpp
+    assert "morph::js_object_rest" in cpp, f"missing object rest:\n{cpp}"
+    assert "morph::js_array_rest" in cpp, f"missing array rest:\n{cpp}"
+    assert ".is_undefined()" in cpp, f"missing default guard:\n{cpp}"
+    assert "morph::js_to_string" in cpp, f"missing computed-key conversion:\n{cpp}"
+    ok, err = compiles(cpp, tmp_path, "advanced_destr")
+    assert ok, f"generated C++ does not compile:\n{err}\n{cpp}"
+
+
+def test_destructured_defaults_lazy_and_keys_once(tmp_path: Path):
+    """A default initializer must run only when the value is undefined, and
+    a computed key expression must run exactly once even when it also feeds
+    the object-rest exclusion list."""
+    src = (
+        "let keys = 0;\n"
+        "let defaults = 0;\n"
+        'function nextKey(): string { keys += 1; return "a"; }\n'
+        "function fallback(): number { defaults += 1; return 5; }\n"
+        "function whole({ value = 9 }: any = {}): number { return value; }\n"
+        "const { [nextKey()]: present = fallback(), ...rest } = { a: 1, b: 2 };\n"
+        "const { [nextKey()]: missing = fallback(), ...rest2 } = { b: 7 };\n"
+        "console.log(keys, defaults, present, missing, rest.b, rest2.b, whole(), whole(undefined));\n"
+    )
+    cpp = translate_source(src, tmp_path, "advanced_destr_runtime")
+    ok, output = run_cpp(cpp, tmp_path, "advanced_destr_runtime")
+    assert ok, f"generated C++ failed:\n{output}\n{cpp}"
+    assert output.strip() == "2 1 1 5 2 7 9 9", f"wrong semantics:\n{output}\n{cpp}"
 
 
 def test_generator_rejected_or_lowered(tmp_path: Path):

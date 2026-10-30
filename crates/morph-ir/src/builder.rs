@@ -1287,8 +1287,13 @@ impl IRBuilder {
         // the callback scope, just like a normal JS parameter.
         let local_frame = scope_frame(frame, &shadowed);
         let scoped = if let Some(pattern) = pattern {
+            // Ambient references in defaults/computed keys need the same
+            // prop/state/import rewrite as the body. Bound names are already
+            // removed from `local_frame`, so the pattern's own bindings stay
+            // untouched.
+            let prepared_pattern = prepare_pattern_source(pattern, &local_frame);
             let prepared_inner = prepare_source(&inner_src, &local_frame);
-            format!("const {pattern} = {ch_param};\n{prepared_inner}")
+            format!("const {prepared_pattern} = {ch_param};\n{prepared_inner}")
         } else {
             let params = param_names(&params_src).map_err(|e| {
                 anyhow::anyhow!(
@@ -1329,7 +1334,7 @@ impl IRBuilder {
         };
         if out.body.contains("/* destructuring not supported */") {
             anyhow::bail!(
-                "`{}.on(...)` handler uses a destructuring pattern that cannot be lowered (in `{comp_name}`); use a plain parameter and read fields from it",
+                "`{}.on(...)` handler uses a destructuring pattern that cannot be lowered (in `{comp_name}`); use a plain parameter or a supported object/array pattern",
                 sub.event
             );
         }
@@ -2614,14 +2619,9 @@ impl IRBuilder {
                 );
             }
             if raw.starts_with('{') || raw.starts_with('[') {
-                if has_top_level_default(raw) {
-                    anyhow::bail!(
-                        "function prop `{}` on <{tag}> ({}:{}): default destructured parameters are not supported",
-                        prop.name,
-                        line,
-                        col
-                    );
-                }
+                // A whole-pattern default is unreachable for this adapter:
+                // the prop signature always supplies one payload argument.
+                // Strip it and destructure that argument as usual.
                 let pattern = destructured_param_pattern(raw);
                 let arg = format!("__arg{i}");
                 params.push(format!("{arg}: {ptype}"));
@@ -2643,6 +2643,11 @@ impl IRBuilder {
         // Payload bindings shadow same-named state/props/import aliases for
         // the callback scope, just like a normal JS parameter.
         let local_frame = scope_frame(parent_frame, &shadowed);
+        // Defaults and computed keys inside the pattern may reference ambient
+        // props/state/imports; rewrite them now that the shadowed names are
+        // removed from the frame.
+        let prelude: Vec<String> =
+            prelude.into_iter().map(|line| prepare_pattern_source(&line, &local_frame)).collect();
         let ret_ann = if ret.is_empty() { "void".to_string() } else { ret };
         let body_src = if is_block {
             let inner = body.trim();
@@ -2688,7 +2693,7 @@ impl IRBuilder {
         let cpp = strip_static_linkage(&out.body);
         if cpp.contains("/* destructuring not supported */") {
             anyhow::bail!(
-                "function prop `{}` on <{tag}> ({}:{}): destructured parameters with defaults, rest, or computed keys are not supported",
+                "function prop `{}` on <{tag}> ({}:{}): the destructured parameter could not be lowered (unsupported pattern shape)",
                 prop.name,
                 line,
                 col
@@ -3936,9 +3941,8 @@ fn capture_event_handler(raw: &str, frame: &InstanceFrame) -> (String, Vec<Strin
     let mut shadowed: HashSet<String> = HashSet::from(["e".to_string()]);
     let mut payload_name: Option<String> = None;
     let prelude = if raw_param.starts_with('{') || raw_param.starts_with('[') {
-        if has_top_level_default(raw_param) {
-            return fallback();
-        }
+        // The event object is always supplied, so a whole-pattern default is
+        // unreachable; strip it and destructure the event as usual.
         let pattern = destructured_param_pattern(raw_param);
         shadowed.extend(destructured_binding_names(pattern));
         Some(format!("const {pattern} = e;"))
@@ -3967,7 +3971,10 @@ fn capture_event_handler(raw: &str, frame: &InstanceFrame) -> (String, Vec<Strin
     } else {
         captured
     };
-    let prelude = prelude.unwrap_or_default();
+    // Defaults and computed keys inside a destructured payload must see the
+    // same prop/state/import rewrites as the handler body.
+    let prelude =
+        prelude.map(|line| prepare_pattern_source(&line, &local_frame)).unwrap_or_default();
     let target = if is_block {
         if prelude.is_empty() {
             format!("(e) => {{ {captured} }}")
@@ -4141,6 +4148,142 @@ fn class_instance_type(rhs: &str) -> Option<String> {
 fn prepare_source(src: &str, frame: &InstanceFrame) -> String {
     let sub = qualify_namespace_members(&subst_props_refs(src, frame), &frame.namespace_aliases);
     rename_symbols(&sub, &frame.renames, frame)
+}
+
+/// Pattern-specific preparation: prop bindings are applied after the usual
+/// state/import rewrites, matching `capture_raw`. Defaults and computed keys
+/// inside a destructuring pattern need this because they are not part of the
+/// handler body that goes through `capture_raw`.
+fn prepare_pattern_source(src: &str, frame: &InstanceFrame) -> String {
+    let trimmed = src.trim();
+    let (head, pattern, tail) = split_pattern_decl(trimmed);
+    let prepared = prepare_pattern_exprs(pattern, frame);
+    if head.is_empty() && tail.is_empty() {
+        prepared
+    } else {
+        format!("{head}{prepared}{tail}")
+    }
+}
+
+/// Apply ambient rewrites (including prop bindings) to one expression.
+fn prepare_ambient_source(src: &str, frame: &InstanceFrame) -> String {
+    let prepared = prepare_source(src, frame);
+    rename_symbols(&prepared, &frame.prop_binds, frame)
+}
+
+/// Split a synthetic `const <pattern> = <source>;` prelude into its pattern
+/// and surrounding text. A bare pattern is returned unchanged.
+fn split_pattern_decl(src: &str) -> (&str, &str, &str) {
+    let Some(rest) = src.strip_prefix("const ") else {
+        return ("", src, "");
+    };
+    let bytes = rest.as_bytes();
+    let mut depth = 0i32;
+    let mut i = 0usize;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' | b'\'' | b'`' => {
+                i = str_lit_end(rest, i);
+                continue;
+            }
+            b'{' | b'[' | b'(' => depth += 1,
+            b'}' | b']' | b')' => {
+                if depth > 0 {
+                    depth -= 1;
+                }
+            }
+            b'=' if depth == 0 && bytes.get(i + 1) != Some(&b'>') => {
+                let raw_pattern = &rest[..i];
+                let pattern = raw_pattern.trim();
+                let tail_start = raw_pattern.trim_end().len();
+                return ("const ", pattern, &rest[tail_start..]);
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    ("const ", rest.trim(), "")
+}
+
+/// Rewrite only the expression positions of a binding pattern: computed
+/// keys and default initializers. Static keys and binding identifiers stay
+/// verbatim, so a prop named like a property key cannot corrupt the pattern.
+fn prepare_pattern_exprs(pattern: &str, frame: &InstanceFrame) -> String {
+    if !pattern.contains('=') && !pattern.contains('[') {
+        return pattern.to_string();
+    }
+    let synthetic = format!("const {pattern} = __morph_destructure_source;");
+    let allocator = Allocator::default();
+    let source_type =
+        SourceType::from_path("destructure.ts").unwrap_or_default().with_typescript(true);
+    let parsed = Parser::new(&allocator, &synthetic, source_type).parse();
+    if parsed.panicked || !parsed.diagnostics.is_empty() {
+        return prepare_ambient_source(pattern, frame);
+    }
+    let Some(decl) = parsed.program.body.first().and_then(|stmt| match stmt {
+        Statement::VariableDeclaration(decl) => decl.declarations.first(),
+        _ => None,
+    }) else {
+        return prepare_ambient_source(pattern, frame);
+    };
+    let mut ranges = Vec::new();
+    collect_pattern_prep_ranges(&decl.id, &mut ranges);
+    if ranges.is_empty() {
+        return pattern.to_string();
+    }
+    ranges.sort_unstable();
+    let prefix_len = "const ".len();
+    let mut out = String::with_capacity(pattern.len());
+    let mut cursor = 0usize;
+    for (start, end) in ranges {
+        let Some(local_start) = (start as usize).checked_sub(prefix_len) else {
+            return prepare_ambient_source(pattern, frame);
+        };
+        let Some(local_end) = (end as usize).checked_sub(prefix_len) else {
+            return prepare_ambient_source(pattern, frame);
+        };
+        if local_start < cursor || local_end > pattern.len() || local_start > local_end {
+            return prepare_ambient_source(pattern, frame);
+        }
+        out.push_str(&pattern[cursor..local_start]);
+        out.push_str(&prepare_ambient_source(&pattern[local_start..local_end], frame));
+        cursor = local_end;
+    }
+    out.push_str(&pattern[cursor..]);
+    out
+}
+
+fn collect_pattern_prep_ranges(pattern: &BindingPattern<'_>, ranges: &mut Vec<(u32, u32)>) {
+    match pattern {
+        BindingPattern::BindingIdentifier(_) => {}
+        BindingPattern::AssignmentPattern(assign) => {
+            let span = assign.right.span();
+            ranges.push((span.start, span.end));
+            collect_pattern_prep_ranges(&assign.left, ranges);
+        }
+        BindingPattern::ObjectPattern(object) => {
+            for property in &object.properties {
+                if property.computed {
+                    if let Some(expression) = property.key.as_expression() {
+                        let span = expression.span();
+                        ranges.push((span.start, span.end));
+                    }
+                }
+                collect_pattern_prep_ranges(&property.value, ranges);
+            }
+            if let Some(rest) = &object.rest {
+                collect_pattern_prep_ranges(&rest.argument, ranges);
+            }
+        }
+        BindingPattern::ArrayPattern(array) => {
+            for element in array.elements.iter().flatten() {
+                collect_pattern_prep_ranges(element, ranges);
+            }
+            if let Some(rest) = &array.rest {
+                collect_pattern_prep_ranges(&rest.argument, ranges);
+            }
+        }
+    }
 }
 
 /// `lib.member` → `::app::<module>::member` for `import * as lib`.
@@ -5157,32 +5300,6 @@ fn simple_param_name(param: &str) -> Option<String> {
     } else {
         None
     }
-}
-
-/// Whether a parameter has a top-level `= default` (ignoring `=>` tokens in
-/// a type annotation). Defaults are not part of the declared prop signature.
-fn has_top_level_default(param: &str) -> bool {
-    let bytes = param.as_bytes();
-    let mut depth = 0i32;
-    let mut i = 0usize;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'"' | b'\'' | b'`' => {
-                i = str_lit_end(param, i);
-                continue;
-            }
-            b'{' | b'[' | b'(' => depth += 1,
-            b'}' | b']' | b')' => {
-                if depth > 0 {
-                    depth -= 1;
-                }
-            }
-            b'=' if depth == 0 && bytes.get(i + 1) != Some(&b'>') => return true,
-            _ => {}
-        }
-        i += 1;
-    }
-    false
 }
 
 /// Bare identifier names from a parameter list.
@@ -9882,8 +9999,8 @@ export default function App() {
     }
 
     #[test]
-    fn event_subscription_rejects_unlowerable_destructuring() {
-        let root = scratch("event-destructure-fallback");
+    fn event_subscription_lowers_destructuring_defaults() {
+        let root = scratch("event-destructure-default");
         write_file(
             &root,
             "store.mx",
@@ -9902,12 +10019,11 @@ export default function App() {
 "#,
         );
         let graph = morph_parser::resolve_graph(&root.join("App.mx"), &root).unwrap();
-        let err = IRBuilder::new()
-            .build_with_graph(&graph, &[], &HashMap::new())
-            .expect_err("unsupported destructuring must fail in Morph, not C++");
-        let msg = err.to_string();
-        assert!(msg.contains("destructuring pattern that cannot be lowered"), "{msg}");
-        assert!(!msg.contains("/*"), "diagnostic leaked a C++ comment: {msg}");
+        let win = &IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap()[0];
+        let body = win.channel_subs[0].get("body").expect("channel body");
+        assert!(body.contains("is_undefined()"), "{body}");
+        assert!(body.contains(r#"JsValue("fallback")"#), "{body}");
+        assert!(!body.contains("destructuring not supported"), "{body}");
         let _ = std::fs::remove_dir_all(&root);
     }
 

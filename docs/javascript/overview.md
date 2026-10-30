@@ -79,12 +79,11 @@ Binary (`+`, `-`, `*`, `/`, `===`, `!==`, `==`, `!=`, `<`, `>`, etc.), unary (`!
 - Number `.toString()` on native `int`/`double` (lowers to `morph::str::to_string`)
 - `Array.push` on both `JsArray` (`.push`) and `std::vector` (`.push_back`), `.length` on vectors, arrays, and strings alike (`.size()` where native)
 - Console output: `console.log` / `console.warn` / `console.error` / `console.info` print natively (visible in the DevTools **Logs** tab)
+- Destructuring declarations and callable/event payloads, including defaults (`{ a = 1 }`), rest elements (`{ ...rest }`, `[head, ...tail]`), and computed keys (`{ [key]: value }`). Defaults are lazy and apply only when the value is `undefined`; computed keys evaluate once.
 
 ## What's Not Supported Yet
 
-- Object spread (`{ ...base }`) and rest parameters (`...args`)
-- Defaults, rest elements, or computed keys in a destructured
-  parameter/event payload pattern
+- Object spread (`{ ...base }`) and top-level rest parameters (`...args`)
 - Promise static helpers (`Promise.resolve`, `Promise.all`, …); `await`
   and `new Promise(...)` lower to C++ coroutines
 - Regular expression literals

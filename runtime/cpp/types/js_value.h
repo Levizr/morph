@@ -1169,5 +1169,92 @@ namespace morph {
     inline bool js_has_property(const JsValue& obj, const JsValue& key) {
         return ::js_has_property(obj, key);
     }
+
+    // ── Destructuring helpers ──
+    // Object rest: copy own enumerable keys except the destructured ones.
+    inline JsObject js_object_rest(
+        const JsObject& source,
+        std::initializer_list<std::string> excluded)
+    {
+        JsObject rest;
+        for (const auto& key : source.keys())
+        {
+            bool skip = false;
+            for (const auto& name : excluded)
+            {
+                if (key == name)
+                {
+                    skip = true;
+                    break;
+                }
+            }
+            if (!skip)
+            {
+                rest.set(key, source.get(key));
+            }
+        }
+        return rest;
+    }
+
+    // Object patterns can also destructure arrays: own enumerable indices
+    // become string keys, and `length` is intentionally not copied.
+    inline JsObject js_object_rest(
+        const JsArray& source,
+        std::initializer_list<std::string> excluded)
+    {
+        JsObject rest;
+        for (size_t i = 0; i < source.length(); ++i)
+        {
+            std::string key = std::to_string(i);
+            bool skip = false;
+            for (const auto& name : excluded)
+            {
+                if (key == name)
+                {
+                    skip = true;
+                    break;
+                }
+            }
+            if (!skip)
+            {
+                rest.set(key, source[static_cast<int64_t>(i)]);
+            }
+        }
+        return rest;
+    }
+
+    inline JsObject js_object_rest(
+        const JsValue& source,
+        std::initializer_list<std::string> excluded)
+    {
+        if (source.is_array())
+        {
+            return js_object_rest(source.as_array(), excluded);
+        }
+        return js_object_rest(source.as_object(), excluded);
+    }
+
+    // Array rest: the tail after the last destructured index.
+    inline JsArray js_array_rest(const JsArray& source, size_t start)
+    {
+        return source.slice(static_cast<int64_t>(start));
+    }
+
+    inline JsArray js_array_rest(const JsValue& source, size_t start)
+    {
+        return js_array_rest(source.as_array(), start);
+    }
+
+    template <typename T>
+    inline std::vector<T> js_array_rest(const std::vector<T>& source, size_t start)
+    {
+        if (start >= source.size())
+        {
+            return {};
+        }
+        return std::vector<T>(
+            source.begin() + static_cast<typename std::vector<T>::difference_type>(start),
+            source.end());
+    }
 }
 // Codegen adds <format> only when `${}` is used.

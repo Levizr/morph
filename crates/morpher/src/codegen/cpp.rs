@@ -576,8 +576,9 @@ impl<'a> CppTranslator<'a> {
     /// One `auto` per binding. Literal containers inline each element
     /// value (single evaluation, full precision); identifier sources
     /// repeat a side-effect-free root; anything else stages through one
-    /// `__destructure_N` temporary. Defaults, rest elements, computed
-    /// keys, and string iteration keep the comment fallback below.
+    /// `__destructure_N` temporary. Patterns with defaults, rest elements,
+    /// or computed keys route to the recursive emitter; string iteration
+    /// keeps the comment fallback below.
     /// Bindings emit plain `auto` regardless of `kind`, matching how the
     /// typed declarator treats deduced locals, so later moves keep working.
     fn emit_destructured(&mut self, d: &VariableDeclarator<'a>, _kind: &str) -> Option<String> {
@@ -585,6 +586,9 @@ impl<'a> CppTranslator<'a> {
         let Some(init) = d.init.as_ref() else {
             return fallback();
         };
+        if Self::pattern_has_advanced(&d.id) {
+            return Some(self.emit_advanced_destructured(&d.id, init));
+        }
         let mut raw: Vec<RawBinding> = Vec::new();
         if !Self::collect_access(&d.id, &mut Vec::new(), &mut raw) {
             return fallback();
@@ -606,6 +610,268 @@ impl<'a> CppTranslator<'a> {
             );
         }
         self.emit_destructured_staged(&raw, init)
+    }
+
+    /// Whether a pattern needs the recursive emitter: defaults, rest
+    /// elements, or computed keys. Static object/array patterns keep the
+    /// fast path above.
+    fn pattern_has_advanced(pattern: &BindingPattern<'_>) -> bool {
+        match pattern {
+            BindingPattern::BindingIdentifier(_) => false,
+            BindingPattern::AssignmentPattern(_) => true,
+            BindingPattern::ObjectPattern(object) => {
+                object.rest.is_some()
+                    || object.properties.iter().any(|property| {
+                        property.computed || Self::pattern_has_advanced(&property.value)
+                    })
+            }
+            BindingPattern::ArrayPattern(array) => {
+                array.rest.is_some()
+                    || array
+                        .elements
+                        .iter()
+                        .flatten()
+                        .any(|element| Self::pattern_has_advanced(element))
+            }
+        }
+    }
+
+    fn advanced_container_type(&self, init: &Expression<'a>) -> String {
+        match init {
+            Expression::ParenthesizedExpression(parenthesized) => {
+                self.advanced_container_type(&parenthesized.expression)
+            }
+            // Array literals always lower to JsArray, even when the
+            // inference path would describe a native vector.
+            Expression::ArrayExpression(_) => "JsArray".to_string(),
+            _ => self.infer_type_from_init(init).unwrap_or_else(|| "JsValue".to_string()),
+        }
+    }
+
+    /// Destructuring for defaults/rest/computed keys. The source is staged
+    /// once, then the pattern is walked recursively so nested combinations
+    /// and lazily evaluated defaults preserve JS evaluation order.
+    fn emit_advanced_destructured(
+        &mut self,
+        pattern: &BindingPattern<'a>,
+        init: &Expression<'a>,
+    ) -> String {
+        let fallback = format!("{}/* destructuring not supported */", self.indent());
+        let container_type = self.advanced_container_type(init);
+        let temp = format!("__destructure_{}", self.destructure_count);
+        self.destructure_count += 1;
+        let staged_init = self.emit_expression(init);
+        self.ctx.need(&container_type);
+        self.ctx.var_types.insert(temp.clone(), container_type.clone());
+        let prefix = if self.ctx.indent_level == 0 { "static " } else { "" };
+        let mut lines =
+            vec![format!("{}{}auto {} = {};", self.indent(), prefix, temp, staged_init)];
+        if !self.emit_pattern_bindings(pattern, &temp, &container_type, &mut lines) {
+            return fallback;
+        }
+        lines.join("\n")
+    }
+
+    /// Recursively bind one pattern against an already-evaluated source.
+    /// Returns false on shapes the renderer cannot express, so callers can
+    /// keep their explicit fallback.
+    fn emit_pattern_bindings(
+        &mut self,
+        pattern: &BindingPattern<'a>,
+        source: &str,
+        source_type: &str,
+        lines: &mut Vec<String>,
+    ) -> bool {
+        match pattern {
+            BindingPattern::BindingIdentifier(id) => {
+                self.push_destructured_binding(id.name.as_str(), source, source_type, lines);
+                true
+            }
+            BindingPattern::AssignmentPattern(assign) => {
+                if Self::value_may_be_undefined(source_type) {
+                    let default = self.emit_expression(&assign.right);
+                    self.ctx.need("JsValue");
+                    // The conditional keeps the default lazy. Avoid a lambda:
+                    // top-level destructuring may be emitted inside `main` or
+                    // at namespace scope, where captures differ.
+                    let source_is_value = Self::bare_type(source_type) == "JsValue";
+                    let checked = if source_is_value {
+                        source.to_string()
+                    } else {
+                        format!("JsValue({source})")
+                    };
+                    let default_source =
+                        format!("({checked}.is_undefined() ? JsValue({default}) : {checked})");
+                    self.emit_pattern_bindings(&assign.left, &default_source, "JsValue", lines)
+                } else {
+                    // Native element types are always present; a JS default
+                    // here can never fire, so keep the precise native type.
+                    self.emit_pattern_bindings(&assign.left, source, source_type, lines)
+                }
+            }
+            BindingPattern::ObjectPattern(object) => {
+                self.emit_object_pattern(object, source, source_type, lines)
+            }
+            BindingPattern::ArrayPattern(array) => {
+                self.emit_array_pattern(array, source, source_type, lines)
+            }
+        }
+    }
+
+    fn push_destructured_binding(
+        &mut self,
+        name: &str,
+        source: &str,
+        source_type: &str,
+        lines: &mut Vec<String>,
+    ) {
+        self.ctx.need(source_type);
+        self.ctx.var_types.insert(name.to_string(), source_type.to_string());
+        let prefix = if self.ctx.indent_level == 0 { "static " } else { "" };
+        lines.push(format!("{}{}auto {} = {};", self.indent(), prefix, name, source));
+    }
+
+    fn emit_object_pattern(
+        &mut self,
+        object: &ObjectPattern<'a>,
+        source: &str,
+        source_type: &str,
+        lines: &mut Vec<String>,
+    ) -> bool {
+        let Some(dot) = Self::destructure_dot(source_type, &self.ctx.class_names) else {
+            return false;
+        };
+        if dot && object.properties.iter().any(|property| property.computed) {
+            return false;
+        }
+        if !dot && Self::vector_inner_type(source_type).is_some() {
+            return false;
+        }
+        let mut excluded: Vec<String> = Vec::new();
+        for property in &object.properties {
+            let access = if let Some(name) = property.key.static_name() {
+                let key = name.into_owned();
+                excluded.push(cpp_string_literal(&key));
+                if dot {
+                    format!("{source}.{key}")
+                } else {
+                    format!("{source}[{}]", cpp_string_literal(&key))
+                }
+            } else {
+                let Some(key_expr) = property.key.as_expression() else {
+                    return false;
+                };
+                if dot {
+                    return false;
+                }
+                let key_temp = format!("__key_{}", self.destructure_count);
+                self.destructure_count += 1;
+                let key_cpp = self.emit_expression(key_expr);
+                self.ctx.need("std::string");
+                self.ctx.var_types.insert(key_temp.clone(), "std::string".to_string());
+                let prefix = if self.ctx.indent_level == 0 { "static " } else { "" };
+                lines.push(format!(
+                    "{}{}auto {} = morph::js_to_string({}).to_std_string();",
+                    self.indent(),
+                    prefix,
+                    key_temp,
+                    key_cpp
+                ));
+                excluded.push(key_temp.clone());
+                format!("{source}[{key_temp}]")
+            };
+            if !self.emit_pattern_bindings(&property.value, &access, "JsValue", lines) {
+                return false;
+            }
+        }
+        if let Some(rest) = &object.rest {
+            if dot {
+                return false;
+            }
+            self.ctx.need("JsObject");
+            let rest_source =
+                format!("morph::js_object_rest({source}, {{{}}})", excluded.join(", "));
+            if !self.emit_pattern_bindings(&rest.argument, &rest_source, "JsObject", lines) {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn emit_array_pattern(
+        &mut self,
+        array: &ArrayPattern<'a>,
+        source: &str,
+        source_type: &str,
+        lines: &mut Vec<String>,
+    ) -> bool {
+        match Self::destructure_dot(source_type, &self.ctx.class_names) {
+            Some(false) => {}
+            Some(true) | None => return false,
+        }
+        let bare = Self::bare_type(source_type);
+        if bare == "JsObject" {
+            return false;
+        }
+        let elem_type = Self::destructured_array_element_type(source_type);
+        for (index, element) in array.elements.iter().enumerate() {
+            let Some(nested) = element else {
+                continue;
+            };
+            let access = format!("{source}[{index}]");
+            if !self.emit_pattern_bindings(nested, &access, &elem_type, lines) {
+                return false;
+            }
+        }
+        if let Some(rest) = &array.rest {
+            let start = array.elements.len();
+            let Some((rest_source, rest_type)) =
+                self.array_rest_expression(source, source_type, start)
+            else {
+                return false;
+            };
+            if !self.emit_pattern_bindings(&rest.argument, &rest_source, &rest_type, lines) {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn array_rest_expression(
+        &mut self,
+        source: &str,
+        source_type: &str,
+        start: usize,
+    ) -> Option<(String, String)> {
+        if let Some(inner) = Self::vector_inner_type(source_type) {
+            let inner = inner.trim();
+            let ty = format!("std::vector<{inner}>");
+            self.ctx.need(&ty);
+            self.ctx.need("JsValue");
+            return Some((format!("morph::js_array_rest({source}, {start})"), ty));
+        }
+        let bare = Self::bare_type(source_type);
+        if matches!(bare, "JsArray" | "JsValue" | "auto" | "") {
+            self.ctx.need("JsArray");
+            return Some((
+                format!("morph::js_array_rest({source}, {start})"),
+                "JsArray".to_string(),
+            ));
+        }
+        None
+    }
+
+    fn destructured_array_element_type(source_type: &str) -> String {
+        Self::vector_inner_type(source_type)
+            .map_or_else(|| "JsValue".to_string(), |inner| inner.trim().to_string())
+    }
+
+    fn bare_type(source_type: &str) -> &str {
+        source_type.trim_start_matches("const ").trim_end_matches('&').trim()
+    }
+
+    fn value_may_be_undefined(source_type: &str) -> bool {
+        matches!(Self::bare_type(source_type), "" | "auto" | "JsValue" | "JsUndefined")
     }
 
     /// Bindings off a literal container, inlining each element value.
@@ -718,8 +984,9 @@ impl<'a> CppTranslator<'a> {
         "JsValue".to_string()
     }
 
-    /// Absolute access path per bound name. `false` on anything the
-    /// renderer cannot express (defaults, rest, computed keys).
+    /// Absolute access path per bound name for the static fast path.
+    /// Returns `false` on defaults, rest, or computed keys; callers route
+    /// those through `emit_pattern_bindings` instead.
     fn collect_access(
         pattern: &BindingPattern,
         steps: &mut Vec<AccessStep>,
@@ -769,8 +1036,8 @@ impl<'a> CppTranslator<'a> {
         }
     }
 
-    /// Defaults keep the comment fallback: they prove nothing statically
-    /// and need runtime presence checks the renderer does not emit.
+    /// The fast path cannot express defaults; advanced patterns are caught
+    /// by `pattern_has_advanced` before they reach this collector.
     fn collect_access_default(
         pattern: &BindingPattern,
         steps: &mut Vec<AccessStep>,
@@ -2618,6 +2885,26 @@ impl<'a> CppTranslator<'a> {
                 continue;
             }
             let cpp_type = self.destructured_param_cpp_type(p);
+            let base = format!("__arg{index}");
+            // A whole-pattern default already reaches the C++ signature, but
+            // an explicit `undefined` argument must trigger it too. Guard the
+            // staged source lazily; native typed parameters cannot be
+            // undefined and keep their precise type.
+            let guarded = p.initializer.as_ref().and_then(|init| {
+                if !Self::value_may_be_undefined(&cpp_type) {
+                    return None;
+                }
+                let default = self.emit_expression(init);
+                self.ctx.need("JsValue");
+                Some(format!("({base}.is_undefined() ? JsValue({default}) : {base})"))
+            });
+            let source = guarded.as_deref().unwrap_or(&base);
+            if Self::pattern_has_advanced(&p.pattern) || guarded.is_some() {
+                if !self.emit_pattern_bindings(&p.pattern, source, &cpp_type, &mut lines) {
+                    continue;
+                }
+                continue;
+            }
             let mut raw: Vec<RawBinding> = Vec::new();
             if !Self::collect_access(&p.pattern, &mut Vec::new(), &mut raw) {
                 continue;
@@ -2633,7 +2920,6 @@ impl<'a> CppTranslator<'a> {
             {
                 continue;
             }
-            let base = format!("__arg{index}");
             for binding in raw {
                 let access = Self::render_access(&base, dot, &binding.steps);
                 let elem_type = Self::access_elem_type(&cpp_type, &binding.steps);
