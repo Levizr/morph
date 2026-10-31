@@ -4,7 +4,6 @@ __pycache__/
 dist/
 .morph/
 .morph/css-cache/
-.vscode
 .morph/packages/
 /build/
 /build_dev/
@@ -16,6 +15,7 @@ venv/
 .venv/
 target/
 runtime/cpp/dev/build/
+temp_auto_push.bat
 runtime/bin/
 runtime/cpp/dev/.devrt_source_hash
 
@@ -33,4 +33,5 @@ tests/translate/fixtures/main
 examples/budget/
 
 # Generated per project on every build (route manifest types)
-morph-routes.d.ts
+morph-routes.d.ts.gitignore
+branch_structure.json
