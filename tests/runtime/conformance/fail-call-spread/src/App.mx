@@ -1,0 +1,15 @@
+export const windowConfig = { title: "fail-call-spread", width: 800, height: 600 }
+
+function add(a: number, b: number) {
+  return a + b
+}
+
+export default function App() {
+  const values = [1, 2]
+  const total = add(...values)
+  return (
+    <body>
+      <span>{total}</span>
+    </body>
+  )
+}

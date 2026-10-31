@@ -66,24 +66,27 @@ Inside a component body, statements written between the declarations (branches, 
 
 ### Expressions
 
-Binary (`+`, `-`, `*`, `/`, `===`, `!==`, `==`, `!=`, `<`, `>`, etc.), unary (`!`, `-`, `++`, `--`), ternary (`? :`), template literals, array/object literals, `new`, member access, function calls, optional chaining / nullish coalescing. Object literals hold data values only — keep functions as separate consts (`{ handler: save }` is [mx-js-syntax](../errors/mx-js-syntax.md)).
+Binary (`+`, `-`, `*`, `/`, `**`, `===`, `!==`, `==`, `!=`, `<`, `>`, etc.), unary (`!`, `-`, `++`, `--`), ternary (`? :`), template literals, array/object literals (including object spread `{ ...base }` and computed keys `{ [key]: value }`), `new`, member access, function calls, optional chaining / nullish coalescing, and logical assignments `&&=`, `||=`, `??=`. Object literals hold data values only — keep functions as separate consts (`{ handler: save }` is [mx-js-syntax](../errors/mx-js-syntax.md)).
 
 ### JS Runtime Semantics
 
 - Truthiness (same rules as JS — `0`, `NaN`, `""`, `null`, `undefined`, `false` are falsy)
+- Exponentiation (`**`, `**=`) coerces both sides with `ToNumber`; logical assignments (`&&=`, `||=`, `??=`) short-circuit and only test `null`/`undefined` for `??=`
 - `==` / `!=` with JS coercion rules, `===` / `!==`, relational operators — on native and `Js*` types alike (see [How JavaScript Comparisons Work in Morph](./js-comparisons.md))
 - String concatenation (`"" + x`)
-- Array `push`/`pop`/index access
+- Array `push`/`pop`/index access, plus `map`, `filter`, `forEach`, `reduce`, `find`, `findIndex`, `some`, `every`, `sort`, `splice`, `shift`, `unshift`, `fill`, `flat`, `flatMap` on arrays and `JsArray` (callbacks receive `(item)`, `(item, index)`, or `(item, index, array)`)
 - Object `has`/`keys`/index access
 - String methods on both `JsString` and native `std::string`: `trim`, `toUpperCase`, `toLowerCase`, `indexOf`, `substring`, `slice`, `replace`, `charAt`, plus `split`, `startsWith`, `endsWith`, `includes`, `repeat`, `padStart`, `padEnd` — natives lower to `morph::str::*` helpers, chains nest (see [Native C++ Types](./native-types.md#js-methods-on-natives))
 - Number `.toString()` on native `int`/`double` (lowers to `morph::str::to_string`)
-- `Array.push` on both `JsArray` (`.push`) and `std::vector` (`.push_back`), `.length` on vectors, arrays, and strings alike (`.size()` where native)
+- `Array.push` on both `JsArray` (`.push`) and `std::vector` (`.push_back`); multi-argument `push`, `unshift`, and `splice` accept spread elements. `.length` on vectors, arrays, and strings alike (`.size()` where native)
 - Console output: `console.log` / `console.warn` / `console.error` / `console.info` print natively (visible in the DevTools **Logs** tab)
-- Destructuring declarations and callable/event payloads, including defaults (`{ a = 1 }`), rest elements (`{ ...rest }`, `[head, ...tail]`), and computed keys (`{ [key]: value }`). Defaults are lazy and apply only when the value is `undefined`; computed keys evaluate once.
+- Destructuring declarations (including at the top of a component body) and callable/event payloads, including defaults (`{ a = 1 }`), rest elements (`{ ...rest }`, `[head, ...tail]`), and computed keys (`{ [key]: value }`). Defaults are lazy and apply only when the value is `undefined`; computed keys evaluate once.
 
 ## What's Not Supported Yet
 
-- Object spread (`{ ...base }`) and top-level rest parameters (`...args`)
+- Top-level rest parameters (`...args`) and general call/constructor spread
+  (`f(...args)`, `new C(...args)`). Spread arguments are supported on
+  `push`/`unshift`/`splice`/`concat` and `Math.min`/`Math.max`.
 - Promise static helpers (`Promise.resolve`, `Promise.all`, …); `await`
   and `new Promise(...)` lower to C++ coroutines
 - Regular expression literals
@@ -91,12 +94,10 @@ Binary (`+`, `-`, `*`, `/`, `===`, `!==`, `==`, `!=`, `<`, `>`, etc.), unary (`!
 - `import * as ns` namespace imports
 - Browser globals (`document`, `window`, `localStorage`, …)
 - Class expressions assigned to a const (`const C = class { … }`)
-- Destructuring at the top of a component body (the `morphState` pair is
-  the exception)
 - C++ keywords used as JS binding or class member names (`double`,
   `template`, `delete`, …)
 - A few JS methods whose receiver is provably a native type (for example
-  array `.sort()` and body-level `.forEach()`)
+  array `.toSorted()` and `.reduceRight()`)
 
 The linter (`morph check`) rejects every unsupported construct above with
 a precise error and exits non-zero. A clean `morph check` is the preflight

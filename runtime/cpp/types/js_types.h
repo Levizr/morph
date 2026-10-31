@@ -21,3 +21,7 @@
 #include "js_convert.h"
 #include "js_math.h"
 #include "js_json.h"
+
+// General Array.prototype methods (map/filter/reduce/sort/splice/...)
+// used by non-JSX logic. Included last: the helpers need complete values.
+#include "js_array_ops.h"

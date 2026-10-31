@@ -13,7 +13,7 @@ type the checker can prove (a literal, or state with a type argument or
 literal initializer):
 
 ```
-error : mx-js-method : Method `.map()` is not implemented for arrays
+error : mx-js-method : Method `.toSorted()` is not implemented for arrays
   hint: Check the runtime type docs for supported methods, or use a `.cpp` helper
   Learn more: https://morph.levizr.com/docs/errors/mx-js-method
 ```
@@ -21,9 +21,12 @@ error : mx-js-method : Method `.map()` is not implemented for arrays
 Supported today: strings (`toUpperCase`, `toLowerCase`, `charAt`,
 `indexOf`, `substring`, `slice`, `trim`, `replace`, `split`, `includes`,
 `startsWith`, `padStart`, `repeat`, `match`, … — the full translator
-table), arrays (`push`, `pop`), objects (`has`, `keys`, `get`),
-numbers/booleans (`toString`). Everything else on a proven receiver
-errors; unprovable receivers (params, call results, `any`) stay quiet.
+table), arrays (`push`, `pop`, `join`, `slice`, `concat`, `map`, `filter`,
+`forEach`, `reduce`, `find`, `findIndex`, `some`, `every`, `sort`,
+`splice`, `shift`, `unshift`, `fill`, `flat`, `flatMap`, …), objects
+(`has`, `keys`, `get`), numbers/booleans (`toString`). Everything else on a
+proven receiver errors; unprovable receivers (params, call results, `any`)
+stay quiet.
 
 ## Why Morph raises it
 
@@ -40,9 +43,9 @@ call is rejected with the exact method named.
 import { morphState } from 'morph';
 
 export default function App() {
-  const [name, setName] = morphState("ada");
-  // ❌ If the method/position lacks support — mx-js-method
-  return <div>{name.toFancyCase()}</div>;
+  const [items, setItems] = morphState([3, 1, 2]);
+  // ❌ `.toSorted()` has no native lowering — mx-js-method
+  return <div>{items.toSorted().join(",")}</div>;
 }
 ```
 

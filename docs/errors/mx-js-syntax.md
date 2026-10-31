@@ -16,20 +16,20 @@ The current set is:
 - the `with` statement
 - labeled `break` / `continue`
 - `import.meta` and dynamic `import()`
-- object spread
 - `namespace` blocks
 - decorators
 - TypeScript `enum` declarations
 - regular expression literals (`/ab+c/`)
 - rest parameters (`...args`)
+- general call/constructor spread (`f(...args)`, `new C(...args)`; the
+  variadic array helpers `push`/`unshift`/`splice`/`concat` and
+  `Math.min`/`Math.max` are supported)
 - `import * as ns` namespace imports
 - C++ keywords used as binding names or class member names (`double`,
   `template`, `delete`, …)
 - class expressions assigned to a const
 - function-valued object properties (`{ handler: save }` — `JsObject`
   fields cannot store closures)
-- destructuring at the top of a component body (except the
-  `const [value, setValue] = morphState(...)` pair)
 
 ```
 error : mx-js-syntax : `enum` declaration cannot be translated to C++
@@ -38,18 +38,19 @@ error : mx-js-syntax : `enum` declaration cannot be translated to C++
 ```
 
 These lower correctly and are **not** errors: optional chaining `?.`,
-nullish coalescing `??`, `for...in` / `for...of`, array spread, getters and
-setters, plain-TS destructuring and loop-head destructuring, class
-declarations / `new`, type-only imports and exports, default and optional
-parameters, arrow/function consts, data-only object-literal consts, and JSX
-list expressions.
+nullish coalescing `??`, `for...in` / `for...of`, array spread, object
+spread and computed keys, getters and setters, plain-TS destructuring,
+loop-head destructuring, destructuring at the top of a component body,
+class declarations / `new`, type-only imports and exports, default and
+optional parameters, arrow/function consts, data-only object-literal
+consts, and JSX list expressions.
 
 ## Why Morph raises it
 
 Each rejected construct needs hidden runtime machinery Morph omits on
 purpose: generators need resumable frames; `with` needs dynamic scope;
 labeled jumps have no C++ equivalent; `import.meta` / dynamic `import()`
-need a module loader; object spread needs reflective copies; namespaces
+need a module loader; namespaces
 and decorators vanish in translation; enums and regex literals have no
 lowering yet. Supporting any of them approximately would change
 program meaning — so each is rejected with an explicit rewrite. See
@@ -62,15 +63,6 @@ program meaning — so each is rejected with an explicit rewrite. See
 export default function App() {
   enum Color { Red, Green }
   return <div>{Color.Red}</div>;
-}
-```
-
-```tsx
-// ❌ Object spread — mx-js-syntax
-export default function App() {
-  const base = { a: 1 };
-  const ext = { ...base, b: 2 };
-  return <div>Hello</div>;
 }
 ```
 
@@ -108,10 +100,9 @@ export default function App() {
 | `/ab+c/` | plain string checks or a `.cpp` helper |
 | `import * as lib` | `import { token, greet } from "./lib.ts"` |
 | `...args` | an explicit array parameter |
+| `f(...args)` / `new C(...args)` | pass each argument explicitly, or use `push`/`unshift`/`splice`/`concat` and `Math.min`/`Math.max` for variadic arrays |
 | `const C = class { … }` | a class declaration |
-| `{...o, k: v}` | an explicit object literal |
 | `{ handler: fn }` | keep `fn` as its own const and call it directly |
-| destructuring in a component body | one const per binding (`const [v, setV]` state pairs are fine) |
 | generator / `yield` | a state machine with `morphState` |
 | `with (o) { ... }` | explicit `o.` qualification |
 | labeled `break`/`continue` | a flag variable or early return |

@@ -76,14 +76,11 @@ struct Response {
     // Body consumption
     std::string text() { bodyUsed = true; return body; }
     std::string arrayBuffer() { bodyUsed = true; return body; }
-    // Minimal json() - returns body as JsValue (caller can parse). For now just wraps body.
+    // Response.json() parses the body with the same JSON DOM parser as
+    // JSON.parse, including its SyntaxError on malformed input.
     JsValue json() {
         bodyUsed = true;
-        // Very small JSON parser: if body is JSON, try to parse, else return string
-        if (body.empty()) return JsValue(JsNull{});
-        // Heuristic: if starts with { or [, try to return as JsObject/JsArray placeholder
-        // For now, just return the raw string as JsString - real JSON parsing can be added via json_parser.h
-        return JsValue(JsString(body));
+        return morph::json_parse(body);
     }
     bool bodyUsedFn() const { return bodyUsed; }
 

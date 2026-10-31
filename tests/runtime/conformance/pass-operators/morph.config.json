@@ -1,0 +1,7 @@
+{
+  "name": "pass-operators",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "pass-operators" },
+  "dependencies": {},
+  "cpp_sources": []
+}

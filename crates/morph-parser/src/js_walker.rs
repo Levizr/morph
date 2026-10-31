@@ -114,6 +114,43 @@ fn binding_ident_name(bp: &BindingPattern) -> Option<String> {
     }
 }
 
+/// Every identifier bound by a pattern, in source order. Nested object and
+/// array patterns, defaults, and rest elements all contribute.
+fn collect_binding_names(bp: &BindingPattern, out: &mut Vec<String>) {
+    match bp {
+        BindingPattern::BindingIdentifier(id) => {
+            let name = id.name.to_string();
+            if !out.contains(&name) {
+                out.push(name);
+            }
+        }
+        BindingPattern::ObjectPattern(object) => {
+            for property in &object.properties {
+                collect_binding_names(&property.value, out);
+            }
+            if let Some(rest) = &object.rest {
+                collect_binding_names(&rest.argument, out);
+            }
+        }
+        BindingPattern::ArrayPattern(array) => {
+            for element in array.elements.iter().flatten() {
+                collect_binding_names(element, out);
+            }
+            if let Some(rest) = &array.rest {
+                collect_binding_names(&rest.argument, out);
+            }
+        }
+        BindingPattern::AssignmentPattern(assign) => collect_binding_names(&assign.left, out),
+    }
+}
+
+/// Stable hidden name for the value a component-body destructuring
+/// declaration is unwrapped from. Span starts are unique per declarator, so
+/// the extraction and body-flow passes agree without shared state.
+fn destructure_source_name(decl: &VariableDeclarator) -> String {
+    format!("__morph_destructure_{}", decl.span.start)
+}
+
 impl<'src> MxWalker<'src> {
     /// Name behind a `ModuleExportName` (`foo`, `foo` in `as foo`, or a
     /// string-literal export name).
@@ -1386,7 +1423,6 @@ impl<'src> MxWalker<'src> {
         for stmt in &body.statements {
             let Statement::VariableDeclaration(vd) = stmt else { continue };
             for decl in &vd.declarations {
-                let Some(name) = binding_ident_name(&decl.id) else { continue };
                 let skip = match decl.init.as_ref() {
                     Some(Expression::CallExpression(call)) => {
                         matches!(&call.callee, Expression::Identifier(id) if {
@@ -1403,13 +1439,54 @@ impl<'src> MxWalker<'src> {
                     ) => true,
                     _ => false,
                 };
-                if skip || name.is_empty() {
+                if skip {
                     continue;
                 }
-                if let Some(init) = &decl.init {
+                let Some(init) = &decl.init else { continue };
+                if let Some(name) = binding_ident_name(&decl.id) {
+                    if !name.is_empty() {
+                        consts.push(ComponentConst {
+                            name,
+                            rhs: self.span_text(init.span()).to_string(),
+                            local_bindings: Vec::new(),
+                        });
+                    }
+                    continue;
+                }
+                let mut names = Vec::new();
+                collect_binding_names(&decl.id, &mut names);
+                if names.is_empty() {
+                    continue;
+                }
+                // Destructuring needs a single source value. An IIFE runs
+                // the original declaration once per read and returns the
+                // bindings as an object; each binding then becomes its own
+                // reactive const, exactly like `const {a} = obj` written as
+                // two declarations.
+                let source = destructure_source_name(decl);
+                let returns = names
+                    .iter()
+                    .map(|name| format!("\"{name}\": {name}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                // Wrap the initializer in parentheses: a bare identifier
+                // would take morpher's destructuring fast path, which copies
+                // the source text verbatim and skips ambient rewrites.
+                let declaration = self.span_text(decl.span());
+                let initializer = self.span_text(init.span());
+                let head = declaration.strip_suffix(initializer).map_or(declaration, |head| head);
+                consts.push(ComponentConst {
+                    name: source.clone(),
+                    rhs: format!(
+                        "(() => {{ const {head}({initializer}); return {{ {returns} }}; }})()"
+                    ),
+                    local_bindings: names.clone(),
+                });
+                for name in names {
                     consts.push(ComponentConst {
-                        name,
-                        rhs: self.span_text(init.span()).to_string(),
+                        name: name.clone(),
+                        rhs: format!("{source}[\"{name}\"]"),
+                        local_bindings: Vec::new(),
                     });
                 }
             }
@@ -1536,9 +1613,9 @@ impl<'src> MxWalker<'src> {
 
     /// True when a declarator is owned by the declarative collectors:
     /// `morph*` calls (state pairs, shared/event bindings) stay with their
-    /// passes; any other init with an identifier binding becomes a const
-    /// (or an inner function). Everything else — `let x;`, destructured
-    /// bindings the linter rejects — flows into the body block.
+    /// passes; any other init with an identifier or destructured binding
+    /// becomes a const (or an inner function). Everything else — `let x;`
+    /// without an initializer — flows into the body block.
     fn declarator_is_declarative(decl: &VariableDeclarator) -> bool {
         let Some(init) = decl.init.as_ref() else {
             return false;
@@ -1552,7 +1629,7 @@ impl<'src> MxWalker<'src> {
                 return true;
             }
         }
-        binding_ident_name(&decl.id).is_some()
+        true
     }
 
     fn stmt_is_declarative(stmt: &Statement) -> bool {
@@ -1599,6 +1676,18 @@ impl<'src> MxWalker<'src> {
                     let Some(name) = binding_ident_name(&decl.id) else {
                         if !Self::declarator_is_declarative(decl) {
                             undecided = true;
+                            continue;
+                        }
+                        // Destructured bindings are extracted as consts; a
+                        // binding reassigned by body flow becomes a signal,
+                        // so seed it from the same hidden source value.
+                        let mut names = Vec::new();
+                        collect_binding_names(&decl.id, &mut names);
+                        let source = destructure_source_name(decl);
+                        for name in names {
+                            if locals.iter().any(|l| l.name == name) && decl.init.is_some() {
+                                stmts.push(format!("{name} = {source}[\"{name}\"];"));
+                            }
                         }
                         continue;
                     };
@@ -2104,6 +2193,38 @@ mod walker_tests {
         assert!(!joined.contains("return ("), "{joined}");
         assert!(c.mutable_locals.is_empty(), "{c:?}");
         assert!(c.consts.iter().any(|k| k.name == "title"), "{:?}", c.consts);
+    }
+
+    #[test]
+    fn body_destructuring_becomes_consts_with_hidden_source() {
+        let c = component(
+            "export default function App() {\n  const user = { name: \"Ada\", email: \"a@b.c\" }\n  const { name, email } = user\n  return (<div>{name} {email}</div>)\n}\n",
+        );
+        let source = c
+            .consts
+            .iter()
+            .find(|k| !k.local_bindings.is_empty())
+            .expect("hidden destructuring source");
+        assert_eq!(source.local_bindings, vec!["name".to_string(), "email".to_string()]);
+        assert!(
+            source.rhs.contains("return { \"name\": name, \"email\": email }"),
+            "{}",
+            source.rhs
+        );
+        assert!(c.consts.iter().any(|k| k.name == "name"), "{:?}", c.consts);
+        assert!(c.consts.iter().any(|k| k.name == "email"), "{:?}", c.consts);
+        assert!(!c.body_stmts.join("\n").contains("const { name"), "{:?}", c.body_stmts);
+    }
+
+    #[test]
+    fn body_destructuring_reassigned_binding_becomes_mutable_local() {
+        let c = component(
+            "export default function App() {\n  const user = { name: \"Ada\" }\n  let { name } = user\n  name = \"Grace\"\n  return (<div>{name}</div>)\n}\n",
+        );
+        assert!(c.mutable_locals.iter().any(|l| l.name == "name"), "{c:?}");
+        let joined = c.body_stmts.join("\n");
+        assert!(joined.contains("name = __morph_destructure_"), "{joined}");
+        assert!(!c.consts.iter().any(|k| k.name == "name"), "{:?}", c.consts);
     }
 
     #[test]

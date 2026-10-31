@@ -1,0 +1,26 @@
+import { morphState } from 'morph'
+
+export const windowConfig = { title: "pass-destructuring", width: 800, height: 600 }
+
+type User = { name: string; email: string; age?: number; extra?: { city: string } }
+
+// Component-body destructuring lowers to one hidden source value plus one
+// reactive const per binding. Defaults, rest elements, computed keys and
+// nested patterns all run inside that source expression.
+export default function App() {
+  const [count, setCount] = morphState(0)
+  const user: User = { name: "Ada", email: "ada@example.com", extra: { city: "London" } }
+  const { name, email, age = 36, ...rest } = user
+  const [first, second = 9] = [count, undefined]
+  const key = "email"
+  const { [key]: dynamicEmail } = user
+  const nested = { profile: { city: "Paris" } }
+  const { profile: { city } } = nested
+  return (
+    <body>
+      <button onClick={() => setCount(count + 1)}>tick</button>
+      <span>{name} {email} {age} {Object.keys(rest).length}</span>
+      <span>{first} {second} {dynamicEmail} {city}</span>
+    </body>
+  )
+}

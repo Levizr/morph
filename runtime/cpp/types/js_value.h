@@ -1256,5 +1256,51 @@ namespace morph {
             source.begin() + static_cast<typename std::vector<T>::difference_type>(start),
             source.end());
     }
+
+    // Object spread: copy own enumerable keys onto an object being built.
+    // Later properties win because the emitter calls this in source order.
+    inline void js_object_assign(JsObject& target, const JsObject& source)
+    {
+        for (const auto& key : source.keys())
+        {
+            target.set(key, source.get(key));
+        }
+    }
+
+    inline void js_object_assign(JsObject& target, const JsArray& source)
+    {
+        for (size_t i = 0; i < source.length(); ++i)
+        {
+            target.set(std::to_string(i), source[static_cast<int64_t>(i)]);
+        }
+    }
+
+    inline void js_object_assign(JsObject& target, const std::shared_ptr<JsObject>& source)
+    {
+        if (source)
+        {
+            js_object_assign(target, *source);
+        }
+    }
+
+    inline void js_object_assign(JsObject& target, const std::shared_ptr<JsArray>& source)
+    {
+        if (source)
+        {
+            js_object_assign(target, *source);
+        }
+    }
+
+    inline void js_object_assign(JsObject& target, const JsValue& source)
+    {
+        if (source.is_object())
+        {
+            js_object_assign(target, std::get<JsObject>(source.inner));
+        }
+        else if (source.is_array())
+        {
+            js_object_assign(target, std::get<JsArray>(source.inner));
+        }
+    }
 }
 // Codegen adds <format> only when `${}` is used.

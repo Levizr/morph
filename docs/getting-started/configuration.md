@@ -237,7 +237,7 @@ Example:
 | `mx-js-global` | Browser/JS globals with no native counterpart (`document`, `window`, `localStorage`, `sessionStorage`, `navigator`, `location`, `history`, `screen`, `alert`, `prompt`, `confirm`, `requestAnimationFrame`) | error |
 | `mx-js-member` | Member access on unsupported JS builtins (`Math.*`, `JSON.*`, `Date.*`, `RegExp.*`, `console.*` other than log/warn/error/info) | error |
 | `mx-js-method` | Methods the runtime types don't implement (`.map()`/`.split()`/`.toUpperCase()` on state values or string literals, …) | error |
-| `mx-js-op` | Operators the C++ translator can't emit (`typeof`, `**`, `instanceof`, `in`, `delete`, `??=`, `&&=`, `||=`, `>>>`, `void`) | error |
+| `mx-js-op` | Operators the C++ translator can't emit (`typeof`, `instanceof`, `delete`, `>>>`, `>>>=`, `void`) | error |
 | `mx-js-syntax` | JS constructs the translator can't handle (`?.`, destructuring, generators/`yield`, `for...in`/`for...of`, object spread, spread in call args, object methods/getters) | error |
 | `mx-list-key` | `.map()` item root has a `key` | warning |
 

@@ -553,7 +553,7 @@
           "morph js runtime",
           "morph translator coverage"
         ],
-        "lastUpdated": "2026-10-28",
+        "lastUpdated": "2026-10-31",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -1965,7 +1965,7 @@
           "morph method not implemented",
           "morph string array methods"
         ],
-        "lastUpdated": "2026-10-11",
+        "lastUpdated": "2026-10-31",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -1977,13 +1977,14 @@
         "file": "errors/mx-js-op",
         "status": "production",
         "author": "PIYUSH",
-        "description": "Fix mx-js-op: rewriting typeof instanceof delete and compound assignment with no C++ lowering.",
+        "description": "Fix mx-js-op: rewriting typeof instanceof delete unsigned-shift and void operators that have no C++ lowering.",
         "keywords": [
           "mx-js-op",
           "morph typeof instanceof",
-          "morph operator not supported"
+          "morph operator not supported",
+          "morph unsigned shift"
         ],
-        "lastUpdated": "2026-10-11",
+        "lastUpdated": "2026-10-31",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -1995,14 +1996,15 @@
         "file": "errors/mx-js-syntax",
         "status": "production",
         "author": "PIYUSH",
-        "description": "Fix mx-js-syntax: rewrite rejected enums, regex literals, namespace imports, generators, object spread, and C++ keyword bindings.",
+        "description": "Fix mx-js-syntax: rewrite rejected enums, regex literals, namespace imports, generators, call spread, and C++ keyword bindings.",
         "keywords": [
           "mx-js-syntax",
           "morph enum error",
           "morph namespace import",
-          "morph regex literal"
+          "morph regex literal",
+          "morph call spread"
         ],
-        "lastUpdated": "2026-10-23",
+        "lastUpdated": "2026-10-31",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -2524,20 +2526,23 @@
         "changefreq": "monthly"
       },
       {
-        "title": "Morph TS-to-C++ Translator Coverage (Planned)",
+        "title": "Morph TS-to-C++ Translator Coverage",
         "sidebarTitle": "Coverage",
         "slug": "future/javascript/coverage",
         "file": "future/javascript/coverage",
-        "status": "future",
+        "status": "development",
         "author": "PIYUSH",
-        "description": "TypeScript-to-C++ translator coverage in Morph: optional chaining, nullish coalescing, and more string methods shipped; Math, JSON, Map/Set, and array higher-order methods remain.",
+        "description": "The working plan for Morph's TypeScript-to-C++ translator: actual supported baseline, ranked app-readiness gaps, and milestones for shipped array methods, object spread, component-body destructuring, exponentiation, and logical assignment, plus upcoming dates, Map/Set, and platform services.",
         "keywords": [
           "morph typescript coverage",
           "morph javascript translator",
           "morph c++ translator",
-          "morph js feature coverage"
+          "morph js feature coverage",
+          "morph js app readiness",
+          "morph array methods",
+          "morph object spread"
         ],
-        "lastUpdated": "2026-10-19",
+        "lastUpdated": "2026-10-31",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"

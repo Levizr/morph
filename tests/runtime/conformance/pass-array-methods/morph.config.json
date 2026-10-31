@@ -1,0 +1,7 @@
+{
+  "name": "pass-array-methods",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "pass-array-methods" },
+  "dependencies": {},
+  "cpp_sources": []
+}

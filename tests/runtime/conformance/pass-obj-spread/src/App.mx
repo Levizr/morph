@@ -1,0 +1,21 @@
+import { morphState } from 'morph'
+
+export const windowConfig = { title: "pass-obj-spread", width: 800, height: 600 }
+
+// Object spread and computed keys build objects at runtime. Later
+// properties win, computed keys evaluate once, and arrays spread by index.
+export default function App() {
+  const [count, setCount] = morphState(0)
+  const base = { a: 1, b: 2 }
+  const key = "c"
+  const merged = { ...base, b: 3, [key]: 4 }
+  const indexed = { ...["x", "y"] }
+  const reactive = { ...merged, ["d" + count]: count }
+  return (
+    <body>
+      <button onClick={() => setCount(count + 1)}>tick</button>
+      <span>{merged.a} {merged.b} {merged.c}</span>
+      <span>{indexed["0"]} {indexed["1"]} {reactive.d0}</span>
+    </body>
+  )
+}

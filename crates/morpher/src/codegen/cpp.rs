@@ -1,4 +1,5 @@
 use oxc_ast::ast::*;
+use oxc_ast_visit::Visit;
 use oxc_span::GetSpan;
 use std::collections::{HashMap, HashSet};
 
@@ -23,11 +24,38 @@ pub struct CppTranslator<'a> {
     narrow_index: HashMap<(String, u32), (String, String)>,
     active_narrows: HashMap<String, String>,
     destructure_count: usize,
+    /// Locals/parameters that call one of the lowered Array.prototype
+    /// methods. Their declarations are forced to `JsArray` so callbacks
+    /// and mutating methods share JS reference semantics; `std::vector`
+    /// stays the fast path everywhere else.
+    js_array_receiver_vars: HashSet<String>,
     /// When set, top-level forward declarations omit parameter defaults.
     /// Project builds declare the defaults once in `morph_api.h`; repeating
     /// them on the premain prototype is a C++ redefinition error.
     omit_param_defaults: bool,
 }
+
+/// Array methods lowered to `morph::js_array_*` runtime helpers.
+const JS_ARRAY_METHODS: &[&str] = &[
+    "map",
+    "filter",
+    "forEach",
+    "reduce",
+    "find",
+    "findIndex",
+    "some",
+    "every",
+    "sort",
+    "splice",
+    "shift",
+    "unshift",
+    "fill",
+    "flat",
+    "flatMap",
+    "push",
+    "pop",
+    "reverse",
+];
 
 /// One access step from a destructured root to a bound name.
 #[derive(Clone)]
@@ -188,6 +216,7 @@ impl<'a> CppTranslator<'a> {
             narrow_index: HashMap::new(),
             active_narrows: HashMap::new(),
             destructure_count: 0,
+            js_array_receiver_vars: HashSet::new(),
             omit_param_defaults: false,
         };
         this
@@ -284,6 +313,31 @@ impl<'a> CppTranslator<'a> {
                 );
             }
         }
+        self.collect_js_array_receivers(program);
+    }
+
+    /// Record identifiers used as receivers of lowered Array methods.
+    /// Declarations for these names emit `JsArray`, so `map`/`sort`/`splice`
+    /// callbacks and in-place mutations keep JS reference semantics instead
+    /// of copying a native vector.
+    fn collect_js_array_receivers(&mut self, program: &Program<'a>) {
+        struct Collector<'s> {
+            out: &'s mut HashSet<String>,
+        }
+        impl<'a> oxc_ast_visit::Visit<'a> for Collector<'_> {
+            fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+                if let Expression::StaticMemberExpression(member) = &call.callee {
+                    if JS_ARRAY_METHODS.contains(&member.property.name.as_str()) {
+                        if let Expression::Identifier(object) = &member.object {
+                            self.out.insert(object.name.to_string());
+                        }
+                    }
+                }
+                oxc_ast_visit::walk::walk_call_expression(self, call);
+            }
+        }
+        let mut collector = Collector { out: &mut self.js_array_receiver_vars };
+        collector.visit_program(program);
     }
 
     /// Emit one expression for a hosting unit (component const lowering).
@@ -1191,7 +1245,20 @@ impl<'a> CppTranslator<'a> {
     /// for `await fetch(...)` declarators, so the scan is narrow and the
     /// body-text default is untouched.
     fn uses_response_api(&self, name: &str) -> bool {
-        const MEMBERS: &[&str] = &["ok", "status", "text", "headers", "statusText"];
+        const MEMBERS: &[&str] = &[
+            "ok",
+            "status",
+            "statusText",
+            "headers",
+            "text",
+            "json",
+            "arrayBuffer",
+            "clone",
+            "bodyUsed",
+            "redirected",
+            "type",
+            "url",
+        ];
         let src = self.source.as_bytes();
         let name_bytes = name.as_bytes();
         if name_bytes.is_empty() {
@@ -1275,6 +1342,14 @@ impl<'a> CppTranslator<'a> {
             if Self::is_spread_array(init) {
                 cpp_type = "JsArray".to_string();
             }
+        }
+        // A local that calls a lowered Array method becomes `JsArray`:
+        // shared element storage keeps `sort`/`splice`/`push` mutations and
+        // callback results consistent with JS. Other vectors stay native.
+        if self.js_array_receiver_vars.contains(name)
+            && (cpp_type == "auto" || cpp_type == "JsValue" || cpp_type.starts_with("std::vector<"))
+        {
+            cpp_type = "JsArray".to_string();
         }
         let new_class_name = self.new_class_name_of(&cpp_type, &d.init);
         if let Some(class_name) = &new_class_name {
@@ -2761,6 +2836,15 @@ impl<'a> CppTranslator<'a> {
             } else {
                 "auto".to_string()
             };
+            // Parameters that call Array methods use JsArray so mutations
+            // reach the caller's array (`sort`, `splice`, ...).
+            let cpp_type = if self.js_array_receiver_vars.contains(&name)
+                && (cpp_type == "auto" || cpp_type.starts_with("std::vector<"))
+            {
+                "JsArray".to_string()
+            } else {
+                cpp_type
+            };
             let cpp_type = self.wrap_type(&cpp_type);
             self.ctx.need(&cpp_type);
             self.ctx.var_types.insert(name.clone(), cpp_type.clone());
@@ -3815,21 +3899,50 @@ impl<'a> CppTranslator<'a> {
             return "JsObject{}".to_string();
         }
         self.ctx.need("JsObject");
-        let mut pairs = Vec::new();
+        let runtime_build = obj.properties.iter().any(|prop| match prop {
+            ObjectPropertyKind::SpreadProperty(_) => true,
+            ObjectPropertyKind::ObjectProperty(p) => p.computed,
+        });
+        if !runtime_build {
+            let mut pairs = Vec::new();
+            for prop in &obj.properties {
+                let ObjectPropertyKind::ObjectProperty(p) = prop else {
+                    continue;
+                };
+                if let Some(key) = self.property_key_to_string(&p.key) {
+                    let val = self.emit_expression(&p.value);
+                    pairs.push(format!("{{{}, {}}}", cpp_string_literal(&key), val));
+                }
+            }
+            return format!("JsObject{{{}}}", pairs.join(", "));
+        }
+        let mut lines = vec!["[&]() {".to_string(), "    JsObject __o{};".to_string()];
         for prop in &obj.properties {
             match prop {
                 ObjectPropertyKind::ObjectProperty(p) => {
-                    if let Some(key) = self.property_key_to_string(&p.key) {
-                        let val = self.emit_expression(&p.value);
-                        pairs.push(format!("{{\"{}\", {}}}", key, val));
-                    }
+                    let key = if p.computed {
+                        let Some(key_expr) = p.key.as_expression() else {
+                            continue;
+                        };
+                        let key = self.emit_expression(key_expr);
+                        format!("morph::js_to_string({key}).to_std_string()")
+                    } else if let Some(key) = self.property_key_to_string(&p.key) {
+                        cpp_string_literal(&key)
+                    } else {
+                        continue;
+                    };
+                    let val = self.emit_expression(&p.value);
+                    lines.push(format!("    __o.set({key}, {val});"));
                 }
                 ObjectPropertyKind::SpreadProperty(s) => {
-                    pairs.push(format!("/* spread {} */", self.emit_expression(&s.argument)));
+                    let source = self.emit_expression(&s.argument);
+                    lines.push(format!("    morph::js_object_assign(__o, {source});"));
                 }
             }
         }
-        format!("JsObject{{{}}}", pairs.join(", "))
+        lines.push("    return __o;".to_string());
+        lines.push("}()".to_string());
+        lines.join("\n")
     }
 
     /// `new Window` config object with ownership keys pre-lowered.
@@ -4024,6 +4137,8 @@ impl<'a> CppTranslator<'a> {
             Expression::BinaryExpression(binary) => {
                 if ComparisonKind::from_binary_operator(binary.operator.as_str()).is_some() {
                     OperandClass::Boolean
+                } else if binary.operator.as_str() == "**" {
+                    OperandClass::Float
                 } else {
                     let left_class = self.operand_class_of(&binary.left);
                     let right_class = self.operand_class_of(&binary.right);
@@ -4111,11 +4226,92 @@ impl<'a> CppTranslator<'a> {
         false
     }
 
+    /// Bare class name behind a pointer/reference spelling.
+    fn bare_pointer_type(cpp_type: &str) -> &str {
+        let trimmed = cpp_type.trim();
+        for wrap in ["std::shared_ptr<", "std::unique_ptr<"] {
+            if let Some(inner) = trimmed.strip_prefix(wrap).and_then(|s| s.strip_suffix('>')) {
+                return inner.trim();
+            }
+        }
+        trimmed.trim_end_matches('*').trim()
+    }
+
+    /// True when `obj` should lower a general Array.prototype method to the
+    /// runtime helpers. Known non-array receivers (classes, strings,
+    /// numbers, objects) keep their own member/method emission; everything
+    /// array-shaped or dynamic goes through the helpers.
+    fn is_array_method_receiver(&self, obj: &Expression<'a>) -> bool {
+        if matches!(obj, Expression::ArrayExpression(_)) {
+            return true;
+        }
+        if let Expression::Identifier(id) = obj {
+            let Some(ty) = self.ctx.var_types.get(id.name.as_str()) else {
+                return true;
+            };
+            let bare = Self::bare_pointer_type(ty);
+            if self.ctx.class_names.contains(bare) {
+                return false;
+            }
+            if matches!(
+                bare,
+                "JsObject"
+                    | "JsString"
+                    | "JsNumber"
+                    | "JsBoolean"
+                    | "JsUndefined"
+                    | "JsNull"
+                    | "bool"
+                    | "char"
+                    | "int"
+                    | "int32_t"
+                    | "int64_t"
+                    | "double"
+                    | "float"
+                    | "size_t"
+                    | "uint32_t"
+                    | "uint64_t"
+                    | "int16_t"
+                    | "uint16_t"
+                    | "int8_t"
+                    | "uint8_t"
+            ) || bare.starts_with("std::string")
+            {
+                return false;
+            }
+            return true;
+        }
+        !matches!(
+            self.operand_class_of(obj),
+            OperandClass::Text
+                | OperandClass::Boolean
+                | OperandClass::Integer
+                | OperandClass::Float
+                | OperandClass::Null
+                | OperandClass::Undefined
+                | OperandClass::JsString
+                | OperandClass::JsNumber
+                | OperandClass::JsBoolean
+                | OperandClass::JsObject
+        )
+    }
+
     /// Classify a call result: known string/number/boolean methods keep their
     /// native class, everything else is treated as dynamic.
     fn call_result_class(&self, call: &CallExpression<'a>) -> OperandClass {
         if let Expression::StaticMemberExpression(member) = &call.callee {
             let method_name = member.property.name.as_str();
+            if JS_ARRAY_METHODS.contains(&method_name)
+                && self.is_array_method_receiver(&member.object)
+            {
+                return match method_name {
+                    "map" | "filter" | "splice" | "fill" | "flat" | "flatMap" | "sort"
+                    | "reverse" => OperandClass::JsArray,
+                    "findIndex" | "push" | "unshift" => OperandClass::Integer,
+                    "some" | "every" => OperandClass::Boolean,
+                    _ => OperandClass::JsValue,
+                };
+            }
             if matches!(method_name, "indexOf" | "lastIndexOf" | "search" | "localeCompare") {
                 return OperandClass::Integer;
             }
@@ -4322,6 +4518,14 @@ impl<'a> CppTranslator<'a> {
     fn emit_binary(&mut self, b: &BinaryExpression<'a>) -> String {
         let op = b.operator.as_str();
 
+        // Exponentiation coerces both sides with ToNumber and always yields
+        // a JS number, so it must run before the integer narrowing below.
+        if op == "**" {
+            let left = self.emit_expression(&b.left);
+            let right = self.emit_expression(&b.right);
+            return self.emit_pow(&left, &right);
+        }
+
         // Handle special operators that don't want conversion
         if op == "instanceof" {
             let left = self.emit_expression(&b.left);
@@ -4405,7 +4609,6 @@ impl<'a> CppTranslator<'a> {
         let op_mapped = match op {
             "===" => "==",
             "!==" => "!=",
-            "**" => "/* pow */",
             ">>>" => "/* >>> */",
             _ => op,
         };
@@ -4618,6 +4821,21 @@ impl<'a> CppTranslator<'a> {
                     self.ctx.state_vars.get(left_id.name.as_str()).cloned().unwrap_or_default();
                 return format!("{set_head}(({read}) {bin} ({right}))");
             }
+            // Exponentiation goes through ToNumber like JS; logical
+            // assignments keep the read on both sides so the right side
+            // only evaluates when the condition selects it.
+            if op == "**=" {
+                let read =
+                    self.ctx.state_vars.get(left_id.name.as_str()).cloned().unwrap_or_default();
+                let value = self.emit_pow(&format!("({read})"), &right);
+                return format!("{set_head}({value})");
+            }
+            if matches!(op, "&&=" | "||=" | "??=") {
+                let read =
+                    self.ctx.state_vars.get(left_id.name.as_str()).cloned().unwrap_or_default();
+                let value = self.emit_logical_assign_value(op, &read, &right);
+                return format!("{set_head}({value})");
+            }
             // `??=` / `&&=` / `||=` keep their default lowering.
         }
         // `win.title = x` on a tracked Window handle lowers to a registry
@@ -4670,6 +4888,24 @@ impl<'a> CppTranslator<'a> {
                 }
             }
         }
+        // Exponentiation and logical assignment keep JS value semantics:
+        // the right side is only evaluated when the condition selects it.
+        if matches!(
+            a.operator,
+            AssignmentOperator::Exponential
+                | AssignmentOperator::LogicalAnd
+                | AssignmentOperator::LogicalOr
+                | AssignmentOperator::LogicalNullish
+        ) {
+            let left = self.emit_assignment_target(&a.left);
+            let right = self.emit_expression(&a.right);
+            if a.operator == AssignmentOperator::Exponential {
+                let value = self.emit_pow(&left, &right);
+                return format!("({left} = {value})");
+            }
+            let value = self.emit_logical_assign_value(a.operator.as_str(), &left, &right);
+            return format!("({left} = {value})");
+        }
         let left = self.emit_assignment_target(&a.left);
         let right = self.emit_expression(&a.right);
         // Check if we need to convert JsValue from array element to int.
@@ -4699,6 +4935,35 @@ impl<'a> CppTranslator<'a> {
             x => x,
         };
         format!("({} {} {})", left, op, right)
+    }
+
+    /// Emit JS exponentiation (`a ** b`): both operands go through ToNumber,
+    /// matching `2 ** "3"` and `(-1) ** 0.5` (NaN).
+    fn emit_pow(&mut self, left: &str, right: &str) -> String {
+        self.ctx.need("JsValue");
+        format!(
+            "std::pow(morph::js_to_number({left}).as_double(), \
+             morph::js_to_number({right}).as_double())"
+        )
+    }
+
+    /// Emit the value selected by a logical assignment.
+    ///
+    /// The read appears in both the condition and the fallback, matching JS
+    /// short-circuiting: `a &&= b` writes `b` only when `a` is truthy.
+    fn emit_logical_assign_value(&mut self, op: &str, read: &str, right: &str) -> String {
+        // Both helpers live in js_convert.h; a native-only app still needs
+        // the include even when it uses no `Js*` type.
+        self.ctx.need("JsValue");
+        if op == "??=" {
+            return format!("(morph::js_is_nullish({read}) ? ({right}) : ({read}))");
+        }
+        let test = format!("morph::js_to_boolean({read})");
+        if op == "&&=" {
+            format!("({test} ? ({right}) : ({read}))")
+        } else {
+            format!("({test} ? ({read}) : ({right}))")
+        }
     }
 
     fn emit_assignment_target(&mut self, target: &AssignmentTarget<'a>) -> String {
@@ -4939,6 +5204,168 @@ impl<'a> CppTranslator<'a> {
                     out = format!("{out}.concat({{{}}})", group.join(", "));
                 }
                 Some(out)
+            }
+            _ => None,
+        }
+    }
+
+    fn array_args_have_spread(args: &[Argument<'a>]) -> bool {
+        args.iter().any(|arg| matches!(arg, Argument::SpreadElement(_)))
+    }
+
+    /// Comma-separated `JsValue(...)` items for an `initializer_list`.
+    fn emit_array_items(&mut self, args: &[Argument<'a>]) -> String {
+        self.ctx.need("JsValue");
+        args.iter()
+            .filter_map(|arg| match arg {
+                Argument::SpreadElement(_) => None,
+                _ => Some(format!("JsValue({})", self.emit_argument(arg))),
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    /// Build a `JsArray` from a mixed argument list, flattening spreads.
+    /// `[a, ...b, c]` has the same result as the array literal spelling.
+    fn emit_array_spread_args(&mut self, args: &[Argument<'a>]) -> String {
+        self.ctx.need("JsArray");
+        self.ctx.need("JsValue");
+        let mut lines = vec!["[&]() {".to_string(), "    JsArray __args{};".to_string()];
+        for arg in args {
+            match arg {
+                Argument::SpreadElement(spread) => {
+                    let source = self.emit_expression(&spread.argument);
+                    lines.push(format!("    morph::js_array_extend(__args, {source});"));
+                }
+                _ => {
+                    let value = self.emit_argument(arg);
+                    lines.push(format!("    __args.push(JsValue({value}));"));
+                }
+            }
+        }
+        lines.push("    return __args;".to_string());
+        lines.push("}()".to_string());
+        lines.join("\n")
+    }
+
+    fn emit_array_argument(&mut self, arg: &Argument<'a>) -> Option<String> {
+        if matches!(arg, Argument::SpreadElement(_)) {
+            return None;
+        }
+        Some(self.emit_argument(arg))
+    }
+
+    fn emit_array_index_argument(&mut self, arg: &Argument<'a>) -> Option<String> {
+        self.emit_array_argument(arg).map(|value| format!("morph::js_to_integer(JsValue({value}))"))
+    }
+
+    /// Lower one general Array.prototype method call. `None` keeps the
+    /// default member-call emission for non-array receivers and shapes the
+    /// dedicated `push` fast path already handles.
+    fn emit_array_method(
+        &mut self,
+        member: &StaticMemberExpression<'a>,
+        call: &CallExpression<'a>,
+    ) -> Option<String> {
+        let method = member.property.name.as_str();
+        if !JS_ARRAY_METHODS.contains(&method) || !self.is_array_method_receiver(&member.object) {
+            return None;
+        }
+        // The single-value `push` path above handles vectors with
+        // push_back and JsArray with push.
+        if method == "push"
+            && call.arguments.len() == 1
+            && !matches!(call.arguments[0], Argument::SpreadElement(_))
+        {
+            return None;
+        }
+        self.ctx.need("JsArray");
+        self.ctx.need("JsValue");
+        let object = self.emit_expression(&member.object);
+        match method {
+            "map" | "filter" | "forEach" | "find" | "findIndex" | "some" | "every" | "flatMap" => {
+                let callback = self.emit_array_argument(call.arguments.first()?)?;
+                let helper = match method {
+                    "map" => "js_array_map",
+                    "filter" => "js_array_filter",
+                    "forEach" => "js_array_for_each",
+                    "find" => "js_array_find",
+                    "findIndex" => "js_array_find_index",
+                    "some" => "js_array_some",
+                    "every" => "js_array_every",
+                    _ => "js_array_flat_map",
+                };
+                Some(format!("morph::{helper}({object}, {callback})"))
+            }
+            "reduce" => {
+                let callback = self.emit_array_argument(call.arguments.first()?)?;
+                if let Some(initial) = call.arguments.get(1) {
+                    let initial = self.emit_array_argument(initial)?;
+                    Some(format!("morph::js_array_reduce({object}, {callback}, {initial})"))
+                } else {
+                    Some(format!("morph::js_array_reduce({object}, {callback})"))
+                }
+            }
+            "sort" => {
+                if let Some(callback) = call.arguments.first() {
+                    let callback = self.emit_array_argument(callback)?;
+                    Some(format!("morph::js_array_sort({object}, {callback})"))
+                } else {
+                    Some(format!("morph::js_array_sort({object})"))
+                }
+            }
+            "reverse" => Some(format!("morph::js_array_reverse({object})")),
+            "pop" => Some(format!("morph::js_array_pop({object})")),
+            "shift" => Some(format!("morph::js_array_shift({object})")),
+            "push" | "unshift" => {
+                let helper = if method == "push" { "js_array_push" } else { "js_array_unshift" };
+                let items = if Self::array_args_have_spread(&call.arguments) {
+                    self.emit_array_spread_args(&call.arguments)
+                } else {
+                    format!("{{{}}}", self.emit_array_items(&call.arguments))
+                };
+                Some(format!("morph::{helper}({object}, {items})"))
+            }
+            "splice" => {
+                let start = self.emit_array_index_argument(call.arguments.first()?)?;
+                if call.arguments.len() == 1 {
+                    return Some(format!("morph::js_array_splice({object}, {start})"));
+                }
+                let delete = self.emit_array_index_argument(&call.arguments[1])?;
+                if call.arguments.len() == 2 {
+                    return Some(format!("morph::js_array_splice({object}, {start}, {delete})"));
+                }
+                let items = &call.arguments[2..];
+                let items = if Self::array_args_have_spread(items) {
+                    self.emit_array_spread_args(items)
+                } else {
+                    format!("{{{}}}", self.emit_array_items(items))
+                };
+                Some(format!("morph::js_array_splice({object}, {start}, {delete}, {items})"))
+            }
+            "fill" => {
+                let value = self.emit_array_argument(call.arguments.first()?)?;
+                let value = format!("JsValue({value})");
+                match call.arguments.len() {
+                    0 | 1 => Some(format!("morph::js_array_fill({object}, {value})")),
+                    2 => {
+                        let start = self.emit_array_index_argument(&call.arguments[1])?;
+                        Some(format!("morph::js_array_fill({object}, {value}, {start})"))
+                    }
+                    _ => {
+                        let start = self.emit_array_index_argument(&call.arguments[1])?;
+                        let end = self.emit_array_index_argument(&call.arguments[2])?;
+                        Some(format!("morph::js_array_fill({object}, {value}, {start}, {end})"))
+                    }
+                }
+            }
+            "flat" => {
+                if let Some(depth) = call.arguments.first() {
+                    let depth = self.emit_array_index_argument(depth)?;
+                    Some(format!("morph::js_array_flat({object}, {depth})"))
+                } else {
+                    Some(format!("morph::js_array_flat({object})"))
+                }
             }
             _ => None,
         }
@@ -5192,7 +5619,10 @@ impl<'a> CppTranslator<'a> {
             }
         }
         if let Expression::StaticMemberExpression(m) = &call.callee {
-            if m.property.name.as_str() == "push" && call.arguments.len() == 1 {
+            if m.property.name.as_str() == "push"
+                && call.arguments.len() == 1
+                && !matches!(call.arguments[0], Argument::SpreadElement(_))
+            {
                 let obj = self.emit_expression(&m.object);
                 let arg = self.emit_moved_argument(&call.arguments[0], true);
                 // std::vector uses push_back, JsArray uses push.
@@ -5211,6 +5641,14 @@ impl<'a> CppTranslator<'a> {
                     }
                 }
                 return format!("{}.push({})", obj, arg);
+            }
+        }
+        // General Array.prototype methods (`map`, `filter`, `reduce`, ...)
+        // lower to morph::js_array_* helpers. JSX list `.map` calls never
+        // reach here: the walker rewrites them into list nodes.
+        if let Expression::StaticMemberExpression(m) = &call.callee {
+            if let Some(lowered) = self.emit_array_method(m, call) {
+                return lowered;
             }
         }
         // JS builtin namespaces (Math/JSON/Number.is*/Object.keys/Array.isArray),
@@ -6012,6 +6450,50 @@ mod tests {
             }
         }
         out.join("\n")
+    }
+
+    #[test]
+    fn object_spread_and_computed_keys_build_at_runtime() {
+        let out = translate_stmts(
+            "const base = { a: 1 };\n\
+             const key = \"b\";\n\
+             const merged = { ...base, z: 3, [key]: 2 };",
+        );
+        assert!(out.contains("morph::js_object_assign(__o, base)"), "{out}");
+        assert!(out.contains("__o.set(\"z\", 3)"), "{out}");
+        assert!(out.contains("morph::js_to_string(key).to_std_string()"), "{out}");
+    }
+
+    #[test]
+    fn exponentiation_and_logical_assignment_lower_with_js_semantics() {
+        let out = translate_stmts(
+            "let n = 2;\n\
+             n **= 3;\n\
+             n &&= 4;\n\
+             n ||= 5;\n\
+             n ??= 6;\n\
+             const p = 2 ** 8;",
+        );
+        assert!(out.contains("std::pow(morph::js_to_number(n)"), "{out}");
+        assert!(out.contains("morph::js_to_boolean(n)"), "{out}");
+        assert!(out.contains("morph::js_is_nullish(n)"), "{out}");
+        assert!(out.contains("std::pow(morph::js_to_number(2)"), "{out}");
+    }
+
+    #[test]
+    fn response_json_requests_full_response() {
+        let out = translate_stmts(
+            "async function load() {\n\
+                 const response = await fetch(\"http://example.com\");\n\
+                 const data = response.json();\n\
+                 console.log(data);\n\
+             }",
+        );
+        assert!(
+            out.contains("morph::net::Response response = co_await morph::net::fetch_response"),
+            "{out}"
+        );
+        assert!(out.contains("response.json()"), "{out}");
     }
 
     #[test]

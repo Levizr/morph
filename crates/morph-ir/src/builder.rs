@@ -172,11 +172,20 @@ impl IRBuilder {
                 if cst.name.is_empty() || cst.rhs.is_empty() {
                     continue;
                 }
+                let vars = if cst.local_bindings.is_empty() {
+                    ambient_vars.clone()
+                } else {
+                    let mut vars = ambient_vars.clone();
+                    for name in &cst.local_bindings {
+                        vars.remove(name);
+                    }
+                    vars
+                };
                 let translated = self
-                    .translate_expr(&cst.rhs, &ambient_vars, &ambient_types, &events)
+                    .translate_expr(&cst.rhs, &vars, &ambient_types, &events)
                     .map(|out| (out.body, out.includes, out.ty))
                     .or_else(|| {
-                        self.translate_logic(&cst.rhs, &ambient_vars, &ambient_types, &events)
+                        self.translate_logic(&cst.rhs, &vars, &ambient_types, &events)
                             .map(|out| (out.body, out.includes, None))
                     });
                 if let Some((body, includes, ty)) = translated {
@@ -1040,9 +1049,29 @@ impl IRBuilder {
             if cst.name.is_empty() || cst.rhs.is_empty() {
                 continue;
             }
-            let rhs = prepare_source(&cst.rhs, frame);
-            let Some(out) = self.translate_expr(&rhs, &frame.vars, &frame.types, &frame.events)
-            else {
+            // A destructuring source declares its bindings inside the
+            // initializer. Those names must shadow the ambient const
+            // wrappers, or `const {a} = x` would rewrite the local `a` to
+            // the ambient `a()` inside the same expression.
+            let filtered;
+            let local_frame = if cst.local_bindings.is_empty() {
+                &*frame
+            } else {
+                let mut copy = frame.clone();
+                for name in &cst.local_bindings {
+                    copy.vars.remove(name);
+                    copy.renames.remove(name);
+                }
+                filtered = copy;
+                &filtered
+            };
+            let rhs = prepare_source(&cst.rhs, local_frame);
+            let Some(out) = self.translate_expr(
+                &rhs,
+                &local_frame.vars,
+                &local_frame.types,
+                &local_frame.events,
+            ) else {
                 continue;
             };
             let expr = out.body.trim().trim_end_matches(';').trim();
@@ -7965,6 +7994,7 @@ mod tests {
                 consts: vec![ComponentConst {
                     name: "doubled".to_string(),
                     rhs: "count * 2".to_string(),
+                    local_bindings: Vec::new(),
                 }],
                 console_logs: vec!["body log".to_string()],
                 body_stmts: Vec::new(),

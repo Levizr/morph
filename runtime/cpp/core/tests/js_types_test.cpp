@@ -181,6 +181,34 @@ static void testConversions()
     CHECK(morph::js_to_boolean(JsValue(JsUndefined{})) == false, "undefined falsy");
     CHECK(morph::js_to_boolean(JsValue(JsNull{})) == false, "null falsy");
     CHECK(morph::js_to_boolean(JsValue(JsArray{})) == true, "empty array truthy");
+    CHECK(morph::js_to_boolean(JsBoolean(true)) == true, "JsBoolean true");
+    CHECK(morph::js_to_boolean(JsBoolean(false)) == false, "JsBoolean false");
+    CHECK(morph::js_to_boolean(JsNumber(0)) == false, "JsNumber zero");
+    CHECK(morph::js_to_boolean(JsString("")) == false, "JsString empty");
+    CHECK(morph::js_to_boolean(JsArray{}) == true, "JsArray truthy");
+    CHECK(morph::js_to_boolean(JsObject{}) == true, "JsObject truthy");
+    CHECK(morph::js_to_boolean(JsNull{}) == false, "JsNull falsy");
+    CHECK(morph::js_to_boolean(JsUndefined{}) == false, "JsUndefined falsy");
+    CHECK(morph::js_to_boolean(std::string_view("")) == false, "empty string_view falsy");
+    CHECK(morph::js_to_boolean(std::string_view("x")) == true, "string_view truthy");
+    CHECK(morph::js_to_boolean(std::nan("")) == false, "native NaN falsy");
+    CHECK(morph::js_to_boolean(0.5) == true, "native fraction truthy");
+
+    struct Bare {};
+    struct ExplicitBool
+    {
+        explicit operator bool() const { return false; }
+    };
+    CHECK(morph::js_to_boolean(Bare{}) == true, "bare object truthy");
+    CHECK(morph::js_to_boolean(ExplicitBool{}) == false, "explicit bool conversion used");
+
+    CHECK(morph::js_is_nullish(JsValue(JsNull{})) == true, "null is nullish");
+    CHECK(morph::js_is_nullish(JsValue(JsUndefined{})) == true, "undefined is nullish");
+    CHECK(morph::js_is_nullish(JsValue(0)) == false, "zero is not nullish");
+    CHECK(morph::js_is_nullish(JsValue("")) == false, "empty string is not nullish");
+    CHECK(morph::js_is_nullish(JsValue(JsArray{})) == false, "empty array is not nullish");
+    CHECK(morph::js_is_nullish(std::string("")) == false, "native empty string is not nullish");
+    CHECK(morph::js_is_nullish(0) == false, "native zero is not nullish");
 }
 
 static void testParseFunctions()
@@ -276,6 +304,104 @@ static void testArrayMethods()
 
     CHECK(JsValue("abc").includes(JsValue("b")) == true, "JsValue string includes");
     CHECK(JsValue("abc").includes(JsValue("d")) == false, "JsValue string includes miss");
+}
+
+static void testArrayCallbacks()
+{
+    JsArray a{3, 1, 2};
+    CHECK(morph::js_array_map(a, [](auto x) { return x * 2; }).join().value == "6,2,4",
+          "map untyped callback");
+    CHECK(morph::js_array_map(a, [](auto x, auto i) { return JsValue(i) + x; }).join().value ==
+              "3,2,4",
+          "map callback receives index");
+    CHECK(morph::js_array_map(a, [](int64_t x) { return x + 1; }).join().value == "4,2,3",
+          "map typed numeric callback");
+    CHECK(morph::js_array_filter(a, [](auto x) { return JsNumber(x).as_int() % 2 == 1; })
+              .join()
+              .value == "3,1",
+          "filter keeps matching items");
+
+    JsValue seen = JsValue(0);
+    (void)morph::js_array_for_each(a, [&](auto x) { seen = seen + x; });
+    CHECK(sv(seen) == "6", "forEach visits every item");
+    CHECK(morph::js_array_for_each(a, [](auto) {}).is_undefined(), "forEach returns undefined");
+
+    CHECK(sv(morph::js_array_reduce(a, [](auto acc, auto x) { return acc + x; }, 0)) == "6",
+          "reduce with initial value");
+    CHECK(sv(morph::js_array_reduce(a, [](auto acc, auto x) { return acc + x; })) == "6",
+          "reduce without initial uses first item");
+    CHECK(morph::js_array_reduce(JsArray{}, [](auto acc, auto x) { return acc + x; })
+              .is_undefined(),
+          "reduce empty without initial is undefined");
+    CHECK(sv(morph::js_array_reduce(a, [](auto acc, auto x) { return acc + x; }, 10)) == "16",
+          "reduce starts from the initial value");
+
+    CHECK(sv(morph::js_array_find(a, [](auto x) { return JsNumber(x).as_int() > 1; })) == "3",
+          "find returns first match");
+    CHECK(morph::js_array_find(a, [](auto x) { return JsNumber(x).as_int() > 9; })
+              .is_undefined(),
+          "find miss is undefined");
+    CHECK(morph::js_array_find_index(a, [](auto x) { return JsNumber(x).as_int() > 1; }) == 0,
+          "findIndex returns index");
+    CHECK(morph::js_array_find_index(a, [](auto x) { return JsNumber(x).as_int() > 9; }) == -1,
+          "findIndex miss is -1");
+    CHECK(morph::js_array_some(a, [](auto x) { return JsNumber(x).as_int() > 2; }) == true,
+          "some true");
+    CHECK(morph::js_array_every(a, [](auto x) { return JsNumber(x).as_int() > 2; }) == false,
+          "every false");
+
+    CHECK(morph::js_array_sort(JsArray{10, 2, 1}).join().value == "1,10,2",
+          "sort default is lexicographic");
+    CHECK(morph::js_array_sort(JsArray{10, 2, 1},
+                               [](auto x, auto y)
+                               { return JsNumber(x).as_int() - JsNumber(y).as_int(); })
+              .join()
+              .value == "1,2,10",
+          "sort numeric comparator");
+    JsArray alias = a;
+    (void)morph::js_array_sort(alias, [](auto x, auto y) { return JsNumber(x).as_int() -
+                                                               JsNumber(y).as_int(); });
+    CHECK(a.join().value == "1,2,3", "sort mutates the shared array");
+
+    JsArray vector_sorted = JsArray{9, 3};
+    std::vector<int64_t> native{9, 3, 5};
+    morph::js_array_sort(native);
+    CHECK(native == std::vector<int64_t>({3, 5, 9}), "sort vector in place");
+    CHECK(morph::js_array_map(native, [](auto x) { return x; }).join().value == "3,5,9",
+          "map accepts a native vector");
+
+    JsArray spliced = morph::js_array_splice(vector_sorted, 1, 1, {7, 8});
+    CHECK(spliced.join().value == "3", "splice returns removed items");
+    CHECK(vector_sorted.join().value == "9,7,8", "splice inserts items");
+    JsArray tail = morph::js_array_splice(vector_sorted, -2);
+    CHECK(tail.join().value == "7,8", "splice negative start removes to end");
+    CHECK(vector_sorted.join().value == "9", "splice tail mutates");
+
+    JsArray queue{1, 2, 3};
+    CHECK(sv(morph::js_array_shift(queue)) == "1", "shift returns first");
+    CHECK(queue.join().value == "2,3", "shift mutates");
+    CHECK(morph::js_array_unshift(queue, {9, 8}) == 4, "unshift returns new length");
+    CHECK(queue.join().value == "9,8,2,3", "unshift inserts in order");
+    CHECK(morph::js_array_push(queue, {5, 4}) == 6, "push multi-arg returns length");
+    CHECK(queue.join().value == "9,8,2,3,5,4", "push multi-arg appends");
+    CHECK(morph::js_array_push(queue, JsArray{6, 7}) == 8, "push array overload appends");
+    CHECK(sv(morph::js_array_pop(queue)) == "7", "pop returns last");
+
+    JsArray filled = morph::js_array_fill(JsArray{1, 2, 3, 4}, 0, 1, 3);
+    CHECK(filled.join().value == "1,0,0,4", "fill range");
+    CHECK(morph::js_array_fill(JsArray{1, 2}, 9, -1).join().value == "1,9",
+          "fill negative start");
+
+    CHECK(morph::js_array_flat(JsArray{JsArray{1, JsArray{2}}, JsArray{3}}).join().value ==
+              "1,2,3",
+          "flat defaults to one level");
+    CHECK(morph::js_array_flat(JsArray{JsArray{1, JsArray{2}}, JsArray{3}}, 2).join().value ==
+              "1,2,3",
+          "flat depth two");
+    CHECK(morph::js_array_flat_map(JsArray{1, 2}, [](auto x) { return JsArray{x, x}; })
+              .join()
+              .value == "1,1,2,2",
+          "flatMap flattens one level");
 }
 
 static void testObjectMethods()
@@ -405,6 +531,7 @@ int main()
     testPredicates();
     testIsArray();
     testArrayMethods();
+    testArrayCallbacks();
     testObjectMethods();
     testJson();
     testMath();

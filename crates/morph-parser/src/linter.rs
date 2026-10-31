@@ -535,10 +535,11 @@ fn check_js_members(program: &Program, file_path: &str, offsets: &[usize]) -> Ve
 }
 
 /// `mx-js-op`: operators the C++ translator cannot emit. Each one below
-/// was verified to produce uncompilable C++ (comment stubs like `/* pow */`
+/// was verified to produce uncompilable C++ (comment stubs like `/* >>> */`
 /// or verbatim `typeof`/`delete`). `in` lowers to `js_has_property` and
 /// stays allowed; `instanceof` has no valid right-hand side today (builtin
 /// ctors don't exist, user classes aren't `JsValue`s) so it is denied too.
+/// `**`/`**=` and the logical assignments lower through runtime helpers.
 fn check_js_operators(program: &Program, file_path: &str, offsets: &[usize]) -> Vec<LintError> {
     struct Visitor<'a> {
         // (span start, operator text, hint)
@@ -547,7 +548,6 @@ fn check_js_operators(program: &Program, file_path: &str, offsets: &[usize]) -> 
     impl<'a> Visit<'a> for Visitor<'a> {
         fn visit_binary_expression(&mut self, e: &BinaryExpression<'a>) {
             let denied = match e.operator {
-                BinaryOperator::Exponential => Some(("**", "Use repeated multiplication (`a * a`) or a `.cpp` helper")),
                 BinaryOperator::ShiftRightZeroFill => {
                     Some((">>>", "Use `>>` for non-negative values, or a `.cpp` helper"))
                 }
@@ -564,16 +564,10 @@ fn check_js_operators(program: &Program, file_path: &str, offsets: &[usize]) -> 
         }
         fn visit_assignment_expression(&mut self, e: &AssignmentExpression<'a>) {
             let denied = match e.operator {
-                AssignmentOperator::Exponential => {
-                    Some(("**=", "Use `x = x * x` or a `.cpp` helper"))
-                }
                 AssignmentOperator::ShiftRightZeroFill => Some((
                     ">>>=",
                     "Unsigned shift-assign has no counterpart — use `>>=` for non-negative values",
                 )),
-                AssignmentOperator::LogicalAnd => Some(("&&=", "Use `x = x && y`")),
-                AssignmentOperator::LogicalOr => Some(("||=", "Use `x = x || y`")),
-                AssignmentOperator::LogicalNullish => Some(("??=", "Use `x = x ?? y`")),
                 _ => None,
             };
             if let Some((op, hint)) = denied {
@@ -733,7 +727,48 @@ struct JsSyntaxVisitor<'s> {
     function_symbols: &'s HashSet<SymbolId>,
     scoping: &'s Scoping,
 }
+
+/// Spread call arguments lower only where the runtime helper is variadic:
+/// `push`/`unshift`/`splice`/`concat` on arrays and `Math.min`/`Math.max`.
+/// Every other call would pass the spread array as one argument, so the
+/// checker rejects it instead of emitting a wrong call.
+fn call_spread_supported(call: &CallExpression<'_>) -> bool {
+    let Some(MemberExpression::StaticMemberExpression(member)) = call.callee.as_member_expression()
+    else {
+        return false;
+    };
+    match member.property.name.as_str() {
+        "push" | "unshift" | "splice" | "concat" => true,
+        "min" | "max" => {
+            matches!(&member.object, Expression::Identifier(id) if id.name.as_str() == "Math")
+        }
+        _ => false,
+    }
+}
+
 impl<'a> Visit<'a> for JsSyntaxVisitor<'_> {
+    fn visit_call_expression(&mut self, e: &CallExpression<'a>) {
+        if e.arguments.iter().any(|arg| matches!(arg, Argument::SpreadElement(_)))
+            && !call_spread_supported(e)
+        {
+            self.out.push((
+                e.span.start,
+                "spread call arguments (`f(...args)`)",
+                "Pass the array itself, or use push/unshift/splice/concat/Math.min/Math.max",
+            ));
+        }
+        oxc_ast_visit::walk::walk_call_expression(self, e);
+    }
+    fn visit_new_expression(&mut self, e: &NewExpression<'a>) {
+        if e.arguments.iter().any(|arg| matches!(arg, Argument::SpreadElement(_))) {
+            self.out.push((
+                e.span.start,
+                "spread constructor arguments (`new C(...args)`)",
+                "Pass each constructor argument explicitly",
+            ));
+        }
+        oxc_ast_visit::walk::walk_new_expression(self, e);
+    }
     fn visit_expression(&mut self, e: &Expression<'a>) {
         match e {
             Expression::YieldExpression(y) => {
@@ -799,22 +834,13 @@ impl<'a> Visit<'a> for JsSyntaxVisitor<'_> {
     }
     fn visit_object_expression(&mut self, e: &ObjectExpression<'a>) {
         for prop in &e.properties {
-            match prop {
-                ObjectPropertyKind::SpreadProperty(sp) => {
+            if let ObjectPropertyKind::ObjectProperty(p) = prop {
+                if self.property_value_is_function(p) {
                     self.out.push((
-                        sp.span.start,
-                        "object spread",
-                        "Copy the fields explicitly — spread data is dropped",
+                        p.span.start,
+                        "function-valued object property",
+                        "Keep functions as separate consts; JsObject fields cannot store closures",
                     ));
-                }
-                ObjectPropertyKind::ObjectProperty(p) => {
-                    if self.property_value_is_function(p) {
-                        self.out.push((
-                            p.span.start,
-                            "function-valued object property",
-                            "Keep functions as separate consts; JsObject fields cannot store closures",
-                        ));
-                    }
                 }
             }
         }
@@ -1100,6 +1126,21 @@ const fn supported_methods(kind: RecvKind) -> &'static [&'static str] {
             "lastIndexOf",
             "at",
             "reverse",
+            "map",
+            "filter",
+            "forEach",
+            "reduce",
+            "find",
+            "findIndex",
+            "some",
+            "every",
+            "sort",
+            "splice",
+            "shift",
+            "unshift",
+            "fill",
+            "flat",
+            "flatMap",
             "toString",
         ],
         RecvKind::Obj => &["has", "keys", "get", "values", "entries"],
@@ -1268,7 +1309,10 @@ fn check_js_method_calls(
                     MemberExpression::PrivateFieldExpression(_) => (None, None),
                 };
                 if let (Some(kind), Some(method)) = (root, prop) {
-                    if !supported_methods(kind).contains(&method.as_str()) {
+                    let jsx_map_outside_list = method == "map"
+                        && is_list_map_call(e)
+                        && !self.list_maps.contains(&e.span.start);
+                    if jsx_map_outside_list || !supported_methods(kind).contains(&method.as_str()) {
                         self.out.push((
                             me.span().start,
                             me.span().end,
@@ -1515,9 +1559,9 @@ pub fn check(source: &str, file_path: &str) -> Vec<LintError> {
         errors.extend(check_js_members(&ret.program, file_path, &offsets));
         // Browser-only globals, detected from scope references.
         errors.extend(check_js_globals(&ret.program, file_path, &offsets));
-        // Unemittable operators (`**`, `typeof`, `delete`, ...).
+        // Unemittable operators (`typeof`, `delete`, `>>>`, ...).
         errors.extend(check_js_operators(&ret.program, file_path, &offsets));
-        // Unhandleable syntax (generators, `with`, object spread, ...).
+        // Unhandleable syntax (generators, `with`, call spread, ...).
         errors.extend(check_js_syntax(&ret.program, file_path, &offsets));
         // Unimplemented methods on provably-typed receivers.
         errors.extend(check_js_method_calls(&ret.program, source, file_path, &offsets));
@@ -3625,16 +3669,6 @@ fn scope_declarator(
                     out,
                 );
             }
-        } else if binding_ident_name(&decl.id).is_none() {
-            scope_error(
-                "mx-js-syntax",
-                "destructuring in component bodies cannot be translated to C++".into(),
-                "Declare each binding with its own const (only `const [value, setValue] = morphState(...)` pairs lower)".into(),
-                file_path,
-                offsets,
-                decl.span.start,
-                out,
-            );
         } else if let Some((what, hint)) = unlowerable_const_init(init) {
             scope_error(
                 "mx-js-syntax",
@@ -5962,17 +5996,12 @@ mod tests {
     #[test]
     fn unemittable_operators_error_with_fixes() {
         let cases = [
-            ("a ** 2", "**", "repeated multiplication"),
             ("a >>> 1", ">>>", "non-negative"),
             ("typeof a", "typeof", "statically typed"),
             ("void a", "void", "Drop `void`"),
             ("delete a.x", "delete", "undefined"),
             ("a instanceof B", "instanceof", "discriminant"),
-            ("n **= 2", "**=", "x * x"),
             ("n >>>= 1", ">>>=", "non-negative"),
-            ("n &&= 2", "&&=", "x && y"),
-            ("n ||= 2", "||=", "x || y"),
-            ("n ??= 2", "??=", "x ?? y"),
         ];
         for (expr, op, hint) in cases {
             let content = format!(
@@ -5991,7 +6020,7 @@ mod tests {
 
     #[test]
     fn emittable_operators_stay_quiet() {
-        let content = "import { morphState } from 'morph'\nconst a = {}; let n = 1; n += 1; n >>= 1; n |= 1;\nconst k = \"x\" in a;\nexport default function App() { return (<div>{k}</div>) }\n";
+        let content = "import { morphState } from 'morph'\nconst a = {}; let n = 1; n += 1; n >>= 1; n |= 1; n **= 2; n &&= 3; n ||= 4; n ??= 5;\nconst p = 2 ** 8;\nconst k = \"x\" in a;\nexport default function App() { return (<div>{k}{p}{n}</div>) }\n";
         let errs = check(content, "App.mx");
         assert!(!codes(&errs).contains(&"mx-js-op"), "{errs:?}");
     }
@@ -6004,7 +6033,8 @@ mod tests {
             ("top: { break top; }", "labeled `break`", "early return"),
             ("const m = import.meta.url;", "`import.meta`", "imports or constants"),
             ("const m = import(\"./x.ts\");", "dynamic `import()`", "statically"),
-            ("const o = { ...x, z: 1 };", "object spread", "explicitly"),
+            ("console.log(...[1, 2]);", "spread call arguments", "push"),
+            ("const m = new Error(...[1]);", "spread constructor arguments", "explicitly"),
             ("namespace N { export const x = 1; }", "`namespace` block", "plain functions"),
         ];
         for (stmt, what, hint) in cases {
@@ -6027,6 +6057,13 @@ mod tests {
         let content = "import { morphState } from 'morph'\nclass A { greet(): any { return 1; } }\nclass B extends A { m(): any { return super.greet(); } }\nexport default function App() {\n  const arr = [...[1]];\n  for (let i = 0; i < 2; i++) { if (i) { break; } }\n  return (<div>{arr.length}</div>)\n}\n";
         let errs = check(content, "App.mx");
         assert!(!codes(&errs).contains(&"mx-js-syntax"), "{errs:?}");
+    }
+
+    #[test]
+    fn supported_spread_calls_stay_quiet() {
+        let content = "import { morphState } from 'morph'\nexport default function App() {\n  const [items, setItems] = morphState([1, 2]);\n  const xs = [3, 4];\n  items.push(...xs);\n  items.unshift(...xs);\n  items.splice(0, 1, ...xs);\n  const joined = items.concat(...xs);\n  const biggest = Math.max(...items);\n  return (<div>{joined.length}{biggest}</div>)\n}\n";
+        let errs = check(content, "App.mx");
+        assert!(!errs.iter().any(|e| e.code == "mx-js-syntax"), "{errs:?}");
     }
 
     #[test]
@@ -6162,8 +6199,8 @@ mod tests {
                 "strings",
             ),
             (
-                "const [items] = morphState([1, 2]);\n  const v = items.map(x => x);",
-                "map",
+                "const [items, setItems] = morphState([1, 2]);\n  const v = items.toSorted();",
+                "toSorted",
                 "arrays",
             ),
             ("const v = \"abc\".length();", "length", "strings"),
@@ -6194,18 +6231,17 @@ mod tests {
     }
 
     #[test]
-    fn component_destructuring_errors_but_nested_and_loops_stay_quiet() {
-        let bad = "import { morphState } from 'morph'\nexport default function App() {\n  const [a, b] = [1, 2];\n  return (<div>{a}</div>)\n}\n";
-        let errs = check(bad, "App.mx");
-        let err = errs
-            .iter()
-            .find(|e| e.code == "mx-js-syntax" && e.message.contains("destructuring"))
-            .expect("destructuring fires");
-        assert_eq!(err.severity, "error");
+    fn component_destructuring_and_nested_loops_stay_quiet() {
+        let array = "import { morphState } from 'morph'\nexport default function App() {\n  const [a, b] = [1, 2];\n  return (<div>{a}</div>)\n}\n";
+        let errs = check(array, "App.mx");
+        assert!(
+            !errs.iter().any(|e| e.code == "mx-js-syntax" && e.message.contains("destructuring")),
+            "{errs:?}"
+        );
         let obj = "import { morphState } from 'morph'\nexport default function App() {\n  const { x } = { x: 1 };\n  return (<div>{x}</div>)\n}\n";
         let errs = check(obj, "App.mx");
         assert!(
-            errs.iter().any(|e| e.code == "mx-js-syntax" && e.message.contains("destructuring")),
+            !errs.iter().any(|e| e.code == "mx-js-syntax" && e.message.contains("destructuring")),
             "{errs:?}"
         );
         // Nested blocks and loop heads translate wholesale.

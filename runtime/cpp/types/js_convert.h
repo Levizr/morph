@@ -1,9 +1,11 @@
 #pragma once
 #include <string>
+#include <string_view>
 #include <cstdlib>
 #include <cctype>
 #include <cmath>
 #include <limits>
+#include <type_traits>
 #include "js_value.h"
 
 // JS value conversions: String(x), Number(x), Boolean(x), parseInt,
@@ -11,6 +13,21 @@
 // Semantics verified against node (see types verification fixture).
 
 namespace morph {
+
+// ── Nullish check (`??` / `??=`) ──
+// Only JavaScript null and undefined are nullish. Native numbers, strings,
+// booleans, arrays, objects and class values never are.
+
+template <typename T>
+inline bool js_is_nullish(const T&) { return false; }
+
+inline bool js_is_nullish(const JsValue& value)
+{
+    return value.is_null() || value.is_undefined();
+}
+
+inline bool js_is_nullish(const JsNull&) { return true; }
+inline bool js_is_nullish(const JsUndefined&) { return true; }
 
 // ── String(x): arrays join with ",", everything else coerces ──
 
@@ -138,6 +155,9 @@ inline JsNumber js_to_number() { return JsNumber((int64_t)0); }
 inline JsNumber js_to_number(int v) { return JsNumber((int64_t)v); }
 inline JsNumber js_to_number(int64_t v) { return JsNumber(v); }
 inline JsNumber js_to_number(bool v) { return JsNumber((int64_t)(v ? 1 : 0)); }
+template <typename T>
+inline std::enable_if_t<std::is_unsigned_v<T> && !std::is_same_v<T, bool>, JsNumber>
+js_to_number(T v) { return JsNumber(static_cast<double>(v)); }
 inline JsNumber js_to_number(const JsNumber& v) { return v; }
 inline JsNumber js_to_number(const JsString& v) { return js_to_number(JsValue(v)); }
 inline JsNumber js_to_number(const std::string& v) { return js_to_number(JsValue(v)); }
@@ -162,11 +182,37 @@ inline bool js_to_boolean(int v) { return v != 0; }
 inline bool js_to_boolean(int64_t v) { return v != 0; }
 inline bool js_to_boolean(const JsString& v) { return !v.value.empty(); }
 inline bool js_to_boolean(const std::string& v) { return !v.empty(); }
+inline bool js_to_boolean(std::string_view v) { return !v.empty(); }
 inline bool js_to_boolean(const char* v) { return v && v[0] != '\0'; }
 inline bool js_to_boolean(const JsNumber& v) {
     return js_to_boolean(JsValue(v));
 }
+inline bool js_to_boolean(const JsBoolean& v) { return v.value; }
+inline bool js_to_boolean(const JsArray&) { return true; }
+inline bool js_to_boolean(const JsObject&) { return true; }
+inline bool js_to_boolean(const JsNull&) { return false; }
+inline bool js_to_boolean(const JsUndefined&) { return false; }
 inline bool js_to_boolean() { return false; }
+
+// Fallback for native values with no JS wrapper (class instances, smart
+// pointers, containers): floating-point NaN is falsy, values with an
+// explicit bool conversion use it, and every remaining object is truthy.
+template <typename T>
+inline bool js_to_boolean(const T& value)
+{
+    if constexpr (std::is_floating_point_v<T>)
+    {
+        return value != static_cast<T>(0) && value == value;
+    }
+    else if constexpr (requires { static_cast<bool>(value); })
+    {
+        return static_cast<bool>(value);
+    }
+    else
+    {
+        return true;
+    }
+}
 
 // ── parseInt / parseFloat ──
 

@@ -300,6 +300,9 @@ pub struct ReExport {
 pub struct ComponentConst {
     pub name: String,
     pub rhs: String,
+    /// Names declared inside the initializer that must shadow ambient
+    /// bindings of the same name (destructuring sources).
+    pub local_bindings: Vec<String>,
 }
 
 /// A component-body local that body-level flow reassigns.

@@ -2189,6 +2189,8 @@ impl EscapeAnalyzer {
             Expression::BinaryExpression(binary) => {
                 if ComparisonKind::from_binary_operator(binary.operator.as_str()).is_some() {
                     OperandClass::Boolean
+                } else if binary.operator.as_str() == "**" {
+                    OperandClass::Float
                 } else {
                     let left_class = self.infer_expression_class(&binary.left);
                     let right_class = self.infer_expression_class(&binary.right);

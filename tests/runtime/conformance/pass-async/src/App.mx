@@ -12,10 +12,17 @@ export default function App() {
     setMsg(response.text())
   }
 
+  async function loadJson() {
+    const response = await fetch("http://127.0.0.1/")
+    const data = response.json()
+    console.log(data)
+  }
+
   return (
     <body>
       <text>{msg}</text>
       <button onClick={load}>Load</button>
+      <button onClick={loadJson}>Load JSON</button>
     </body>
   )
 }

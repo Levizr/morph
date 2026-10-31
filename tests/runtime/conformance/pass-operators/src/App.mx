@@ -1,0 +1,39 @@
+import { morphState } from 'morph'
+
+export const windowConfig = { title: "pass-operators", width: 800, height: 600 }
+
+// Exponentiation and logical assignment lower with JS value semantics:
+// both sides of `**` go through ToNumber, `&&=`/`||=` test truthiness,
+// and `??=` only reacts to null/undefined.
+export default function App() {
+  const [count, setCount] = morphState(2)
+  const [label, setLabel] = morphState("")
+
+  const squared = 2 ** 8
+  const fraction = 2 ** -1
+  const coerced = 3 ** Number("2")
+
+  let exponent = 3
+  exponent **= 2
+
+  let flags = 0
+  flags &&= 7
+  flags ||= 4
+
+  const config = {}
+  config.name ??= "Ada"
+
+  const ensure = () => {
+    setCount(count ** 2)
+    label ||= "fallback"
+    setLabel(label)
+  }
+
+  return (
+    <body>
+      <button onClick={ensure}>ensure</button>
+      <span>{squared} {fraction} {coerced} {exponent}</span>
+      <span>{flags} {config.name} {label} {count}</span>
+    </body>
+  )
+}

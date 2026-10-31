@@ -1,0 +1,46 @@
+import { morphState } from 'morph'
+
+export const windowConfig = { title: "pass-array-methods", width: 800, height: 600 }
+
+// General Array.prototype methods lower to morph::js_array_* helpers.
+// Receivers that call them are forced to JsArray so mutations and results
+// keep JS reference semantics.
+export default function App() {
+  const [count, setCount] = morphState(0)
+  const [items, setItems] = morphState([3, 1, 2, 4])
+
+  const doubled = items.map((x) => x * 2)
+  const labels = items.map((x, i) => `${i}:${x}`)
+  const evens = items.filter((x) => x % 2 === 0)
+  const found = items.find((x) => x > 2)
+  const foundIndex = items.findIndex((x) => x > 2)
+  const anyBig = items.some((x) => x > 3)
+  const allSmall = items.every((x) => x < 10)
+  const total = items.reduce((acc, x) => acc + x, 0)
+
+  const sorted = [...items].sort((a, b) => a - b)
+  const reversed = [...items].sort((a, b) => b - a)
+
+  const spliced = items.splice(1, 2, 7, 6, ...evens)
+  const shifted = items.shift()
+  const unshifted = items.unshift(9, 8)
+  items.push(5, 4)
+  const popped = items.pop()
+  items.reverse()
+  items.fill(0, 0, 1)
+  items.forEach((x) => console.log(x))
+
+  const flat = [[1, [2]], [3]].flat(2)
+  const flatMapped = [1, 2].flatMap((x) => [x, x])
+
+  return (
+    <body>
+      <button onClick={() => setCount(count + 1)}>tick</button>
+      <span>{doubled.join(",")} {labels.join("|")} {evens.join(",")} {found} {foundIndex}</span>
+      <span>{anyBig ? "yes" : "no"} {allSmall ? "yes" : "no"} {total}</span>
+      <span>{sorted.join(",")} {reversed.join(",")} {spliced.join(",")}</span>
+      <span>{shifted} {unshifted} {popped} {items.join(",")}</span>
+      <span>{flat.join(",")} {flatMapped.join(",")} {count}</span>
+    </body>
+  )
+}

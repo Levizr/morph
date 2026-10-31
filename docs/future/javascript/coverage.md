@@ -1,81 +1,151 @@
 # Broader TS→C++ Translator Coverage
 
-**Status:** development → future · **Priority:** high
+**Status:** development · **Priority:** high
 
-> **Note:** This is a future plan, not a commitment. The syntax and API shown here are proposals — they can be completely different when actually implemented.
+> **Note:** This is the working plan, not a promise. Items move as implementation teaches us what is safe to lower; every shipped item must lose its `morph check` gate and gain a runtime fixture.
 
-Closing the gap between "JS you can write" and "JS that compiles to C++". `morph check` already audits unsupported syntax; this page catalogs exactly what's missing and what each piece unlocks.
+Closing the gap between "JS you can write" and "JS that compiles to C++". `morph check` is the contract: a clean check means the translator has a native representation for everything in the file. This page replaces the old feature wishlist with the actual baseline, ranked gaps, and delivery order.
 
 ## Why it matters
 
-The translator (`crates/morpher/`) is the heart of the "write JS, get native binary" promise. Every unsupported operator, builtin, or method is a workaround users hit. Coverage growth is also the top contribution area.
+The translator (`crates/morpher/`) is the heart of the "write JS, get native binary" promise. A missing operator hurts once; a missing array method or object spread blocks every CRUD screen. The goal is not 100% JavaScript or browser parity — it is a small, honest subset that covers ordinary application code without `.cpp` escape hatches.
 
-## Currently supported (the baseline)
+## Definition of usable
 
-- Statements: `if`/`while`/`for`/`do-while`/`switch`/`try-catch`/`throw`, variable declarations, functions + arrow functions, classes/interfaces (inheritance, `super`, generics), `return`/`break`/`continue`
-- Component-body flow: `if`/`for`/`while`/calls between a component's declarations lower into one setup effect that re-runs on the state it reads; a `let` that flow (or a body function) reassigns becomes a signal the JSX reads reactively, everything else stays a stack value
-- Expressions: binary/unary/ternary/sequence/update/assignment, template literals, array literals **with spread**, object literals, `new`, member access, calls, `await`
-- Builtins: `fetch()`, `console.*`, `setTimeout`/`setInterval`/`clearTimeout`, `morphState`/`morphEffect`, `Error`
-- Value semantics: truthiness, `==`/`!=`, `typeof`, string concatenation coercion, array `push`/`pop`/index, object `has`/`keys`, string `toUpperCase`/`toLowerCase`/`trim`/`indexOf`/`substring`/`slice`/`replace`/`charAt`/`split`/`includes`/`startsWith`/`endsWith`, optional chaining `?.`, nullish coalescing `??`
+Morph's JS subset is usable when these apps build with **no native helpers**:
 
-## Missing — operators (currently compiled to `/* comment */` or rejected)
+1. **CRUD/list app** — filter, sort, map, reduce, object updates, component-body destructuring.
+2. **API dashboard** — `fetch`, real `response.json()`, dates, `Promise.all`, a regex validation.
+3. **Settings app** — persistent storage, clipboard, next-frame animation, native dialogs.
 
-| Construct | Today | Unlocks |
-|---|---|---|
-| `**` / `**=` | `/* pow */` / error | exponent math |
-| `>>>` (unsigned shift) | `/* >>> */` | bit-twiddling code |
-| `typeof` | `/* typeof */` | runtime type checks |
-| `void` / `delete` | `/* void */` / `/* delete */` | JS idioms |
-| `&&=` / `\|\|=` / `??=` | `/* ... */` | shorthand assign |
-| `instanceof` / `in` | error | type/containment checks |
-| Optional chaining `?.` | ✅ Shipped (`emit_chain` in morpher) | safe deep access |
-| Generator functions / `yield` | error | lazy sequences |
-| `for...in` / `for...of` | ✅ Shipped (`emit_for_of` / `emit_for_in` in morpher; loop variables ToNumber in numeric contexts; component-body loops lower into the setup effect) | iteration over keys/values |
-| Destructuring (except `morphState` pattern) | error | multi-return unpacking |
-| Spread in call args / object spread | error | functional style |
+Until those pass, coverage work is measured against them rather than against the size of the JavaScript spec.
 
-## Missing — globals (`morph check` rejects: `mx-js-global`)
+## Current baseline
 
-`document`, `window`, `localStorage`, `alert`/`prompt`/`confirm`, `requestAnimationFrame`, `Math`, `JSON`, `Date`, `RegExp`, `Promise`, `Proxy`, `Map`/`Set`/`WeakMap`, `parseInt`, event constructors, `addEventListener`.
+Already shipped and **not** on the missing list:
 
-Interesting candidates (the ones a native UI framework plausibly implements):
+- Statements: `if`/`else`, `while`, `for`, `do-while`, `switch`, `try`/`catch`, `throw`, `return`, `break`, `continue`.
+- Expressions: binary/unary/ternary/sequence/update/assignment, template literals, array literals with spread, object literals with spread and computed keys, `new`, member access, calls, optional chaining `?.`, nullish coalescing `??`, `await`.
+- Functions/classes: declarations, expressions, arrows, default/optional parameters, classes, inheritance, `super`, getters/setters, interfaces, generics.
+- Destructuring: declarations, callable/event payloads, defaults, rest elements (object and array), computed keys, nested patterns. `JsObject`/`JsArray` rest use runtime helpers.
+- Component-body flow: branches, loops, and calls between declarations lower into the setup effect; reassigned `let` becomes a signal.
+- Builtins: `fetch` (`Response.text`/`json`/`arrayBuffer`/`clone`, `ok`, `status`), `console.*`, timers, `Promise` constructor + `await`, `Error`, `morphState`/`morphEffect`/`morphShared`/`morphEvent`.
+- Builtin namespaces: partial `Math`, `JSON.parse`/`stringify`, `Number.isFinite`/`isNaN`/`isInteger`, `Object.keys`/`values`/`entries`, `Array.isArray`, `String`/`Number`/`Boolean` conversions, `parseInt`/`parseFloat`.
+- Strings: broad method coverage including `toUpperCase`, `toLowerCase`, `trim*`, `indexOf`, `substring`, `slice`, `replace*`, `split`, `includes`, `startsWith`, `endsWith`, `pad*`, `repeat`, `match*`, `search`, `normalize`.
+- Arrays: `push`/`pop`, `join`, `slice`, `concat`, `includes`, `indexOf`, `lastIndexOf`, `at`, `reverse`, `toString`, plus the general methods `map`, `filter`, `forEach`, `reduce`, `find`, `findIndex`, `some`, `every`, `sort`, `splice`, `shift`, `unshift`, `fill`, `flat`, `flatMap` (multi-argument `push` and spread arguments on supported methods included). Receivers that call these lower to `JsArray`; `std::vector` stays the fast path for loops and indexing. A JSX-producing `.map` is still only valid as a direct JSX child.
+- Objects: `has`, `keys`, `get`, `values`, `entries`.
+- Operators with JS semantics: `==`/`!=`, `===`/`!==`, relational, `in`, `**`/`**=`, `&&=`/`||=`/`??=`, truthiness, string concatenation, `ToNumber` in numeric contexts.
 
-| Global | What it would map to |
-|---|---|
-| `Math` | native `<cmath>` — trivial, high value |
-| `JSON` | the existing JSON DOM parser in dev runtime |
-| `Date` | `std::chrono` |
-| `parseInt` / `parseFloat` | small wrappers |
-| `Map` / `Set` | hash containers |
-| `requestAnimationFrame` | `co_await next_frame()` (already exists!) |
-| `localStorage` | a config-file-backed store |
+The old version of this page claimed `Math`, `parseInt`, `JSON`, optional chaining, destructuring, and most string methods were missing. They are not. Treat the linter tables and this baseline as the source of truth.
 
-## Missing — methods (`mx-js-method`)
+## Gap map
 
-State values implement only `{length, push, pop, get, toString}`. Strings implement `{length, empty, toUpperCase, toLowerCase, substring, slice, charAt, indexOf, replace, trim, toString}`.
+Priority is user impact, not spec size.
 
-- **Arrays:** `map`, `filter`, `forEach`, `reduce`, `includes`, `indexOf`, `find`, `join`, `concat`, `sort`
-- **Strings:** `startsWith`/`endsWith`/`includes`/`split` ✅ shipped; still missing: `padStart`, `padEnd`, `repeat`, `match`
+| Priority | Gap | Why it blocks apps | Effort |
+|---|---|---|---|
+| **P0** | General array methods: `map`, `filter`, `forEach`, `reduce`, `find`, `findIndex`, `some`, `every`, `sort`, `splice`, `shift`, `unshift`, `fill`, `flat`, `flatMap` | Every list, search, sort, and CRUD screen. `.map()` works in JSX list lowering and in ordinary logic; JSX-producing `.map` outside a list position stays rejected. | Large |
+| **P0** | Fail loudly on silent-wrong forms | General call spread emits `/* spread */` and passes one array argument. Wrong binaries are worse than errors; `morph check` now rejects `f(...args)` and `new C(...args)` while the variadic array helpers stay supported. | Small |
+| **P1** | Rest parameters and general call spread | Wrapper functions, `f(...args)`, variadic helpers. Rest *destructuring* works; rest *parameters* do not. | Medium |
+| **P1** | Date subset and full common Math | Timestamps, formatting, `Math.random`/`trunc`/logs/trig, `Math.PI`. Examples currently escape to `osDate()`/`osTime()`. | Medium |
+| **P1** | `Promise.resolve`/`all`/`allSettled`/`race` | Multi-request screens and dashboard loading. | Medium |
+| **P1** | TypeScript enums | Codegen has an enum emitter; the linter blocks it. Numeric enums first. | Small |
+| **P1** | RegExp literals and basic `.test`/`.exec` | Validation and text search. Regex-backed string helpers already exist. | Medium |
+| **P1** | `Map` / `Set` | Keyed collections, insertion order, non-string keys. | Medium |
+| **P1** | Object/Array statics | `Object.assign`, `Object.fromEntries`, `Array.from`, `Array.of`. | Small–medium |
+| **P2** | Platform services: persistent storage, clipboard, next frame, native dialogs | Desktop-app basics. Prefer native Morph APIs; alias browser names only where semantics match. | Medium |
+| **P2** | `typeof` | Type-aware validation idioms; needs a strategy that survives native lowering. | Small–medium |
+| **P3** | Namespace imports, class expressions, function values in objects | Ergonomics, not blockers. Function-in-object support needs a closure-storage decision. | Small–medium |
 
-Array `map`/`filter`/`forEach`/`includes` are the highest-value additions — JSX list rendering already does `.map` in templates, but the general method form is unbuilt.
+### Explicit non-goals
 
-## Note on `morph check`
+Do **not** chase browser parity:
 
-All of the above are already audited with precise diagnostics and suggestions (`mx-js-op`, `mx-js-syntax`, `mx-js-global`, `mx-js-member`, `mx-js-method`), so progress on coverage is measurable: each item disappears from `morph check` output when done.
+- DOM (`document`, `window`, `location`, `history`, `navigator`), event constructors, `addEventListener`.
+- Full `Intl`, locale/timezone formatting, TypedArrays, `Proxy`, `Reflect`, `WeakMap`, `BigInt`, `Symbol`.
+- Generators/`yield`, `with`, labeled jumps, dynamic `import()`, decorators.
+- A general `Promise.then` chain runtime — Morph uses `async`/`await` coroutines.
+
+Morph should expose native equivalents (`useWindow`, clipboard, storage) instead of pretending to be a browser.
+
+## Delivery plan
+
+### Milestone 1 — ordinary TS compiles
+
+- [x] `Response.json()` uses the real JSON parser; Response detection includes `json`/`arrayBuffer`/`clone`/`bodyUsed`.
+- [x] Object spread in expressions (last key wins, computed keys evaluate once).
+- [x] Component-body top-level destructuring (single evaluation, one const per binding, reactivity preserved).
+- [x] General array methods lowered on `JsArray`; receivers that use them are forced to `JsArray`; `std::vector` stays the fast path for loops/indexing.
+- [x] Multi-argument `push` and spread arguments on supported array methods.
+- [x] `morph check` rejects general call spread until it lowers correctly; array methods with variadic helpers (`push`/`unshift`/`splice`/`concat`) and `Math.min`/`Math.max` remain allowed.
+- [x] `**`/`**=` (ToNumber semantics through `std::pow`) and `&&=`/`||=`/`??=` for simple targets.
+- [ ] Numeric TS enums.
+
+Exit: the CRUD/list reference app builds without a `.cpp` helper.
+
+### Milestone 2 — application standard library
+
+- [ ] Date subset: construction, `now`, `parse`, `getTime`, `toISOString`, calendar/time getters.
+- [ ] Common `Math` members and constants.
+- [ ] `Promise.resolve`/`all`/`allSettled`/`race` (correctness first; parallel execution later).
+- [ ] RegExp literal plus `.test`/`.exec`; document unsupported regex features.
+- [ ] `Map`/`Set` runtime wrappers with JS key semantics and insertion order.
+- [ ] `Object.assign`/`fromEntries`, `Array.from`/`of`, remaining safe statics.
+
+Exit: the API dashboard reference app builds without a `.cpp` helper.
+
+### Milestone 3 — platform services
+
+- [ ] Persistent key-value storage (file-backed; optionally aliased to `localStorage`).
+- [ ] Clipboard bridge.
+- [ ] `requestAnimationFrame` → next-frame coroutine.
+- [ ] Native dialogs behind a documented API.
+
+Exit: the settings reference app builds without a `.cpp` helper.
+
+### Milestone 4 — compatibility tail
+
+Only with demonstrated demand:
+
+- [ ] `import * as ns` namespace imports.
+- [ ] Class expressions assigned to consts.
+- [ ] Function values in object literals (requires a real closure-storage design).
+- [ ] `typeof` / `instanceof` runtime narrowing helpers.
+- [ ] Lower-priority operators: `delete`, `void`, `>>>`.
+
+## Engineering rules
+
+1. **No silent fallbacks.** A codegen placeholder (`/* spread */`, `/* ... */`) must become either real lowering or a `morph check` error in the same change.
+2. **One capability table.** The linter and translator currently duplicate supported-method/builtin lists. Extract shared tables so a feature cannot be half-shipped.
+3. **Every feature gets three tests:** runtime helper unit test, translator fixture, and conformance fixture (pass, or fail for rejected edge cases).
+4. **Docs ship with the feature.** Remove the item from `docs/javascript/overview.md` "What's Not Supported Yet", update the matching error page, and keep the registry description current.
+5. **No browser shims by accident.** A browser-named API is only added when its semantics are honest; otherwise expose a Morph-native name.
+
+## Verification
+
+For every milestone:
+
+```bash
+cargo fmt --all
+cargo test --workspace
+cargo clippy --all-targets --all-features -- -D warnings
+./tests/runtime/check-js-types.sh
+./tests/runtime/check-conformance.sh
+./tests/runtime/run-selftests.sh
+```
+
+Plus a manual build of the reference app and a headless `--morph-self-test` run.
 
 ## Current state
 
 | Piece | State |
 |---|---|
-| Array spread + `slice` + `.length` semantics | ✅ Shipped (latest cycle) |
-| Optional chaining `?.` + `??` + `String.split/includes/startsWith/endsWith` | ✅ Shipped |
-| Operator / builtin / method coverage above | ❌ Missing (each item either comments itself out or errors) |
-| `morph check` diagnostics for every missing item | ✅ Shipped |
-
-## Suggested order
-
-1. `Math` + `parseInt`/`parseFloat` (trivial, high usage)
-2. `Array.map/filter/forEach/includes` (JSX list rendering already does `.map` in templates — the pattern is proven)
-3. ~~`String.split/includes/startsWith/endsWith`~~ ✅ Shipped
-4. ~~Optional chaining `?.` (biggest ergonomics win)~~ ✅ Shipped
-5. `Map`/`Set`, `Date`, `JSON`, `requestAnimationFrame`
+| Baseline above (excluding gap map) | ✅ Shipped |
+| P0 silent-wrong audit (general call spread) | ✅ Shipped — rejected by `mx-js-syntax`; variadic array methods stay allowed |
+| `Response.json()` / Response detection | ✅ Shipped |
+| Object spread and computed keys | ✅ Shipped |
+| Component-body destructuring | ✅ Shipped |
+| General array methods | ✅ Shipped |
+| `**`/`**=` and `&&=`/`||=`/`??=` | ✅ Shipped — ToNumber via `std::pow`; logical assignments short-circuit on simple targets |
+| Milestones 2–4 | Planned |
+| `morph check` diagnostics for rejected constructs | ✅ Shipped; grows with each item |

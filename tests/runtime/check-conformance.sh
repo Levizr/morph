@@ -63,29 +63,30 @@ run_pass pass-arrow-default
 run_pass pass-export-spellings
 run_pass pass-const-inits
 run_pass pass-async
+run_pass pass-obj-spread
+run_pass pass-destructuring
+run_pass pass-array-methods
+run_pass pass-operators
 run_pass pass-rule-warnings
 run_pass pass-lint-config
 
 run_fail fail-math-member mx-js-member
-run_fail fail-pow-op mx-js-op
 run_fail fail-typeof-op mx-js-op
 run_fail fail-instanceof-op mx-js-op
 run_fail fail-generator mx-js-syntax
 run_fail fail-with-stmt mx-js-syntax
-run_fail fail-obj-spread mx-js-syntax
 run_fail fail-labeled-break mx-js-syntax
 run_fail fail-import-meta mx-js-syntax
 run_fail fail-dyn-import mx-js-syntax
 run_fail fail-namespace mx-js-syntax
 run_fail fail-namespace-import mx-js-syntax
-run_fail fail-array-map mx-js-method
+run_fail fail-call-spread mx-js-syntax
 run_fail fail-str-method mx-js-method
 run_fail fail-document-global mx-js-global
 run_fail fail-state-scope mx-state-scope
 run_fail fail-undefined-name mx-undefined
 run_fail fail-missing-css mx-css-file-missing
 run_fail fail-inline-style mx-style-prop
-run_fail fail-destructuring mx-js-syntax
 run_fail fail-state-init mx-state-init
 run_fail fail-state-pattern mx-state-pattern
 run_fail fail-const-init mx-js-syntax
