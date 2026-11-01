@@ -1,0 +1,7 @@
+{
+  "name": "pass-window",
+  "entry": "src/App.mx",
+  "window": { "width": 640, "height": 480, "title": "pass-window" },
+  "dependencies": {},
+  "cpp_sources": []
+}

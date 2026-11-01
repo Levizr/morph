@@ -62,16 +62,18 @@ const win = useWindow("settings-win") // any window, by id — see missing-windo
 const win = useWindow("/auth/login")  // or by route id — the focused live window on that route
 ```
 
-**Rule:** `useWindow()` with no argument works directly in the component body and in event handlers. It does **not** work inside module-level helper functions — those have no window context (same reason React hooks have call-site rules). Pass the handle in instead:
+**Rule:** `useWindow()` with no argument works directly in the component body and in event handlers. It does **not** work inside module-level helper functions — those have no window context (same reason React hooks have call-site rules). Pass the handle in instead, annotated as `Window`:
 
 ```tsx
 // ✗ module scope has no window — hard build error
 function retitle() { const w = useWindow(); w.title = "x" }
 
-// ✓ pass the handle from event context
-function retitle(w) { w.title = "x" }
+// ✓ pass the handle from event context; the annotation marks it as a handle
+function retitle(w: Window) { w.title = "x" }
 <button onClick={() => retitle(useWindow())}>retitle</button>
 ```
+
+An untyped parameter (`function retitle(w)`) is just a number to the compiler: it has no handle lowering and member access fails the build. Annotate every helper that receives a window handle.
 
 ### Missing windows
 
@@ -92,6 +94,8 @@ if (win.closed) return   // missing or closed — every operation below degrades
 | `win.closed` | `true` once closed — by you **or** by the user (X button, task manager). |
 | `win.title` / `win.title = "…"` | Live title read + write. |
 | `win.on('close', () => { … })` | Fires for **any** close, including user-initiated. Only `'close'` is supported. |
+
+The member set is closed. Anything else — `win.focus()`, `win.ready()`, computed access like `win["title"]` — fails `morph check` with [`mx-window-member`](../errors/mx-window-member.md) instead of emitting invalid C++.
 
 ```tsx
 const win = useWindow()

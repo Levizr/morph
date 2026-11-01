@@ -1,0 +1,9 @@
+export const windowConfig = { title: "Pass Window Settings", width: 400, height: 300 }
+
+export default function Settings() {
+  return (
+    <body>
+      <div id="settings-title">settings</div>
+    </body>
+  )
+}

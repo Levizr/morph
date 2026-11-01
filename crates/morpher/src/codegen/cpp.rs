@@ -611,7 +611,9 @@ impl<'a> CppTranslator<'a> {
             return Some(format!("{}/* destructuring not supported */", self.indent()));
         }
         // Track Window handles for method/property lowering: direct
-        // `useWindow(...)` / `new Window(...)` initializers only.
+        // `useWindow(...)` / `new Window(...)` initializers only. A
+        // `Window` annotation also marks helpers/locals even when the
+        // initializer comes from another function.
         if let Some(init) = d.init.as_ref() {
             let is_window = match init {
                 Expression::CallExpression(call) => {
@@ -626,8 +628,20 @@ impl<'a> CppTranslator<'a> {
                 self.ctx.window_vars.insert(name.clone());
             }
         }
-
-        self.emit_typed_variable_declarator(d, &name, kind)
+        let typed_window = d.type_annotation.as_ref().is_some_and(|ta| {
+            resolve_type_annotation(
+                Some(ta),
+                "auto",
+                &self.ctx.template_params,
+                false,
+                &self.ctx.class_names,
+            ) == "WID"
+        });
+        let out = self.emit_typed_variable_declarator(d, &name, kind);
+        if typed_window {
+            self.ctx.var_types.insert(name.clone(), "WID".to_string());
+        }
+        out
     }
 
     /// Destructuring declarations (`const {x} = obj`, `const [a] = arr`).
@@ -4850,16 +4864,16 @@ impl<'a> CppTranslator<'a> {
             }
             // `??=` / `&&=` / `||=` keep their default lowering.
         }
-        // `win.title = x` on a tracked Window handle lowers to a registry
-        // write; every other member assignment keeps default emission.
+        // `win.title = x` on any Window-handle receiver lowers to a
+        // registry write. Handles may be tracked locals, `Window`-typed
+        // bindings, lazy component-body placeholders, or direct
+        // `useWindow(...)` / `new Window(...)` expressions.
         if a.operator.as_str() == "=" {
             if let AssignmentTarget::StaticMemberExpression(mem) = &a.left {
-                if let Expression::Identifier(obj) = &mem.object {
-                    if mem.property.name.as_str() == "title"
-                        && self.ctx.window_vars.contains(obj.name.as_str())
-                    {
+                if mem.property.name.as_str() == "title" {
+                    if let Some(obj) = self.window_handle_expr(&mem.object) {
                         let rhs = self.emit_expression(&a.right);
-                        return format!("__morph_win_set_title({}, {})", obj.name, rhs);
+                        return format!("__morph_win_set_title({obj}, {rhs})");
                     }
                 }
             }
@@ -5631,20 +5645,12 @@ impl<'a> CppTranslator<'a> {
             }
         }
         // Window-handle methods (`win.navigate/close/show/hide/on`) —
-        // only for locals tracked as Window handles (from `useWindow()`
-        // or `new Window()`), so user objects with same-named methods
-        // keep default emission.
+        // only for trackable Window handles (tracked locals, `Window`-typed
+        // bindings, lazy placeholders, or direct `useWindow()` /
+        // `new Window()`), so user objects with same-named methods keep
+        // default emission.
         if let Expression::StaticMemberExpression(m) = &call.callee {
-            if let Expression::Identifier(obj) = &m.object {
-                if self.ctx.window_vars.contains(obj.name.as_str()) {
-                    if let Some(lowered) =
-                        self.emit_window_method(obj.name.as_str(), m.property.name.as_str(), call)
-                    {
-                        return lowered;
-                    }
-                }
-            }
-            if let Some(obj) = self.window_placeholder_expr(&m.object) {
+            if let Some(obj) = self.window_handle_expr(&m.object) {
                 if let Some(lowered) = self.emit_window_method(&obj, m.property.name.as_str(), call)
                 {
                     return lowered;
@@ -5920,20 +5926,10 @@ impl<'a> CppTranslator<'a> {
             }
             return format!("/* super */{}", prop);
         }
-        // Window-handle properties (tracked locals only): `closed` and
-        // `title` lower to registry reads; anything else keeps default
-        // emission (fails C++ compilation loudly on the int handle).
-        if let Expression::Identifier(id) = &m.object {
-            if self.ctx.window_vars.contains(id.name.as_str()) {
-                let obj = id.name.as_str();
-                match prop.as_str() {
-                    "closed" => return format!("__morph_win_closed({obj})"),
-                    "title" => return format!("__morph_win_title({obj})"),
-                    _ => {}
-                }
-            }
-        }
-        if let Some(obj) = self.window_placeholder_expr(&m.object) {
+        // Window-handle properties: `closed` and `title` lower to registry
+        // reads on every handle shape; anything else keeps default emission
+        // (wrong handle members fail the C++ compile loudly).
+        if let Some(obj) = self.window_handle_expr(&m.object) {
             match prop.as_str() {
                 "closed" => return format!("__morph_win_closed({obj})"),
                 "title" => return format!("__morph_win_title({obj})"),
@@ -6057,23 +6053,46 @@ impl<'a> CppTranslator<'a> {
         }
     }
 
-    /// Window-handle placeholder already substituted by the caller
-    /// (`const win = useWindow()` bound lazily, so each use site keeps
-    /// its own window). Emits the object only for the syntactic
-    /// placeholder calls, never for arbitrary expressions.
-    fn window_placeholder_expr(&mut self, obj: &Expression<'a>) -> Option<String> {
-        let Expression::CallExpression(call) = obj else {
-            return None;
-        };
-        let Expression::Identifier(callee) = &call.callee else {
-            return None;
-        };
-        if callee.name.as_str() != "__morph_current_window"
-            && callee.name.as_str() != "__morph_use_window"
-        {
+    /// True for bindings carrying a window handle: locals tracked from a
+    /// `useWindow()` / `new Window()` initializer, and `Window`-typed
+    /// bindings (parameters, props, annotated locals).
+    fn is_window_handle_var(&self, name: &str) -> bool {
+        self.ctx.window_vars.contains(name)
+            || self.ctx.var_types.get(name).is_some_and(|ty| ty == "WID")
+    }
+
+    /// Resolve a window-handle receiver to its WID expression.
+    ///
+    /// Handles arrive in several shapes: tracked locals, `Window`-typed
+    /// bindings, lazy component-body placeholders (`__morph_current_window()`
+    /// / `__morph_use_window(...)`), and direct `useWindow(...)` /
+    /// `new Window(...)` expressions. Parentheses and TS wrappers are
+    /// unwrapped first because lazy const substitution inserts a call
+    /// expression at the use site.
+    fn window_handle_expr(&mut self, obj: &Expression<'a>) -> Option<String> {
+        let obj = Self::unwrap_expr(obj);
+        if let Expression::Identifier(id) = obj {
+            return self.is_window_handle_var(id.name.as_str()).then(|| id.name.to_string());
+        }
+        if let Expression::CallExpression(call) = obj {
+            if let Expression::Identifier(callee) = &call.callee {
+                if matches!(
+                    callee.name.as_str(),
+                    "__morph_current_window" | "__morph_use_window" | "useWindow"
+                ) {
+                    return Some(self.emit_expression(obj));
+                }
+            }
             return None;
         }
-        Some(self.emit_expression(obj))
+        if let Expression::NewExpression(n) = obj {
+            if matches!(&n.callee, Expression::Identifier(id) if id.name.as_str() == "Window")
+                && !n.arguments.is_empty()
+            {
+                return Some(self.emit_expression(obj));
+            }
+        }
+        None
     }
 
     /// Lower a method call on a tracked Window handle (WID int) to a
@@ -6585,6 +6604,59 @@ mod tests {
         assert!(out.contains("__morph_win_closed(w)"), "{out}");
         assert!(out.contains("__morph_win_title(w)"), "{out}");
         assert!(out.contains("__morph_win_set_title(w,"), "{out}");
+    }
+
+    #[test]
+    fn window_lazy_placeholders_lower_reads_writes_and_calls() {
+        let out = translate_stmts(
+            "const current = __morph_current_window().title;\n\
+             __morph_current_window().title = \"current\";\n\
+             (__morph_current_window()).close();\n\
+             const other = __morph_use_window(\"login-a\").closed;\n\
+             __morph_use_window(\"login-a\").title = \"other\";\n\
+             useWindow().title = \"direct\";\n\
+             useWindow().close();\n\
+             const direct = useWindow().title;\n\
+             new Window(\"/settings\").title = \"fresh\";",
+        );
+        assert!(out.contains("__morph_win_title(__morph_current_window())"), "{out}");
+        assert!(
+            out.contains("__morph_win_set_title(__morph_current_window(), \"current\")"),
+            "{out}"
+        );
+        assert!(out.contains("WindowManager::get().close(__morph_current_window())"), "{out}");
+        assert!(out.contains("__morph_win_closed(__morph_use_window(\"login-a\"))"), "{out}");
+        assert!(
+            out.contains("__morph_win_set_title(__morph_use_window(\"login-a\"), \"other\")"),
+            "{out}"
+        );
+        assert!(
+            out.contains("__morph_win_set_title(__morph_current_window(), \"direct\")"),
+            "{out}"
+        );
+        assert!(out.contains("WindowManager::get().close(__morph_current_window())"), "{out}");
+        assert!(out.contains("__morph_win_title(__morph_current_window())"), "{out}");
+        assert!(out.contains("__morph_win_set_title(__morph_new_window(\"/settings\""), "{out}");
+    }
+
+    #[test]
+    fn window_typed_params_lower_handle_members() {
+        let out = translate_stmts(
+            "function retitle(w: Window) {\n\
+                 w.title = \"hi\";\n\
+                 w.navigate(\"/settings\");\n\
+                 const shut = w.closed;\n\
+             }\n\
+             function retitleDialog(dialog: Dialog) {\n\
+                 dialog.title = \"hi\";\n\
+             }",
+        );
+        assert!(out.contains("void retitle(WID w)"), "{out}");
+        assert!(out.contains("__morph_win_set_title(w, \"hi\")"), "{out}");
+        assert!(out.contains("__morph_win_navigate(w,"), "{out}");
+        assert!(out.contains("__morph_win_closed(w)"), "{out}");
+        assert!(!out.contains("void retitleDialog(WID"), "{out}");
+        assert!(out.contains("dialog.title = \"hi\""), "{out}");
     }
 
     #[test]

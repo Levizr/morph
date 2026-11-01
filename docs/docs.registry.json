@@ -816,9 +816,10 @@
           "morph window parent",
           "morph modal",
           "morph window role",
-          "morph window ownership"
+          "morph window ownership",
+          "morph window title"
         ],
-        "lastUpdated": "2026-09-29",
+        "lastUpdated": "2026-11-01",
         "publishedAt": "2026-09-21",
         "priority": 0.9,
         "changefreq": "monthly"
@@ -1389,6 +1390,25 @@
         ],
         "lastUpdated": "2026-10-23",
         "publishedAt": "2026-09-21",
+        "priority": 0.7,
+        "changefreq": "monthly"
+      },
+      {
+        "title": "mx-window-member — Unsupported Window Handle Member",
+        "sidebarTitle": "mx-window-member",
+        "slug": "errors/mx-window-member",
+        "file": "errors/mx-window-member",
+        "status": "production",
+        "author": "PIYUSH",
+        "description": "Fix mx-window-member: unsupported members on Window handles, supported navigate/close/show/hide/on/title/closed API, and native fallbacks.",
+        "keywords": [
+          "mx-window-member",
+          "morph window handle member",
+          "morph window focus",
+          "morph useWindow title"
+        ],
+        "lastUpdated": "2026-11-01",
+        "publishedAt": "2026-11-01",
         "priority": 0.7,
         "changefreq": "monthly"
       },
@@ -2464,7 +2484,7 @@
           "morph route props",
           "morph page cache"
         ],
-        "lastUpdated": "2026-09-30",
+        "lastUpdated": "2026-11-01",
         "publishedAt": "2026-09-27",
         "priority": 0.5,
         "changefreq": "monthly"

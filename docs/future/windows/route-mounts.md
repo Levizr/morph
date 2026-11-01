@@ -99,7 +99,7 @@ User-facing rules: [Windows & Routes](../../guides/windows-and-routing.md#props)
 
 The mount function receives the mounting window's WID; generated code binds it as `__wid`, and `useWindow()` (no arg) lowers to that variable. Entry windows bind `__wid` as their constant WID. One rule, both paths — no ambient context crosses any boundary.
 
-**Fixed 2026-09-28.** `const win = useWindow()` in any component body (entry or route, root or child) stays lazy: the const binds to the `__morph_current_window()` placeholder instead of an eager namespace-scope evaluation, so each use site resolves to its own window. `win.navigate/close/show/hide/on` on such cross-snippet handles lowers through the same placeholders as same-snippet handles.
+**Fixed 2026-09-28.** `const win = useWindow()` in any component body (entry or route, root or child) stays lazy: the const binds to the `__morph_current_window()` placeholder instead of an eager namespace-scope evaluation, so each use site resolves to its own window. `win.navigate/close/show/hide/on` calls, `win.title` reads/writes, and `win.closed` reads on such cross-snippet handles lower through the same placeholders as same-snippet handles. `Window`-annotated params and locals resolve as handles too, so helpers can take `w: Window` and retitle/navigate without an untyped round-trip.
 
 ```cpp
 // inside mount(auth_login): generated

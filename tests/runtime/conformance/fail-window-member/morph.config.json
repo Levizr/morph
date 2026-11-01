@@ -1,0 +1,7 @@
+{
+  "name": "fail-window-member",
+  "entry": "src/App.mx",
+  "window": { "width": 640, "height": 480, "title": "fail-window-member" },
+  "dependencies": {},
+  "cpp_sources": []
+}

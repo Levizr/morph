@@ -1,0 +1,28 @@
+import { morphState, Window, useWindow } from 'morph'
+
+export const windowConfig = { title: "pass-window", width: 640, height: 480 }
+
+// Every supported handle shape lowers to registry calls: lazy
+// component-body consts, direct chained calls, and `Window`-annotated
+// helper params. A helper must carry the annotation — untyped params are
+// just numbers, not handles.
+function retitle(w: Window, title: string) {
+  w.title = title
+  w.navigate("/settings")
+  return w.closed
+}
+
+export default function App() {
+  const [status, setStatus] = morphState("idle")
+  const win = useWindow()
+
+  return (
+    <body>
+      <button onClick={() => { win.title = "local"; setStatus("local") }}>local write</button>
+      <button onClick={() => { useWindow().title = "direct"; setStatus("direct") }}>direct write</button>
+      <button onClick={() => { new Window("/settings", { width: 400 }).title = "fresh"; setStatus("fresh") }}>new write</button>
+      <button onClick={() => { const shut = retitle(useWindow(), "helper"); setStatus(shut ? "closed" : "open") }}>helper</button>
+      <div>{win.title} {status}</div>
+    </body>
+  )
+}

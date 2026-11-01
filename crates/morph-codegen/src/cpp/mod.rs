@@ -566,7 +566,7 @@ impl<'a> CppEmitter<'a> {
         let premain_defs: Vec<String> =
             kept_entries.iter().map(|e| logic_emitter::strip_param_defaults(e)).collect();
         let premain_code = lower_channels(premain_defs.join("\n\n"));
-        let premain_code = resolve_window_placeholders(&premain_code, self.routes)?;
+        let mut premain_code = resolve_window_placeholders(&premain_code, self.routes)?;
 
         // Native mode: user C++ imports via `import "./file.cpp"`
         // Native mode: user C++ imports via `import "./file.cpp"`
@@ -616,6 +616,14 @@ impl<'a> CppEmitter<'a> {
                 self.app_ownership.clone(),
             )?;
             if !helpers.is_empty() {
+                // Module-level helpers (premain) can create or navigate
+                // windows too; their definitions live in the route-mount
+                // section below, so declare the entry points up front.
+                premain_code = format!(
+                    "WID __morph_create_window(int rid, const JsObject& opts);\n\
+                     bool __morph_navigate_window(WID wid, int rid, const JsObject& props);\n\
+                     {premain_code}"
+                );
                 // Helpers precede the mounts: navigate/create are called
                 // from mount bodies, so they must be declared first. The
                 // reverse order is safe too — mount_into calls mount_* via
@@ -975,25 +983,29 @@ fn lookup_route<'r>(routes: &'r [RouteEntry], id: &str) -> anyhow::Result<&'r Ro
 /// unknown or non-literal routes are hard errors (`mx-route-unknown`).
 /// `current_window` must already be substituted (per-window WID or
 /// `__wid`) — leftovers here mean module scope, which has no window.
+/// Placeholder calls the resolver understands. Kept in one list so the
+/// scan and nested-resolution check stay in sync.
+const WINDOW_PLACEHOLDERS: &[&str] = &[
+    "__morph_new_window(",
+    "__morph_win_navigate(",
+    "__morph_use_window(",
+    "__morph_route_wid(",
+    "__morph_win_closed(",
+    "__morph_win_title(",
+    "__morph_win_set_title(",
+    "__morph_open_browser(",
+    "__morph_current_window(",
+];
+
 pub fn resolve_window_placeholders(src: &str, routes: &[RouteEntry]) -> anyhow::Result<String> {
     let mut out = String::with_capacity(src.len());
     let mut i = 0;
     while i < src.len() {
         let rest = &src[i..];
-        let found = [
-            "__morph_new_window(",
-            "__morph_win_navigate(",
-            "__morph_use_window(",
-            "__morph_route_wid(",
-            "__morph_win_closed(",
-            "__morph_win_title(",
-            "__morph_win_set_title(",
-            "__morph_open_browser(",
-            "__morph_current_window(",
-        ]
-        .iter()
-        .filter_map(|marker| rest.find(marker).map(|pos| (*marker, pos)))
-        .min_by_key(|(_, pos)| *pos);
+        let found = WINDOW_PLACEHOLDERS
+            .iter()
+            .filter_map(|marker| rest.find(marker).map(|pos| (*marker, pos)))
+            .min_by_key(|(_, pos)| *pos);
         let Some((marker, pos)) = found else {
             out.push_str(rest);
             break;
@@ -1072,6 +1084,15 @@ pub fn resolve_window_placeholders(src: &str, routes: &[RouteEntry]) -> anyhow::
                     "useWindow() with no argument needs a component or event context (module scope has no window); pass the handle in instead"
                 );
             }
+        };
+        // Nested placeholders are legal: `new Window(...).title = "x"`
+        // lowers to a title setter wrapping a creation call. Resolve the
+        // replacement's own arguments before splicing it in, or the inner
+        // creation call reaches the C++ compiler unexpanded.
+        let replacement = if WINDOW_PLACEHOLDERS.iter().any(|marker| replacement.contains(marker)) {
+            resolve_window_placeholders(&replacement, routes)?
+        } else {
+            replacement
         };
         out.push_str(&replacement);
         i = end;
@@ -3593,6 +3614,45 @@ mod tests {
         assert_eq!(
             retarget_captures("TextNode* t = new TextNode(\"[]\");"),
             "TextNode* t = new TextNode(\"[]\");"
+        );
+    }
+
+    #[test]
+    fn nested_window_placeholders_resolve_inside_title_writes() {
+        let routes = vec![RouteEntry {
+            id: "/settings".to_string(),
+            rid: 1,
+            file: std::path::PathBuf::from("/src/settings/route.mx"),
+            const_name: "kSettings".to_string(),
+            title: None,
+            width: None,
+            height: None,
+            parent: String::new(),
+            modal: false,
+            role: String::new(),
+            has_default_export: true,
+        }];
+        let fresh = resolve_window_placeholders(
+            "__morph_win_set_title(__morph_new_window(\"/settings\", JsObject{{\"width\", 400}}), \"fresh\")",
+            &routes,
+        )
+        .unwrap();
+        assert!(
+            fresh.contains("WindowManager::get().setTitle(__morph_create_window(::app::routes::kSettings, JsObject{{\"width\", 400}}), \"fresh\")"),
+            "{fresh}"
+        );
+        assert!(!fresh.contains("__morph_new_window"), "{fresh}");
+
+        let alias = resolve_window_placeholders(
+            "__morph_win_set_title(__morph_use_window(\"main\"), \"hi\")",
+            &routes,
+        )
+        .unwrap();
+        assert!(
+            alias.contains(
+                "WindowManager::get().setTitle(WindowManager::get().widForAlias(\"main\"), \"hi\")"
+            ),
+            "{alias}"
         );
     }
 

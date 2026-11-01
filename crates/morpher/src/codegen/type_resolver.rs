@@ -44,6 +44,10 @@ const CONTEXTUAL_TYPES: &[(&str, &str)] = &[
     ("KeyboardEvent", "MorphEvent*"),
     ("FocusEvent", "MorphEvent*"),
     ("Promise", "auto"),
+    // Window handles are WID ints (see docs/api/windows.md); the type
+    // annotation keeps helpers and typed locals on the same lowering path
+    // as `const w = useWindow()`.
+    ("Window", "WID"),
 ];
 
 fn lookup(m: &[(&str, &str)], k: &str) -> Option<String> {

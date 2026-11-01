@@ -8680,7 +8680,7 @@ export default function SettingsPage(props: { userId: number }) {
 import { useWindow } from 'morph'
 export default function Nav() {
   const win = useWindow();
-  return (<div><button onClick={() => win.navigate("/ledger")}>go</button></div>)
+  return (<div><button onClick={() => { win.navigate("/ledger"); win.title = "Ledger" }}>go</button></div>)
 }
 "#,
         );
@@ -8710,9 +8710,10 @@ export default function Nav() {
         let dumped = format!("{:?}", win.nodes);
         assert!(
             dumped.contains("__morph_current_window()")
+                && dumped.contains("title")
                 && dumped.contains("navigate(")
                 && dumped.contains("ledger"),
-            "handle call keeps the lazy placeholder for codegen: {dumped}"
+            "handle call and title write keep the lazy placeholder for codegen: {dumped}"
         );
         let _ = std::fs::remove_dir_all(&root);
     }

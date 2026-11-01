@@ -1,0 +1,11 @@
+import { useWindow } from 'morph'
+
+export const windowConfig = { title: "fail-window-member", width: 640, height: 480 }
+
+export default function App() {
+  return (
+    <body>
+      <button onClick={() => { useWindow().focus() }}>focus</button>
+    </body>
+  )
+}

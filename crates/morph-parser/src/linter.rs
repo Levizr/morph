@@ -1434,6 +1434,166 @@ fn check_js_method_calls(
     out
 }
 
+/// Members a `Window` handle lowers natively (mirrors
+/// `window_handle_expr` / `emit_window_method` in the translator):
+/// methods plus the `title` / `closed` properties.
+const WINDOW_MEMBERS: &[&str] = &["navigate", "close", "show", "hide", "on", "title", "closed"];
+
+/// `Window` annotations mark helper params and typed locals as handles.
+fn is_window_type(ty: &TSType<'_>) -> bool {
+    matches!(
+        ty,
+        TSType::TSTypeReference(r)
+            if matches!(&r.type_name, TSTypeName::IdentifierReference(id) if id.name.as_str() == "Window")
+    )
+}
+
+/// Initializers that produce a window handle: `useWindow(...)` and
+/// `new Window(...)`.
+fn is_window_init(expr: &Expression<'_>) -> bool {
+    match expr {
+        Expression::CallExpression(call) => {
+            matches!(&call.callee, Expression::Identifier(id) if id.name.as_str() == "useWindow")
+        }
+        Expression::NewExpression(new) => {
+            matches!(&new.callee, Expression::Identifier(id) if id.name.as_str() == "Window")
+        }
+        Expression::TSAsExpression(a) => is_window_init(&a.expression),
+        Expression::TSSatisfiesExpression(s) => is_window_init(&s.expression),
+        Expression::TSNonNullExpression(n) => is_window_init(&n.expression),
+        Expression::ParenthesizedExpression(p) => is_window_init(&p.expression),
+        _ => false,
+    }
+}
+
+/// `mx-window-member`: Window handles are `WID` ints with a closed set of
+/// natively lowered members. Anything else used to emit raw C++ on the
+/// integer (`win.focus()` → `w.focus()`), failing only at the C++ compile
+/// with a type error far from the source. Flag the member here instead.
+struct WindowHandleCollector {
+    handles: HashSet<SymbolId>,
+}
+
+impl<'a> Visit<'a> for WindowHandleCollector {
+    fn visit_variable_declarator(&mut self, d: &VariableDeclarator<'a>) {
+        if let BindingPattern::BindingIdentifier(id) = &d.id {
+            let typed =
+                d.type_annotation.as_ref().is_some_and(|a| is_window_type(&a.type_annotation));
+            let initialized = d.init.as_ref().is_some_and(is_window_init);
+            if typed || initialized {
+                // Symbol IDs let the member visitor ignore shadowed
+                // non-handles with the same name.
+                if let Some(symbol) = id.symbol_id.get() {
+                    self.handles.insert(symbol);
+                }
+            }
+        }
+        oxc_ast_visit::walk::walk_variable_declarator(self, d);
+    }
+
+    fn visit_formal_parameter(&mut self, p: &FormalParameter<'a>) {
+        if let BindingPattern::BindingIdentifier(id) = &p.pattern {
+            let typed =
+                p.type_annotation.as_ref().is_some_and(|a| is_window_type(&a.type_annotation));
+            if typed {
+                if let Some(symbol) = id.symbol_id.get() {
+                    self.handles.insert(symbol);
+                }
+            }
+        }
+        oxc_ast_visit::walk::walk_formal_parameter(self, p);
+    }
+}
+
+struct WindowMemberVisitor<'s> {
+    scoping: &'s Scoping,
+    handles: &'s HashSet<SymbolId>,
+    out: Vec<(u32, Option<String>)>,
+}
+
+impl WindowMemberVisitor<'_> {
+    fn is_handle(&self, expr: &Expression<'_>) -> bool {
+        match expr {
+            Expression::Identifier(id) => {
+                let Some(reference_id) = id.reference_id.get() else { return false };
+                self.scoping
+                    .get_reference(reference_id)
+                    .symbol_id()
+                    .is_some_and(|symbol| self.handles.contains(&symbol))
+            }
+            Expression::CallExpression(call) => matches!(
+                &call.callee,
+                Expression::Identifier(id) if id.name.as_str() == "useWindow"
+            ),
+            Expression::NewExpression(new) => matches!(
+                &new.callee,
+                Expression::Identifier(id) if id.name.as_str() == "Window"
+            ),
+            Expression::TSAsExpression(a) => self.is_handle(&a.expression),
+            Expression::TSSatisfiesExpression(s) => self.is_handle(&s.expression),
+            Expression::TSNonNullExpression(n) => self.is_handle(&n.expression),
+            Expression::ParenthesizedExpression(p) => self.is_handle(&p.expression),
+            _ => false,
+        }
+    }
+}
+
+impl<'a> Visit<'a> for WindowMemberVisitor<'_> {
+    fn visit_static_member_expression(&mut self, e: &StaticMemberExpression<'a>) {
+        if self.is_handle(&e.object) {
+            let prop = e.property.name.as_str();
+            if !WINDOW_MEMBERS.contains(&prop) {
+                self.out.push((e.property.span.start, Some(prop.to_string())));
+            }
+        }
+        oxc_ast_visit::walk::walk_static_member_expression(self, e);
+    }
+
+    fn visit_computed_member_expression(&mut self, e: &ComputedMemberExpression<'a>) {
+        if self.is_handle(&e.object) {
+            self.out.push((e.span.start, None));
+        }
+        oxc_ast_visit::walk::walk_computed_member_expression(self, e);
+    }
+}
+
+fn check_window_members(program: &Program, file_path: &str, offsets: &[usize]) -> Vec<LintError> {
+    let semantic = SemanticBuilder::new().with_build_nodes(true).build(program).semantic;
+    let scoping = semantic.scoping();
+    let mut collector = WindowHandleCollector { handles: HashSet::new() };
+    collector.visit_program(program);
+
+    let mut visitor = WindowMemberVisitor { scoping, handles: &collector.handles, out: Vec::new() };
+    visitor.visit_program(program);
+    let mut out = Vec::new();
+    for (start, prop) in visitor.out {
+        let (line, col) = offset_to_line_col_fast(offsets, start);
+        let (message, suggestion) = prop.map_or_else(
+            || (
+                "Computed member access on a Window handle has no native lowering".to_string(),
+                "Use a static member (`.title`, `.closed`) instead".to_string(),
+            ),
+            |prop| {
+                (
+                    format!("Unsupported Window member `.{prop}` — no native lowering"),
+                    "Window handles support navigate(), close(), show(), hide(), on('close'), title, and closed"
+                        .to_string(),
+                )
+            },
+        );
+        out.push(LintError {
+            severity: "error".into(),
+            code: "mx-window-member".into(),
+            message,
+            suggestion: Some(suggestion),
+            file_path: file_path.into(),
+            line,
+            col,
+        });
+    }
+    out
+}
+
 /// State bindings pinned to receiver kinds, collected check-locally:
 /// `const [v, setV] = morphState("ada")`, single-element patterns and
 /// nested positions all count. The IR walker's `state_vars` only covers
@@ -1624,6 +1784,8 @@ pub fn check(source: &str, file_path: &str) -> Vec<LintError> {
         errors.extend(check_js_syntax(&ret.program, file_path, &offsets));
         // Unimplemented methods on provably-typed receivers.
         errors.extend(check_js_method_calls(&ret.program, source, file_path, &offsets));
+        // Unsupported members on provable `Window` handles.
+        errors.extend(check_window_members(&ret.program, file_path, &offsets));
     }
 
     // Walk program to build MxSource for semantic lints (even with parse errors, program is partial)
@@ -6295,6 +6457,45 @@ mod tests {
         let unknown = "import { morphState } from 'morph'\nexport default function App({ data }: any) {\n  const v = data.anything.deeper();\n  return (<div>{v}</div>)\n}\n";
         let errs = check(unknown, "App.mx");
         assert!(!codes(&errs).contains(&"mx-js-method"), "{errs:?}");
+    }
+
+    #[test]
+    fn unsupported_window_members_report_window_member() {
+        let content = "import { useWindow } from 'morph'\nexport default function App() {\n  const win = useWindow()\n  const bad = win.focus()\n  const size = win.size\n  const indexed = win[0]\n  return (<div>{bad}{size}{indexed}</div>)\n}\n";
+        let errs = check(content, "App.mx");
+        let window_errs: Vec<_> = errs.iter().filter(|e| e.code == "mx-window-member").collect();
+        assert_eq!(window_errs.len(), 3, "{errs:?}");
+        assert!(window_errs.iter().all(|e| e.severity == "error"), "{window_errs:?}");
+        assert!(window_errs.iter().any(|e| e.message.contains(".focus")), "{window_errs:?}");
+        assert!(window_errs.iter().any(|e| e.message.contains(".size")), "{window_errs:?}");
+        assert!(
+            window_errs.iter().any(|e| e.message.contains("Computed member")),
+            "{window_errs:?}"
+        );
+        assert!(!codes(&errs).contains(&"mx-undefined"), "{errs:?}");
+    }
+
+    #[test]
+    fn direct_window_calls_are_checked_without_a_local() {
+        let content = "import { useWindow } from 'morph'\nexport default function App() {\n  return (<div>{useWindow().title}{useWindow().focus()}</div>)\n}\n";
+        let errs = check(content, "App.mx");
+        let window_errs: Vec<_> = errs.iter().filter(|e| e.code == "mx-window-member").collect();
+        assert_eq!(window_errs.len(), 1, "{errs:?}");
+        assert!(window_errs[0].message.contains(".focus"), "{window_errs:?}");
+    }
+
+    #[test]
+    fn supported_window_members_stay_quiet() {
+        let content = "import { Window, useWindow } from 'morph'\nfunction retitle(w: Window, title: string) {\n  w.title = title\n  w.navigate(\"/settings\")\n  w.close()\n  w.show()\n  w.hide()\n  w.on('close', () => {})\n  return w.closed\n}\nexport default function App() {\n  const win = useWindow()\n  const typed: Window = useWindow(\"main\")\n  const open = retitle(win, \"hi\") && retitle(typed, \"bye\")\n  return (<div>{win.title}{open}</div>)\n}\n";
+        let errs = check(content, "App.mx");
+        assert!(!codes(&errs).contains(&"mx-window-member"), "{errs:?}");
+    }
+
+    #[test]
+    fn shadowed_non_window_binding_keeps_its_members() {
+        let content = "import { useWindow } from 'morph'\nexport default function App() {\n  const win = useWindow()\n  function label(win: string) { return win.toUpperCase() }\n  win.title = label(\"hi\")\n  return (<div>{win.title}</div>)\n}\n";
+        let errs = check(content, "App.mx");
+        assert!(!codes(&errs).contains(&"mx-window-member"), "{errs:?}");
     }
 
     #[test]
