@@ -67,10 +67,13 @@ run_pass pass-obj-spread
 run_pass pass-destructuring
 run_pass pass-array-methods
 run_pass pass-operators
+run_pass pass-math
+run_pass pass-window
 run_pass pass-rule-warnings
 run_pass pass-lint-config
 
 run_fail fail-math-member mx-js-member
+run_fail fail-window-member mx-window-member
 run_fail fail-typeof-op mx-js-op
 run_fail fail-instanceof-op mx-js-op
 run_fail fail-generator mx-js-syntax

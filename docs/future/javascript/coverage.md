@@ -30,7 +30,7 @@ Already shipped and **not** on the missing list:
 - Destructuring: declarations, callable/event payloads, defaults, rest elements (object and array), computed keys, nested patterns. `JsObject`/`JsArray` rest use runtime helpers.
 - Component-body flow: branches, loops, and calls between declarations lower into the setup effect; reassigned `let` becomes a signal.
 - Builtins: `fetch` (`Response.text`/`json`/`arrayBuffer`/`clone`, `ok`, `status`), `console.*`, timers, `Promise` constructor + `await`, `Error`, `morphState`/`morphEffect`/`morphShared`/`morphEvent`.
-- Builtin namespaces: partial `Math`, `JSON.parse`/`stringify`, `Number.isFinite`/`isNaN`/`isInteger`, `Object.keys`/`values`/`entries`, `Array.isArray`, `String`/`Number`/`Boolean` conversions, `parseInt`/`parseFloat`.
+- Builtin namespaces: `Math` constants plus `min`/`max`, rounding, logs, exponentials, trig, `hypot`, `fround`, and `random`; `JSON.parse`/`stringify`, `Number.isFinite`/`isNaN`/`isInteger`, `Object.keys`/`values`/`entries`, `Array.isArray`, `String`/`Number`/`Boolean` conversions, `parseInt`/`parseFloat`.
 - Strings: broad method coverage including `toUpperCase`, `toLowerCase`, `trim*`, `indexOf`, `substring`, `slice`, `replace*`, `split`, `includes`, `startsWith`, `endsWith`, `pad*`, `repeat`, `match*`, `search`, `normalize`.
 - Arrays: `push`/`pop`, `join`, `slice`, `concat`, `includes`, `indexOf`, `lastIndexOf`, `at`, `reverse`, `toString`, plus the general methods `map`, `filter`, `forEach`, `reduce`, `find`, `findIndex`, `some`, `every`, `sort`, `splice`, `shift`, `unshift`, `fill`, `flat`, `flatMap` (multi-argument `push` and spread arguments on supported methods included). Receivers that call these lower to `JsArray`; `std::vector` stays the fast path for loops and indexing. A JSX-producing `.map` is still only valid as a direct JSX child.
 - Objects: `has`, `keys`, `get`, `values`, `entries`.
@@ -47,7 +47,7 @@ Priority is user impact, not spec size.
 | **P0** | General array methods: `map`, `filter`, `forEach`, `reduce`, `find`, `findIndex`, `some`, `every`, `sort`, `splice`, `shift`, `unshift`, `fill`, `flat`, `flatMap` | Every list, search, sort, and CRUD screen. `.map()` works in JSX list lowering and in ordinary logic; JSX-producing `.map` outside a list position stays rejected. | Large |
 | **P0** | Fail loudly on silent-wrong forms | General call spread emits `/* spread */` and passes one array argument. Wrong binaries are worse than errors; `morph check` now rejects `f(...args)` and `new C(...args)` while the variadic array helpers stay supported. | Small |
 | **P1** | Rest parameters and general call spread | Wrapper functions, `f(...args)`, variadic helpers. Rest *destructuring* works; rest *parameters* do not. | Medium |
-| **P1** | Date subset and full common Math | Timestamps, formatting, `Math.random`/`trunc`/logs/trig, `Math.PI`. Examples currently escape to `osDate()`/`osTime()`. | Medium |
+| **P1** | Date subset | Timestamps, formatting, timezone-aware display. Examples currently escape to `osDate()`/`osTime()`. Math is no longer a gap. | Medium |
 | **P1** | `Promise.resolve`/`all`/`allSettled`/`race` | Multi-request screens and dashboard loading. | Medium |
 | **P1** | TypeScript enums | Codegen has an enum emitter; the linter blocks it. Numeric enums first. | Small |
 | **P1** | RegExp literals and basic `.test`/`.exec` | Validation and text search. Regex-backed string helpers already exist. | Medium |
@@ -86,7 +86,7 @@ Exit: the CRUD/list reference app builds without a `.cpp` helper.
 ### Milestone 2 — application standard library
 
 - [ ] Date subset: construction, `now`, `parse`, `getTime`, `toISOString`, calendar/time getters.
-- [ ] Common `Math` members and constants.
+- [x] Common `Math` members and constants: `random`, `trunc`, `sign`, logs, exponentials, trig, `hypot`, `fround`, and all eight constants.
 - [ ] `Promise.resolve`/`all`/`allSettled`/`race` (correctness first; parallel execution later).
 - [ ] RegExp literal plus `.test`/`.exec`; document unsupported regex features.
 - [ ] `Map`/`Set` runtime wrappers with JS key semantics and insertion order.

@@ -287,6 +287,23 @@ fn member_prop_label(me: &MemberExpression) -> Option<String> {
     }
 }
 
+/// True when the expression is itself a member access. The nested access
+/// is checked when its subtree is visited, so an outer property belongs to
+/// the resulting value (`Math.PI.toFixed`) rather than the builtin root.
+fn is_member_access(expr: &Expression<'_>) -> bool {
+    matches!(expr, Expression::StaticMemberExpression(_) | Expression::ComputedMemberExpression(_))
+}
+
+/// Root for a member's *object*, skipping nested accesses whose own
+/// property is checked by the subtree walk.
+fn direct_member_root<'a>(expr: &'a Expression<'a>) -> Option<(&'a str, u32)> {
+    if is_member_access(expr) {
+        None
+    } else {
+        member_root_name(expr)
+    }
+}
+
 /// `mx-js-member`: JS builtins with no native counterpart. The translator
 /// passes them through verbatim so they fail the C++ compile; flagging
 /// them here (instead of the misleading `mx-undefined`) tells the user
@@ -345,13 +362,13 @@ impl<'a> Visit<'a> for JsMemberVisitor {
     fn visit_static_member_expression(&mut self, e: &StaticMemberExpression<'a>) {
         // The object subtree still needs visiting (deeper roots live
         // there); each node is visited once, so nothing double-reports.
-        let root = member_root_name(&e.object);
+        let root = direct_member_root(&e.object);
         let prop = Some(e.property.name.as_str().to_string());
         self.check_root(root, (e.span.start, e.span.end), prop);
         self.visit_expression(&e.object);
     }
     fn visit_computed_member_expression(&mut self, e: &ComputedMemberExpression<'a>) {
-        let root = member_root_name(&e.object);
+        let root = direct_member_root(&e.object);
         let prop = match &e.expression {
             Expression::StringLiteral(s) => Some(s.value.to_string()),
             _ => None,
@@ -364,10 +381,10 @@ impl<'a> Visit<'a> for JsMemberVisitor {
         if let Some(me) = e.callee.as_member_expression() {
             let (root, prop) = match me {
                 MemberExpression::StaticMemberExpression(s) => {
-                    (member_root_name(&s.object), Some(s.property.name.as_str().to_string()))
+                    (direct_member_root(&s.object), Some(s.property.name.as_str().to_string()))
                 }
                 MemberExpression::ComputedMemberExpression(c) => (
-                    member_root_name(&c.object),
+                    direct_member_root(&c.object),
                     match &c.expression {
                         Expression::StringLiteral(s) => Some(s.value.to_string()),
                         _ => None,
@@ -405,8 +422,8 @@ impl<'a> Visit<'a> for JsMemberVisitor {
     fn visit_new_expression(&mut self, e: &NewExpression<'a>) {
         if let Some(me) = e.callee.as_member_expression() {
             let root = match me {
-                MemberExpression::StaticMemberExpression(s) => member_root_name(&s.object),
-                MemberExpression::ComputedMemberExpression(c) => member_root_name(&c.object),
+                MemberExpression::StaticMemberExpression(s) => direct_member_root(&s.object),
+                MemberExpression::ComputedMemberExpression(c) => direct_member_root(&c.object),
                 MemberExpression::PrivateFieldExpression(_) => None,
             };
             self.check_root(root, (me.span().start, me.span().end), member_prop_label(me));
@@ -420,9 +437,11 @@ impl<'a> Visit<'a> for JsMemberVisitor {
             ChainElement::CallExpression(call) => {
                 if let Some(me) = call.callee.as_member_expression() {
                     let root = match me {
-                        MemberExpression::StaticMemberExpression(s) => member_root_name(&s.object),
+                        MemberExpression::StaticMemberExpression(s) => {
+                            direct_member_root(&s.object)
+                        }
                         MemberExpression::ComputedMemberExpression(c) => {
-                            member_root_name(&c.object)
+                            direct_member_root(&c.object)
                         }
                         MemberExpression::PrivateFieldExpression(_) => None,
                     };
@@ -435,9 +454,11 @@ impl<'a> Visit<'a> for JsMemberVisitor {
             _ => {
                 if let Some(me) = e.expression.as_member_expression() {
                     let root = match me {
-                        MemberExpression::StaticMemberExpression(s) => member_root_name(&s.object),
+                        MemberExpression::StaticMemberExpression(s) => {
+                            direct_member_root(&s.object)
+                        }
                         MemberExpression::ComputedMemberExpression(c) => {
-                            member_root_name(&c.object)
+                            direct_member_root(&c.object)
                         }
                         MemberExpression::PrivateFieldExpression(_) => None,
                     };
@@ -1068,8 +1089,46 @@ enum RecvKind {
 fn supported_builtin_member(root: &str, member: &str) -> bool {
     matches!(
         (root, member),
-        ("Math", "min" | "max" | "abs" | "floor" | "ceil" | "round" | "pow" | "sqrt")
-            | ("JSON", "parse" | "stringify")
+        (
+            "Math",
+            "PI" | "E"
+                | "LN2"
+                | "LN10"
+                | "LOG2E"
+                | "LOG10E"
+                | "SQRT1_2"
+                | "SQRT2"
+                | "min"
+                | "max"
+                | "abs"
+                | "floor"
+                | "ceil"
+                | "round"
+                | "pow"
+                | "sqrt"
+                | "trunc"
+                | "sign"
+                | "cbrt"
+                | "exp"
+                | "expm1"
+                | "log"
+                | "log2"
+                | "log10"
+                | "log1p"
+                | "sin"
+                | "cos"
+                | "tan"
+                | "asin"
+                | "acos"
+                | "atan"
+                | "atan2"
+                | "sinh"
+                | "cosh"
+                | "tanh"
+                | "hypot"
+                | "fround"
+                | "random"
+        ) | ("JSON", "parse" | "stringify")
             | ("Number", "isFinite" | "isNaN" | "isInteger")
             | ("Object", "keys" | "values" | "entries")
             | ("Array", "isArray")
@@ -5930,12 +5989,20 @@ mod tests {
 
     #[test]
     fn unsupported_builtin_members_report_js_member() {
-        let content = "import { morphState } from 'morph'\nexport default function App() {\n  const v = Math.random();\n  const j = JSON.parse2({});\n  return (<div>{v}</div>)\n}\n";
+        let content = "import { morphState } from 'morph'\nexport default function App() {\n  const v = Math.imul(2, 3);\n  const j = JSON.parse2({});\n  return (<div>{v}</div>)\n}\n";
         let errs = check(content, "App.mx");
         assert_eq!(codes(&errs).iter().filter(|c| **c == "mx-js-member").count(), 2, "{errs:?}");
         assert!(!codes(&errs).contains(&"mx-undefined"), "{errs:?}");
-        let math = errs.iter().find(|e| e.message.contains("Math.random")).unwrap();
+        let math = errs.iter().find(|e| e.message.contains("Math.imul")).unwrap();
         assert!(math.message.contains("no native counterpart"), "{math:?}");
+    }
+
+    #[test]
+    fn extended_math_members_stay_quiet() {
+        let content = "import { morphState } from 'morph'\nexport default function App() {\n  const v = Math.trunc(1.7) + Math.sign(-2) + Math.cbrt(8) + Math.log2(8) + Math.sin(0) + Math.hypot(3, 4) + Math.atan2(1, 1) + Math.random() + Math.PI + Math.E + Math.SQRT1_2;\n  const t = Math.PI.toFixed(2);\n  return (<div>{v}{t}</div>)\n}\n";
+        let errs = check(content, "App.mx");
+        assert!(!codes(&errs).contains(&"mx-js-member"), "{errs:?}");
+        assert!(!codes(&errs).contains(&"mx-undefined"), "{errs:?}");
     }
 
     #[test]
@@ -6160,7 +6227,7 @@ mod tests {
     #[test]
     fn nested_unsupported_member_still_errors_once() {
         // The deeper traversal must not double-report: one member error.
-        let content = "import { morphState } from 'morph'\nexport const windowConfig = { title: \"D\", width: 800, height: 600 }\nexport default function App() {\n  const t = Math.random().toFixed(2)\n  return (<div>{t}</div>)\n}\n";
+        let content = "import { morphState } from 'morph'\nexport const windowConfig = { title: \"D\", width: 800, height: 600 }\nexport default function App() {\n  const t = Math.imul(2, 3).toFixed(2)\n  return (<div>{t}</div>)\n}\n";
         let errs = check(content, "App.mx");
         let member_errs = errs.iter().filter(|e| e.code == "mx-js-member").count();
         assert_eq!(member_errs, 1, "{errs:?}");

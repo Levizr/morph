@@ -1,0 +1,57 @@
+import { morphState } from 'morph'
+
+export const windowConfig = { title: "pass-math", width: 800, height: 600 }
+
+// Full Math surface: constants lower as static-member expressions, unary
+// functions coerce through Number, and hypot stays fixed-arity (spread is
+// still gated to min/max).
+export default function App() {
+  const [n, setN] = morphState(0)
+
+  const piValue = Math.PI
+  const eValue = Math.E
+  const ln2Value = Math.LN2
+  const ln10Value = Math.LN10
+  const log2eValue = Math.LOG2E
+  const log10eValue = Math.LOG10E
+  const sqrtHalfValue = Math.SQRT1_2
+  const sqrt2Value = Math.SQRT2
+  const fixedValue = Math.PI.toFixed(3)
+
+  const truncated = Math.trunc(-1.9)
+  const signValue = Math.sign(-2)
+  const cube = Math.cbrt(27)
+  const expValue = Math.exp(0)
+  const expm1Value = Math.expm1(0)
+  const logValue = Math.log(1)
+  const log2Value = Math.log2(8)
+  const log10Value = Math.log10(1000)
+  const log1pValue = Math.log1p(0)
+  const sinValue = Math.sin(0)
+  const cosValue = Math.cos(0)
+  const tanValue = Math.tan(0)
+  const asinValue = Math.asin(1)
+  const acosValue = Math.acos(1)
+  const atanValue = Math.atan(1)
+  const atan2Value = Math.atan2(1, 1)
+  const sinhValue = Math.sinh(0)
+  const coshValue = Math.cosh(0)
+  const tanhValue = Math.tanh(0)
+  const hypotValue = Math.hypot(3, 4, 12)
+  const roundedValue = Math.fround(1.1)
+  const randomValue = Math.random()
+
+  const biggest = Math.max(...[1, 9, 3])
+  const smallest = Math.min(4, 2, 8)
+
+  return (
+    <body>
+      <button onClick={() => setN(n + 1)}>tick</button>
+      <span>{piValue} {eValue} {ln2Value} {ln10Value} {log2eValue} {log10eValue} {sqrtHalfValue} {sqrt2Value} {fixedValue}</span>
+      <span>{truncated} {signValue} {cube} {expValue} {expm1Value} {logValue} {log2Value} {log10Value} {log1pValue}</span>
+      <span>{sinValue} {cosValue} {tanValue} {asinValue} {acosValue} {atanValue} {atan2Value}</span>
+      <span>{sinhValue} {coshValue} {tanhValue} {hypotValue} {roundedValue} {randomValue}</span>
+      <span>{biggest} {smallest} {n}</span>
+    </body>
+  )
+}

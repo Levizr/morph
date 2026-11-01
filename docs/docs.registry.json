@@ -551,9 +551,10 @@
           "morph destructured parameters",
           "morph no interpreter",
           "morph js runtime",
-          "morph translator coverage"
+          "morph translator coverage",
+          "morph math support"
         ],
-        "lastUpdated": "2026-10-31",
+        "lastUpdated": "2026-11-01",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -631,9 +632,10 @@
           "JsNumber",
           "JsString",
           "JsArray",
-          "JsObject value"
+          "JsObject value",
+          "morph math functions"
         ],
-        "lastUpdated": "2026-10-18",
+        "lastUpdated": "2026-11-01",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -1941,13 +1943,14 @@
         "file": "errors/mx-js-member",
         "status": "production",
         "author": "PIYUSH",
-        "description": "Fix mx-js-member: Math JSON Date RegExp console members Morph does not implement, and .cpp alternatives.",
+        "description": "Fix mx-js-member: unsupported Math, JSON, Date, RegExp, and console members, and .cpp alternatives.",
         "keywords": [
           "mx-js-member",
           "morph JSON.parse",
-          "morph Math Date unsupported"
+          "morph Math Date unsupported",
+          "morph math imul"
         ],
-        "lastUpdated": "2026-10-10",
+        "lastUpdated": "2026-11-01",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -2532,7 +2535,7 @@
         "file": "future/javascript/coverage",
         "status": "development",
         "author": "PIYUSH",
-        "description": "The working plan for Morph's TypeScript-to-C++ translator: actual supported baseline, ranked app-readiness gaps, and milestones for shipped array methods, object spread, component-body destructuring, exponentiation, and logical assignment, plus upcoming dates, Map/Set, and platform services.",
+        "description": "The working plan for Morph's TypeScript-to-C++ translator: actual supported baseline, ranked app-readiness gaps, and milestones for shipped array methods, object spread, component-body destructuring, exponentiation, logical assignment, and Math, plus upcoming dates, Map/Set, and platform services.",
         "keywords": [
           "morph typescript coverage",
           "morph javascript translator",
@@ -2540,9 +2543,10 @@
           "morph js feature coverage",
           "morph js app readiness",
           "morph array methods",
-          "morph object spread"
+          "morph object spread",
+          "morph math"
         ],
-        "lastUpdated": "2026-10-31",
+        "lastUpdated": "2026-11-01",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"

@@ -6,8 +6,8 @@
 
 ## What this error means
 
-You access a member of a JS builtin object Morph does not implement — `Math.*`,
-`JSON.*`, `Date.*`, `RegExp.*`, or `console.*` beyond
+You access a member of a JS builtin object Morph does not implement — for
+example `Math.imul`, `Date.now`, `RegExp`, or `console.table` beyond
 `log`/`warn`/`error`/`info`:
 
 ```
@@ -21,17 +21,17 @@ error : mx-js-member : Unsupported member `JSON.parse` — no native counterpart
 Morph's runtime types (`JsNumber`, `JsString`, `JsArray`, `JsObject` — see
 [runtime types](../javascript/types.md)) implement a curated subset of
 JavaScript semantics with zero-overhead native backing. Members outside that
-subset (`Math.hypot`, `JSON.parse`, `Date.now`, `RegExp`, `console.table`)
+subset (`Math.imul`, `JSON.rawJSON`, `Date.now`, `RegExp`, `console.table`)
 have no implementation to call into. Rather than stubbing them with wrong
 semantics, Morph rejects the access and points at the replacement.
 
 ## Example that triggers it
 
 ```tsx
-// ❌ JSON.parse is not implemented — mx-js-member
+// ❌ Math.imul is not implemented — mx-js-member
 export default function App() {
-  const data = JSON.parse('{"n": 1}');
-  return <div>Hello</div>;
+  const hash = Math.imul(31, 7);
+  return <div>{hash}</div>;
 }
 ```
 

@@ -57,6 +57,11 @@ const JS_ARRAY_METHODS: &[&str] = &[
     "reverse",
 ];
 
+/// `Math` constants with a runtime binding in `js_math.h`.
+fn is_math_constant(name: &str) -> bool {
+    matches!(name, "PI" | "E" | "LN2" | "LN10" | "LOG2E" | "LOG10E" | "SQRT1_2" | "SQRT2")
+}
+
 /// One access step from a destructured root to a bound name.
 #[derive(Clone)]
 enum AccessStep {
@@ -4188,6 +4193,13 @@ impl<'a> CppTranslator<'a> {
                 OperandClass::JsValue
             }
             Expression::StaticMemberExpression(member) => {
+                if let Expression::Identifier(object_id) = &member.object {
+                    if object_id.name.as_str() == "Math"
+                        && is_math_constant(member.property.name.as_str())
+                    {
+                        return OperandClass::Float;
+                    }
+                }
                 if member.property.name.as_str() == "length" {
                     OperandClass::Integer
                 } else if matches!(member.property.name.as_str(), "status")
@@ -5100,6 +5112,7 @@ impl<'a> CppTranslator<'a> {
         }
         match (root, method) {
             ("Math", "min" | "max") => {
+                self.ctx.need("JsValue");
                 let fname =
                     if method == "min" { "morph::js_math::min" } else { "morph::js_math::max" };
                 if spread_count == 0 {
@@ -5114,17 +5127,37 @@ impl<'a> CppTranslator<'a> {
                 }
                 Some(format!("{fname}({{{}}})", parts.join(", ")))
             }
-            ("Math", "abs" | "floor" | "ceil" | "round" | "sqrt") => {
+            (
+                "Math",
+                "abs" | "floor" | "ceil" | "round" | "sqrt" | "trunc" | "sign" | "cbrt" | "exp"
+                | "expm1" | "log" | "log2" | "log10" | "log1p" | "sin" | "cos" | "tan" | "asin"
+                | "acos" | "atan" | "sinh" | "cosh" | "tanh" | "fround",
+            ) => {
+                self.ctx.need("JsValue");
                 let arg =
                     fixed.first().cloned().unwrap_or_else(|| "JsValue(JsUndefined{})".to_string());
                 Some(format!("morph::js_math::{method}({arg})"))
             }
-            ("Math", "pow") => {
+            ("Math", "pow" | "atan2") => {
+                self.ctx.need("JsValue");
                 let x =
                     fixed.first().cloned().unwrap_or_else(|| "JsValue(JsUndefined{})".to_string());
                 let y =
                     fixed.get(1).cloned().unwrap_or_else(|| "JsValue(JsUndefined{})".to_string());
-                Some(format!("morph::js_math::pow({x}, {y})"))
+                Some(format!("morph::js_math::{method}({x}, {y})"))
+            }
+            ("Math", "hypot") => {
+                // Fixed arity only for now: a spread would collapse into a
+                // single array argument. The checker gates that form.
+                if spread_count > 0 {
+                    return None;
+                }
+                self.ctx.need("JsValue");
+                Some(format!("morph::js_math::hypot({{{}}})", fixed.join(", ")))
+            }
+            ("Math", "random") => {
+                self.ctx.need("JsValue");
+                Some("morph::js_math::random()".to_string())
             }
             ("JSON", "parse") => {
                 let arg =
@@ -5869,6 +5902,12 @@ impl<'a> CppTranslator<'a> {
     fn emit_static_member(&mut self, m: &StaticMemberExpression<'a>) -> String {
         let obj = self.emit_expression(&m.object);
         let prop = m.property.name.to_string();
+        if let Expression::Identifier(id) = &m.object {
+            if id.name.as_str() == "Math" && is_math_constant(&prop) {
+                self.ctx.need("JsValue");
+                return format!("morph::js_math::{prop}");
+            }
+        }
         if let Expression::ThisExpression(_) = &m.object {
             if self.ctx.fn_expr_depth > 0 {
                 return format!("_jsThis[\"{}\"]", prop);
@@ -6478,6 +6517,30 @@ mod tests {
         assert!(out.contains("morph::js_to_boolean(n)"), "{out}");
         assert!(out.contains("morph::js_is_nullish(n)"), "{out}");
         assert!(out.contains("std::pow(morph::js_to_number(2)"), "{out}");
+    }
+
+    #[test]
+    fn math_constants_and_extended_functions_lower() {
+        let out = translate_stmts(
+            "const pi = Math.PI;\n\
+             const e = Math.E;\n\
+             const fixed = Math.PI.toFixed(2);\n\
+             const t = Math.trunc(1.7);\n\
+             const s = Math.sign(-3);\n\
+             const l = Math.log2(8);\n\
+             const a = Math.atan2(1, 1);\n\
+             const h = Math.hypot(3, 4, 12);\n\
+             const r = Math.random();",
+        );
+        assert!(out.contains("morph::js_math::PI"), "{out}");
+        assert!(out.contains("morph::js_math::E"), "{out}");
+        assert!(out.contains("JsNumber(morph::js_math::PI).toFixed(2)"), "{out}");
+        assert!(out.contains("morph::js_math::trunc(1.7)"), "{out}");
+        assert!(out.contains("morph::js_math::sign(-3)"), "{out}");
+        assert!(out.contains("morph::js_math::log2(8)"), "{out}");
+        assert!(out.contains("morph::js_math::atan2(1, 1)"), "{out}");
+        assert!(out.contains("morph::js_math::hypot({3, 4, 12})"), "{out}");
+        assert!(out.contains("morph::js_math::random()"), "{out}");
     }
 
     #[test]

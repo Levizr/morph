@@ -513,6 +513,52 @@ static void testMath()
     CHECK(sv(sqrt(JsValue(-1))) == "NaN", "sqrt negative is NaN");
     CHECK(sv(sqrt(JsValue(16))) == "4", "sqrt perfect square");
 
+    CHECK(sv(trunc(JsValue(1.9))) == "1", "trunc positive");
+    CHECK(sv(trunc(JsValue(-1.9))) == "-1", "trunc negative");
+    CHECK(sv(trunc(JsValue("x"))) == "NaN", "trunc garbage is NaN");
+    CHECK(sv(sign(JsValue(-3))) == "-1", "sign negative");
+    CHECK(sv(sign(JsValue(0))) == "0", "sign zero");
+    CHECK(std::signbit(sign(JsValue(-0.0)).as_double()), "sign preserves -0");
+    CHECK(sv(sign(JsValue(std::nan("")))) == "NaN", "sign NaN");
+    CHECK(sv(cbrt(JsValue(27))) == "3", "cbrt");
+    CHECK(sv(cbrt(JsValue(-8))) == "-2", "cbrt negative");
+    CHECK(sv(exp(JsValue(0))) == "1", "exp zero");
+    CHECK(sv(expm1(JsValue(0))) == "0", "expm1 zero");
+    CHECK(sv(log(JsValue(1))) == "0", "log one");
+    CHECK(sv(log(JsValue(0))) == "-Infinity", "log zero");
+    CHECK(sv(log2(JsValue(8))) == "3", "log2");
+    CHECK(sv(log10(JsValue(1000))) == "3", "log10");
+    CHECK(sv(log1p(JsValue(0))) == "0", "log1p zero");
+    CHECK(sv(sin(JsValue(0))) == "0", "sin zero");
+    CHECK(sv(cos(JsValue(0))) == "1", "cos zero");
+    CHECK(sv(tan(JsValue(0))) == "0", "tan zero");
+    CHECK(sv(asin(JsValue(1))) == "1.5707963267948966", "asin one");
+    CHECK(sv(acos(JsValue(1))) == "0", "acos one");
+    CHECK(sv(atan(JsValue(1))) == "0.7853981633974483", "atan one");
+    CHECK(sv(sinh(JsValue(0))) == "0", "sinh zero");
+    CHECK(sv(cosh(JsValue(0))) == "1", "cosh zero");
+    CHECK(sv(tanh(JsValue(0))) == "0", "tanh zero");
+    CHECK(sv(fround(JsValue(1.1))) == "1.100000023841858", "fround float32");
+    CHECK(sv(atan2(JsValue(1), JsValue(1))) == "0.7853981633974483", "atan2");
+    CHECK(sv(atan2(JsValue(0), JsValue(-0.0))) == "3.141592653589793", "atan2 signed zero");
+    CHECK(sv(hypot({})) == "0", "hypot empty");
+    CHECK(sv(hypot({3, 4})) == "5", "hypot 3-4-5");
+    CHECK(sv(hypot({3, 4, 12})) == "13", "hypot three args");
+    CHECK(sv(hypot({std::numeric_limits<double>::infinity(), std::nan("")})) == "Infinity",
+          "hypot infinity beats NaN");
+    CHECK(sv(hypot({std::nan(""), 1})) == "NaN", "hypot NaN");
+
+    const double r = morph::js_math::random().as_double();
+    CHECK(r >= 0.0 && r < 1.0, "random in [0,1)");
+    CHECK(num_str(PI) == "3.141592653589793", "PI constant");
+    CHECK(num_str(E) == "2.718281828459045", "E constant");
+    CHECK(num_str(LN2) == "0.6931471805599453", "LN2 constant");
+    CHECK(num_str(LN10) == "2.302585092994046", "LN10 constant");
+    CHECK(num_str(LOG2E) == "1.4426950408889634", "LOG2E constant");
+    CHECK(num_str(LOG10E) == "0.4342944819032518", "LOG10E constant");
+    CHECK(num_str(SQRT1_2) == "0.7071067811865476", "SQRT1_2 constant");
+    CHECK(num_str(SQRT2) == "1.4142135623730951", "SQRT2 constant");
+
     // Spread lowerings: Math.max(...arr) and mutated (shared_ptr) bindings.
     CHECK(sv(max(JsArray{4, 1, 7})) == "7", "max single-spread form");
     std::shared_ptr<JsArray> sp = std::make_shared<JsArray>(JsArray{4, 1, 7});

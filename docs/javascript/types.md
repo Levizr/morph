@@ -125,7 +125,9 @@ Object enumeration — `Object.keys`/`values`/`entries` and `JSON.stringify` —
 
 ## Math
 
-`Math.min`/`max` (variadic, and `...spread` over arrays), `abs`, `floor`, `ceil`, `round`, `pow`, `sqrt`. Arguments coerce through `Number()`; `round` rounds half toward +∞ (`Math.round(-2.5)` → `-2`); empty `min`/`max` return `Infinity`/`-Infinity`.
+Constants: `PI`, `E`, `LN2`, `LN10`, `LOG2E`, `LOG10E`, `SQRT1_2`, `SQRT2`.
+
+Functions: `min`/`max` (variadic, and `...spread` over arrays), `abs`, `floor`, `ceil`, `round`, `trunc`, `sign`, `pow`, `sqrt`, `cbrt`, `exp`, `expm1`, `log`, `log2`, `log10`, `log1p`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `sinh`, `cosh`, `tanh`, `hypot`, `fround`, and `random`. Arguments coerce through `Number()` (so `Math.abs("x")` is `NaN`); `round` rounds half toward +∞ (`Math.round(-2.5)` → `-2`); empty `min`/`max` return `Infinity`/`-Infinity`; `hypot` takes fixed arguments (spread is limited to `min`/`max`).
 
 ## JSON
 
