@@ -15,6 +15,11 @@ function retitle(w: Window, title: string) {
 export default function App() {
   const [status, setStatus] = morphState("idle")
   const win = useWindow()
+  // Late-assigned handle: reads before the assignment are `undefined`
+  // (and handle operations are safe no-ops), then every later read sees
+  // the assigned window.
+  let late
+  console.log(late)
 
   return (
     <body>
@@ -22,7 +27,10 @@ export default function App() {
       <button onClick={() => { useWindow().title = "direct"; setStatus("direct") }}>direct write</button>
       <button onClick={() => { new Window("/settings", { width: 400 }).title = "fresh"; setStatus("fresh") }}>new write</button>
       <button onClick={() => { const shut = retitle(useWindow(), "helper"); setStatus(shut ? "closed" : "open") }}>helper</button>
-      <div>{win.title} {status}</div>
+      <button onClick={() => { late = new Window("/settings", { width: 400 }); late.title = "late"; setStatus("late") }}>late assign</button>
+      <button onClick={() => { const shut = late.closed; late.navigate("/settings"); setStatus(shut ? "late-closed" : "late-open") }}>late read</button>
+      <button onClick={() => { late.close(); setStatus("late-closed") }}>late close</button>
+      <div>{win.title} {late.title} {late.closed ? "late-closed" : "late-open"} {status}</div>
     </body>
   )
 }

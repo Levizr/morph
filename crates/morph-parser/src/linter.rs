@@ -1456,7 +1456,8 @@ fn is_window_init(expr: &Expression<'_>) -> bool {
             matches!(&call.callee, Expression::Identifier(id) if id.name.as_str() == "useWindow")
         }
         Expression::NewExpression(new) => {
-            matches!(&new.callee, Expression::Identifier(id) if id.name.as_str() == "Window")
+            !new.arguments.is_empty()
+                && matches!(&new.callee, Expression::Identifier(id) if id.name.as_str() == "Window")
         }
         Expression::TSAsExpression(a) => is_window_init(&a.expression),
         Expression::TSSatisfiesExpression(s) => is_window_init(&s.expression),
@@ -1470,11 +1471,23 @@ fn is_window_init(expr: &Expression<'_>) -> bool {
 /// natively lowered members. Anything else used to emit raw C++ on the
 /// integer (`win.focus()` → `w.focus()`), failing only at the C++ compile
 /// with a type error far from the source. Flag the member here instead.
-struct WindowHandleCollector {
+struct WindowHandleCollector<'s> {
+    scoping: &'s Scoping,
     handles: HashSet<SymbolId>,
 }
 
-impl<'a> Visit<'a> for WindowHandleCollector {
+impl WindowHandleCollector<'_> {
+    /// Resolve an assignment target through the semantic graph so a late
+    /// handle marks the declared binding, not every same-named variable.
+    fn mark_reference(&mut self, id: &IdentifierReference<'_>) {
+        let Some(reference_id) = id.reference_id.get() else { return };
+        if let Some(symbol) = self.scoping.get_reference(reference_id).symbol_id() {
+            self.handles.insert(symbol);
+        }
+    }
+}
+
+impl<'a> Visit<'a> for WindowHandleCollector<'_> {
     fn visit_variable_declarator(&mut self, d: &VariableDeclarator<'a>) {
         if let BindingPattern::BindingIdentifier(id) = &d.id {
             let typed =
@@ -1502,6 +1515,18 @@ impl<'a> Visit<'a> for WindowHandleCollector {
             }
         }
         oxc_ast_visit::walk::walk_formal_parameter(self, p);
+    }
+
+    fn visit_assignment_expression(&mut self, a: &AssignmentExpression<'a>) {
+        // `let win; ... win = new Window(...)` carries a handle from the
+        // assignment onward. Marking the declared symbol keeps the member
+        // check correct under shadowing and across nested handlers.
+        if a.operator == AssignmentOperator::Assign && is_window_init(&a.right) {
+            if let AssignmentTarget::AssignmentTargetIdentifier(id) = &a.left {
+                self.mark_reference(id);
+            }
+        }
+        oxc_ast_visit::walk::walk_assignment_expression(self, a);
     }
 }
 
@@ -1560,7 +1585,7 @@ impl<'a> Visit<'a> for WindowMemberVisitor<'_> {
 fn check_window_members(program: &Program, file_path: &str, offsets: &[usize]) -> Vec<LintError> {
     let semantic = SemanticBuilder::new().with_build_nodes(true).build(program).semantic;
     let scoping = semantic.scoping();
-    let mut collector = WindowHandleCollector { handles: HashSet::new() };
+    let mut collector = WindowHandleCollector { scoping, handles: HashSet::new() };
     collector.visit_program(program);
 
     let mut visitor = WindowMemberVisitor { scoping, handles: &collector.handles, out: Vec::new() };
@@ -6482,6 +6507,26 @@ mod tests {
         let window_errs: Vec<_> = errs.iter().filter(|e| e.code == "mx-window-member").collect();
         assert_eq!(window_errs.len(), 1, "{errs:?}");
         assert!(window_errs[0].message.contains(".focus"), "{window_errs:?}");
+    }
+
+    #[test]
+    fn late_window_assignments_mark_the_declared_binding() {
+        let content = "import { useWindow } from 'morph'\nexport default function App() {\n  let win;\n  win = useWindow();\n  const bad = win.focus()\n  return (<div>{bad}</div>)\n}\n";
+        let errs = check(content, "App.mx");
+        let window_errs: Vec<_> = errs.iter().filter(|e| e.code == "mx-window-member").collect();
+        assert_eq!(window_errs.len(), 1, "{errs:?}");
+        assert!(window_errs[0].message.contains(".focus"), "{window_errs:?}");
+
+        let ok = "import { useWindow } from 'morph'\nexport default function App() {\n  let win = null;\n  win = useWindow();\n  win.title = \"ready\"\n  return (<div>{win.title}</div>)\n}\n";
+        let errs = check(ok, "App.mx");
+        assert!(!codes(&errs).contains(&"mx-window-member"), "{errs:?}");
+    }
+
+    #[test]
+    fn late_window_assignment_does_not_leak_across_shadowing() {
+        let content = "import { useWindow } from 'morph'\nexport default function App() {\n  let win;\n  win = useWindow();\n  function label(win: string) { return win.toUpperCase() }\n  win.title = label(\"hi\")\n  return (<div>{win.title}</div>)\n}\n";
+        let errs = check(content, "App.mx");
+        assert!(!codes(&errs).contains(&"mx-window-member"), "{errs:?}");
     }
 
     #[test]

@@ -163,6 +163,32 @@ inline JsNumber js_to_number(const JsString& v) { return js_to_number(JsValue(v)
 inline JsNumber js_to_number(const std::string& v) { return js_to_number(JsValue(v)); }
 inline JsNumber js_to_number(const char* v) { return js_to_number(JsValue(v)); }
 
+// ── Late-assigned value arithmetic (`let x; x = ...`) ──
+//
+// A late binding is a `JsValue`, but its value is unknown until runtime.
+// These apply JS coercion instead of requiring the numeric variant: `+`
+// concatenates when either side is a string, the other operators use
+// ToNumber (so `undefined - 1` is NaN, `"5" - 2` is 3).
+
+inline JsValue js_late_add(const JsValue& a, const JsValue& b) {
+    if (a.is_string() || b.is_string()) {
+        return JsValue(JsString(js_to_string(a).value + js_to_string(b).value));
+    }
+    return JsValue(js_to_number(a) + js_to_number(b));
+}
+inline JsValue js_late_sub(const JsValue& a, const JsValue& b) {
+    return JsValue(js_to_number(a) - js_to_number(b));
+}
+inline JsValue js_late_mul(const JsValue& a, const JsValue& b) {
+    return JsValue(js_to_number(a) * js_to_number(b));
+}
+inline JsValue js_late_div(const JsValue& a, const JsValue& b) {
+    return JsValue(js_to_number(a) / js_to_number(b));
+}
+inline JsValue js_late_mod(const JsValue& a, const JsValue& b) {
+    return JsValue(js_to_number(a) % js_to_number(b));
+}
+
 // ── ToIntegerOrInfinity (array indices, precision args): NaN → 0 ──
 
 inline int64_t js_to_integer(const JsValue& v) {
@@ -367,6 +393,104 @@ inline bool js_is_array(const std::shared_ptr<T>&) { return false; }
 // and js_value.h cannot see this header) ──
 
 } // namespace morph
+
+// ── JsValue operators used by late-assigned bindings ──
+//
+// `let x; x = ...` lowers to a `JsLateValue` (a `JsValue`), so every
+// operator has to behave like JavaScript instead of requiring a numeric
+// variant. ToNumber follows the usual rules (undefined → NaN, strings
+// parsed, null → 0); bitwise/shift use ToInt32. These live in the global
+// namespace because `JsValue` does, so ADL finds them in generated code.
+
+inline JsValue operator-(const JsValue& value) {
+    return JsValue(JsNumber(-morph::js_to_number(value).as_double()));
+}
+inline JsValue operator+(const JsValue& value) {
+    return JsValue(morph::js_to_number(value));
+}
+inline JsValue operator~(const JsValue& value) {
+    return JsValue(JsNumber(~morph::js_to_integer(value)));
+}
+inline JsValue operator&(const JsValue& a, const JsValue& b) {
+    return JsValue(JsNumber(morph::js_to_integer(a) & morph::js_to_integer(b)));
+}
+inline JsValue operator|(const JsValue& a, const JsValue& b) {
+    return JsValue(JsNumber(morph::js_to_integer(a) | morph::js_to_integer(b)));
+}
+inline JsValue operator^(const JsValue& a, const JsValue& b) {
+    return JsValue(JsNumber(morph::js_to_integer(a) ^ morph::js_to_integer(b)));
+}
+inline JsValue operator<<(const JsValue& a, const JsValue& b) {
+    return JsValue(JsNumber(morph::js_to_integer(a) << (morph::js_to_integer(b) & 31)));
+}
+inline JsValue operator>>(const JsValue& a, const JsValue& b) {
+    return JsValue(JsNumber(morph::js_to_integer(a) >> (morph::js_to_integer(b) & 31)));
+}
+
+// Bitwise operators mix the JS value with native number literals
+// (`bits & 3`). ToInt32 lives in the JsValue/JsValue forms above.
+inline JsValue operator&(const JsValue& a, int b) { return a & JsValue((int64_t)b); }
+inline JsValue operator|(const JsValue& a, int b) { return a | JsValue((int64_t)b); }
+inline JsValue operator^(const JsValue& a, int b) { return a ^ JsValue((int64_t)b); }
+inline JsValue operator&(int a, const JsValue& b) { return JsValue((int64_t)a) & b; }
+inline JsValue operator|(int a, const JsValue& b) { return JsValue((int64_t)a) | b; }
+inline JsValue operator^(int a, const JsValue& b) { return JsValue((int64_t)a) ^ b; }
+inline JsValue operator&(const JsValue& a, int64_t b) { return a & JsValue(b); }
+inline JsValue operator|(const JsValue& a, int64_t b) { return a | JsValue(b); }
+inline JsValue operator^(const JsValue& a, int64_t b) { return a ^ JsValue(b); }
+inline JsValue operator&(int64_t a, const JsValue& b) { return JsValue(a) & b; }
+inline JsValue operator|(int64_t a, const JsValue& b) { return JsValue(a) | b; }
+inline JsValue operator^(int64_t a, const JsValue& b) { return JsValue(a) ^ b; }
+inline JsValue operator&(const JsValue& a, double b) { return a & JsValue(b); }
+inline JsValue operator|(const JsValue& a, double b) { return a | JsValue(b); }
+inline JsValue operator^(const JsValue& a, double b) { return a ^ JsValue(b); }
+inline JsValue operator&(double a, const JsValue& b) { return JsValue(a) & b; }
+inline JsValue operator|(double a, const JsValue& b) { return JsValue(a) | b; }
+inline JsValue operator^(double a, const JsValue& b) { return JsValue(a) ^ b; }
+inline JsValue operator<<(const JsValue& a, int b) {
+    return a << JsValue((int64_t)b);
+}
+inline JsValue operator>>(const JsValue& a, int b) {
+    return a >> JsValue((int64_t)b);
+}
+inline JsValue operator<<(int a, const JsValue& b) {
+    return JsValue((int64_t)a) << b;
+}
+inline JsValue operator>>(int a, const JsValue& b) {
+    return JsValue((int64_t)a) >> b;
+}
+inline JsValue operator<<(const JsValue& a, int64_t b) { return a << JsValue(b); }
+inline JsValue operator>>(const JsValue& a, int64_t b) { return a >> JsValue(b); }
+inline JsValue operator<<(int64_t a, const JsValue& b) { return JsValue(a) << b; }
+inline JsValue operator>>(int64_t a, const JsValue& b) { return JsValue(a) >> b; }
+
+inline JsValue& operator+=(JsValue& a, const JsValue& b) { return a = morph::js_late_add(a, b); }
+inline JsValue& operator-=(JsValue& a, const JsValue& b) { return a = morph::js_late_sub(a, b); }
+inline JsValue& operator*=(JsValue& a, const JsValue& b) { return a = morph::js_late_mul(a, b); }
+inline JsValue& operator/=(JsValue& a, const JsValue& b) { return a = morph::js_late_div(a, b); }
+inline JsValue& operator%=(JsValue& a, const JsValue& b) { return a = morph::js_late_mod(a, b); }
+inline JsValue& operator&=(JsValue& a, const JsValue& b) { return a = a & b; }
+inline JsValue& operator|=(JsValue& a, const JsValue& b) { return a = a | b; }
+inline JsValue& operator^=(JsValue& a, const JsValue& b) { return a = a ^ b; }
+
+inline JsValue& operator++(JsValue& value) {
+    value = JsValue(morph::js_to_number(value).as_double() + 1.0);
+    return value;
+}
+inline JsValue operator++(JsValue& value, int) {
+    JsValue old = value;
+    ++value;
+    return old;
+}
+inline JsValue& operator--(JsValue& value) {
+    value = JsValue(morph::js_to_number(value).as_double() - 1.0);
+    return value;
+}
+inline JsValue operator--(JsValue& value, int) {
+    JsValue old = value;
+    --value;
+    return old;
+}
 
 inline bool JsArray::includes(const JsValue& item, const JsValue& from) const {
     return includes(item, morph::js_to_integer(from));

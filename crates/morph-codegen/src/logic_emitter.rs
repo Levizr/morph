@@ -242,8 +242,11 @@ fn ambient_maps(windows: &[IRWindow]) -> AmbientMaps {
         types.extend(w.reactive_const_types.iter().map(|(k, v)| (k.clone(), v.clone())));
         types.extend(w.fn_return_types.iter().map(|(k, v)| (k.clone(), v.clone())));
         for ml in &w.mutable_locals {
-            if let (Some(name), Some(ty)) = (ml.get("name"), ml.get("type")) {
-                if !name.is_empty() && !ty.is_empty() {
+            if let Some(name) = ml.get("name").filter(|name| !name.is_empty()) {
+                // JSX reads stay reactive: body flow writes the signal and
+                // node expressions must read through its getter.
+                vars.insert(name.clone(), format!("__st_{name}.get()"));
+                if let Some(ty) = ml.get("type").filter(|ty| !ty.is_empty()) {
                     types.insert(name.clone(), ty.clone());
                 }
             }

@@ -69,6 +69,7 @@ run_pass pass-array-methods
 run_pass pass-operators
 run_pass pass-math
 run_pass pass-window
+run_pass pass-late-values
 run_pass pass-rule-warnings
 run_pass pass-lint-config
 

@@ -80,7 +80,7 @@ pub fn cpp_type_to_class(cpp_type: &str) -> OperandClass {
         "JsBoolean" => OperandClass::JsBoolean,
         "JsNumber" => OperandClass::JsNumber,
         "JsString" => OperandClass::JsString,
-        "JsValue" => OperandClass::JsValue,
+        "JsValue" | "JsWindowHandle" | "JsLateValue" => OperandClass::JsValue,
         "JsArray" => OperandClass::JsArray,
         "JsObject" => OperandClass::JsObject,
         "JsNull" | "std::nullptr_t" | "nullptr_t" => OperandClass::Null,

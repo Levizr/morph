@@ -31,6 +31,12 @@ This module is provided by `node_modules/morph/index.d.ts` — it ships with eve
 ### Declarations
 
 - `const`, `let`, `var` with type annotations
+- Late-assigned bindings: `let x;` and `let x = null/undefined` read
+  `undefined` until the first assignment, then hold any JS value — number,
+  string, boolean, object, array, or window handle — with real operator
+  semantics and no type annotation. Late-assigned window handles keep
+  resolving the current window on every use (see
+  [Window handles](../api/windows.md#late-assigned-handles))
 - `function` declarations and expressions
 - Arrow functions (`() => {}`)
 - Arrow/function expressions assigned to consts (inside components and at
@@ -74,6 +80,11 @@ Binary (`+`, `-`, `*`, `/`, `**`, `===`, `!==`, `==`, `!=`, `<`, `>`, etc.), una
 - Exponentiation (`**`, `**=`) coerces both sides with `ToNumber`; logical assignments (`&&=`, `||=`, `??=`) short-circuit and only test `null`/`undefined` for `??=`
 - `==` / `!=` with JS coercion rules, `===` / `!==`, relational operators — on native and `Js*` types alike (see [How JavaScript Comparisons Work in Morph](./js-comparisons.md))
 - String concatenation (`"" + x`)
+- Late-assigned bindings (`let x; … x = ...`) keep JS value semantics
+  through every operator: `+` concatenates when either side is a string,
+  `-` / `*` / `/` / `%` coerce with `ToNumber`, and `++` / `--`, compound
+  assignment, unary `+` / `-` / `~`, and bitwise/shift operators follow JS
+  conversions instead of requiring a native numeric slot
 - Array `push`/`pop`/index access, plus `map`, `filter`, `forEach`, `reduce`, `find`, `findIndex`, `some`, `every`, `sort`, `splice`, `shift`, `unshift`, `fill`, `flat`, `flatMap` on arrays and `JsArray` (callbacks receive `(item)`, `(item, index)`, or `(item, index, array)`)
 - Object `has`/`keys`/index access
 - String methods on both `JsString` and native `std::string`: `trim`, `toUpperCase`, `toLowerCase`, `indexOf`, `substring`, `slice`, `replace`, `charAt`, plus `split`, `startsWith`, `endsWith`, `includes`, `repeat`, `padStart`, `padEnd` — natives lower to `morph::str::*` helpers, chains nest (see [Native C++ Types](./native-types.md#js-methods-on-natives))

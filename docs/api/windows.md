@@ -84,6 +84,38 @@ const win = useWindow("login-window")
 if (win.closed) return   // missing or closed — every operation below degrades safely
 ```
 
+### Late-assigned handles
+
+A handle does not have to be initialized where it is declared. Morph keeps
+the JavaScript value semantics of the binding:
+
+```tsx
+let win
+console.log(win)                // undefined — not a window
+
+win = new Window("/settings")
+win.title = "Settings"          // works from here on
+```
+
+Before the assignment `win` is `undefined`. Logging it, reading `win.title`
+(empty string), testing `win.closed` (`true`), or calling a handle method
+is a safe no-op — it never targets some other live window. After the
+assignment every read and write uses the assigned window. Reassigning
+later switches to the newest window; the old one is untouched.
+
+The same rule applies to declarations that start without a window:
+
+```tsx
+let win: Window
+let win = null
+let win = undefined
+```
+
+Direct initializers (`const win = useWindow()`,
+`const win = new Window(...)`) remain the preferred form and lower to the
+native window id immediately. Use a late assignment when the handle must
+be created in an event handler or only after some condition becomes true.
+
 ## Handle API
 
 | Operation | Description |

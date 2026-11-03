@@ -1,0 +1,48 @@
+import { morphState } from 'morph'
+
+export const windowConfig = { title: "pass-late-values", width: 640, height: 480 }
+
+// Late-assigned bindings hold `undefined` until their first write, then
+// accept any JS value with real operator semantics: numbers, strings,
+// booleans, objects and arrays. None of these need a type annotation or a
+// C++ escape hatch.
+export default function App() {
+  const [status, setStatus] = morphState("idle")
+
+  // Read before assignment is `undefined`; later writes keep JS behavior.
+  let count
+  console.log(count)
+  count = 1
+
+  // Nullish declarations are late bindings too.
+  let label = null
+  label = "ready"
+
+  let data
+  data = { name: "Ada", hits: 0 }
+
+  let list
+  list = [1, 2, 3]
+
+  let enabled = undefined
+  enabled = true
+
+  // Logical assignment and increments on late bindings coerce like JS.
+  let maybe = null
+  maybe ??= "fallback"
+  let word
+  word = "5"
+  word++
+
+  return (
+    <body>
+      <button onClick={() => { count += 1; setStatus(`count=${count}`) }}>inc</button>
+      <button onClick={() => { count++; setStatus(`count=${count}`) }}>inc2</button>
+      <button onClick={() => { label = label + "!"; setStatus(label) }}>bang</button>
+      <button onClick={() => { data.hits += 1; setStatus(`${data.name}:${data.hits}`) }}>hit</button>
+      <button onClick={() => { list = list.concat([4]); setStatus(`len=${list.length}`) }}>push</button>
+      <button onClick={() => { enabled = !enabled; setStatus(enabled ? "on" : "off") }}>toggle</button>
+      <div>{count} {label.toUpperCase()} {data.name} {list.length} {enabled ? "on" : "off"} {maybe} {word} {status}</div>
+    </body>
+  )
+}

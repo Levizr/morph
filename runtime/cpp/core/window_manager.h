@@ -18,6 +18,24 @@
 using WID = int;
 inline constexpr WID kInvalidWid = -1;
 
+/// WID behind a JS-visible handle. Direct `useWindow()` / `new Window()`
+/// lowering produces WIDs; late-assigned handles (`let win; win = ...`)
+/// stay `JsWindowHandle` so reads before assignment preserve JS
+/// `undefined`. Only numbers name a live window; everything else maps to
+/// the invalid id, so a pre-assignment `win.title` / `win.close()` is a
+/// safe no-op instead of accidentally targeting WID 0.
+inline WID window_wid(WID wid)
+{
+    return wid;
+}
+
+inline WID window_wid(const JsValue& value)
+{
+    if (!value.is_number())
+        return kInvalidWid;
+    return static_cast<WID>(value.as_int());
+}
+
 // One mounted route instance: the route's context (signals + owned
 // effects, type-erased — the route's own deleter destroys effects)
 // plus the teardown that runs before the handle is dropped. Touched

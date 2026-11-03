@@ -552,9 +552,12 @@
           "morph no interpreter",
           "morph js runtime",
           "morph translator coverage",
-          "morph math support"
+          "morph math support",
+          "morph late-assigned window handles",
+          "morph late-assigned variables",
+          "morph uninitialized let"
         ],
-        "lastUpdated": "2026-11-01",
+        "lastUpdated": "2026-11-03",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -566,15 +569,17 @@
         "file": "javascript/state",
         "status": "production",
         "author": "PIYUSH",
-        "description": "How state works in Morph: create reactive state with morphState, update it like React's useState, and trigger native re-renders automatically when the value changes.",
+        "description": "How state works in Morph: create reactive state with morphState, update it like React's useState, and trigger native re-renders automatically when the value changes. Late-assigned locals seeded with undefined are covered too.",
         "keywords": [
           "how state works in morph",
           "morphState",
           "morph reactive state",
           "morph useState",
-          "morph re-render state"
+          "morph re-render state",
+          "morph late-assigned local",
+          "morph uninitialized let"
         ],
-        "lastUpdated": "2026-10-19",
+        "lastUpdated": "2026-11-03",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -804,13 +809,15 @@
         "file": "api/windows",
         "status": "production",
         "author": "PIYUSH",
-        "description": "Window API: new Window with route config and data props, useWindow handle access, navigate/close/show/hide/closed/title/on-close, lifecycle safety, and scope rules.",
+        "description": "Window API: new Window with route config and data props, useWindow handle access, late-assigned handles, navigate/close/show/hide/closed/title/on-close, lifecycle safety, and scope rules.",
         "keywords": [
           "morph Window",
           "morph useWindow",
           "morph new Window",
           "morph navigate",
           "morph window handle",
+          "morph late-assigned window",
+          "morph uninitialized window handle",
           "morph page cache",
           "morph navigation.cache",
           "morph window parent",
@@ -819,7 +826,7 @@
           "morph window ownership",
           "morph window title"
         ],
-        "lastUpdated": "2026-11-01",
+        "lastUpdated": "2026-11-03",
         "publishedAt": "2026-09-21",
         "priority": 0.9,
         "changefreq": "monthly"
@@ -1400,14 +1407,15 @@
         "file": "errors/mx-window-member",
         "status": "production",
         "author": "PIYUSH",
-        "description": "Fix mx-window-member: unsupported members on Window handles, supported navigate/close/show/hide/on/title/closed API, and native fallbacks.",
+        "description": "Fix mx-window-member: unsupported members on Window handles, late-assigned `let win` bindings, supported navigate/close/show/hide/on/title/closed API, and native fallbacks.",
         "keywords": [
           "mx-window-member",
           "morph window handle member",
           "morph window focus",
-          "morph useWindow title"
+          "morph useWindow title",
+          "morph late-assigned window handle"
         ],
-        "lastUpdated": "2026-11-01",
+        "lastUpdated": "2026-11-03",
         "publishedAt": "2026-11-01",
         "priority": 0.7,
         "changefreq": "monthly"

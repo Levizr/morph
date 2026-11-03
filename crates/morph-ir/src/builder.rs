@@ -1016,7 +1016,19 @@ impl IRBuilder {
             let read = format!("{}{emitted}.get()", ctx.signal_prefix);
             frame.vars.insert(local.name.clone(), read.clone());
             frame.vars.insert(emitted.clone(), read);
-            let ty = infer_state_type(&local.init);
+            let ty = if local.window {
+                // Late-assigned Window handles are JS values: reading one
+                // before its assignment must yield `undefined`, and later
+                // member/method lowering narrows through `window_wid(...)`.
+                Some("JsWindowHandle".to_string())
+            } else if matches!(local.init.trim(), "undefined" | "null") {
+                // Empty/nullish bindings are assigned later. Keep the JS
+                // value (`undefined` before the assignment) instead of
+                // inferring a native zero from the placeholder.
+                Some("JsLateValue".to_string())
+            } else {
+                infer_state_type(&local.init)
+            };
             if let Some(ty) = &ty {
                 frame.types.insert(local.name.clone(), ty.clone());
                 frame.types.insert(emitted.clone(), ty.clone());
@@ -8929,6 +8941,93 @@ export default function App() {
         reactive_texts(&win.nodes[0], &mut texts);
         assert!(texts.iter().any(|t| t.contains("label")), "{texts:?}");
         assert!(texts.iter().any(|t| t.contains("total")), "{texts:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn late_window_handle_body_local_uses_js_window_signal() {
+        let root = scratch("latewindow");
+        write_file(
+            &root,
+            "App.mx",
+            r#"
+import { Window, useWindow } from 'morph'
+
+export default function App() {
+  let win
+  console.log(win)
+  win = new Window("/settings")
+  return (
+    <body>
+      <button onClick={() => { win.title = "ready" }}>retitle</button>
+      <text>{win.title}</text>
+    </body>
+  )
+}
+"#,
+        );
+        let graph = morph_parser::resolve_graph(&root.join("App.mx"), &root).unwrap();
+        let win = &IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap()[0];
+        let local = win
+            .mutable_locals
+            .iter()
+            .find(|m| m.get("name").map(String::as_str) == Some("win"))
+            .expect("late window local");
+        assert_eq!(local.get("type").map(String::as_str), Some("JsWindowHandle"), "{local:?}");
+        let eff = win.body_effects.first().expect("body effect");
+        assert!(eff.contains("__st_win.set(JsUndefined{})"), "{eff}");
+        assert!(eff.contains("__st_win.set(__morph_new_window(\"/settings\""), "{eff}");
+        assert!(eff.contains("std::println(\"{}\", __st_win.peek())"), "{eff}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn late_value_body_local_uses_js_late_signal() {
+        let root = scratch("latevalue");
+        write_file(
+            &root,
+            "App.mx",
+            r#"
+export default function App() {
+  let count
+  console.log(count)
+  count = 5
+  let label = null
+  label = "hi"
+  let data
+  data = { name: "Ada" }
+  return (
+    <body>
+      <button onClick={() => { count = count + 1 }}>inc</button>
+      <text>{count} {label.toUpperCase()} {data.name}</text>
+    </body>
+  )
+}
+"#,
+        );
+        let graph = morph_parser::resolve_graph(&root.join("App.mx"), &root).unwrap();
+        let win = &IRBuilder::new().build_with_graph(&graph, &[], &HashMap::new()).unwrap()[0];
+        let local = |name: &str| {
+            win.mutable_locals
+                .iter()
+                .find(|m| m.get("name").map(String::as_str) == Some(name))
+                .unwrap_or_else(|| panic!("late value local `{name}`: {:?}", win.mutable_locals))
+        };
+        for name in ["count", "label", "data"] {
+            assert_eq!(
+                local(name).get("type").map(String::as_str),
+                Some("JsLateValue"),
+                "{name}: {:?}",
+                local(name)
+            );
+        }
+        assert_eq!(local("label").get("init").map(String::as_str), Some("null"));
+        let eff = win.body_effects.first().expect("body effect");
+        assert!(eff.contains("__st_count.set(JsUndefined{})"), "{eff}");
+        assert!(eff.contains("__st_count.set(5)"), "{eff}");
+        assert!(eff.contains("__st_label.set(\"hi\")"), "{eff}");
+        assert!(eff.contains("__st_data.set("), "{eff}");
+        assert!(!eff.contains("std::get<JsNumber>"), "{eff}");
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -367,6 +367,8 @@ pub fn headers_for(cpp_type: &str) -> Vec<&'static str> {
         ("JsArray", "\"../../runtime/cpp/types/js_types.h\""),
         ("JsObject", "\"../../runtime/cpp/types/js_types.h\""),
         ("JsValue", "\"../../runtime/cpp/types/js_types.h\""),
+        ("JsWindowHandle", "\"../../runtime/cpp/types/js_types.h\""),
+        ("JsLateValue", "\"../../runtime/cpp/types/js_types.h\""),
         ("JsUndefined", "\"../../runtime/cpp/types/js_types.h\""),
         ("JsNull", "\"../../runtime/cpp/types/js_types.h\""),
         ("morph::Result", "\"../../runtime/cpp/reactivity/promise.h\""),

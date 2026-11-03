@@ -315,6 +315,10 @@ pub struct MutableLocal {
     pub name: String,
     /// Initializer source text (used to infer the signal's C++ type).
     pub init: String,
+    /// The local is later assigned a Window handle (`win = new Window()`),
+    /// so it lowers to a JS-visible `JsWindowHandle` signal instead of a
+    /// value inferred from its initializer.
+    pub window: bool,
 }
 
 /// Intermediate JSX representation (mirrors Python's dict-based IR).

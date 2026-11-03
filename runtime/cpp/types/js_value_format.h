@@ -41,11 +41,9 @@ template <>
 struct std::formatter<JsNumber> {
     constexpr auto parse(auto& ctx) { return ctx.begin(); }
     auto format(const JsNumber& v, auto& ctx) const {
-        if (v.is_int())
-            return std::format_to(ctx.out(), "{}", std::get<int64_t>(v.value));
-        if (v.is_big())
-            return std::format_to(ctx.out(), "{}", std::get<std::string>(v.value));
-        return std::format_to(ctx.out(), "{}", std::get<double>(v.value));
+        // as_string applies JS number formatting: NaN/Infinity spelling,
+        // shortest round-trip doubles, integral values without `.0`.
+        return std::format_to(ctx.out(), "{}", v.as_string());
     }
 };
 

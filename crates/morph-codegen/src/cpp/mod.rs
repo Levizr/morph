@@ -2364,6 +2364,22 @@ fn generate_self_test(windows: &[IRWindow], routes: &[RouteEntry]) -> String {
     // every null-safe path; display behavior (show/focus/sweep) is
     // verified visually, not here.
     {
+        // JS-visible handles narrow through `window_wid`: unassigned
+        // handles stay `undefined` and must never name WID 0, which is a
+        // valid live window.
+        lines.push(
+            "    check(window_wid(JsValue()) == kInvalidWid, \"win:undefined-invalid\");"
+                .to_string(),
+        );
+        lines.push(
+            "    check(window_wid(JsValue(\"901\")) == kInvalidWid, \"win:non-number-invalid\");"
+                .to_string(),
+        );
+        lines.push("    check(window_wid(JsValue(0)) == 0, \"win:wid-zero-valid\");".to_string());
+        lines.push(
+            "    check(window_wid(JsValue(901)) == 901, \"win:number-passthrough\");".to_string(),
+        );
+        lines.push("    check(window_wid(WID(902)) == 902, \"win:wid-passthrough\");".to_string());
         lines.push("    glfwSetErrorCallback([](int, const char*){});".to_string());
         lines.push("    auto& __wm = WindowManager::get();".to_string());
         lines.push(

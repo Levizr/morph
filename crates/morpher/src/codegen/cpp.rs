@@ -29,6 +29,18 @@ pub struct CppTranslator<'a> {
     /// and mutating methods share JS reference semantics; `std::vector`
     /// stays the fast path everywhere else.
     js_array_receiver_vars: HashSet<String>,
+    /// Names assigned a window handle somewhere in the program
+    /// (`win = new Window(...)` / `win = useWindow(...)`). Declarations
+    /// without a direct window initializer become `JsWindowHandle`, the
+    /// JS-visible `JsValue` form: reads stay `undefined` before the
+    /// assignment, and later handle operations resolve through
+    /// `window_wid(...)`.
+    late_window_vars: HashSet<String>,
+    /// Names assigned any value somewhere in the program. Empty/nullish
+    /// declarations of these names become `JsLateValue`, so a read before
+    /// the assignment is `undefined` and later assignments keep JS value
+    /// semantics.
+    late_value_vars: HashSet<String>,
     /// When set, top-level forward declarations omit parameter defaults.
     /// Project builds declare the defaults once in `morph_api.h`; repeating
     /// them on the premain prototype is a C++ redefinition error.
@@ -141,6 +153,48 @@ fn escape_cpp_template_raw(raw: &str) -> String {
     out
 }
 
+/// True when an expression definitely yields a window handle. Wrappers
+/// are unwrapped because `const w = (new Window(...) as Window)` must still
+/// be tracked. Conditional/logical forms count only when every branch is a
+/// handle, so the declaration's native type is unambiguous.
+fn is_window_value_expr(expr: &Expression<'_>) -> bool {
+    match expr {
+        Expression::CallExpression(call) => {
+            matches!(&call.callee, Expression::Identifier(id) if id.name.as_str() == "useWindow")
+        }
+        Expression::NewExpression(new) => {
+            !new.arguments.is_empty()
+                && matches!(&new.callee, Expression::Identifier(id) if id.name.as_str() == "Window")
+        }
+        Expression::TSAsExpression(a) => is_window_value_expr(&a.expression),
+        Expression::TSSatisfiesExpression(s) => is_window_value_expr(&s.expression),
+        Expression::TSNonNullExpression(n) => is_window_value_expr(&n.expression),
+        Expression::ParenthesizedExpression(p) => is_window_value_expr(&p.expression),
+        Expression::ConditionalExpression(c) => {
+            is_window_value_expr(&c.consequent) && is_window_value_expr(&c.alternate)
+        }
+        Expression::LogicalExpression(l) => {
+            is_window_value_expr(&l.left) && is_window_value_expr(&l.right)
+        }
+        _ => false,
+    }
+}
+
+/// True when a declaration starts without a real value (`let x;`,
+/// `let x = null`, `let x = undefined`, plus TS wrappers). Those bindings
+/// keep JS value semantics when they are assigned later.
+fn is_nullish_value_expr(expr: &Expression<'_>) -> bool {
+    match expr {
+        Expression::NullLiteral(_) => true,
+        Expression::Identifier(id) => id.name.as_str() == "undefined",
+        Expression::TSAsExpression(a) => is_nullish_value_expr(&a.expression),
+        Expression::TSSatisfiesExpression(s) => is_nullish_value_expr(&s.expression),
+        Expression::TSNonNullExpression(n) => is_nullish_value_expr(&n.expression),
+        Expression::ParenthesizedExpression(p) => is_nullish_value_expr(&p.expression),
+        _ => false,
+    }
+}
+
 /// A single-char value as a C++ character literal.
 fn cpp_char_literal(value: &str) -> String {
     let mut out = String::with_capacity(value.len() + 2);
@@ -222,6 +276,8 @@ impl<'a> CppTranslator<'a> {
             active_narrows: HashMap::new(),
             destructure_count: 0,
             js_array_receiver_vars: HashSet::new(),
+            late_window_vars: HashSet::new(),
+            late_value_vars: HashSet::new(),
             omit_param_defaults: false,
         };
         this
@@ -318,7 +374,47 @@ impl<'a> CppTranslator<'a> {
                 );
             }
         }
+        self.collect_late_vars(program);
         self.collect_js_array_receivers(program);
+    }
+
+    /// Record names assigned later in the program.
+    ///
+    /// The scan is whole-file because the declaration and its later
+    /// assignment may sit in different snippets (`let x;` in a component
+    /// body, `x = ...` in a JSX handler). Per-name tracking matches the
+    /// translator's existing Window-handle model; declarations with a
+    /// direct initializer keep their inferred native type.
+    fn collect_late_vars(&mut self, program: &Program<'a>) {
+        struct Collector<'s> {
+            windows: &'s mut HashSet<String>,
+            values: &'s mut HashSet<String>,
+        }
+        impl<'a> Visit<'a> for Collector<'_> {
+            fn visit_assignment_expression(&mut self, a: &AssignmentExpression<'a>) {
+                if let AssignmentTarget::AssignmentTargetIdentifier(id) = &a.left {
+                    // Any write (plain, compound, logical) means a later
+                    // declaration without an initializer must stay a JS
+                    // value.
+                    self.values.insert(id.name.to_string());
+                    if a.operator == AssignmentOperator::Assign && is_window_value_expr(&a.right) {
+                        self.windows.insert(id.name.to_string());
+                    }
+                }
+                oxc_ast_visit::walk::walk_assignment_expression(self, a);
+            }
+
+            fn visit_update_expression(&mut self, u: &oxc_ast::ast::UpdateExpression<'a>) {
+                if let oxc_ast::ast::SimpleAssignmentTarget::AssignmentTargetIdentifier(id) =
+                    &u.argument
+                {
+                    self.values.insert(id.name.to_string());
+                }
+                oxc_ast_visit::walk::walk_update_expression(self, u);
+            }
+        }
+        Collector { windows: &mut self.late_window_vars, values: &mut self.late_value_vars }
+            .visit_program(program);
     }
 
     /// Record identifiers used as receivers of lowered Array methods.
@@ -611,22 +707,16 @@ impl<'a> CppTranslator<'a> {
             return Some(format!("{}/* destructuring not supported */", self.indent()));
         }
         // Track Window handles for method/property lowering: direct
-        // `useWindow(...)` / `new Window(...)` initializers only. A
-        // `Window` annotation also marks helpers/locals even when the
-        // initializer comes from another function.
-        if let Some(init) = d.init.as_ref() {
-            let is_window = match init {
-                Expression::CallExpression(call) => {
-                    matches!(&call.callee, Expression::Identifier(id) if id.name.as_str() == "useWindow")
-                }
-                Expression::NewExpression(n) => {
-                    matches!(&n.callee, Expression::Identifier(id) if id.name.as_str() == "Window")
-                }
-                _ => false,
-            };
-            if is_window {
-                self.ctx.window_vars.insert(name.clone());
-            }
+        // `useWindow(...)` / `new Window(...)` initializers keep their WID
+        // lowering. A late assignment (`let win; ... win = new Window()`)
+        // instead forces the JS-visible `JsWindowHandle`, so reads before
+        // assignment stay `undefined`. A `Window` annotation also marks
+        // helpers/locals even when the initializer comes from another
+        // function.
+        let direct_window = d.init.as_ref().is_some_and(is_window_value_expr);
+        let late_window = !direct_window && self.late_window_vars.contains(&name);
+        if direct_window || late_window {
+            self.ctx.window_vars.insert(name.clone());
         }
         let typed_window = d.type_annotation.as_ref().is_some_and(|ta| {
             resolve_type_annotation(
@@ -638,7 +728,7 @@ impl<'a> CppTranslator<'a> {
             ) == "WID"
         });
         let out = self.emit_typed_variable_declarator(d, &name, kind);
-        if typed_window {
+        if typed_window && !late_window {
             self.ctx.var_types.insert(name.clone(), "WID".to_string());
         }
         out
@@ -1369,6 +1459,25 @@ impl<'a> CppTranslator<'a> {
             && (cpp_type == "auto" || cpp_type == "JsValue" || cpp_type.starts_with("std::vector<"))
         {
             cpp_type = "JsArray".to_string();
+        }
+        // Window handles: direct initializers stay WID ints (the native
+        // registry key). Late-assigned locals use the JS-visible
+        // `JsWindowHandle = JsValue` form so `console.log(win)` prints
+        // `undefined` before assignment; handle operations narrow through
+        // `window_wid(...)` at use sites.
+        if d.init.as_ref().is_some_and(is_window_value_expr) {
+            cpp_type = "WID".to_string();
+        } else if self.late_window_vars.contains(name) {
+            cpp_type = "JsWindowHandle".to_string();
+        } else if d.type_annotation.is_none()
+            && (d.init.is_none()
+                || (self.late_value_vars.contains(name)
+                    && d.init.as_ref().is_some_and(is_nullish_value_expr)))
+        {
+            // `let x;` and `let x = null/undefined` bindings are JS
+            // values: reads before the assignment stay `undefined`, and
+            // later assignments can hold any value.
+            cpp_type = "JsLateValue".to_string();
         }
         let new_class_name = self.new_class_name_of(&cpp_type, &d.init);
         if let Some(class_name) = &new_class_name {
@@ -3700,6 +3809,16 @@ impl<'a> CppTranslator<'a> {
                 {
                     let read =
                         self.ctx.state_vars.get(id.name.as_str()).cloned().unwrap_or_default();
+                    let late_signal = self
+                        .ctx
+                        .var_types
+                        .get(id.name.as_str())
+                        .is_some_and(|ty| ty.contains("JsLateValue"));
+                    if late_signal {
+                        let helper =
+                            if u.operator.as_str() == "++" { "js_late_add" } else { "js_late_sub" };
+                        return format!("{set_head}(morph::{helper}({read}, 1))");
+                    }
                     let bin = if u.operator.as_str() == "++" { "+" } else { "-" };
                     return format!("{set_head}(({read}) {bin} 1)");
                 }
@@ -4017,7 +4136,15 @@ impl<'a> CppTranslator<'a> {
                 id => format!("WindowManager::get().widForAlias(\"{id}\")"),
             },
             Expression::NullLiteral(_) => "kInvalidWid".to_string(),
-            other => format!("JsValue({}).as_int()", self.emit_expression(other)),
+            other => {
+                // Handles (WID ints or JS-visible JsWindowHandle values)
+                // narrow through window_wid: JsValue(undefined).as_int()
+                // would otherwise silently name WID 0, a live window.
+                if let Some(handle) = self.window_handle_expr(other) {
+                    return handle;
+                }
+                format!("JsValue({}).as_int()", self.emit_expression(other))
+            }
         }
     }
 
@@ -4091,8 +4218,11 @@ impl<'a> CppTranslator<'a> {
                 | "JsBoolean"
                 | "JsString"
                 | "JsValue"
+                | "JsWindowHandle"
+                | "JsLateValue"
                 | "JsNull"
                 | "JsUndefined"
+                | "WID"
         ) || inner_type.starts_with("int")
             || inner_type.starts_with("uint")
             || inner_type.starts_with("long")
@@ -4588,9 +4718,15 @@ impl<'a> CppTranslator<'a> {
             }
         }
 
+        // Late-assigned values keep JS operator semantics: `undefined + 1`
+        // is NaN, strings concatenate, and objects coerce through ToNumber
+        // instead of requiring the numeric variant of the union.
+        let late_value = self.is_late_value_expr(&b.left) || self.is_late_value_expr(&b.right);
         // Check if we need to convert JsValue to number for arithmetic
-        let needs_left_convert = self.is_jsarray_index(&b.left) || self.is_jsvalue_var(&b.left);
-        let needs_right_convert = self.is_jsarray_index(&b.right) || self.is_jsvalue_var(&b.right);
+        let needs_left_convert =
+            !late_value && (self.is_jsarray_index(&b.left) || self.is_jsvalue_var(&b.left));
+        let needs_right_convert =
+            !late_value && (self.is_jsarray_index(&b.right) || self.is_jsvalue_var(&b.right));
 
         let mut left = self.emit_expression(&b.left);
         let mut right = self.emit_expression(&b.right);
@@ -4621,8 +4757,26 @@ impl<'a> CppTranslator<'a> {
             }
         }
 
-        // For division, use double to match JS semantics (float division)
-        if op == "/" {
+        // Late-assigned values coerce at runtime: `+` concatenates when
+        // either side is a string, other arithmetic uses ToNumber.
+        if late_value {
+            let helper = match op {
+                "+" => Some("js_late_add"),
+                "-" => Some("js_late_sub"),
+                "*" => Some("js_late_mul"),
+                "/" => Some("js_late_div"),
+                "%" => Some("js_late_mod"),
+                _ => None,
+            };
+            if let Some(helper) = helper {
+                self.ctx.need("JsValue");
+                return format!("morph::{helper}({left}, {right})");
+            }
+        }
+
+        // For division, use double to match JS semantics (float division).
+        // Late values carry that semantics in their runtime operators.
+        if op == "/" && !late_value {
             // Check if operands are integer types that need float promotion
             let left_is_int = self.is_integer_type(&b.left);
             let right_is_int = self.is_integer_type(&b.right);
@@ -4667,6 +4821,17 @@ impl<'a> CppTranslator<'a> {
         false
     }
 
+    /// True when the expression reads a late-assigned JS value binding.
+    /// Those use `JsLateValue` so every operator keeps JS semantics.
+    fn is_late_value_expr(&self, expr: &Expression<'a>) -> bool {
+        if let Expression::Identifier(id) = expr {
+            if let Some(var_type) = self.ctx.var_types.get(id.name.as_str()) {
+                return var_type.contains("JsLateValue");
+            }
+        }
+        false
+    }
+
     fn is_integer_type(&self, expr: &Expression<'a>) -> bool {
         // Check if expression is a numeric literal or variable with integer type
         match expr {
@@ -4698,7 +4863,10 @@ impl<'a> CppTranslator<'a> {
         // Check if expression is a JsValue type
         if let Expression::Identifier(id) = expr {
             if let Some(var_type) = self.ctx.var_types.get(id.name.as_str()) {
-                return var_type == "JsValue" || var_type == "JsArray" || var_type == "JsObject";
+                return matches!(
+                    var_type.as_str(),
+                    "JsValue" | "JsLateValue" | "JsArray" | "JsObject"
+                );
             }
         }
         false
@@ -4717,7 +4885,7 @@ impl<'a> CppTranslator<'a> {
                 {
                     return None;
                 }
-                if var_type == "JsString" || var_type == "JsValue" {
+                if var_type == "JsString" || var_type == "JsValue" || var_type == "JsLateValue" {
                     return Some(false);
                 }
                 if var_type == "JsArray" || var_type == "JsObject" {
@@ -4784,7 +4952,8 @@ impl<'a> CppTranslator<'a> {
                             // vector<JsValue> or other -> element is JsValue -> direct (JsValue has methods)
                             return Some(false);
                         }
-                        if bt == "JsArray" || bt == "JsObject" || bt == "JsValue" {
+                        if matches!(bt.as_str(), "JsArray" | "JsObject" | "JsValue" | "JsLateValue")
+                        {
                             return Some(false);
                         }
                         // Unknown base: if base name looks like split result? default native for chaining
@@ -4845,6 +5014,24 @@ impl<'a> CppTranslator<'a> {
             if let Some(bin) = compound_assign_binop(op) {
                 let read =
                     self.ctx.state_vars.get(left_id.name.as_str()).cloned().unwrap_or_default();
+                let late_signal = self
+                    .ctx
+                    .var_types
+                    .get(left_id.name.as_str())
+                    .is_some_and(|ty| ty.contains("JsLateValue"));
+                if late_signal {
+                    let helper = match op {
+                        "+=" => Some("js_late_add"),
+                        "-=" => Some("js_late_sub"),
+                        "*=" => Some("js_late_mul"),
+                        "/=" => Some("js_late_div"),
+                        "%=" => Some("js_late_mod"),
+                        _ => None,
+                    };
+                    if let Some(helper) = helper {
+                        return format!("{set_head}(morph::{helper}({read}, {right}))");
+                    }
+                }
                 return format!("{set_head}(({read}) {bin} ({right}))");
             }
             // Exponentiation goes through ToNumber like JS; logical
@@ -4859,7 +5046,12 @@ impl<'a> CppTranslator<'a> {
             if matches!(op, "&&=" | "||=" | "??=") {
                 let read =
                     self.ctx.state_vars.get(left_id.name.as_str()).cloned().unwrap_or_default();
-                let value = self.emit_logical_assign_value(op, &read, &right);
+                let late_signal = self
+                    .ctx
+                    .var_types
+                    .get(left_id.name.as_str())
+                    .is_some_and(|ty| ty.contains("JsLateValue"));
+                let value = self.emit_logical_assign_value(op, &read, &right, late_signal);
                 return format!("{set_head}({value})");
             }
             // `??=` / `&&=` / `||=` keep their default lowering.
@@ -4929,7 +5121,20 @@ impl<'a> CppTranslator<'a> {
                 let value = self.emit_pow(&left, &right);
                 return format!("({left} = {value})");
             }
-            let value = self.emit_logical_assign_value(a.operator.as_str(), &left, &right);
+            // A late binding holds a JsValue, so both ternary branches must
+            // stay JsValue even when the other side is a native literal
+            // (`let y = null; y ||= "set"`).
+            let late_target = matches!(
+                &a.left,
+                AssignmentTarget::AssignmentTargetIdentifier(id)
+                    if self
+                        .ctx
+                        .var_types
+                        .get(id.name.as_str())
+                        .is_some_and(|ty| ty.contains("JsLateValue"))
+            );
+            let value =
+                self.emit_logical_assign_value(a.operator.as_str(), &left, &right, late_target);
             return format!("({left} = {value})");
         }
         let left = self.emit_assignment_target(&a.left);
@@ -4944,7 +5149,18 @@ impl<'a> CppTranslator<'a> {
             AssignmentTarget::StaticMemberExpression(mem)
                 if matches!(&mem.object, Expression::ThisExpression(_))
         );
-        let right = if self.is_jsvalue_var(&a.right) && !assign_this_field {
+        // Assigning a JS value to a late binding stays a value copy; the
+        // numeric unwrap is only for native numeric targets.
+        let assign_late_value = matches!(
+            &a.left,
+            AssignmentTarget::AssignmentTargetIdentifier(id)
+                if self
+                    .ctx
+                    .var_types
+                    .get(id.name.as_str())
+                    .is_some_and(|ty| ty.contains("JsLateValue"))
+        );
+        let right = if self.is_jsvalue_var(&a.right) && !assign_this_field && !assign_late_value {
             format!("std::get<JsNumber>({}.inner).as_int()", right)
         } else if let AssignmentTarget::AssignmentTargetIdentifier(left_id) = &a.left {
             match self.ctx.var_types.get(left_id.name.as_str()).cloned() {
@@ -4977,18 +5193,27 @@ impl<'a> CppTranslator<'a> {
     ///
     /// The read appears in both the condition and the fallback, matching JS
     /// short-circuiting: `a &&= b` writes `b` only when `a` is truthy.
-    fn emit_logical_assign_value(&mut self, op: &str, read: &str, right: &str) -> String {
+    fn emit_logical_assign_value(
+        &mut self,
+        op: &str,
+        read: &str,
+        right: &str,
+        wrap_js_value: bool,
+    ) -> String {
         // Both helpers live in js_convert.h; a native-only app still needs
         // the include even when it uses no `Js*` type.
         self.ctx.need("JsValue");
+        let read_value = if wrap_js_value { format!("JsValue({read})") } else { read.to_string() };
+        let right_value =
+            if wrap_js_value { format!("JsValue({right})") } else { right.to_string() };
         if op == "??=" {
-            return format!("(morph::js_is_nullish({read}) ? ({right}) : ({read}))");
+            return format!("(morph::js_is_nullish({read}) ? ({right_value}) : ({read_value}))");
         }
         let test = format!("morph::js_to_boolean({read})");
         if op == "&&=" {
-            format!("({test} ? ({right}) : ({read}))")
+            format!("({test} ? ({right_value}) : ({read_value}))")
         } else {
-            format!("({test} ? ({read}) : ({right}))")
+            format!("({test} ? ({read_value}) : ({right_value}))")
         }
     }
 
@@ -5981,6 +6206,9 @@ impl<'a> CppTranslator<'a> {
                 | "trim"
                 | "replace"
                 | "split"
+                | "startsWith"
+                | "endsWith"
+                | "includes"
                 | "toString"
                 | "length"
                 | "push"
@@ -6008,7 +6236,7 @@ impl<'a> CppTranslator<'a> {
             }
             return matches!(
                 self.ctx.var_types.get(id.name.as_str()).map(|s| s.as_str()),
-                Some("JsObject") | Some("JsValue")
+                Some("JsObject") | Some("JsValue") | Some("JsLateValue")
             );
         }
         // For chained access like `a.b.c` or `arr[i].prop`, infer the
@@ -6016,12 +6244,12 @@ impl<'a> CppTranslator<'a> {
         // JsObject and must bracket; `arr[i]` on a vector<string> stays
         // dot for string methods.
         if let Some(t) = self.infer_type_from_init(obj_node) {
-            if t == "JsObject" || t == "JsValue" {
+            if matches!(t.as_str(), "JsObject" | "JsValue" | "JsLateValue") {
                 return true;
             }
         }
         if let Some(t) = self.ctx.var_types.get(obj_str) {
-            return t == "JsObject" || t == "JsValue";
+            return matches!(t.as_str(), "JsObject" | "JsValue" | "JsLateValue");
         }
         // Also check if obj_str looks like an object access (contains ["), then likely JsObject
         if obj_str.contains("[\"") {
@@ -6054,11 +6282,16 @@ impl<'a> CppTranslator<'a> {
     }
 
     /// True for bindings carrying a window handle: locals tracked from a
-    /// `useWindow()` / `new Window()` initializer, and `Window`-typed
-    /// bindings (parameters, props, annotated locals).
+    /// `useWindow()` / `new Window()` initializer, late-assigned handles,
+    /// and `Window`-typed bindings (parameters, props, annotated locals).
     fn is_window_handle_var(&self, name: &str) -> bool {
         self.ctx.window_vars.contains(name)
-            || self.ctx.var_types.get(name).is_some_and(|ty| ty == "WID")
+            || self.late_window_vars.contains(name)
+            || self
+                .ctx
+                .var_types
+                .get(name)
+                .is_some_and(|ty| ty == "WID" || ty.contains("JsWindowHandle"))
     }
 
     /// Resolve a window-handle receiver to its WID expression.
@@ -6072,7 +6305,21 @@ impl<'a> CppTranslator<'a> {
     fn window_handle_expr(&mut self, obj: &Expression<'a>) -> Option<String> {
         let obj = Self::unwrap_expr(obj);
         if let Expression::Identifier(id) = obj {
-            return self.is_window_handle_var(id.name.as_str()).then(|| id.name.to_string());
+            let name = id.name.as_str();
+            if !self.is_window_handle_var(name) {
+                return None;
+            }
+            let emitted = self.emit_expression(obj);
+            let ty = self.ctx.var_types.get(name).map(String::as_str).unwrap_or_default();
+            // Late handles are `JsValue`s (possibly closure-wrapped, in
+            // which case `emit_expression` already dereferenced them).
+            // Narrow to the WID only at the native call boundary.
+            if ty.contains("JsWindowHandle")
+                || (self.late_window_vars.contains(name) && ty != "WID")
+            {
+                return Some(format!("window_wid({emitted})"));
+            }
+            return Some(emitted);
         }
         if let Expression::CallExpression(call) = obj {
             if let Expression::Identifier(callee) = &call.callee {
@@ -6510,6 +6757,28 @@ mod tests {
         out.join("\n")
     }
 
+    /// Like [`translate_stmts`], but runs the whole-program analysis passes
+    /// (late Window handles, escape analysis, array receivers).
+    fn translate_analyzed(source: &str) -> String {
+        use oxc_allocator::Allocator;
+        use oxc_parser::Parser;
+        use oxc_span::SourceType;
+        let allocator = Allocator::default();
+        let source_type =
+            SourceType::from_path("file.ts").unwrap_or_default().with_typescript(true);
+        let parsed = Parser::new(&allocator, source, source_type).parse();
+        assert!(parsed.diagnostics.is_empty());
+        let mut t = CppTranslator::new(source, 0, TypeMode::Infer, None);
+        t.analyze_program(&parsed.program);
+        let mut out = Vec::new();
+        for stmt in &parsed.program.body {
+            if let Some(code) = t.emit_statement(stmt) {
+                out.push(code);
+            }
+        }
+        out.join("\n")
+    }
+
     #[test]
     fn object_spread_and_computed_keys_build_at_runtime() {
         let out = translate_stmts(
@@ -6607,6 +6876,140 @@ mod tests {
     }
 
     #[test]
+    fn late_window_handles_keep_js_values_and_narrow_at_use_sites() {
+        let out = translate_analyzed(
+            "let win;\n\
+             console.log(win);\n\
+             win = new Window(\"/settings\");\n\
+             win.title = \"ready\";\n\
+             win.close();\n\
+             const shut = win.closed;\n\
+             const child = new Window(\"/login\", { parent: win });",
+        );
+        assert!(out.contains("JsWindowHandle win{}"), "{out}");
+        assert!(out.contains("std::println(\"{}\", win)"), "{out}");
+        assert!(out.contains("win = __morph_new_window(\"/settings\""), "{out}");
+        assert!(out.contains("__morph_win_set_title(window_wid(win), \"ready\")"), "{out}");
+        assert!(out.contains("WindowManager::get().close(window_wid(win))"), "{out}");
+        assert!(out.contains("__morph_win_closed(window_wid(win))"), "{out}");
+        assert!(out.contains("{\"parent\", window_wid(win)}"), "{out}");
+    }
+
+    #[test]
+    fn late_window_nullish_and_typed_declarations_use_js_handles() {
+        for source in [
+            "let win: Window;\nwin = useWindow();\nwin.title = \"typed\";",
+            "let win = null;\nwin = useWindow();\nwin.title = \"nullish\";",
+            "let win = undefined;\nwin = new Window(\"/settings\");\nwin.close();",
+        ] {
+            let out = translate_analyzed(source);
+            assert!(out.contains("JsWindowHandle win"), "{source}: {out}");
+            assert!(out.contains("window_wid(win)"), "{source}: {out}");
+            assert!(!out.contains("WID win"), "{source}: {out}");
+        }
+    }
+
+    #[test]
+    fn late_values_keep_js_semantics() {
+        let out = translate_analyzed(
+            "let n;\n\
+             console.log(n);\n\
+             n = 5;\n\
+             console.log(n + 1);\n\
+             let s;\n\
+             s = \"hi\";\n\
+             console.log(s + \"!\");\n\
+             console.log(s.toUpperCase());\n\
+             let obj;\n\
+             obj = { name: \"ada\" };\n\
+             console.log(obj.name);\n\
+             let z = null;\n\
+             z = 7;\n\
+             console.log(z - 2);",
+        );
+        assert!(out.contains("JsLateValue n{}"), "{out}");
+        assert!(out.contains("JsLateValue s{}"), "{out}");
+        assert!(out.contains("JsLateValue obj{}"), "{out}");
+        assert!(out.contains("JsLateValue z = JsNull{}"), "{out}");
+        assert!(out.contains("std::println(\"{}\", n)"), "{out}");
+        assert!(out.contains("(n = 5)"), "{out}");
+        assert!(out.contains("morph::js_late_add(n, 1)"), "{out}");
+        assert!(!out.contains("std::get<JsNumber>(n.inner)"), "{out}");
+        assert!(!out.contains("std::get<JsNumber>(s.inner)"), "{out}");
+        assert!(out.contains("morph::js_late_add(s, JsString(\"!\"))"), "{out}");
+        assert!(out.contains("morph::js_late_sub(z, 2)"), "{out}");
+        assert!(out.contains("obj[\"name\"]"), "{out}");
+    }
+
+    #[test]
+    fn late_value_operators_lower_without_numeric_narrowing() {
+        let out = translate_analyzed(
+            "let x;\n\
+             x = 5;\n\
+             x++;\n\
+             x += 2;\n\
+             x *= 3;\n\
+             x &= 4;\n\
+             console.log(-x);\n\
+             console.log(~x);",
+        );
+        assert!(out.contains("JsLateValue x{}"), "{out}");
+        assert!(out.contains("x++"), "{out}");
+        assert!(out.contains("(x += 2)"), "{out}");
+        assert!(out.contains("std::println(\"{}\", -x)"), "{out}");
+        assert!(out.contains("std::println(\"{}\", ~x)"), "{out}");
+        assert!(!out.contains("std::get<JsNumber>"), "{out}");
+    }
+
+    #[test]
+    fn late_value_logical_assignments_keep_js_value_type() {
+        let out = translate_analyzed(
+            "let y = null;\n\
+             y ||= \"set\";\n\
+             let z;\n\
+             z ??= 9;\n\
+             z++;\n\
+             console.log(z);",
+        );
+        assert!(out.contains("JsLateValue y = JsNull{}"), "{out}");
+        assert!(out.contains("JsLateValue z{}"), "{out}");
+        assert!(out.contains("JsValue(\"set\")"), "{out}");
+        assert!(out.contains("JsValue(9)"), "{out}");
+        assert!(out.contains("z++"), "{out}");
+    }
+
+    #[test]
+    fn module_level_late_window_handles_lower() {
+        let out = translate_analyzed(
+            "let win;\n\
+             console.log(win);\n\
+             win = new Window(\"/settings\");\n\
+             win.title = \"late\";\n\
+             win.close();",
+        );
+        assert!(out.contains("JsWindowHandle win{}"), "{out}");
+        assert!(out.contains("std::println(\"{}\", win)"), "{out}");
+        assert!(out.contains("__morph_win_set_title(window_wid(win), \"late\")"), "{out}");
+        assert!(out.contains("WindowManager::get().close(window_wid(win))"), "{out}");
+    }
+
+    #[test]
+    fn direct_window_initializers_keep_wid_lowering() {
+        let out = translate_analyzed(
+            "const current = useWindow();\n\
+             current.title = \"hi\";\n\
+             const fresh = new Window(\"/settings\");\n\
+             fresh.close();",
+        );
+        assert!(out.contains("WID current = __morph_current_window()"), "{out}");
+        assert!(out.contains("WID fresh = __morph_new_window(\"/settings\""), "{out}");
+        assert!(out.contains("__morph_win_set_title(current, \"hi\")"), "{out}");
+        assert!(out.contains("WindowManager::get().close(fresh)"), "{out}");
+        assert!(!out.contains("window_wid(current)"), "{out}");
+        assert!(!out.contains("window_wid(fresh)"), "{out}");
+    }
+
+    #[test]
     fn window_lazy_placeholders_lower_reads_writes_and_calls() {
         let out = translate_stmts(
             "const current = __morph_current_window().title;\n\
@@ -6670,7 +7073,7 @@ mod tests {
              const e = new Window(\"/settings\", { parent: null });\n\
              const f = new Window(\"/settings\", { role: \"dialog\" });\n",
         );
-        assert!(out.contains("{\"parent\", JsValue(main).as_int()}"), "{out}");
+        assert!(out.contains("{\"parent\", main}"), "{out}");
         assert!(out.contains("{\"modal\", true}"), "{out}");
         assert!(out.contains("{\"role\", 2}"), "{out}");
         assert!(out.contains("{\"width\", 500}"), "{out}");

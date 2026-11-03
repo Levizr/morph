@@ -3,9 +3,10 @@
 **Severity:** error | **Blocks `morph build`:** yes
 
 > **Status:** reported by `morph check` for provable window handles:
-> `useWindow(...)`, `new Window(...)`, `Window`-annotated locals, and
-> `Window`-annotated helper parameters. Untyped values stay quiet — without
-> an annotation the compiler has no handle to check.
+> `useWindow(...)`, `new Window(...)`, `Window`-annotated locals and helper
+> parameters, and bindings assigned a handle later (`let win; win =
+> useWindow()`). Untyped values stay quiet — without an annotation or an
+> assignment the compiler has no handle to check.
 
 ## What this error means
 
@@ -57,6 +58,16 @@ checker follows the handle:
 function focusIt(w: Window) {
   w.focus();
 }
+```
+
+Late assignments are tracked too, so the check follows the binding rather
+than only the declaration:
+
+```tsx
+let win;
+win = useWindow();
+// ❌ reported — `win` is a handle from the assignment onward
+win.focus();
 ```
 
 ## How to fix

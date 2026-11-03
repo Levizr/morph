@@ -172,6 +172,11 @@ a signal: the flow runs in a setup effect that re-seeds it, JSX reads
 subscribe to it, and flipping a branch it reads re-renders the text. A
 `let` nothing reassigns, and every `const`, stays a plain stack value.
 
+An empty declaration (`let label` or `let label = null/undefined`) that is
+assigned later is seeded with `undefined` at its original position, so a
+read before the first assignment keeps JS semantics. The signal then holds
+any value the flow assigns — no annotation needed.
+
 ## Implementation Notes
 
 - State is implemented via `Signal<T>` in the C++ runtime (`runtime/cpp/reactivity/signal.h`)

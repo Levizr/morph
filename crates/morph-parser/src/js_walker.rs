@@ -1604,8 +1604,20 @@ impl<'src> MxWalker<'src> {
                 let Expression::Identifier(obj) = &s.object else {
                     return false;
                 };
-                s.property.name.as_str() == "on"
-                    || (obj.name.as_str() == "console" && s.property.name.as_str() == "log")
+                if s.property.name.as_str() == "on" {
+                    return true;
+                }
+                // Only literal console.log calls are startup logs. A
+                // non-literal argument (`console.log(win)`) must stay in
+                // body flow, or it would be dropped by `logs_from_body`.
+                obj.name.as_str() == "console"
+                    && s.property.name.as_str() == "log"
+                    && call
+                        .arguments
+                        .first()
+                        .and_then(|arg| arg.as_expression())
+                        .and_then(extract_string_lit)
+                        .is_some()
             }
             _ => false,
         }
@@ -1657,13 +1669,16 @@ impl<'src> MxWalker<'src> {
     ) -> (Vec<String>, Vec<MutableLocal>) {
         let mut assigned = AssignedNames::default();
         assigned.visit_function_body(body);
+        let mut window_assigned = WindowAssignedNames::default();
+        window_assigned.visit_function_body(body);
         let mut locals: Vec<MutableLocal> = Vec::new();
         let mut kept: Vec<ComponentConst> = Vec::new();
         for cst in consts.drain(..) {
             if cst.name.is_empty() || !assigned.names.contains(&cst.name) {
                 kept.push(cst);
             } else {
-                locals.push(MutableLocal { name: cst.name, init: cst.rhs });
+                let window = window_assigned.names.contains(&cst.name);
+                locals.push(MutableLocal { name: cst.name, init: cst.rhs, window });
             }
         }
         *consts = kept;
@@ -1691,6 +1706,21 @@ impl<'src> MxWalker<'src> {
                         }
                         continue;
                     };
+                    if !locals.iter().any(|l| l.name == name) && decl.init.is_none() {
+                        // `let x;` initialized the binding to undefined.
+                        // Promote it to a signal and seed that value at the
+                        // declaration position; later assignments write
+                        // through the setter. Window handles keep the
+                        // WID-aware lowering, every other value stays a
+                        // JS-visible value until it is assigned.
+                        locals.push(MutableLocal {
+                            name: name.clone(),
+                            init: "undefined".to_string(),
+                            window: window_assigned.names.contains(&name),
+                        });
+                        stmts.push(format!("{name} = undefined;"));
+                        continue;
+                    }
                     if locals.iter().any(|l| l.name == name) {
                         if let Some(init) = &decl.init {
                             let init = self.span_text(init.span());
@@ -1736,6 +1766,53 @@ impl<'a> Visit<'a> for AssignedNames {
             self.names.insert(id.name.to_string());
         }
         oxc_ast_visit::walk::walk_update_expression(self, expr);
+    }
+}
+
+/// True when an assignment right-hand side produces a Window handle.
+/// Mirrors the morpher's `is_window_value_expr`; only plain `new
+/// Window(route)` (with an argument) is a handle, so a zero-arg user class
+/// named `Window` keeps its constructor semantics.
+fn is_window_assignment_rhs(expr: &Expression) -> bool {
+    match expr {
+        Expression::CallExpression(call) => {
+            matches!(&call.callee, Expression::Identifier(id) if id.name.as_str() == "useWindow")
+        }
+        Expression::NewExpression(new) => {
+            !new.arguments.is_empty()
+                && matches!(&new.callee, Expression::Identifier(id) if id.name.as_str() == "Window")
+        }
+        Expression::TSAsExpression(a) => is_window_assignment_rhs(&a.expression),
+        Expression::TSSatisfiesExpression(s) => is_window_assignment_rhs(&s.expression),
+        Expression::TSNonNullExpression(n) => is_window_assignment_rhs(&n.expression),
+        Expression::ParenthesizedExpression(p) => is_window_assignment_rhs(&p.expression),
+        Expression::ConditionalExpression(c) => {
+            is_window_assignment_rhs(&c.consequent) && is_window_assignment_rhs(&c.alternate)
+        }
+        Expression::LogicalExpression(l) => {
+            is_window_assignment_rhs(&l.left) && is_window_assignment_rhs(&l.right)
+        }
+        _ => false,
+    }
+}
+
+/// Names assigned a Window handle anywhere in a component body, including
+/// nested event handlers and closures. Those bindings must keep the
+/// JS-visible handle value (`undefined` before assignment) instead of a
+/// type inferred from a nullish initializer.
+#[derive(Default)]
+struct WindowAssignedNames {
+    names: std::collections::HashSet<String>,
+}
+
+impl<'a> Visit<'a> for WindowAssignedNames {
+    fn visit_assignment_expression(&mut self, expr: &AssignmentExpression<'a>) {
+        if expr.operator == AssignmentOperator::Assign && is_window_assignment_rhs(&expr.right) {
+            if let AssignmentTarget::AssignmentTargetIdentifier(id) = &expr.left {
+                self.names.insert(id.name.to_string());
+            }
+        }
+        oxc_ast_visit::walk::walk_assignment_expression(self, expr);
     }
 }
 
@@ -2159,6 +2236,51 @@ mod walker_tests {
     }
 
     #[test]
+    fn body_flow_promotes_late_window_handles() {
+        let c = component(
+            "export default function App() {\n  let win;\n  console.log(win);\n  win = new Window(\"/settings\");\n  return (<div>{win.title}</div>)\n}\n",
+        );
+        let local = c.mutable_locals.iter().find(|l| l.name == "win").expect("late handle local");
+        assert!(local.window, "{c:?}");
+        assert_eq!(local.init, "undefined");
+        let joined = c.body_stmts.join("\n");
+        assert!(joined.contains("win = undefined;"), "{joined}");
+        assert!(joined.contains("console.log(win)"), "{joined}");
+        assert!(joined.contains("win = new Window"), "{joined}");
+        assert!(!c.consts.iter().any(|k| k.name == "win"), "{:?}", c.consts);
+    }
+
+    #[test]
+    fn body_flow_promotes_nullish_and_typed_late_handles() {
+        for source in [
+            "let win = null; win = useWindow();",
+            "let win = undefined; win = new Window(\"/settings\");",
+            "let win: Window; win = new Window(\"/settings\");",
+        ] {
+            let src = format!(
+                "export default function App() {{\n  {source}\n  return (<div>{{win.title}}</div>)\n}}\n"
+            );
+            let c = component(&src);
+            let local = c
+                .mutable_locals
+                .iter()
+                .find(|l| l.name == "win")
+                .unwrap_or_else(|| panic!("{c:?}"));
+            assert!(local.window, "{source}: {c:?}");
+        }
+    }
+
+    #[test]
+    fn body_flow_keeps_direct_window_initializers_as_consts() {
+        let c = component(
+            "export default function App() {\n  const win = useWindow();\n  console.log(win);\n  return (<div>{win.title}</div>)\n}\n",
+        );
+        assert!(c.mutable_locals.is_empty(), "{c:?}");
+        assert!(c.consts.iter().any(|k| k.name == "win"), "{:?}", c.consts);
+        assert!(c.body_stmts.join("\n").contains("console.log(win)"), "{:?}", c.body_stmts);
+    }
+
+    #[test]
     fn body_flow_keeps_unassigned_let_as_const() {
         let c = component(
             "export default function App() {\n  let title = \"hello\"\n  if (title) { console.log(title) }\n  return (<div>{title}</div>)\n}\n",
@@ -2166,6 +2288,28 @@ mod walker_tests {
         assert!(c.mutable_locals.is_empty(), "{c:?}");
         assert!(c.consts.iter().any(|k| k.name == "title"), "{:?}", c.consts);
         assert!(!c.body_stmts.join("\n").contains("title = \"hello\";"), "{:?}", c.body_stmts);
+    }
+
+    #[test]
+    fn body_flow_promotes_late_values() {
+        let c = component(
+            "export default function App() {\n  let count\n  count = 1\n  let label = null\n  label = \"hi\"\n  let data\n  data = { name: \"Ada\" }\n  return (<div>{count} {label} {data.name}</div>)\n}\n",
+        );
+        for (name, init, window) in
+            [("count", "undefined", false), ("label", "null", false), ("data", "undefined", false)]
+        {
+            let local =
+                c.mutable_locals.iter().find(|l| l.name == name).unwrap_or_else(|| panic!("{c:?}"));
+            assert_eq!(local.init, init, "{name}: {c:?}");
+            assert_eq!(local.window, window, "{name}: {c:?}");
+        }
+        let joined = c.body_stmts.join("\n");
+        assert!(joined.contains("count = undefined;"), "{joined}");
+        assert!(joined.contains("label = null;"), "{joined}");
+        assert!(joined.contains("data = undefined;"), "{joined}");
+        assert!(joined.contains("count = 1"), "{joined}");
+        assert!(joined.contains("label = \"hi\""), "{joined}");
+        assert!(!c.consts.iter().any(|k| matches!(k.name.as_str(), "count" | "label" | "data")));
     }
 
     #[test]

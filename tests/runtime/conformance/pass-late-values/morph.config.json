@@ -1,0 +1,7 @@
+{
+  "name": "pass-late-values",
+  "entry": "src/App.mx",
+  "window": { "width": 640, "height": 480, "title": "pass-late-values" },
+  "dependencies": {},
+  "cpp_sources": []
+}

@@ -302,6 +302,18 @@ struct JsValue {
         if (is_string()) return std::get<JsString>(inner).replace(search, replacement);
         return JsString();
     }
+    bool startsWith(const JsString& prefix) const {
+        if (!is_string()) return false;
+        const auto& s = std::get<JsString>(inner).value;
+        return s.size() >= prefix.value.size()
+            && s.compare(0, prefix.value.size(), prefix.value) == 0;
+    }
+    bool endsWith(const JsString& suffix) const {
+        if (!is_string()) return false;
+        const auto& s = std::get<JsString>(inner).value;
+        return s.size() >= suffix.value.size()
+            && s.compare(s.size() - suffix.value.size(), suffix.value.size(), suffix.value) == 0;
+    }
     std::vector<JsString> split(const JsString& delim) const {
         if (is_string()) return std::get<JsString>(inner).split(delim);
         return {};
@@ -391,6 +403,21 @@ public:
         return {};
     }
 };
+
+/// JS-visible window handle. A `Window` is a number WID at the native
+/// boundary, but user code can observe it as a value: `let win;` reads
+/// `undefined` until assigned, and later window operations resolve the
+/// WID through `window_wid(...)` (see core/window_manager.h). Keeping the
+/// JS value authoritative prevents a separate native slot from desyncing
+/// after reassignment.
+using JsWindowHandle = JsValue;
+
+/// JS-visible late-assigned value (`let x; ... x = ...`). It is a
+/// `JsValue` at runtime, so reads before the assignment are `undefined`
+/// and the binding can hold any value afterwards. Codegen uses the
+/// distinct spelling to pick JS operator overloads instead of the numeric
+/// narrowing applied to ordinary `JsValue` locals.
+using JsLateValue = JsValue;
 
 // ── JsString methods that depend on JsValue ──
 
@@ -1059,6 +1086,18 @@ inline JsValue operator-(int a, const JsValue& b) { return JsValue((int64_t)a) -
 inline JsValue operator*(int a, const JsValue& b) { return JsValue((int64_t)a) * b; }
 inline JsValue operator/(int a, const JsValue& b) { return JsValue((int64_t)a) / b; }
 inline JsValue operator%(int a, const JsValue& b) { return JsValue((int64_t)a) % b; }
+// Exact `double` overloads: without them `lateValue + 1.5` is ambiguous
+// between the int/int64_t forms and the JsValue/JsValue form.
+inline JsValue operator+(const JsValue& a, double b) { return a + JsValue(b); }
+inline JsValue operator-(const JsValue& a, double b) { return a - JsValue(b); }
+inline JsValue operator*(const JsValue& a, double b) { return a * JsValue(b); }
+inline JsValue operator/(const JsValue& a, double b) { return a / JsValue(b); }
+inline JsValue operator%(const JsValue& a, double b) { return a % JsValue(b); }
+inline JsValue operator+(double a, const JsValue& b) { return JsValue(a) + b; }
+inline JsValue operator-(double a, const JsValue& b) { return JsValue(a) - b; }
+inline JsValue operator*(double a, const JsValue& b) { return JsValue(a) * b; }
+inline JsValue operator/(double a, const JsValue& b) { return JsValue(a) / b; }
+inline JsValue operator%(double a, const JsValue& b) { return JsValue(a) % b; }
 
 // ── JsNumber <-> JsValue interop (for arr[i] where arr[i] is JsValue) ──
 inline JsNumber operator+(const JsNumber& a, const JsValue& b) {

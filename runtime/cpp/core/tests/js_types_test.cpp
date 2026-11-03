@@ -566,6 +566,64 @@ static void testMath()
     CHECK(sv(min(sp)) == "1", "min spread over shared_ptr array");
 }
 
+static void testLateValueOperators()
+{
+    // `let x;` starts as undefined, then holds any JS value.
+    JsValue x;
+    CHECK(sv(x) == "undefined", "late value starts undefined");
+    CHECK(sv(morph::js_late_add(x, JsValue(1.0))) == "NaN", "undefined + 1 is NaN");
+    CHECK(sv(morph::js_late_sub(x, JsValue(1.0))) == "NaN", "undefined - 1 is NaN");
+
+    x = 5;
+    CHECK(sv(morph::js_late_add(x, JsValue(1.0))) == "6", "late number add");
+    CHECK(sv(morph::js_late_sub(x, JsValue(2.0))) == "3", "late number subtract");
+    CHECK(sv(morph::js_late_mul(x, JsValue(3.0))) == "15", "late number multiply");
+    CHECK(sv(morph::js_late_div(x, JsValue(2.0))) == "2.5", "late number divide");
+    CHECK(sv(morph::js_late_mod(x, JsValue(2.0))) == "1", "late number mod");
+
+    // Strings keep concat for `+` and coerce with ToNumber for arithmetic.
+    JsValue s = JsString("hi");
+    CHECK(sv(morph::js_late_add(s, JsValue("!"))) == "hi!", "late string concat");
+    CHECK(sv(morph::js_late_add(JsValue("5"), JsValue(2))) == "52", "numeric string + number concatenates");
+    CHECK(sv(morph::js_late_sub(JsValue("5"), JsValue(2))) == "3", "numeric string - number");
+    CHECK(sv(morph::js_late_mul(JsValue("5"), JsValue(2))) == "10", "numeric string * number");
+    CHECK(sv(morph::js_late_div(JsValue("5"), JsValue(2))) == "2.5", "numeric string / number");
+    CHECK(sv(morph::js_late_add(JsValue(true), JsValue(1))) == "2", "boolean + number");
+    CHECK(sv(morph::js_late_add(JsValue(JsNull{}), JsValue(1))) == "1", "null + number");
+
+    // Operator overloads generated for late-value expressions.
+    JsValue y = 5;
+    y++;
+    CHECK(sv(y) == "6", "postfix increment");
+    ++y;
+    CHECK(sv(y) == "7", "prefix increment");
+    y += JsValue(3);
+    CHECK(sv(y) == "10", "compound add");
+    y *= JsValue(2);
+    CHECK(sv(y) == "20", "compound multiply");
+    y -= JsValue(5);
+    CHECK(sv(y) == "15", "compound subtract");
+    y /= JsValue(3);
+    CHECK(sv(y) == "5", "compound divide");
+    y %= JsValue(3);
+    CHECK(sv(y) == "2", "compound mod");
+    CHECK(sv(-y) == "-2", "unary minus");
+    CHECK(sv(~y) == "-3", "bitwise not");
+    CHECK(sv(y & 1) == "0", "bitwise and with literal");
+    CHECK(sv(y | 8) == "10", "bitwise or with literal");
+    CHECK(sv(y ^ 3) == "1", "bitwise xor with literal");
+    CHECK(sv(y << 2) == "8", "shift left");
+
+    JsValue str = JsString("hello");
+    CHECK(str.toUpperCase().value == "HELLO", "string method on late value");
+    CHECK(str.startsWith(JsString("he")), "startsWith on late value");
+    CHECK(str.endsWith(JsString("lo")), "endsWith on late value");
+    CHECK(!str.startsWith(JsString("x")), "startsWith false on late value");
+    JsValue arr = JsArray{1, 2, 3};
+    CHECK(arr.includes(JsValue(2)), "includes on late array");
+    CHECK(arr.length() == 3, "length on late array");
+}
+
 int main()
 {
     testNumberToString();
@@ -581,6 +639,7 @@ int main()
     testObjectMethods();
     testJson();
     testMath();
+    testLateValueOperators();
     std::printf("[js-types-test] %d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }
