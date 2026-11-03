@@ -230,18 +230,22 @@ Morph doesn't include a built-in updater, but you can integrate:
 Example version check in app:
 
 ```tsx
-// src/App.mx
+// src/App.mx — inside your App component
+const APP_VERSION = "1.2.3" // replace with your generated version constant
+
+async function checkForUpdate() {
+  const response = await fetch("https://api.github.com/repos/you/your-app/releases/latest")
+  if (!response.ok()) return
+  const data = response.json()
+  const latest = String(data["tag_name"]).replace("v", "")
+  if (compareVersions(latest, APP_VERSION) > 0) {
+    showUpdateBanner(String(data["html_url"]))
+  }
+}
+
 morphEffect(() => {
-  fetch("https://api.github.com/repos/you/your-app/releases/latest")
-    .then(r => r.json())
-    .then(data => {
-      const latest = data.tag_name.replace('v', '');
-      const current = import.meta.env.APP_VERSION; // inject at build time
-      if (compareVersions(latest, current) > 0) {
-        showUpdateBanner(data.html_url);
-      }
-    });
-}, []);
+  checkForUpdate()
+}, [])
 ```
 
 ## Size Optimization Checklist

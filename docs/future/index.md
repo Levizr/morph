@@ -33,7 +33,7 @@ Plans are grouped by area. Each group is a folder under `docs/future/` and a sec
 
 | Feature | Page | Priority | Depends on |
 |---|---|---|---|
-| Broader TS→C++ translator coverage | [JS Coverage](javascript/coverage.md) | High | — |
+| **TypeScript app-logic coverage** — contract, dependency-ordered parts, reference apps | [JS Coverage](javascript/coverage.md) | High | — |
 | Full Node.js support (`morph/*` imports with `node:*` aliases, npm packages, servers as native binaries) | [Node.js Support](javascript/nodejs.md) | Medium | JS Coverage |
 | **State, Events & Native C++ Interop** | [State/Events/Native](javascript/native-interop.md) | High | Rust Compiler |
 | **Universal Module Bindings** (import/export/native calls for functions, vars, classes) | [Module Bindings](javascript/module-bindings.md) | High | State/Events/Native |

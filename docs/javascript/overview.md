@@ -99,22 +99,33 @@ Binary (`+`, `-`, `*`, `/`, `**`, `===`, `!==`, `==`, `!=`, `<`, `>`, etc.), una
 - Top-level rest parameters (`...args`) and general call/constructor spread
   (`f(...args)`, `new C(...args)`). Spread arguments are supported on
   `push`/`unshift`/`splice`/`concat` and `Math.min`/`Math.max`.
-- Promise static helpers (`Promise.resolve`, `Promise.all`, …); `await`
-  and `new Promise(...)` lower to C++ coroutines
-- Regular expression literals
+- Promise static helpers (`Promise.resolve`, `Promise.all`, …) and
+  `.then`/`.catch` chains; `await` and `new Promise(...)` lower to C++
+  coroutines
+- Regular expression literals, `Date`, `Map`/`Set`, and `typeof`/`instanceof`
+- Object/Array statics such as `Object.assign`, `Object.fromEntries`,
+  `Array.from`, and `Array.of`
 - TypeScript `enum` declarations
-- `import * as ns` namespace imports
+- `import * as ns` namespace imports and `import.meta`
 - Browser globals (`document`, `window`, `localStorage`, …)
 - Class expressions assigned to a const (`const C = class { … }`)
 - C++ keywords used as JS binding or class member names (`double`,
   `template`, `delete`, …)
 - A few JS methods whose receiver is provably a native type (for example
-  array `.toSorted()` and `.reduceRight()`)
+  array `.toSorted()`, `.reduceRight()`, and string `.at()`)
 
-The linter (`morph check`) rejects every unsupported construct above with
-a precise error and exits non-zero. A clean `morph check` is the preflight
+The linter (`morph check`) rejects the constructs listed above with a
+precise error and exits non-zero. A clean `morph check` is the preflight
 for `morph build`; the two commands share the same parser, graph, lint, and
 IR pipeline.
+
+> **Known contract gaps:** some constructs still pass `morph check` and
+> fail in generated C++ — widening bindings (`let x = 0; x = "hi"`),
+> unannotated/private class fields, constructor parameter properties,
+> class expressions, destructuring assignment, string `switch`,
+> `new.target`, `.then` chains, JSX spread props, and others. The
+> [TypeScript App-Logic Coverage](../future/javascript/coverage.md) plan
+> tracks every case and gates them behind Part 0.
 
 ## Rules `morph check` Enforces
 

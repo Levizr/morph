@@ -16,22 +16,49 @@ async function load() {
 
 `fetch()` runs the HTTP request on a worker thread and resumes the coroutine when the response arrives. The UI stays responsive.
 
+### Request options
+
+`fetch()` accepts a request object for method, headers, and body:
+
+```tsx
+const response = await fetch("https://api.example.com/users", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ name: "Ada" }),
+})
+```
+
+The runtime supports `method`, `headers`, and a string `body`. Response headers expose `.get(name)` and `.has(name)`:
+
+```tsx
+const contentType = response.headers.get("content-type")
+```
+
 ### Response API
 
 | Method/Property | Description |
 |---|---|
 | `response.status` | HTTP status code (200, 404, etc.) |
 | `response.ok()` | Returns `true` if status is 200-299 |
-| `response.text()` | Returns the response body as a string |
-| `response.headers` | Response headers |
+| `response.text()` | Returns the response body as a string (synchronous) |
+| `response.headers` | Response headers; `.get(name)` / `.has(name)` |
 | `response.statusText` | HTTP status text |
 | `response.url` | Final URL (after redirects) |
 | `response.redirected` | Whether the request was redirected |
 | `response.type` | Response type: `"basic"`, `"cors"`, `"error"`, `"opaque"` |
 | `response.bodyUsed` | Whether the body has been consumed |
-| `response.json()` | Parses body as JSON (returns `JsValue`) |
-| `response.arrayBuffer()` | Returns body as raw bytes |
+| `response.json()` | Parses body as JSON (synchronous, returns `JsValue`) |
+| `response.arrayBuffer()` | Returns body as raw bytes (synchronous) |
 | `response.clone()` | Creates a copy for multiple reads |
+
+`response.json()` returns a `JsValue`, so read fields with bracket access today:
+
+```tsx
+const data = response.json()
+console.log(data["name"])
+```
+
+Dot access (`data.name`) and the browser-shaped `await response.json()` are tracked in the [TypeScript App-Logic Coverage](../future/javascript/coverage.md) plan.
 
 ### Error Handling
 
@@ -94,6 +121,13 @@ clearTimeout(id)   // cancels a timeout
 clearInterval(id)  // cancels an interval
 ```
 
+Timer callbacks currently take no arguments. Pass values through a closure instead of using the trailing-argument form:
+
+```tsx
+const label = "done"
+setTimeout(() => console.log(label), 1000)
+```
+
 ## Coroutines
 
 Async functions compile to C++ coroutines (`morph::Result<T>` for `Promise<T>`, `morph::Task` for `Promise<void>`). Each `await` point suspends the coroutine and resumes it when the result is available, without blocking the UI thread.
@@ -146,6 +180,14 @@ co_return;
     return 0;
 }
 ```
+
+## Not Supported Yet
+
+- `Promise.resolve` / `Promise.all` / `Promise.allSettled` / `Promise.race` / `Promise.any`
+- `.then` / `.catch` chains on `fetch` results; use `async`/`await`
+- Trailing timer arguments (`setTimeout(fn, ms, ...args)`)
+
+These are tracked in the [TypeScript App-Logic Coverage](../future/javascript/coverage.md) plan.
 
 ## Implementation Notes
 

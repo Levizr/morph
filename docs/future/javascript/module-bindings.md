@@ -149,7 +149,7 @@ Decision tree addition (extends the `native-cpp.md` table): *call a TS/TSX funct
 | `native-cpp.md` binding-call examples | ✅ Shipped | Decision tree + defining-namespace rules |
 | Unified `app::<ns>` fragments (retire `<stem>_logic`) | 📋 Planned | Standalone (unimported) files still use it; unify when touched |
 | `import type` erasure guidance | 📋 Planned | Linter hint |
-| Top-level side-effect statements in imported `.ts` | 📋 Known limitation | Builder drops bare statements; keep init code in functions |
+| Top-level side-effect statements in imported `.ts` | 📋 Known limitation | Builder drops bare statements; keep init code in functions. Tracked in [TypeScript App-Logic Coverage](coverage.md) Part 2E. |
 
 ---
 
