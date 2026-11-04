@@ -287,6 +287,15 @@ fn member_prop_label(me: &MemberExpression) -> Option<String> {
     }
 }
 
+/// The receiver of a member access, regardless of member spelling.
+fn member_object<'a, 'b>(me: &'b MemberExpression<'a>) -> &'b Expression<'a> {
+    match me {
+        MemberExpression::StaticMemberExpression(s) => &s.object,
+        MemberExpression::ComputedMemberExpression(c) => &c.object,
+        MemberExpression::PrivateFieldExpression(p) => &p.object,
+    }
+}
+
 /// True when the expression is itself a member access. The nested access
 /// is checked when its subtree is visited, so an outer property belongs to
 /// the resulting value (`Math.PI.toFixed`) rather than the builtin root.
@@ -747,6 +756,28 @@ struct JsSyntaxVisitor<'s> {
     out: Vec<(u32, &'static str, &'static str)>,
     function_symbols: &'s HashSet<SymbolId>,
     scoping: &'s Scoping,
+    /// Literal-derived receiver kinds, used to reject constructs whose
+    /// lowering depends on a string/array receiver (`switch` on a string,
+    /// `for...in` over an array).
+    states: &'s HashMap<String, RecvKind>,
+}
+
+/// True for expressions provably holding a string at runtime.
+fn syntax_string_like(expr: &Expression<'_>, states: &HashMap<String, RecvKind>) -> bool {
+    match unwrap_ts_expr(expr) {
+        Expression::StringLiteral(_) | Expression::TemplateLiteral(_) => true,
+        Expression::Identifier(id) => states.get(id.name.as_str()) == Some(&RecvKind::Str),
+        _ => false,
+    }
+}
+
+/// True for expressions provably holding an array at runtime.
+fn syntax_array_like(expr: &Expression<'_>, states: &HashMap<String, RecvKind>) -> bool {
+    match unwrap_ts_expr(expr) {
+        Expression::ArrayExpression(_) => true,
+        Expression::Identifier(id) => states.get(id.name.as_str()) == Some(&RecvKind::Arr),
+        _ => false,
+    }
 }
 
 /// Spread call arguments lower only where the runtime helper is variadic:
@@ -778,7 +809,67 @@ impl<'a> Visit<'a> for JsSyntaxVisitor<'_> {
                 "Pass the array itself, or use push/unshift/splice/concat/Math.min/Math.max",
             ));
         }
+        if let Some(me) = e.callee.as_member_expression() {
+            let prop = member_prop_label(me);
+            if matches!(prop.as_deref(), Some("then" | "catch")) {
+                self.out.push((
+                    e.span.start,
+                    "Promise `.then`/`.catch` chains",
+                    "Use `async`/`await` and `try`/`catch` instead",
+                ));
+            }
+            if let Some((root, _)) = member_root_name(member_object(me)) {
+                if root == "JSON" {
+                    match prop.as_deref() {
+                        Some("parse") if e.arguments.len() > 1 => {
+                            self.out.push((
+                                e.span.start,
+                                "`JSON.parse` reviver arguments",
+                                "Pass only the text; transform the parsed value afterwards",
+                            ));
+                        }
+                        Some("stringify") if e.arguments.len() > 1 => {
+                            self.out.push((
+                                e.span.start,
+                                "`JSON.stringify` replacer/space arguments",
+                                "Pass only the value; format the result yourself",
+                            ));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        if let Expression::Identifier(id) = unwrap_ts_expr(&e.callee) {
+            if matches!(id.name.as_str(), "setTimeout" | "setInterval") && e.arguments.len() > 2 {
+                self.out.push((
+                    e.span.start,
+                    "timer callback arguments (`setTimeout(fn, ms, ...args)`)",
+                    "Pass values through a closure instead of trailing timer arguments",
+                ));
+            }
+        }
         oxc_ast_visit::walk::walk_call_expression(self, e);
+    }
+    fn visit_switch_statement(&mut self, s: &SwitchStatement<'a>) {
+        if syntax_string_like(&s.discriminant, self.states) {
+            self.out.push((
+                s.span.start,
+                "`switch` on a string",
+                "Use `if`/`else if` with `===`, or switch on a number",
+            ));
+        }
+        oxc_ast_visit::walk::walk_switch_statement(self, s);
+    }
+    fn visit_for_in_statement(&mut self, f: &ForInStatement<'a>) {
+        if syntax_array_like(&f.right, self.states) {
+            self.out.push((
+                f.span.start,
+                "`for...in` over an array",
+                "Iterate indices with `for (let i = 0; i < xs.length; i++)`, or use `for...of` for values",
+            ));
+        }
+        oxc_ast_visit::walk::walk_for_in_statement(self, f);
     }
     fn visit_new_expression(&mut self, e: &NewExpression<'a>) {
         if e.arguments.iter().any(|arg| matches!(arg, Argument::SpreadElement(_))) {
@@ -811,6 +902,20 @@ impl<'a> Visit<'a> for JsSyntaxVisitor<'_> {
                     r.span.start,
                     "regular expression literal",
                     "Use a `.cpp` helper or plain string checks instead",
+                ));
+            }
+            Expression::NewTarget(n) => {
+                self.out.push((
+                    n.span.start,
+                    "`new.target`",
+                    "Check constructor identity explicitly instead of using `new.target`",
+                ));
+            }
+            Expression::ClassExpression(c) => {
+                self.out.push((
+                    c.span.start,
+                    "class expression",
+                    "Use a class declaration instead",
                 ));
             }
             _ => {}
@@ -1044,14 +1149,21 @@ impl<'a> Visit<'a> for FunctionSymbolCollector {
     }
 }
 
-fn check_js_syntax(program: &Program, file_path: &str, offsets: &[usize]) -> Vec<LintError> {
+fn check_js_syntax(
+    program: &Program,
+    content: &str,
+    file_path: &str,
+    offsets: &[usize],
+) -> Vec<LintError> {
     let semantic = SemanticBuilder::new().with_build_nodes(true).build(program).semantic;
     let mut functions = FunctionSymbolCollector { out: HashSet::new() };
     functions.visit_program(program);
+    let states = collect_state_kinds(program, content);
     let mut st = JsSyntaxVisitor {
         out: Vec::new(),
         function_symbols: &functions.out,
         scoping: semantic.scoping(),
+        states: &states,
     };
     st.visit_program(program);
     st.out
@@ -1806,7 +1918,7 @@ pub fn check(source: &str, file_path: &str) -> Vec<LintError> {
         // Unemittable operators (`typeof`, `delete`, `>>>`, ...).
         errors.extend(check_js_operators(&ret.program, file_path, &offsets));
         // Unhandleable syntax (generators, `with`, call spread, ...).
-        errors.extend(check_js_syntax(&ret.program, file_path, &offsets));
+        errors.extend(check_js_syntax(&ret.program, source, file_path, &offsets));
         // Unimplemented methods on provably-typed receivers.
         errors.extend(check_js_method_calls(&ret.program, source, file_path, &offsets));
         // Unsupported members on provable `Window` handles.
@@ -3105,18 +3217,6 @@ fn check_state_init(
     );
 }
 
-/// Initializer shapes the component-const pipeline still cannot lower.
-/// Arrow/function/object consts now lower (functions as inner functions,
-/// objects as `JsObject`); class expressions have no native equivalent.
-const fn unlowerable_const_init(init: &Expression) -> Option<(&'static str, &'static str)> {
-    match init {
-        Expression::ClassExpression(_) => {
-            Some(("class expressions assigned to consts", "use a class declaration instead"))
-        }
-        _ => None,
-    }
-}
-
 /// `const [value, setValue] = morphState(...)`: array pattern, at least
 /// two plain identifier elements. Anything else on a state call breaks
 /// the syntactic wiring codegen depends on.
@@ -3915,16 +4015,6 @@ fn scope_declarator(
                     out,
                 );
             }
-        } else if let Some((what, hint)) = unlowerable_const_init(init) {
-            scope_error(
-                "mx-js-syntax",
-                format!("{what} cannot be translated to C++"),
-                hint.into(),
-                file_path,
-                offsets,
-                decl.span.start,
-                out,
-            );
         }
     }
     // Destructuring defaults can hide calls (`const { a = morphState(0) } = x`)
@@ -6661,7 +6751,37 @@ mod tests {
             .iter()
             .find(|e| e.code == "mx-js-syntax")
             .unwrap_or_else(|| panic!("class expression fires mx-js-syntax, got {errs:?}"));
-        assert!(err.message.contains("class expressions assigned to consts"), "{err:?}");
+        assert!(err.message.contains("class expression"), "{err:?}");
+    }
+
+    #[test]
+    fn part0_contract_violations_error() {
+        for (body, expected) in [
+            ("const s = \"a\"; switch (s) { case \"a\": break; }", "`switch` on a string"),
+            ("for (const i in [10, 20]) { console.log(i); }", "`for...in` over an array"),
+            ("fetch(\"http://example.com\").then((r) => r);", "Promise `.then`/`.catch` chains"),
+            ("JSON.parse(\"{}\", (k, v) => v);", "`JSON.parse` reviver arguments"),
+            ("JSON.stringify({}, null, 2);", "`JSON.stringify` replacer/space arguments"),
+            ("setTimeout(() => {}, 0, 1);", "timer callback arguments"),
+            ("function f() { return new.target; }", "`new.target`"),
+        ] {
+            let content = format!(
+                "import {{ morphState }} from 'morph'\nexport default function App() {{\n  {body}\n  return (<div>x</div>)\n}}\n"
+            );
+            let errs = check(&content, "App.mx");
+            let err = errs
+                .iter()
+                .find(|e| e.code == "mx-js-syntax")
+                .unwrap_or_else(|| panic!("{body} fires mx-js-syntax, got {errs:?}"));
+            assert!(err.message.contains(expected), "{body}: {err:?}");
+        }
+    }
+
+    #[test]
+    fn numeric_switch_and_object_for_in_stay_quiet() {
+        let content = "import { morphState } from 'morph'\nexport default function App() {\n  const level = 2;\n  switch (level) { case 2: break; default: break; }\n  const obj = { a: 1 };\n  for (const k in obj) { console.log(k); }\n  return (<div>x</div>)\n}\n";
+        let errs = check(content, "App.mx");
+        assert!(!codes(&errs).contains(&"mx-js-syntax"), "{errs:?}");
     }
 
     #[test]

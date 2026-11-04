@@ -14,7 +14,9 @@ export default function App() {
 
   async function loadJson() {
     const response = await fetch("http://127.0.0.1/")
-    const data = response.json()
+    // The native response reader is synchronous; the browser-shaped
+    // await form must lower to the same call.
+    const data = await response.json()
     console.log(data)
   }
 

@@ -27,9 +27,15 @@ The current set is:
 - `import * as ns` namespace imports
 - C++ keywords used as binding names or class member names (`double`,
   `template`, `delete`, …)
-- class expressions assigned to a const
+- class expressions, including `const C = class { ... }`
 - function-valued object properties (`{ handler: save }` — `JsObject`
   fields cannot store closures)
+- `switch` on a string (numeric `switch` is supported)
+- `for...in` over an array (object `for...in` is supported)
+- Promise `.then` / `.catch` chains (use `async`/`await` and `try`/`catch`)
+- `JSON.parse` reviver and `JSON.stringify` replacer/space arguments
+- trailing timer arguments (`setTimeout(fn, ms, ...args)`)
+- `new.target`
 
 ```
 error : mx-js-syntax : `enum` declaration cannot be translated to C++
@@ -38,12 +44,14 @@ error : mx-js-syntax : `enum` declaration cannot be translated to C++
 ```
 
 These lower correctly and are **not** errors: optional chaining `?.`,
-nullish coalescing `??`, `for...in` / `for...of`, array spread, object
-spread and computed keys, getters and setters, plain-TS destructuring,
-loop-head destructuring, destructuring at the top of a component body,
+nullish coalescing `??`, object `for...in` / `for...of`, numeric `switch`,
+array spread, object spread and computed keys, getters and setters,
+plain-TS destructuring, destructuring at the top of a component body,
 class declarations / `new`, type-only imports and exports, default and
 optional parameters, arrow/function consts, data-only object-literal
-consts, and JSX list expressions.
+consts, and JSX list expressions. Destructuring assignment and loop
+binding patterns are not part of the supported subset yet; they are
+tracked in [Part 1C](../future/javascript/coverage.md#1c--destructuring-assignment-and-loop-bindings).
 
 ## Why Morph raises it
 
@@ -52,8 +60,11 @@ purpose: generators need resumable frames; `with` needs dynamic scope;
 labeled jumps have no C++ equivalent; `import.meta` / dynamic `import()`
 need a module loader; namespaces
 and decorators vanish in translation; enums and regex literals have no
-lowering yet. Supporting any of them approximately would change
-program meaning — so each is rejected with an explicit rewrite. See
+lowering yet. String `switch` needs JavaScript `===`/fallthrough
+semantics, `.then`/`.catch` needs a promise-chain runtime, and JSON/timer
+extra arguments would be silently dropped. Supporting any of them
+approximately would change program meaning — so each is rejected with an
+explicit rewrite. See
 [translator coverage](../future/javascript/coverage.md) for what is planned.
 
 ## Examples that trigger it
@@ -92,6 +103,28 @@ export default function App() {
 }
 ```
 
+```tsx
+// ❌ String switch — mx-js-syntax (use if/else with ===)
+export default function App() {
+  const status = "ready";
+  switch (status) {
+    case "ready":
+      return <div>Ready</div>;
+    default:
+      return <div>Waiting</div>;
+  }
+}
+```
+
+```tsx
+// ❌ Promise chain — mx-js-syntax (use async/await)
+async function load() {
+  fetch("https://api.example.com/data")
+    .then((r) => r.json())
+    .catch((err) => console.log(err));
+}
+```
+
 ## How to fix
 
 | Instead of | Write |
@@ -103,6 +136,13 @@ export default function App() {
 | `f(...args)` / `new C(...args)` | pass each argument explicitly, or use `push`/`unshift`/`splice`/`concat` and `Math.min`/`Math.max` for variadic arrays |
 | `const C = class { … }` | a class declaration |
 | `{ handler: fn }` | keep `fn` as its own const and call it directly |
+| `switch (name)` on a string | `if`/`else if` with `===`, or switch on a number |
+| `for (const i in array)` | `for (let i = 0; i < array.length; i++)`, or `for...of` for values |
+| `fetch(...).then(...)` | `const r = await fetch(...)` inside `try`/`catch` |
+| `JSON.parse(text, reviver)` | parse once, then transform the value |
+| `JSON.stringify(value, replacer, 2)` | stringify the value, then format the result |
+| `setTimeout(fn, ms, a, b)` | `setTimeout(() => fn(a, b), ms)` |
+| `new.target` | an explicit constructor-identity check |
 | generator / `yield` | a state machine with `morphState` |
 | `with (o) { ... }` | explicit `o.` qualification |
 | labeled `break`/`continue` | a flag variable or early return |

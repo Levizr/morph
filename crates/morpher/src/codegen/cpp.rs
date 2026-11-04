@@ -1716,6 +1716,7 @@ impl<'a> CppTranslator<'a> {
                 }
             }
             WidenedType::ToJsValue => "JsValue".to_string(),
+            WidenedType::ToJsLateValue => "JsLateValue".to_string(),
             WidenedType::ToJsArray => "JsArray".to_string(),
             WidenedType::None => {
                 if base_type == "auto" {
@@ -2235,6 +2236,20 @@ impl<'a> CppTranslator<'a> {
         } else {
             format!("{}for (auto {} : {}) {}", self.indent(), left, right, body)
         }
+    }
+
+    /// Response body readers are synchronous in the native runtime, so
+    /// `await response.json()` must not emit `co_await` on a `JsValue`.
+    fn is_sync_response_body_call(expr: &Expression<'a>) -> bool {
+        let Expression::CallExpression(call) = expr else {
+            return false;
+        };
+        let Some(MemberExpression::StaticMemberExpression(member)) =
+            call.callee.as_member_expression()
+        else {
+            return false;
+        };
+        matches!(member.property.name.as_str(), "json" | "text" | "arrayBuffer" | "clone")
     }
 
     /// True when a `for (... of ...)` right-hand side is a js sequence whose
@@ -3759,7 +3774,16 @@ impl<'a> CppTranslator<'a> {
             Expression::ObjectExpression(obj) => self.emit_object(obj),
             Expression::CallExpression(c) => self.emit_call(c),
             Expression::AwaitExpression(a) => {
-                format!("co_await {}", self.emit_expression(&a.argument))
+                let argument = self.emit_expression(&a.argument);
+                // `Response.json()` / `.text()` / `.arrayBuffer()` are
+                // synchronous in the native runtime even though browser
+                // code awaits them. Awaiting a plain value would emit
+                // `co_await` on a non-awaitable type.
+                if Self::is_sync_response_body_call(&a.argument) {
+                    argument
+                } else {
+                    format!("co_await {argument}")
+                }
             }
             Expression::BinaryExpression(b) => self.emit_binary(b),
             Expression::LogicalExpression(b) => {
@@ -5399,11 +5423,16 @@ impl<'a> CppTranslator<'a> {
                 Some("morph::js_math::random()".to_string())
             }
             ("JSON", "parse") => {
+                // js_types.h (pulled by need("JsValue")) includes js_json.h.
+                // A lone JSON.parse previously emitted `morph::json_parse`
+                // without that header.
+                self.ctx.need("JsValue");
                 let arg =
                     fixed.first().cloned().unwrap_or_else(|| "JsValue(JsUndefined{})".to_string());
                 Some(format!("morph::json_parse(JsValue({arg}))"))
             }
             ("JSON", "stringify") => {
+                self.ctx.need("JsValue");
                 let arg =
                     fixed.first().cloned().unwrap_or_else(|| "JsValue(JsUndefined{})".to_string());
                 Some(format!("morph::json_stringify(JsValue({arg}))"))
@@ -6848,6 +6877,31 @@ mod tests {
     }
 
     #[test]
+    fn awaited_response_json_is_synchronous() {
+        let out = translate_stmts(
+            "async function load() {\n\
+                 const response = await fetch(\"http://example.com\");\n\
+                 const data = await response.json();\n\
+                 console.log(data);\n\
+             }",
+        );
+        assert!(out.contains("co_await morph::net::fetch"), "{out}");
+        assert!(!out.contains("co_await response.json()"), "{out}");
+        assert!(out.contains("response.json()"), "{out}");
+    }
+
+    #[test]
+    fn lone_json_parse_pulls_the_runtime_header() {
+        let out = crate::translate_default(
+            "const data = JSON.parse(\"{\\\"name\\\":\\\"Ada\\\"}\");\nconsole.log(data);",
+            "main.ts",
+        )
+        .expect("translate");
+        assert!(out.contains("morph::json_parse"), "{out}");
+        assert!(out.contains("js_types.h") || out.contains("js_json.h"), "{out}");
+    }
+
+    #[test]
     fn window_placeholders_lower() {
         let out = translate_stmts(
             "const w = new Window(\"/settings\", { width: 500 });\n\
@@ -6939,6 +6993,55 @@ mod tests {
         assert!(out.contains("morph::js_late_add(s, JsString(\"!\"))"), "{out}");
         assert!(out.contains("morph::js_late_sub(z, 2)"), "{out}");
         assert!(out.contains("obj[\"name\"]"), "{out}");
+    }
+
+    #[test]
+    fn conflicting_assignment_classes_widen_to_late_values() {
+        let out = translate_analyzed(
+            "let x = 0;\n\
+             x = \"hi\";\n\
+             console.log(x + \"!\");",
+        );
+        assert!(out.contains("JsLateValue x = 0"), "{out}");
+        assert!(out.contains("x = \"hi\""), "{out}");
+        assert!(out.contains("morph::js_late_add(x, JsString(\"!\"))"), "{out}");
+    }
+
+    #[test]
+    fn compound_assignments_widen_when_the_result_class_changes() {
+        let out = translate_analyzed(
+            "let label = 0;\n\
+             label += \"!\";\n\
+             let n = 0;\n\
+             n += 1.5;\n\
+             console.log(label, n);",
+        );
+        assert!(out.contains("JsLateValue label = 0"), "{out}");
+        assert!(out.contains("JsNumber n = 0"), "{out}");
+    }
+
+    #[test]
+    fn dynamic_annotations_widen_even_with_initializers() {
+        let out = translate_analyzed(
+            "let u: number | string = 0;\n\
+             u = \"hi\";\n\
+             let a: any = 1;\n\
+             a = false;\n\
+             console.log(u, a);",
+        );
+        assert!(out.contains("JsLateValue u = 0"), "{out}");
+        assert!(out.contains("JsLateValue a = 1"), "{out}");
+    }
+
+    #[test]
+    fn numeric_assignment_widening_keeps_fractional_values() {
+        let out = translate_analyzed(
+            "let n = 0;\n\
+             n = 1.5;\n\
+             console.log(n);",
+        );
+        assert!(out.contains("JsNumber n = 0"), "{out}");
+        assert!(!out.contains("int64_t n"), "{out}");
     }
 
     #[test]

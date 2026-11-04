@@ -66,7 +66,7 @@ This module is provided by `node_modules/morph/index.d.ts` — it ships with eve
 
 ### Statements
 
-`if`/`else`, `while`, `for`, `do-while`, `switch`/`case`/`default`, `try`/`catch`/`throw`, `return`, `break`, `continue`
+`if`/`else`, `while`, `for`, `do-while`, `switch`/`case`/`default` (numeric; string `switch` is rejected), `try`/`catch`/`throw`, `return`, `break`, `continue`
 
 Inside a component body, statements written between the declarations (branches, loops, calls) lower into a setup effect that re-runs when the state it reads changes — see [Locals Reassigned in the Component Body](./state.md#locals-reassigned-in-the-component-body).
 
@@ -85,6 +85,9 @@ Binary (`+`, `-`, `*`, `/`, `**`, `===`, `!==`, `==`, `!=`, `<`, `>`, etc.), una
   `-` / `*` / `/` / `%` coerce with `ToNumber`, and `++` / `--`, compound
   assignment, unary `+` / `-` / `~`, and bitwise/shift operators follow JS
   conversions instead of requiring a native numeric slot
+- Initialized bindings widen when a later assignment changes value class
+  (`let x = 0; x = "hi"`), including `number | string`, `any`, and
+  `unknown` annotations; mixed numeric classes widen to `JsNumber`
 - Array `push`/`pop`/index access, plus `map`, `filter`, `forEach`, `reduce`, `find`, `findIndex`, `some`, `every`, `sort`, `splice`, `shift`, `unshift`, `fill`, `flat`, `flatMap` on arrays and `JsArray` (callbacks receive `(item)`, `(item, index)`, or `(item, index, array)`)
 - Object `has`/`keys`/index access
 - String methods on both `JsString` and native `std::string`: `trim`, `toUpperCase`, `toLowerCase`, `indexOf`, `substring`, `slice`, `replace`, `charAt`, plus `split`, `startsWith`, `endsWith`, `includes`, `repeat`, `padStart`, `padEnd` — natives lower to `morph::str::*` helpers, chains nest (see [Native C++ Types](./native-types.md#js-methods-on-natives))
@@ -100,15 +103,18 @@ Binary (`+`, `-`, `*`, `/`, `**`, `===`, `!==`, `==`, `!=`, `<`, `>`, etc.), una
   (`f(...args)`, `new C(...args)`). Spread arguments are supported on
   `push`/`unshift`/`splice`/`concat` and `Math.min`/`Math.max`.
 - Promise static helpers (`Promise.resolve`, `Promise.all`, …) and
-  `.then`/`.catch` chains; `await` and `new Promise(...)` lower to C++
-  coroutines
+  `.then`/`.catch` chains (rejected by `morph check`); `await` and
+  `new Promise(...)` lower to C++ coroutines
 - Regular expression literals, `Date`, `Map`/`Set`, and `typeof`/`instanceof`
 - Object/Array statics such as `Object.assign`, `Object.fromEntries`,
   `Array.from`, and `Array.of`
 - TypeScript `enum` declarations
 - `import * as ns` namespace imports and `import.meta`
 - Browser globals (`document`, `window`, `localStorage`, …)
-- Class expressions assigned to a const (`const C = class { … }`)
+- Class expressions (`const C = class { … }` is rejected by `morph check`)
+- String `switch`, array `for...in`, `new.target`, and trailing timer
+  arguments (`setTimeout(fn, ms, ...args)`) — rejected by `morph check`
+  with a precise error
 - C++ keywords used as JS binding or class member names (`double`,
   `template`, `delete`, …)
 - A few JS methods whose receiver is provably a native type (for example
@@ -120,10 +126,10 @@ for `morph build`; the two commands share the same parser, graph, lint, and
 IR pipeline.
 
 > **Known contract gaps:** some constructs still pass `morph check` and
-> fail in generated C++ — widening bindings (`let x = 0; x = "hi"`),
-> unannotated/private class fields, constructor parameter properties,
-> class expressions, destructuring assignment, string `switch`,
-> `new.target`, `.then` chains, JSX spread props, and others. The
+> fail in generated C++ — unannotated/private class fields, constructor
+> parameter properties, destructuring assignment and loop bindings,
+> per-iteration closures, `var` hoisting/TDZ, imported module side effects,
+> JSON dot access, JSX spread props, and others. The
 > [TypeScript App-Logic Coverage](../future/javascript/coverage.md) plan
 > tracks every case and gates them behind Part 0.
 

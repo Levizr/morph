@@ -1,0 +1,7 @@
+{
+  "name": "fail-then-chain",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "fail-then-chain" },
+  "dependencies": {},
+  "cpp_sources": []
+}

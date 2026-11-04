@@ -24,11 +24,12 @@ pub enum EscapeKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WidenedType {
-    None,       // Keep native type
-    ToJsNumber, // int/float -> JsNumber (handles bigint/overflow)
-    ToJsString, // string -> JsString (if .toString() called)
-    ToJsValue,  // any -> JsValue (completely dynamic)
-    ToJsArray,  // array -> JsArray (if array methods like push, length used)
+    None,          // Keep native type
+    ToJsNumber,    // int/float -> JsNumber (handles bigint/overflow)
+    ToJsString,    // string -> JsString (if .toString() called)
+    ToJsValue,     // any -> JsValue (completely dynamic)
+    ToJsLateValue, // mixed assignment classes -> JsLateValue (JS operators)
+    ToJsArray,     // array -> JsArray (if array methods like push, length used)
 }
 
 /// One program point: statement order plus the nesting that scopes it.
@@ -300,6 +301,7 @@ impl EscapeAnalyzer {
 
         self.resolve_cross_function_escapes();
         self.resolve_identifier_init_classes();
+        self.compute_assignment_widening();
         self.compute_narrow_splits();
 
         AnalysisResult {
@@ -1067,6 +1069,11 @@ impl EscapeAnalyzer {
                         d.kind == VariableDeclarationKind::Let,
                         decl.init.as_ref(),
                     );
+                    if let Some(annotation) = &decl.type_annotation {
+                        if Self::annotation_is_dynamic(&annotation.type_annotation) {
+                            self.widens.insert(id.name.to_string(), WidenedType::ToJsLateValue);
+                        }
+                    }
                 }
                 pattern => {
                     self.analyze_destructured_pattern(
@@ -1488,7 +1495,25 @@ impl EscapeAnalyzer {
         if let AssignmentTarget::AssignmentTargetIdentifier(left_id) = &a.left {
             let left_name = left_id.name.to_string();
             self.record_usage(&left_name, UsageKind::PropertyWrite);
-            let assigned_class = self.infer_expression_class(&a.right);
+            let right_class = self.infer_expression_class(&a.right);
+            // Compound assignments apply the operator before writing back.
+            // Record the class the result is known to have, not the raw
+            // right-hand class: `n += 1.5` becomes a number, while
+            // `n += x` with a `JsValue` element keeps the existing
+            // native ToNumber conversion path.
+            let assigned_class = match a.operator.as_str() {
+                "=" | "&&=" | "||=" | "??=" => right_class,
+                "+=" => Self::addition_assign_class(right_class),
+                _ => Self::numeric_assign_class(right_class),
+            };
+            // An await boundary fixes the declared type from the awaited
+            // value, so the declaration must already account for it.
+            // (Declarations deduce `await` directly and need no widening.)
+            let assigned_class = if matches!(&a.right, Expression::AwaitExpression(_)) {
+                OperandClass::JsNumber
+            } else {
+                assigned_class
+            };
             // Only a plain `=` re-establishes a proven literal. A compound
             // `+= 1` keeps the old value in play, so it must never narrow.
             let assigned_literal =
@@ -2138,11 +2163,101 @@ impl EscapeAnalyzer {
         }
     }
 
+    /// Widen a binding when later assignments use a different value class
+    /// than its initializer. Without this, `let x = 0; x = "hi"` emitted
+    /// `int64_t x = 0; x = "hi";` and failed in C++.
+    ///
+    /// Mixed classes use `JsLateValue` so operators keep JavaScript
+    /// semantics. Compatible JS/native pairs widen to the specific runtime
+    /// type instead (`JsNumber`, `JsString`, `JsArray`).
+    fn compute_assignment_widening(&mut self) {
+        let mut updates = Vec::new();
+        for (name, info) in &self.var_infos {
+            let Some(first) = info.def_sites.first() else {
+                continue;
+            };
+            let mut widening = None;
+            for site in info.def_sites.iter().skip(1) {
+                if let Some(kind) = Self::assignment_widening(first.value_class, site.value_class) {
+                    widening = Some(kind);
+                    break;
+                }
+            }
+            if let Some(kind) = widening {
+                updates.push((name.clone(), kind));
+            }
+        }
+        for (name, kind) in updates {
+            self.widens.insert(name, kind);
+        }
+    }
+
+    fn assignment_widening(previous: OperandClass, assigned: OperandClass) -> Option<WidenedType> {
+        use OperandClass::{
+            Float, Integer, JsArray, JsNumber, JsString, JsValue, Null, Other, Text, Undefined,
+            Vector,
+        };
+        if previous == assigned {
+            return None;
+        }
+        match (previous, assigned) {
+            (Integer | Float | JsNumber, Integer | Float | JsNumber) => {
+                Some(WidenedType::ToJsNumber)
+            }
+            (Text, JsString) | (JsString, Text) => Some(WidenedType::ToJsString),
+            (Vector, JsArray) | (JsArray, Vector) => Some(WidenedType::ToJsArray),
+            // Nullish pairs and bindings already initialized from an
+            // unknown source keep their existing dynamic/narrowing path;
+            // forcing `JsLateValue` here would disable the native-region
+            // split.
+            (Null, Undefined) | (Undefined, Null) | (JsValue | Other, _) => None,
+            _ => Some(WidenedType::ToJsLateValue),
+        }
+    }
+
+    /// Result class for `x += rhs`. Strings and objects concatenate; other
+    /// classes follow the existing numeric coercion path.
+    const fn addition_assign_class(right: OperandClass) -> OperandClass {
+        match right {
+            OperandClass::Text
+            | OperandClass::JsString
+            | OperandClass::JsArray
+            | OperandClass::JsObject
+            | OperandClass::Vector => OperandClass::Text,
+            OperandClass::Float | OperandClass::JsNumber => right,
+            OperandClass::Undefined => OperandClass::Float,
+            _ => OperandClass::Integer,
+        }
+    }
+
+    /// Result class for arithmetic/bitwise compound assignments. JS coerces
+    /// these to numbers, so only a fractional right side changes the class.
+    const fn numeric_assign_class(right: OperandClass) -> OperandClass {
+        match right {
+            OperandClass::Float | OperandClass::JsNumber => right,
+            OperandClass::Text | OperandClass::JsString => OperandClass::Text,
+            _ => OperandClass::Integer,
+        }
+    }
+
+    /// Type annotations that promise a dynamic value (`any`, `unknown`, or a
+    /// union). Infer mode ignores annotations when choosing the base type,
+    /// so the widening map has to carry the dynamic shape.
+    fn annotation_is_dynamic(annotation: &TSType) -> bool {
+        match annotation {
+            TSType::TSAnyKeyword(_) | TSType::TSUnknownKeyword(_) | TSType::TSUnionType(_) => true,
+            TSType::TSParenthesizedType(paren) => {
+                Self::annotation_is_dynamic(&paren.type_annotation)
+            }
+            _ => false,
+        }
+    }
+
     fn apply_widening(&self, var_name: &str, base_class: OperandClass) -> OperandClass {
         match self.widens.get(var_name) {
             Some(WidenedType::ToJsNumber) => OperandClass::JsNumber,
             Some(WidenedType::ToJsString) => OperandClass::JsString,
-            Some(WidenedType::ToJsValue) => OperandClass::JsValue,
+            Some(WidenedType::ToJsValue | WidenedType::ToJsLateValue) => OperandClass::JsValue,
             Some(WidenedType::ToJsArray) => OperandClass::JsArray,
             _ => base_class,
         }
@@ -2339,6 +2454,12 @@ impl EscapeAnalyzer {
         let mut splits = Vec::new();
         let mut taken: HashSet<String> = self.var_infos.keys().cloned().collect();
         for (var_name, info) in &self.var_infos {
+            // Late values must keep JS operator semantics for their whole
+            // lifetime; renaming a later literal assignment to a native
+            // region would bypass `js_late_*`.
+            if self.widens.get(var_name) == Some(&WidenedType::ToJsLateValue) {
+                continue;
+            }
             if !matches!(
                 self.apply_widening(var_name, info.init_operand_class),
                 OperandClass::JsNumber | OperandClass::JsValue
@@ -2576,6 +2697,12 @@ mod tests {
             "    return cached;\n}",
         ));
         assert_eq!(result.widens.get("cached"), Some(&WidenedType::ToJsNumber));
+    }
+
+    #[test]
+    fn unknown_initializers_keep_the_narrowing_path() {
+        let result = analyze_source("let tally = getCount();\ntally = 42;");
+        assert!(result.widens.get("tally").is_none());
     }
 
     #[test]

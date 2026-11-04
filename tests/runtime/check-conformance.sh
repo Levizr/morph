@@ -70,6 +70,8 @@ run_pass pass-operators
 run_pass pass-math
 run_pass pass-window
 run_pass pass-late-values
+run_pass pass-control-flow
+run_pass pass-widening
 run_pass pass-rule-warnings
 run_pass pass-lint-config
 
@@ -103,6 +105,12 @@ run_fail fail-import-morph mx-import-morph
 run_fail fail-import-type mx-import-type
 run_fail fail-effect-cb mx-effect-cb
 run_fail fail-object-fn mx-js-syntax
+run_fail fail-string-switch mx-js-syntax
+run_fail fail-array-for-in mx-js-syntax
+run_fail fail-then-chain mx-js-syntax
+run_fail fail-json-args mx-js-syntax
+run_fail fail-timer-args mx-js-syntax
+run_fail fail-new-target mx-js-syntax
 run_fail fail-lint-severity mx-key-misuse
 
 echo "[conformance] $checks checks, $failures failures"

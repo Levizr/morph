@@ -1,0 +1,33 @@
+export const windowConfig = { title: "pass-widening", width: 800, height: 600 }
+
+// A binding whose later assignments change value class must widen instead
+// of keeping the initializer's native C++ type.
+function widened(): string {
+  let mixed = 0
+  mixed = "hi"
+
+  let annotated: number | string = 0
+  annotated = "ready"
+
+  let anyValue: any = 1
+  anyValue = false
+
+  let numeric = 0
+  numeric = 1.5
+
+  let compound = 0
+  compound += "!"
+
+  let fractional = 0
+  fractional += 1.5
+
+  return `${mixed}:${annotated}:${anyValue}:${numeric}:${compound}:${fractional}`
+}
+
+export default function App() {
+  return (
+    <body>
+      <div>{widened()}</div>
+    </body>
+  )
+}

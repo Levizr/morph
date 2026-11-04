@@ -58,7 +58,7 @@ const data = response.json()
 console.log(data["name"])
 ```
 
-Dot access (`data.name`) and the browser-shaped `await response.json()` are tracked in the [TypeScript App-Logic Coverage](../future/javascript/coverage.md) plan.
+The browser-shaped `await response.json()` works and lowers to the same synchronous reader. Dot access (`data.name`) is still tracked in the [TypeScript App-Logic Coverage](../future/javascript/coverage.md) plan.
 
 ### Error Handling
 
@@ -184,8 +184,8 @@ co_return;
 ## Not Supported Yet
 
 - `Promise.resolve` / `Promise.all` / `Promise.allSettled` / `Promise.race` / `Promise.any`
-- `.then` / `.catch` chains on `fetch` results; use `async`/`await`
-- Trailing timer arguments (`setTimeout(fn, ms, ...args)`)
+- `.then` / `.catch` chains on `fetch` results; use `async`/`await` (`morph check` rejects them)
+- Trailing timer arguments (`setTimeout(fn, ms, ...args)`; `morph check` rejects them)
 
 These are tracked in the [TypeScript App-Logic Coverage](../future/javascript/coverage.md) plan.
 

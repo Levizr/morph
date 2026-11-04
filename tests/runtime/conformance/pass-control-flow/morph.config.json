@@ -1,0 +1,7 @@
+{
+  "name": "pass-control-flow",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "pass-control-flow" },
+  "dependencies": {},
+  "cpp_sources": []
+}

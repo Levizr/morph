@@ -100,6 +100,21 @@ struct JsNumber {
 
     JsNumber& operator=(const JsValue& v);
 
+    // Native numeric assignments stay exact; without these, `n = 1.5`
+    // is ambiguous between the copy assignment and the JsValue overload.
+    JsNumber& operator=(int v) {
+        value = int64_t(v);
+        return *this;
+    }
+    JsNumber& operator=(int64_t v) {
+        value = v;
+        return *this;
+    }
+    JsNumber& operator=(double v) {
+        value = v;
+        return *this;
+    }
+
     // ── Compound assignment ──
 
     JsNumber& operator+=(const JsNumber& o) { *this = *this + o; return *this; }
@@ -120,6 +135,11 @@ struct JsNumber {
     JsNumber& operator*=(int64_t o) { *this = *this * JsNumber(o); return *this; }
     JsNumber& operator/=(int64_t o) { *this = *this / JsNumber(o); return *this; }
     JsNumber& operator%=(int64_t o) { *this = *this % JsNumber(o); return *this; }
+    JsNumber& operator+=(double o) { *this = *this + JsNumber(o); return *this; }
+    JsNumber& operator-=(double o) { *this = *this - JsNumber(o); return *this; }
+    JsNumber& operator*=(double o) { *this = *this * JsNumber(o); return *this; }
+    JsNumber& operator/=(double o) { *this = *this / JsNumber(o); return *this; }
+    JsNumber& operator%=(double o) { *this = *this % JsNumber(o); return *this; }
 
     // ── Unary ──
     JsNumber operator-() const {

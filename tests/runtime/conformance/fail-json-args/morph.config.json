@@ -1,0 +1,7 @@
+{
+  "name": "fail-json-args",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "fail-json-args" },
+  "dependencies": {},
+  "cpp_sources": []
+}

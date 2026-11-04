@@ -1,0 +1,17 @@
+export const windowConfig = { title: "fail-string-switch", width: 800, height: 600 }
+
+export default function App() {
+  const status = "ready"
+  switch (status) {
+    case "ready":
+      console.log("ready")
+      break
+    default:
+      console.log("other")
+  }
+  return (
+    <body>
+      <div>string switch is not lowered yet</div>
+    </body>
+  )
+}

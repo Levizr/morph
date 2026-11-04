@@ -1,0 +1,12 @@
+export const windowConfig = { title: "fail-array-for-in", width: 800, height: 600 }
+
+export default function App() {
+  for (const index in [10, 20]) {
+    console.log(index)
+  }
+  return (
+    <body>
+      <div>array for...in is not lowered yet</div>
+    </body>
+  )
+}

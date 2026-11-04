@@ -1,0 +1,7 @@
+{
+  "name": "fail-new-target",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "fail-new-target" },
+  "dependencies": {},
+  "cpp_sources": []
+}

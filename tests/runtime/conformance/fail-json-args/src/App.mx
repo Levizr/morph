@@ -1,0 +1,11 @@
+export const windowConfig = { title: "fail-json-args", width: 800, height: 600 }
+
+export default function App() {
+  JSON.parse('{"x":1}', (key, value) => value)
+  JSON.stringify({ x: 1 }, null, 2)
+  return (
+    <body>
+      <div>JSON replacer/reviver arguments are not lowered</div>
+    </body>
+  )
+}

@@ -60,7 +60,7 @@ Already shipped and **not** on the missing list:
 - **Functions/classes:** declarations, expressions, arrows, default/optional parameters, classes with explicitly typed fields, inheritance, `super`, getters/setters with typed backing fields, interfaces, generics.
 - **Destructuring declarations:** callable/event payloads, defaults (`{ a = 1 }`), rest elements (`{ ...rest }`, `[head, ...tail]`), computed keys, and nested patterns. Assignment patterns and loop binding patterns are Part 1C.
 - **Component-body flow:** branches, loops, and calls between declarations lower into the setup effect; reassigned `let` becomes a signal; the functional state updater (`setCount(c => c + 1)`) works.
-- **Late-assigned values:** `let x; x = 5; x = "hi"` works through `JsLateValue` in module and component scope; Window handles lower through `window_wid`.
+- **Late-assigned and widened values:** `let x; x = 5; x = "hi"` works through `JsLateValue` in module and component scope, and initialized bindings widen when a later assignment changes value class (`let x = 0; x = "hi"`, `let x: number | string`, `let x: any`). Mixed numeric classes widen to `JsNumber`; Window handles lower through `window_wid`.
 - **Builtins:** `fetch` (request options plus `Response.text`/`json`/`arrayBuffer`/`clone`, `ok`, `status`, headers), `console.*` (`log`/`warn`/`error`/`info`), timers, `Promise` constructor + `await`, `Error`, `morphState`/`morphEffect`/`morphShared`/`morphEvent`.
 - **Builtin namespaces:** `Math` constants plus `min`/`max`, rounding, logs, exponentials, trig, `hypot`, `fround`, and `random`; `JSON.parse`/`stringify` (single-argument forms), `Number.isFinite`/`isNaN`/`isInteger`, `Object.keys`/`values`/`entries`, `Array.isArray`, `String`/`Number`/`Boolean` conversions, `parseInt`/`parseFloat`.
 - **Strings:** broad method coverage including `toUpperCase`, `toLowerCase`, `trim*`, `indexOf`, `substring`, `slice`, `replace*`, `split`, `includes`, `startsWith`, `endsWith`, `pad*`, `repeat`, `match*`, `search`, `normalize`.
@@ -69,7 +69,7 @@ Already shipped and **not** on the missing list:
 - **Operators with JS semantics:** `==`/`!=`, `===`/`!==`, relational, `in`, `**`/`**=`, `&&=`/`||=`/`??=`, truthiness, string concatenation, `ToNumber` in numeric contexts.
 - **JSX:** elements, fragments, and list `.map` in direct JSX-child position.
 
-`Response.json()` returns a `JsValue`; dot access and the `await` form are Part 3A/3B. `JSON.parse`/`stringify` extra arguments are Part 0. Unannotated class fields are Part 1B.
+`Response.json()` returns a `JsValue`; dot access is Part 3A, while `await response.json()` lowers to the synchronous reader. `JSON.parse`/`stringify` extra arguments, string `switch`, array `for...in`, `.then`/`.catch`, timer trailing arguments, `new.target`, and class expressions are rejected by `morph check`. Unannotated class fields are Part 1B.
 
 ## Part map
 
@@ -120,17 +120,17 @@ Parts 0–4 plus 6A–6D are the current app-logic path and block the three refe
 
 **This is the gate.** Every item below is a known violation of the contract. Part 0 either lowers it correctly or rejects it with a precise `morph check` error. Each later part removes its own rejection and adds a pass fixture; no part is allowed to leave a check-pass/build-fail gap in between.
 
-The statuses below were probed on 2026-11-04 with `morph check`, `morph --to cpp`, and `g++ -std=c++23 -fsyntax-only`. Re-probe before changing a row.
+The statuses below were probed on 2026-11-04 with `morph check`, `morph --to cpp`, and `g++ -std=c++23 -fsyntax-only`. Re-probe before changing a row. Rows marked ⛔ now fail `morph check` with a precise error and a conformance fail fixture; rows marked ✅ are lowered and covered by a pass fixture. The remaining ⚠️/🟥 rows are owned by the part named in the table and stay on the contract-gate checklist.
 
 ### 0.1 Silent-wrong behavior
 
 | ID | Construct | Today | Target |
 |---|---|---|---|
-| 0.1.1 | `for (const i in [10, 20])` | 🟥 Iterates values (`10`, `20`) instead of indices (`"0"`, `"1"`). | Lower to index iteration over own enumerable keys, or reject array `for...in`. |
+| 0.1.1 | `for (const i in [10, 20])` | ⛔ Rejected by `morph check`; object `for...in` still lowers correctly. | Lower array `for...in` to own enumerable keys when implemented (Part 2C). |
 | 0.1.2 | `console.log(x); var x = 1` | 🟥 Prints `1`; JS prints `undefined`. | Hoist `var` with `undefined` initialization. |
 | 0.1.3 | `console.log(x); let x = 1` | 🟥 Prints `1`; JS throws a TDZ `ReferenceError`. | Emit a TDZ check/error, or reject use-before-declaration. |
-| 0.1.4 | `JSON.stringify(v, replacer, 2)` | 🟥 Extra arguments are silently dropped. | Implement `replacer`/`space`, or reject with a hint. |
-| 0.1.5 | `JSON.parse(text, reviver)` | 🟥 `reviver` is silently dropped. | Implement `reviver`, or reject with a hint. |
+| 0.1.4 | `JSON.stringify(v, replacer, 2)` | ⛔ Rejected with a hint. | Implement `replacer`/`space` when needed. |
+| 0.1.5 | `JSON.parse(text, reviver)` | ⛔ Rejected with a hint. | Implement `reviver` when needed. |
 | 0.1.6 | Top-level statements in an imported `.ts` | 🟥 Dropped; module initialization never runs. | Execute once in import order (Part 2E). |
 | 0.1.7 | Codegen placeholders (`/* destructuring not supported */`, `/* spread */`, …) | 🟥 Some reach generated C++. | Every placeholder must become real lowering or a check error in the same change. |
 
@@ -138,22 +138,22 @@ The statuses below were probed on 2026-11-04 with `morph check`, `morph --to cpp
 
 | ID | Construct | Generated failure | Owning part |
 |---|---|---|---|
-| 0.2.1 | `let x = 0; x = "hi"`; `let x: number \| string`; `let y: any` | Type is fixed from the initializer (`int64_t x = 0`); later assignment emits a string. | 1A |
+| 0.2.1 | `let x = 0; x = "hi"`; `let x: number \| string`; `let y: any` | ✅ Fixed in 1A: the binding widens to `JsLateValue` or `JsNumber`. | 1A |
 | 0.2.2 | `class A { x = 0 }`; `static count = 0`; `private _x = 0`; getter/setter backing fields | Emits `auto` data members — invalid C++. | 1B |
-| 0.2.3 | `switch (someString)` | C++ `switch` on a non-integer. | 2A |
+| 0.2.3 | `switch (someString)` | ⛔ Rejected by `morph check`; lowering is 2A. | 2A |
 | 0.2.4 | `for (let i = 0; ...) fns.push(() => i)` | `i is not captured`; no per-iteration binding. | 1D |
 | 0.2.5 | `[a, b] = [b, a]`; `({ c } = o)` | Destructuring-assignment placeholder / invalid C++. | 1C |
-| 0.2.6 | `const C = class { ... }` | Invalid C++; check passes even though the overview lists it as unsupported. | 1B |
+| 0.2.6 | `const C = class { ... }` | ⛔ Rejected by `morph check`; lowering is 1B. | 1B |
 | 0.2.7 | `constructor(public x: number)` | Parameter property is never declared as a field. | 1B |
 | 0.2.8 | `#private` fields | `auto` placeholder. | 1B |
-| 0.2.9 | `fetch(...).then(...)`; `r.text().then(...)` | `Result<JsString>` / `std::string` has no `.then`. | 3C |
-| 0.2.10 | `setTimeout(fn, 0, 1, 2)` | Callback is emitted as `std::function<void()>`; extra arguments are dropped. | 3D |
-| 0.2.11 | `new.target` | Emits undeclared `JsNull{}`. | 2B |
+| 0.2.9 | `fetch(...).then(...)`; `r.text().then(...)` | ⛔ Rejected by `morph check`; 3C decides chain support. | 3C |
+| 0.2.10 | `setTimeout(fn, 0, 1, 2)` | ⛔ Rejected by `morph check`; forwarding is 3D. | 3D |
+| 0.2.11 | `new.target` | ⛔ Rejected by `morph check`; lowering/identity is 2B. | 2B |
 | 0.2.12 | `for (const [k, v] of Object.entries(o))` | `for (auto /* array destructuring */ : ...)`; `k`/`v` undefined. | 1C |
 | 0.2.13 | `JSON.parse(s).name`; `response.json().name` | `JsValue` has no `.name`; bracket access works. | 3A |
-| 0.2.14 | `await response.json()` | `json()` is synchronous; translator emits `co_await` on a `JsValue`. | 3B |
+| 0.2.14 | `await response.json()` | ✅ Fixed in 3B: awaited body readers lower to synchronous calls without `co_await`. | 3B |
 | 0.2.15 | `<Card {...props} />` with required props | `.tsx` check passes; `morph build` fails `mx-component-required`. | 6F |
-| 0.2.16 | `JSON.parse(...)` as the only JSON use | Can emit `morph::json_parse` without pulling in the runtime header. | 3A |
+| 0.2.16 | `JSON.parse(...)` as the only JSON use | ✅ Fixed in 3A: `JSON.parse`/`stringify` pull the runtime header. | 3A |
 
 ### 0.3 One capability table
 
@@ -179,14 +179,14 @@ Every later part adds rows to these tables; no part creates a second list.
 
 ### 1A — Widening bindings
 
-**Today:** late-assigned values (`let x; x = 5; x = "hi"`) work through `JsLateValue`, but initialized bindings never widen:
+**Shipped:** initialized bindings now widen when a later assignment changes value class:
 
 ```ts
 let x = 0;
-x = "hello";        // emits int64_t x = 0; x = "hello";
+x = "hello";        // emits JsLateValue x = 0; x = "hello";
 ```
 
-`number | string` and `any` annotations are ignored the same way.
+`number | string`, `any`, and `unknown` annotations widen even when an initializer would otherwise fix a native type. Mixed value classes use `JsLateValue`; mixed numeric classes use `JsNumber`; compatible native/JS pairs use `JsString`/`JsArray`. Module, function, and component-body declarations share the same widening map; the reference apps remain the end-to-end signal gate.
 
 **Target:** a binding whose later assignments or annotation widen its type uses `JsLateValue`; explicit annotations keep their native type until a widening assignment requires the general representation. Numeric/string/boolean/object/array/Window values keep working, and arithmetic lowers through `morph::js_late_*`.
 
@@ -251,7 +251,7 @@ x = "hello";        // emits int64_t x = 0; x = "hello";
 
 ### 2A — String `switch`
 
-**Today:** `switch` on a string passes check and emits a C++ `switch` on a non-integer.
+**Today:** ⛔ `morph check` rejects `switch` on a string receiver; numeric `switch` still lowers natively.
 
 **Target:** lower to an if/else chain or a tagged `JsValue` switch with JavaScript `===` semantics, including fallthrough and `default`.
 
@@ -261,9 +261,9 @@ x = "hello";        // emits int64_t x = 0; x = "hello";
 
 ### 2B — `new.target`
 
-**Today:** passes check and emits undeclared `JsNull{}`.
+**Today:** ⛔ `morph check` rejects `new.target` instead of emitting undeclared `JsNull{}`.
 
-**Target:** either implement constructor identity (for `new.target` checks) or reject with a precise error. Do not emit an undeclared placeholder.
+**Target:** either implement constructor identity (for `new.target` checks) or keep the precise rejection. Do not emit an undeclared placeholder.
 
 **Depends on:** Part 0.
 
@@ -271,9 +271,9 @@ x = "hello";        // emits int64_t x = 0; x = "hello";
 
 ### 2C — `for...in` over arrays
 
-**Today:** silently iterates values instead of indices.
+**Today:** ⛔ Array receivers are rejected; object `for...in` remains correct.
 
-**Target:** iterate own enumerable string keys in JavaScript order, or reject array `for...in` until the correct lowering exists.
+**Target:** iterate own enumerable string keys in JavaScript order, or keep rejecting array `for...in` until the correct lowering exists.
 
 **Depends on:** Part 0 (silent-wrong fix).
 
@@ -303,9 +303,9 @@ x = "hello";        // emits int64_t x = 0; x = "hello";
 
 ### 3A — JSON return typing and dot access
 
-**Today:** `JSON.parse(...)` and `response.json()` return `JsValue`. Bracket access works; dot access emits `obj.name` and fails because `JsValue` has no such member. A lone `JSON.parse` can also miss the runtime include.
+**Today:** `JSON.parse(...)` and `response.json()` return `JsValue`. Bracket access works; dot access emits `obj.name` and fails because `JsValue` has no such member. A lone `JSON.parse`/`stringify` now pulls the runtime header.
 
-**Target:** lower dot access on `JsValue` to the same lookup as bracket access, or reject it with a hint to use `["key"]` until typed JSON exists. Always pull the JSON runtime header when `JSON.parse` is used.
+**Target:** lower dot access on `JsValue` to the same lookup as bracket access, or reject it with a hint to use `["key"]` until typed JSON exists. Keep the JSON runtime header dependency explicit.
 
 **Depends on:** Part 0.
 
@@ -315,9 +315,9 @@ x = "hello";        // emits int64_t x = 0; x = "hello";
 
 ### 3B — `await response.json()`
 
-**Today:** `json()` is synchronous, but the translator emits `co_await` for the awaited form.
+**Today:** ✅ Shipped. `await response.json()`, `.text()`, `.arrayBuffer()`, and `.clone()` lower to the synchronous call without `co_await`.
 
-**Target:** either make `json()` awaitable or lower `await response.json()` to the synchronous call. The browser-shaped `await` must not produce invalid C++.
+**Target:** the browser-shaped `await` form must not produce invalid C++ and must return the same value as the synchronous form.
 
 **Depends on:** 3A.
 
@@ -325,12 +325,12 @@ x = "hello";        // emits int64_t x = 0; x = "hello";
 
 ### 3C — `.then`/`.catch` decision
 
-**Today:** `.then`/`.catch` pass check and fail in generated C++. The deployment guide now uses `async`/`await`, but the language still accepts `.then` and fails in C++.
+**Today:** ⛔ `morph check` rejects `.then`/`.catch` with a hint to use `async`/`await` and `try`/`catch`. The deployment guide already uses that form.
 
 **Target:** make an explicit decision:
 
 - implement a small compatibility chain for `fetch`/`Response` results, or
-- reject `.then`/`.catch` with a clear error and replace the docs example with `async`/`await`.
+- keep rejecting `.then`/`.catch` with a clear error and keep the docs on `async`/`await`.
 
 A general Promise chain runtime is not required. The contract only requires that the chosen behavior is honest.
 
@@ -340,7 +340,7 @@ A general Promise chain runtime is not required. The contract only requires that
 
 ### 3D — Timer extra arguments
 
-**Today:** `setTimeout(fn, 0, 1, 2)` emits a `std::function<void()>` and drops the extra arguments.
+**Today:** ⛔ `morph check` rejects trailing timer arguments instead of dropping them.
 
 **Target:** capture the trailing arguments in the callback for `setTimeout` and `setInterval`; keep `clearTimeout`/`clearInterval` behavior unchanged.
 
@@ -557,11 +557,12 @@ Morph should expose native equivalents (`useWindow`, clipboard, storage) instead
 | Current baseline (above) | ✅ Shipped |
 | Late-assigned JS values (`JsLateValue`, Window handles) | ✅ Shipped in `7b9774e` |
 | General array methods, object spread, component-body destructuring | ✅ Shipped |
-| `Response.json()` detection and full `Response` runtime | ✅ Shipped; dot access/await forms are Part 3A/3B |
+| `Response.json()` detection and full `Response` runtime | ✅ Shipped; dot access is Part 3A, awaited form shipped |
 | `morph check` diagnostics for rejected constructs | ✅ Shipped; grows with each part |
 | App-logic contract and docs truth-up | ✅ This pass |
-| Part 0 — contract integrity | 🚧 In progress |
-| Parts 1–6 | 🚧 Planned |
+| Part 0 — contract integrity | 🚧 In progress — shipped rejections for string `switch`, array `for...in`, `.then`/`.catch`, JSON extra args, timer args, `new.target`, and class expressions; remaining ⚠️/🟥 rows are owned by 1B/1C/1D/2D/2E/3A/6F |
+| Part 1A — widening bindings | ✅ Shipped |
+| Parts 1B–6 | 🚧 Planned |
 | Part 7 — docs and claims | 📋 Continuous |
 
 ## How to use this page

@@ -1,0 +1,10 @@
+export const windowConfig = { title: "fail-timer-args", width: 800, height: 600 }
+
+export default function App() {
+  setTimeout((a, b) => console.log(a + b), 0, 1, 2)
+  return (
+    <body>
+      <div>trailing timer arguments are not lowered</div>
+    </body>
+  )
+}
