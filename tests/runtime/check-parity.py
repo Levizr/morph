@@ -57,6 +57,7 @@ EXPECTED_REJECTIONS = {
     "enum_decl": {"mx-js-syntax"},
     "filter_non_jsx": {"mx-js-method"},
     "find_non_jsx": {"mx-js-method"},
+    "for_in_pattern_body": {"mx-js-syntax"},
     "forEach_body": {"mx-js-method"},
     "instanceof_op": {"mx-js-member", "mx-js-op"},
     "map_non_jsx": {"mx-js-method"},
@@ -284,6 +285,50 @@ case(
       let total = 0
       for (const x of [1, 2, 3]) { total = total + x }
       return (<body><text>{total}</text></body>)
+    }
+    """,
+)
+case(
+    "destructuring_assignment_body",
+    """
+    export default function App() {
+      let a = 1
+      let b = 2
+      ;[a, b] = [b, a]
+      let first = 0
+      let rest = [0]
+      ;[first, ...rest] = [3, 4, 5]
+      const user = { name: "ada", extra: { city: "paris" } }
+      let name = ""
+      let city = ""
+      ;({ name, extra: { city } } = user)
+      const key = "name"
+      let picked = ""
+      ;({ [key]: picked } = user)
+      return (<body><text>{a} {b} {first} {rest.length} {name} {city} {picked}</text></body>)
+    }
+    """,
+)
+case(
+    "for_of_pattern_body",
+    """
+    export default function App() {
+      let total = 0
+      for (const { value } of [{ value: 1 }, { value: 2 }]) { total = total + value }
+      let left = 0
+      let right = 0
+      for ([left, right] of [[3, 4]]) { total = total + left + right }
+      return (<body><text>{total} {left} {right}</text></body>)
+    }
+    """,
+)
+case(
+    "for_in_pattern_body",
+    """
+    export default function App() {
+      const source = { a: 1 }
+      for (const [key] in source) { console.log(key) }
+      return (<body><text>rejected</text></body>)
     }
     """,
 )

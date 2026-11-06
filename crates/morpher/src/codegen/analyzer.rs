@@ -1347,6 +1347,9 @@ impl EscapeAnalyzer {
             Expression::AssignmentExpression(a) => {
                 self.analyze_assignment(a);
             }
+            Expression::ParenthesizedExpression(p) => {
+                self.analyze_expression(&p.expression);
+            }
             Expression::StaticMemberExpression(m) => {
                 self.analyze_expression(&m.object);
             }
@@ -1534,6 +1537,7 @@ impl EscapeAnalyzer {
             self.fold_assignment_range(&left_name, a.operator.as_str(), &a.right);
         } else {
             self.analyze_assignment_target_reads(&a.left);
+            self.record_assignment_pattern_defs(&a.left);
         }
 
         self.analyze_expression(&a.right);
@@ -1560,6 +1564,62 @@ impl EscapeAnalyzer {
                 self.analyze_expression(&m.object);
             }
             _ => {}
+        }
+    }
+
+    /// Destructuring writes can store any JS value in their bindings, so
+    /// record a dynamic definition for every identifier target. Without
+    /// this, `let x = 0; [x] = ["hi"]` kept the native integer type and
+    /// silently coerced the string through `JsNumber`.
+    fn record_assignment_pattern_defs(&mut self, target: &AssignmentTarget) {
+        match target {
+            AssignmentTarget::AssignmentTargetIdentifier(id) => {
+                self.record_usage(id.name.as_str(), UsageKind::PropertyWrite);
+                self.record_def(id.name.as_str(), OperandClass::JsValue, None, Some(id.span.start));
+            }
+            AssignmentTarget::ArrayAssignmentTarget(array) => {
+                for element in array.elements.iter().flatten() {
+                    self.record_assignment_maybe_default_defs(element);
+                }
+                if let Some(rest) = &array.rest {
+                    self.record_assignment_pattern_defs(&rest.target);
+                }
+            }
+            AssignmentTarget::ObjectAssignmentTarget(object) => {
+                for property in &object.properties {
+                    match property {
+                        AssignmentTargetProperty::AssignmentTargetPropertyIdentifier(p) => {
+                            self.record_usage(p.binding.name.as_str(), UsageKind::PropertyWrite);
+                            self.record_def(
+                                p.binding.name.as_str(),
+                                OperandClass::JsValue,
+                                None,
+                                Some(p.binding.span.start),
+                            );
+                        }
+                        AssignmentTargetProperty::AssignmentTargetPropertyProperty(p) => {
+                            self.record_assignment_maybe_default_defs(&p.binding);
+                        }
+                    }
+                }
+                if let Some(rest) = &object.rest {
+                    self.record_assignment_pattern_defs(&rest.target);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn record_assignment_maybe_default_defs(&mut self, target: &AssignmentTargetMaybeDefault) {
+        match target {
+            AssignmentTargetMaybeDefault::AssignmentTargetWithDefault(with_default) => {
+                self.record_assignment_pattern_defs(&with_default.binding);
+            }
+            _ => {
+                if let Some(target) = target.as_assignment_target() {
+                    self.record_assignment_pattern_defs(target);
+                }
+            }
         }
     }
 
@@ -2676,6 +2736,28 @@ mod tests {
         let info = result.var_infos.get("i").unwrap();
         assert_eq!(info.int_range, Some((0, 9)));
         assert!(info.int_range_exact);
+    }
+
+    #[test]
+    fn destructuring_assignment_widens_native_targets() {
+        let result = analyze_source(concat!(
+            "let first = 0;\n",
+            "let label = \"\";\n",
+            "[first, label] = [\"hi\", 1];\n",
+            "console.log(first, label);",
+        ));
+        assert_eq!(result.widens.get("first"), Some(&WidenedType::ToJsLateValue));
+        assert_eq!(result.widens.get("label"), Some(&WidenedType::ToJsLateValue));
+    }
+
+    #[test]
+    fn object_destructuring_assignment_widens_native_targets() {
+        let result = analyze_source(concat!(
+            "let count = 0;\n",
+            "({ count } = { count: \"hi\" });\n",
+            "console.log(count);",
+        ));
+        assert_eq!(result.widens.get("count"), Some(&WidenedType::ToJsLateValue));
     }
 
     #[test]

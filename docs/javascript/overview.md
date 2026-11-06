@@ -45,6 +45,10 @@ This module is provided by `node_modules/morph/index.d.ts` — it ships with eve
 - Destructured object/array parameters in function declarations, expressions,
   arrows, methods, function-prop callbacks, and `.on()` event handlers
   (lowered to one synthetic argument plus local bindings)
+- Destructuring assignments (`[a, b] = ...`, `({ c } = o)`) with defaults,
+  rest elements, computed keys, nested patterns, and member targets
+- `for...of` declaration and assignment patterns, such as
+  `for (const [key, value] of Object.entries(object))`
 - Object/array literal consts, including nested object member access
 - Classes with constructors, methods, `super()`, `this`, inferred or annotated fields, `static` and `#private` members, constructor parameter properties, getters/setters, and module-scope class expressions in direct `const`/`let` initializers
 - Interfaces and type aliases
@@ -100,6 +104,7 @@ Binary (`+`, `-`, `*`, `/`, `**`, `===`, `!==`, `==`, `!=`, `<`, `>`, etc.), una
 - `Array.push` on both `JsArray` (`.push`) and `std::vector` (`.push_back`); multi-argument `push`, `unshift`, and `splice` accept spread elements. `.length` on vectors, arrays, and strings alike (`.size()` where native)
 - Console output: `console.log` / `console.warn` / `console.error` / `console.info` print natively (visible in the DevTools **Logs** tab)
 - Destructuring declarations (including at the top of a component body) and callable/event payloads, including defaults (`{ a = 1 }`), rest elements (`{ ...rest }`, `[head, ...tail]`), and computed keys (`{ [key]: value }`). Defaults are lazy and apply only when the value is `undefined`; computed keys evaluate once.
+- Destructuring assignments and `for...of` binding patterns. The right-hand side is evaluated once, so `[a, b] = [b, a]` swaps correctly; defaults, rest, computed keys, nested patterns, and member targets (`[box.label] = ...`) all lower. `for...in` destructuring is rejected — bind the key with a plain name and destructure inside the loop body.
 
 ## What's Not Supported Yet
 
@@ -118,9 +123,10 @@ Binary (`+`, `-`, `*`, `/`, `**`, `===`, `!==`, `==`, `!=`, `<`, `>`, etc.), una
 - Class expressions outside a module-scope direct `const`/`let` initializer
   (module-scope initializers lower to a named class; function-local and
   every other position are rejected)
-- String `switch`, array `for...in`, `new.target`, and trailing timer
-  arguments (`setTimeout(fn, ms, ...args)`) — rejected by `morph check`
-  with a precise error
+- String `switch`, array `for...in`, destructuring in `for...in`,
+  `new.target`, and trailing timer arguments
+  (`setTimeout(fn, ms, ...args)`) — rejected by `morph check` with a
+  precise error
 - C++ keywords used as JS binding or class member names (`double`,
   `template`, `delete`, …)
 - A few JS methods whose receiver is provably a native type (for example
@@ -132,11 +138,18 @@ for `morph build`; the two commands share the same parser, graph, lint, and
 IR pipeline.
 
 > **Known contract gaps:** some constructs still pass `morph check` and
-> fail in generated C++ — destructuring assignment and loop bindings,
-> per-iteration closures, `var` hoisting/TDZ, imported module side effects,
-> JSON dot access, JSX spread props, and others. The
+> fail in generated C++ — per-iteration closures, `var` hoisting/TDZ,
+> imported module side effects, JSON dot access, JSX spread props,
+> function-local class metadata that escapes its declaring function, and
+> others. The
 > [TypeScript App-Logic Coverage](../future/javascript/coverage.md) plan
 > tracks every case and gates them behind Part 0.
+>
+> **Scope:** every JavaScript language and standard-library gap in that
+> plan (Parts 1C–5G) is committed to implementation. Browser DOM and
+> browser globals (`document`, `window`, `location`, `history`,
+> `navigator`, event constructors) remain out of scope; use Morph's native
+> equivalents such as `useWindow` instead.
 
 ## Rules `morph check` Enforces
 

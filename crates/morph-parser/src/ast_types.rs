@@ -319,6 +319,10 @@ pub struct MutableLocal {
     /// so it lowers to a JS-visible `JsWindowHandle` signal instead of a
     /// value inferred from its initializer.
     pub window: bool,
+    /// The local is written through an array/object assignment pattern.
+    /// Destructuring can store any JS value in it, so the signal stays a
+    /// `JsValue` instead of narrowing to the initializer's native type.
+    pub dynamic: bool,
 }
 
 /// Intermediate JSX representation (mirrors Python's dict-based IR).

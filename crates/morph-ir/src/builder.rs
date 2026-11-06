@@ -1054,6 +1054,10 @@ impl IRBuilder {
                 // before its assignment must yield `undefined`, and later
                 // member/method lowering narrows through `window_wid(...)`.
                 Some("JsWindowHandle".to_string())
+            } else if local.dynamic {
+                // A destructuring assignment can store any JS value in this
+                // binding, so the signal must not narrow to the initializer.
+                Some("JsValue".to_string())
             } else if matches!(local.init.trim(), "undefined" | "null") {
                 // Empty/nullish bindings are assigned later. Keep the JS
                 // value (`undefined` before the assignment) instead of

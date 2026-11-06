@@ -917,6 +917,26 @@ impl<'a> Visit<'a> for JsSyntaxVisitor<'_> {
         oxc_ast_visit::walk::walk_switch_statement(self, s);
     }
     fn visit_for_in_statement(&mut self, f: &ForInStatement<'a>) {
+        let pattern_binding = match &f.left {
+            ForStatementLeft::VariableDeclaration(declaration) => declaration
+                .declarations
+                .iter()
+                .any(|declarator| !matches!(&declarator.id, BindingPattern::BindingIdentifier(_))),
+            _ => f.left.as_assignment_target().is_some_and(|target| {
+                matches!(
+                    target,
+                    AssignmentTarget::ArrayAssignmentTarget(_)
+                        | AssignmentTarget::ObjectAssignmentTarget(_)
+                )
+            }),
+        };
+        if pattern_binding {
+            self.out.push((
+                f.left.span().start,
+                "`for...in` with a destructuring binding",
+                "Bind the key with a plain name, then destructure the value inside the loop body",
+            ));
+        }
         if syntax_array_like(&f.right, self.states) {
             self.out.push((
                 f.span.start,

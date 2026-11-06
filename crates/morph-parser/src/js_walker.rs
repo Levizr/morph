@@ -1655,6 +1655,20 @@ impl<'src> MxWalker<'src> {
         }
     }
 
+    /// Source text for a statement the body-flow pass copies verbatim.
+    /// Statement spans exclude the terminating semicolon, and the copied
+    /// statements are joined with newlines, so two adjacent expression
+    /// statements would otherwise parse as one (`({...} = obj)` followed by
+    /// `[a] = xs`). Appending `;` keeps every copied statement a statement.
+    fn raw_statement_text(&self, stmt: &Statement) -> String {
+        let text = self.span_text(stmt.span());
+        if text.trim_end().ends_with(';') {
+            text.to_string()
+        } else {
+            format!("{text};")
+        }
+    }
+
     /// Split a component body into the setup flow the declarative
     /// collectors do not own. `consts` is filtered in place: a local any
     /// body statement (or nested closure) reassigns moves out of the
@@ -1669,6 +1683,8 @@ impl<'src> MxWalker<'src> {
     ) -> (Vec<String>, Vec<MutableLocal>) {
         let mut assigned = AssignedNames::default();
         assigned.visit_function_body(body);
+        let mut destructured = DestructuredAssignedNames::default();
+        destructured.visit_function_body(body);
         let mut window_assigned = WindowAssignedNames::default();
         window_assigned.visit_function_body(body);
         let mut locals: Vec<MutableLocal> = Vec::new();
@@ -1678,7 +1694,8 @@ impl<'src> MxWalker<'src> {
                 kept.push(cst);
             } else {
                 let window = window_assigned.names.contains(&cst.name);
-                locals.push(MutableLocal { name: cst.name, init: cst.rhs, window });
+                let dynamic = destructured.names.contains(&cst.name);
+                locals.push(MutableLocal { name: cst.name, init: cst.rhs, window, dynamic });
             }
         }
         *consts = kept;
@@ -1717,6 +1734,7 @@ impl<'src> MxWalker<'src> {
                             name: name.clone(),
                             init: "undefined".to_string(),
                             window: window_assigned.names.contains(&name),
+                            dynamic: destructured.names.contains(&name),
                         });
                         stmts.push(format!("{name} = undefined;"));
                         continue;
@@ -1731,16 +1749,104 @@ impl<'src> MxWalker<'src> {
                     }
                 }
                 if undecided {
-                    stmts.push(self.span_text(stmt.span()).to_string());
+                    stmts.push(self.raw_statement_text(stmt));
                 }
                 continue;
             }
             if Self::stmt_is_declarative(stmt) {
                 continue;
             }
-            stmts.push(self.span_text(stmt.span()).to_string());
+            stmts.push(self.raw_statement_text(stmt));
         }
         (stmts, locals)
+    }
+}
+
+/// Names bound by an assignment target, including array/object
+/// destructuring targets and their defaults/rest elements.
+fn collect_assignment_target_names(
+    target: &AssignmentTarget,
+    names: &mut std::collections::HashSet<String>,
+) {
+    match target {
+        AssignmentTarget::AssignmentTargetIdentifier(id) => {
+            names.insert(id.name.to_string());
+        }
+        AssignmentTarget::ArrayAssignmentTarget(array) => {
+            for element in array.elements.iter().flatten() {
+                collect_assignment_maybe_default_names(element, names);
+            }
+            if let Some(rest) = &array.rest {
+                collect_assignment_target_names(&rest.target, names);
+            }
+        }
+        AssignmentTarget::ObjectAssignmentTarget(object) => {
+            for property in &object.properties {
+                match property {
+                    AssignmentTargetProperty::AssignmentTargetPropertyIdentifier(p) => {
+                        names.insert(p.binding.name.to_string());
+                    }
+                    AssignmentTargetProperty::AssignmentTargetPropertyProperty(p) => {
+                        collect_assignment_maybe_default_names(&p.binding, names);
+                    }
+                }
+            }
+            if let Some(rest) = &object.rest {
+                collect_assignment_target_names(&rest.target, names);
+            }
+        }
+        AssignmentTarget::TSAsExpression(e) => {
+            collect_expression_target_name(&e.expression, names);
+        }
+        AssignmentTarget::TSSatisfiesExpression(e) => {
+            collect_expression_target_name(&e.expression, names);
+        }
+        AssignmentTarget::TSNonNullExpression(e) => {
+            collect_expression_target_name(&e.expression, names);
+        }
+        AssignmentTarget::TSTypeAssertion(e) => {
+            collect_expression_target_name(&e.expression, names);
+        }
+        _ => {}
+    }
+}
+
+fn collect_assignment_maybe_default_names(
+    target: &AssignmentTargetMaybeDefault,
+    names: &mut std::collections::HashSet<String>,
+) {
+    match target {
+        AssignmentTargetMaybeDefault::AssignmentTargetWithDefault(with_default) => {
+            collect_assignment_target_names(&with_default.binding, names);
+        }
+        _ => {
+            if let Some(target) = target.as_assignment_target() {
+                collect_assignment_target_names(target, names);
+            }
+        }
+    }
+}
+
+fn collect_expression_target_name(
+    expr: &Expression,
+    names: &mut std::collections::HashSet<String>,
+) {
+    match expr {
+        Expression::Identifier(id) => {
+            names.insert(id.name.to_string());
+        }
+        Expression::TSAsExpression(e) => collect_expression_target_name(&e.expression, names),
+        Expression::TSSatisfiesExpression(e) => {
+            collect_expression_target_name(&e.expression, names);
+        }
+        Expression::TSNonNullExpression(e) => {
+            collect_expression_target_name(&e.expression, names);
+        }
+        Expression::TSTypeAssertion(e) => collect_expression_target_name(&e.expression, names),
+        Expression::ParenthesizedExpression(p) => {
+            collect_expression_target_name(&p.expression, names);
+        }
+        _ => {}
     }
 }
 
@@ -1755,9 +1861,7 @@ struct AssignedNames {
 
 impl<'a> Visit<'a> for AssignedNames {
     fn visit_assignment_expression(&mut self, expr: &AssignmentExpression<'a>) {
-        if let AssignmentTarget::AssignmentTargetIdentifier(id) = &expr.left {
-            self.names.insert(id.name.to_string());
-        }
+        collect_assignment_target_names(&expr.left, &mut self.names);
         oxc_ast_visit::walk::walk_assignment_expression(self, expr);
     }
 
@@ -1766,6 +1870,68 @@ impl<'a> Visit<'a> for AssignedNames {
             self.names.insert(id.name.to_string());
         }
         oxc_ast_visit::walk::walk_update_expression(self, expr);
+    }
+
+    fn visit_for_of_statement(&mut self, f: &ForOfStatement<'a>) {
+        if let Some(target) = f.left.as_assignment_target() {
+            collect_assignment_target_names(target, &mut self.names);
+        }
+        oxc_ast_visit::walk::walk_for_of_statement(self, f);
+    }
+
+    fn visit_for_in_statement(&mut self, f: &ForInStatement<'a>) {
+        if let Some(target) = f.left.as_assignment_target() {
+            collect_assignment_target_names(target, &mut self.names);
+        }
+        oxc_ast_visit::walk::walk_for_in_statement(self, f);
+    }
+}
+
+/// Names written through an array/object assignment pattern, including
+/// `for...of` assignment targets. A destructured write can store any JS
+/// value, so those signals stay dynamic instead of narrowing to the
+/// initializer's native type.
+#[derive(Default)]
+struct DestructuredAssignedNames {
+    names: std::collections::HashSet<String>,
+}
+
+impl<'a> Visit<'a> for DestructuredAssignedNames {
+    fn visit_assignment_expression(&mut self, expr: &AssignmentExpression<'a>) {
+        if matches!(
+            &expr.left,
+            AssignmentTarget::ArrayAssignmentTarget(_)
+                | AssignmentTarget::ObjectAssignmentTarget(_)
+        ) {
+            collect_assignment_target_names(&expr.left, &mut self.names);
+        }
+        oxc_ast_visit::walk::walk_assignment_expression(self, expr);
+    }
+
+    fn visit_for_of_statement(&mut self, f: &ForOfStatement<'a>) {
+        if let Some(target) = f.left.as_assignment_target() {
+            if matches!(
+                target,
+                AssignmentTarget::ArrayAssignmentTarget(_)
+                    | AssignmentTarget::ObjectAssignmentTarget(_)
+            ) {
+                collect_assignment_target_names(target, &mut self.names);
+            }
+        }
+        oxc_ast_visit::walk::walk_for_of_statement(self, f);
+    }
+
+    fn visit_for_in_statement(&mut self, f: &ForInStatement<'a>) {
+        if let Some(target) = f.left.as_assignment_target() {
+            if matches!(
+                target,
+                AssignmentTarget::ArrayAssignmentTarget(_)
+                    | AssignmentTarget::ObjectAssignmentTarget(_)
+            ) {
+                collect_assignment_target_names(target, &mut self.names);
+            }
+        }
+        oxc_ast_visit::walk::walk_for_in_statement(self, f);
     }
 }
 
@@ -1808,9 +1974,7 @@ struct WindowAssignedNames {
 impl<'a> Visit<'a> for WindowAssignedNames {
     fn visit_assignment_expression(&mut self, expr: &AssignmentExpression<'a>) {
         if expr.operator == AssignmentOperator::Assign && is_window_assignment_rhs(&expr.right) {
-            if let AssignmentTarget::AssignmentTargetIdentifier(id) = &expr.left {
-                self.names.insert(id.name.to_string());
-            }
+            collect_assignment_target_names(&expr.left, &mut self.names);
         }
         oxc_ast_visit::walk::walk_assignment_expression(self, expr);
     }
@@ -2369,6 +2533,32 @@ mod walker_tests {
         let joined = c.body_stmts.join("\n");
         assert!(joined.contains("name = __morph_destructure_"), "{joined}");
         assert!(!c.consts.iter().any(|k| k.name == "name"), "{:?}", c.consts);
+    }
+
+    #[test]
+    fn body_destructuring_assignment_marks_local_dynamic() {
+        let c = component(
+            "export default function App() {\n  let first = 0\n  let name = \"\"\n  ;[first] = [1]\n  ;({ name } = { name: \"Ada\" })\n  return (<div>{first} {name}</div>)\n}\n",
+        );
+        let first =
+            c.mutable_locals.iter().find(|l| l.name == "first").unwrap_or_else(|| panic!("{c:?}"));
+        assert!(first.dynamic, "{c:?}");
+        let name =
+            c.mutable_locals.iter().find(|l| l.name == "name").unwrap_or_else(|| panic!("{c:?}"));
+        assert!(name.dynamic, "{c:?}");
+        let joined = c.body_stmts.join("\n");
+        assert!(joined.contains("[first] = [1]"), "{joined}");
+        assert!(joined.contains("({ name } = { name: \"Ada\" })"), "{joined}");
+    }
+
+    #[test]
+    fn body_flow_keeps_copied_statements_separate() {
+        let c = component(
+            "export default function App() {\n  let a = 0\n  let b = 0\n  ;({ a } = { a: 1 })\n  const box = { label: \"\" }\n  ;[b] = [2]\n  return (<div>{a} {b}</div>)\n}\n",
+        );
+        let joined = c.body_stmts.join("\n");
+        assert!(joined.contains("({ a } = { a: 1 });"), "{joined}");
+        assert!(joined.contains("[b] = [2];"), "{joined}");
     }
 
     #[test]

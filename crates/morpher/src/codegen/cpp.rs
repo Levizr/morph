@@ -1160,6 +1160,490 @@ impl<'a> CppTranslator<'a> {
         true
     }
 
+    /// Destructuring assignment (`[a, b] = rhs`, `({ c } = o)`).
+    ///
+    /// The right-hand side is staged once inside an immediately-invoked
+    /// lambda so every target reads the same value and computed keys run
+    /// exactly once. The lambda returns the staged value, matching the
+    /// value of a JavaScript assignment expression. Module-scope
+    /// assignments use a captureless lambda because C++ forbids a
+    /// capture-default outside a function.
+    fn emit_destructuring_assignment(&mut self, a: &AssignmentExpression<'a>) -> String {
+        let container_type = self.advanced_container_type(&a.right);
+        let temp = format!("__assign_{}", self.destructure_count);
+        self.destructure_count += 1;
+        let rhs = self.emit_expression(&a.right);
+        self.ctx.need(&container_type);
+        self.ctx.var_types.insert(temp.clone(), container_type.clone());
+
+        let capture =
+            if self.ctx.fn_body_depth > 0 || self.ctx.arrow_depth > 0 || self.ctx.fn_expr_depth > 0
+            {
+                "[&]"
+            } else {
+                "[]"
+            };
+        let base_indent = self.indent();
+        let inner_indent = format!("{base_indent}{INDENT}");
+        let mut lines = vec![format!("({capture}() {{")];
+        lines.push(format!("{inner_indent}auto {temp} = {rhs};"));
+
+        let old_indent = self.ctx.indent_level;
+        self.ctx.indent_level += 1;
+        let mut assignments = Vec::new();
+        let ok = self.emit_assignment_pattern(&a.left, &temp, &container_type, &mut assignments);
+        self.ctx.indent_level = old_indent;
+        if !ok {
+            return format!("{}/* destructuring assignment not supported */", self.indent());
+        }
+        lines.extend(assignments);
+        lines.push(format!("{inner_indent}return {temp};"));
+        lines.push(format!("{base_indent}}})()"));
+        lines.join("\n")
+    }
+
+    fn emit_assignment_pattern(
+        &mut self,
+        target: &AssignmentTarget<'a>,
+        source: &str,
+        source_type: &str,
+        lines: &mut Vec<String>,
+    ) -> bool {
+        match target {
+            AssignmentTarget::AssignmentTargetIdentifier(id) => {
+                self.push_identifier_assignment(id.name.as_str(), source, source_type, lines);
+                true
+            }
+            AssignmentTarget::StaticMemberExpression(_)
+            | AssignmentTarget::ComputedMemberExpression(_)
+            | AssignmentTarget::PrivateFieldExpression(_) => {
+                let target_code = self.emit_assignment_target(target);
+                let target_type = self.assignment_target_type(target);
+                self.push_value_assignment(
+                    &target_code,
+                    target_type.as_deref(),
+                    source,
+                    source_type,
+                    lines,
+                );
+                true
+            }
+            AssignmentTarget::ArrayAssignmentTarget(array) => {
+                self.emit_assignment_array(array, source, source_type, lines)
+            }
+            AssignmentTarget::ObjectAssignmentTarget(object) => {
+                self.emit_assignment_object(object, source, source_type, lines)
+            }
+            _ => false,
+        }
+    }
+
+    fn emit_assignment_maybe_default(
+        &mut self,
+        target: &AssignmentTargetMaybeDefault<'a>,
+        source: &str,
+        source_type: &str,
+        lines: &mut Vec<String>,
+    ) -> bool {
+        match target {
+            AssignmentTargetMaybeDefault::AssignmentTargetWithDefault(with_default) => {
+                if Self::value_may_be_undefined(source_type) {
+                    let default = self.emit_expression(&with_default.init);
+                    self.ctx.need("JsValue");
+                    let checked = if Self::bare_type(source_type) == "JsValue" {
+                        source.to_string()
+                    } else {
+                        format!("JsValue({source})")
+                    };
+                    let default_source =
+                        format!("({checked}.is_undefined() ? JsValue({default}) : {checked})");
+                    self.emit_assignment_pattern(
+                        &with_default.binding,
+                        &default_source,
+                        "JsValue",
+                        lines,
+                    )
+                } else {
+                    self.emit_assignment_pattern(&with_default.binding, source, source_type, lines)
+                }
+            }
+            _ => target.as_assignment_target().is_some_and(|target| {
+                self.emit_assignment_pattern(target, source, source_type, lines)
+            }),
+        }
+    }
+
+    fn emit_assignment_array(
+        &mut self,
+        array: &ArrayAssignmentTarget<'a>,
+        source: &str,
+        source_type: &str,
+        lines: &mut Vec<String>,
+    ) -> bool {
+        match Self::destructure_dot(source_type, &self.ctx.class_names) {
+            Some(false) => {}
+            Some(true) | None => return false,
+        }
+        if Self::bare_type(source_type) == "JsObject" {
+            return false;
+        }
+        let elem_type = Self::destructured_array_element_type(source_type);
+        for (index, element) in array.elements.iter().enumerate() {
+            let Some(nested) = element else {
+                continue;
+            };
+            let access = format!("{source}[{index}]");
+            if !self.emit_assignment_maybe_default(nested, &access, &elem_type, lines) {
+                return false;
+            }
+        }
+        if let Some(rest) = &array.rest {
+            let start = array.elements.len();
+            let Some((rest_source, rest_type)) =
+                self.array_rest_expression(source, source_type, start)
+            else {
+                return false;
+            };
+            if !self.emit_assignment_pattern(&rest.target, &rest_source, &rest_type, lines) {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn emit_assignment_object(
+        &mut self,
+        object: &ObjectAssignmentTarget<'a>,
+        source: &str,
+        source_type: &str,
+        lines: &mut Vec<String>,
+    ) -> bool {
+        let Some(access) = Self::assignment_object_access(source_type, &self.ctx.class_names)
+        else {
+            return false;
+        };
+        let dot = access != "[]";
+        if dot
+            && object.properties.iter().any(|property| {
+                matches!(
+                    property,
+                    AssignmentTargetProperty::AssignmentTargetPropertyProperty(p) if p.computed
+                )
+            })
+        {
+            return false;
+        }
+        let mut excluded: Vec<String> = Vec::new();
+        for property in &object.properties {
+            match property {
+                AssignmentTargetProperty::AssignmentTargetPropertyIdentifier(p) => {
+                    let key = p.binding.name.to_string();
+                    excluded.push(cpp_string_literal(&key));
+                    let field_type = if dot {
+                        self.assignment_object_field_type(source_type, &key)
+                    } else {
+                        "JsValue".to_string()
+                    };
+                    let source_expr = if dot {
+                        format!("{source}{access}{key}")
+                    } else {
+                        format!("{source}[{}]", cpp_string_literal(&key))
+                    };
+                    if let Some(init) = &p.init {
+                        if !self.emit_assignment_identifier_default(
+                            p.binding.name.as_str(),
+                            &source_expr,
+                            &field_type,
+                            init,
+                            lines,
+                        ) {
+                            return false;
+                        }
+                    } else {
+                        self.push_identifier_assignment(
+                            p.binding.name.as_str(),
+                            &source_expr,
+                            &field_type,
+                            lines,
+                        );
+                    }
+                }
+                AssignmentTargetProperty::AssignmentTargetPropertyProperty(p) => {
+                    if !self.emit_assignment_object_property(
+                        p,
+                        source,
+                        source_type,
+                        access,
+                        dot,
+                        &mut excluded,
+                        lines,
+                    ) {
+                        return false;
+                    }
+                }
+            }
+        }
+        if let Some(rest) = &object.rest {
+            if dot {
+                return false;
+            }
+            self.ctx.need("JsObject");
+            let rest_source =
+                format!("morph::js_object_rest({source}, {{{}}})", excluded.join(", "));
+            if !self.emit_assignment_pattern(&rest.target, &rest_source, "JsObject", lines) {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn emit_assignment_object_property(
+        &mut self,
+        property: &AssignmentTargetPropertyProperty<'a>,
+        source: &str,
+        source_type: &str,
+        access: &str,
+        dot: bool,
+        excluded: &mut Vec<String>,
+        lines: &mut Vec<String>,
+    ) -> bool {
+        let (source_expr, field_type) = if let Some(name) = property.name.static_name() {
+            let key = name.into_owned();
+            excluded.push(cpp_string_literal(&key));
+            let field_type = if dot {
+                self.assignment_object_field_type(source_type, &key)
+            } else {
+                "JsValue".to_string()
+            };
+            let source_expr = if dot {
+                format!("{source}{access}{key}")
+            } else {
+                format!("{source}[{}]", cpp_string_literal(&key))
+            };
+            (source_expr, field_type)
+        } else {
+            let Some(key_expr) = property.name.as_expression() else {
+                return false;
+            };
+            if dot {
+                return false;
+            }
+            let key_temp = format!("__key_{}", self.destructure_count);
+            self.destructure_count += 1;
+            let key_cpp = self.emit_expression(key_expr);
+            self.ctx.need("std::string");
+            self.ctx.need("JsValue");
+            let prefix = if self.ctx.indent_level == 0 { "static " } else { "" };
+            lines.push(format!(
+                "{}{prefix}auto {key_temp} = morph::js_to_string({key_cpp}).to_std_string();",
+                self.indent()
+            ));
+            excluded.push(key_temp.clone());
+            (format!("{source}[{key_temp}]"), "JsValue".to_string())
+        };
+        self.emit_assignment_maybe_default(&property.binding, &source_expr, &field_type, lines)
+    }
+
+    fn emit_assignment_identifier_default(
+        &mut self,
+        name: &str,
+        source: &str,
+        source_type: &str,
+        init: &Expression<'a>,
+        lines: &mut Vec<String>,
+    ) -> bool {
+        if Self::value_may_be_undefined(source_type) {
+            let default = self.emit_expression(init);
+            self.ctx.need("JsValue");
+            let checked = if Self::bare_type(source_type) == "JsValue" {
+                source.to_string()
+            } else {
+                format!("JsValue({source})")
+            };
+            let default_source =
+                format!("({checked}.is_undefined() ? JsValue({default}) : {checked})");
+            self.push_identifier_assignment(name, &default_source, "JsValue", lines);
+        } else {
+            self.push_identifier_assignment(name, source, source_type, lines);
+        }
+        true
+    }
+
+    fn push_identifier_assignment(
+        &self,
+        name: &str,
+        source: &str,
+        source_type: &str,
+        lines: &mut Vec<String>,
+    ) {
+        let target_type = self.ctx.var_types.get(name).cloned();
+        if let Some(set_head) = self.signal_set_head(name) {
+            let value =
+                Self::convert_assignment_source(target_type.as_deref(), source_type, source);
+            lines.push(format!("{}{}({});", self.indent(), set_head, value));
+            return;
+        }
+        let target =
+            self.active_narrows.get(name).cloned().unwrap_or_else(|| {
+                self.deref_shared_scalar(name).unwrap_or_else(|| name.to_string())
+            });
+        let value = Self::convert_assignment_source(target_type.as_deref(), source_type, source);
+        lines.push(format!("{}{} = {};", self.indent(), target, value));
+    }
+
+    fn push_value_assignment(
+        &self,
+        target: &str,
+        target_type: Option<&str>,
+        source: &str,
+        source_type: &str,
+        lines: &mut Vec<String>,
+    ) {
+        let value = Self::convert_assignment_source(target_type, source_type, source);
+        lines.push(format!("{}{} = {};", self.indent(), target, value));
+    }
+
+    fn convert_assignment_source(
+        target_type: Option<&str>,
+        source_type: &str,
+        source: &str,
+    ) -> String {
+        let Some(target_type) = target_type else {
+            return source.to_string();
+        };
+        let target = Self::bare_type(target_type);
+        let int_target = matches!(
+            target,
+            "int" | "int32_t" | "int64_t" | "size_t" | "uint" | "uint32_t" | "uint64_t" | "uint8_t"
+        );
+        let float_target = matches!(target, "float" | "double");
+        if !int_target && !float_target {
+            return source.to_string();
+        }
+        let source_bare = Self::bare_type(source_type);
+        if !matches!(source_bare, "JsValue" | "JsNumber" | "JsLateValue" | "auto" | "") {
+            return source.to_string();
+        }
+        let primitive = if source_bare == "JsNumber" {
+            source.to_string()
+        } else {
+            format!("std::get<JsNumber>(JsValue({source}).inner)")
+        };
+        if int_target {
+            format!("({primitive}).as_int()")
+        } else {
+            format!("({primitive}).as_double()")
+        }
+    }
+
+    fn assignment_target_type(&self, target: &AssignmentTarget<'a>) -> Option<String> {
+        match target {
+            AssignmentTarget::AssignmentTargetIdentifier(id) => {
+                self.ctx.var_types.get(id.name.as_str()).cloned()
+            }
+            AssignmentTarget::StaticMemberExpression(member) => {
+                if matches!(&member.object, Expression::ThisExpression(_)) {
+                    let class = self.ctx.class_name.as_ref()?;
+                    return self
+                        .ctx
+                        .class_field_types
+                        .get(class)
+                        .and_then(|fields| fields.get(member.property.name.as_str()))
+                        .cloned();
+                }
+                if let Expression::Identifier(id) = &member.object {
+                    if self.ctx.class_names.contains(id.name.as_str()) {
+                        return self
+                            .ctx
+                            .class_field_types
+                            .get(id.name.as_str())
+                            .and_then(|fields| fields.get(member.property.name.as_str()))
+                            .cloned();
+                    }
+                    let obj_type = self.ctx.var_types.get(id.name.as_str())?;
+                    let class = Self::class_name_from_type(obj_type)?;
+                    return self
+                        .ctx
+                        .class_field_types
+                        .get(&class)
+                        .and_then(|fields| fields.get(member.property.name.as_str()))
+                        .cloned();
+                }
+                None
+            }
+            AssignmentTarget::ComputedMemberExpression(member) => {
+                let obj_type = self.infer_type_from_init(&member.object)?;
+                if matches!(
+                    Self::bare_type(&obj_type),
+                    "JsObject" | "JsValue" | "JsArray" | "JsLateValue"
+                ) {
+                    return Some("JsValue".to_string());
+                }
+                Self::vector_inner_type(&obj_type).map(|inner| inner.trim().to_string())
+            }
+            AssignmentTarget::PrivateFieldExpression(private) => {
+                if matches!(&private.object, Expression::ThisExpression(_)) {
+                    let class = self.ctx.class_name.as_ref()?;
+                    return self.ctx.class_field_types.get(class).and_then(|fields| {
+                        fields.get(&format!("#{}", private.field.name)).cloned()
+                    });
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    fn class_name_from_type(ty: &str) -> Option<String> {
+        let bare = Self::bare_type(ty);
+        if let Some(inner) =
+            bare.strip_prefix("std::shared_ptr<").and_then(|value| value.strip_suffix('>'))
+        {
+            return Some(inner.trim().to_string());
+        }
+        if let Some(inner) =
+            bare.strip_prefix("std::unique_ptr<").and_then(|value| value.strip_suffix('>'))
+        {
+            return Some(inner.trim().to_string());
+        }
+        let first = bare.chars().next()?;
+        if first.is_ascii_uppercase() { Some(bare.to_string()) } else { None }
+    }
+
+    fn assignment_object_access(
+        source_type: &str,
+        class_names: &HashSet<String>,
+    ) -> Option<&'static str> {
+        let bare = Self::bare_type(source_type);
+        if bare.starts_with("std::shared_ptr<") || bare.starts_with("std::unique_ptr<") {
+            return Some("->");
+        }
+        if class_names.contains(bare) {
+            return Some(".");
+        }
+        if matches!(bare, "JsObject" | "JsValue" | "JsLateValue" | "auto" | "") {
+            return Some("[]");
+        }
+        None
+    }
+
+    fn assignment_object_field_type(&self, source_type: &str, key: &str) -> String {
+        let bare = Self::bare_type(source_type);
+        let class = if bare.starts_with("std::shared_ptr<")
+            || bare.starts_with("std::unique_ptr<")
+            || self.ctx.class_names.contains(bare)
+        {
+            Self::class_name_from_type(bare)
+        } else {
+            None
+        };
+        class
+            .and_then(|class| {
+                self.ctx.class_field_types.get(&class).and_then(|fields| fields.get(key)).cloned()
+            })
+            .unwrap_or_else(|| "JsValue".to_string())
+    }
+
     fn array_rest_expression(
         &mut self,
         source: &str,
@@ -1286,6 +1770,7 @@ impl<'a> CppTranslator<'a> {
         }
         if bare == "JsObject"
             || bare == "JsValue"
+            || bare == "JsLateValue"
             || bare == "auto"
             || bare.is_empty()
             || bare.starts_with("std::vector<")
@@ -2373,6 +2858,161 @@ impl<'a> CppTranslator<'a> {
         }
     }
 
+    fn for_of_element_type(&self, right: &Expression<'a>) -> String {
+        if self.iterates_js_sequence(right) {
+            return "JsValue".to_string();
+        }
+        if let Some(ty) = self.infer_type_from_init(right) {
+            if let Some(inner) = Self::vector_inner_type(&ty) {
+                return inner.trim().to_string();
+            }
+            if matches!(Self::bare_type(&ty), "JsArray" | "JsObject" | "JsValue" | "JsLateValue") {
+                return "JsValue".to_string();
+            }
+        }
+        "JsValue".to_string()
+    }
+
+    fn collect_binding_names(pattern: &BindingPattern<'_>, out: &mut Vec<String>) {
+        match pattern {
+            BindingPattern::BindingIdentifier(id) => out.push(id.name.to_string()),
+            BindingPattern::AssignmentPattern(assign) => {
+                Self::collect_binding_names(&assign.left, out);
+            }
+            BindingPattern::ObjectPattern(object) => {
+                for property in &object.properties {
+                    Self::collect_binding_names(&property.value, out);
+                }
+                if let Some(rest) = &object.rest {
+                    Self::collect_binding_names(&rest.argument, out);
+                }
+            }
+            BindingPattern::ArrayPattern(array) => {
+                for element in array.elements.iter().flatten() {
+                    Self::collect_binding_names(element, out);
+                }
+                if let Some(rest) = &array.rest {
+                    Self::collect_binding_names(&rest.argument, out);
+                }
+            }
+        }
+    }
+
+    fn emit_loop_pattern(
+        &mut self,
+        pattern: &BindingPattern<'a>,
+        element_type: &str,
+        right_code: &str,
+        body: &Statement<'a>,
+        is_await: bool,
+    ) -> String {
+        let temp = format!("__loop_item_{}", self.destructure_count);
+        self.destructure_count += 1;
+        self.ctx.need(element_type);
+        self.ctx.var_types.insert(temp.clone(), element_type.to_string());
+
+        let mut names = Vec::new();
+        Self::collect_binding_names(pattern, &mut names);
+        let saved: Vec<(String, Option<String>)> = names
+            .iter()
+            .map(|name| (name.clone(), self.ctx.var_types.get(name).cloned()))
+            .collect();
+
+        let old_indent = self.ctx.indent_level;
+        self.ctx.indent_level += 1;
+        let mut binding_lines = Vec::new();
+        let bindings_ok =
+            self.emit_pattern_bindings(pattern, &temp, element_type, &mut binding_lines);
+        let body_lines = self.emit_loop_body_lines(body);
+        self.ctx.indent_level = old_indent;
+
+        self.ctx.var_types.remove(&temp);
+        for (name, previous) in saved {
+            match previous {
+                Some(ty) => {
+                    self.ctx.var_types.insert(name, ty);
+                }
+                None => {
+                    self.ctx.var_types.remove(&name);
+                }
+            }
+        }
+
+        if !bindings_ok {
+            return format!("{}/* destructuring not supported */", self.indent());
+        }
+        let await_prefix = if is_await { "co_await " } else { "" };
+        let mut lines = vec![format!(
+            "{}for (auto {} : {}{}) {{",
+            self.indent(),
+            temp,
+            await_prefix,
+            right_code
+        )];
+        lines.extend(binding_lines);
+        lines.extend(body_lines);
+        lines.push(format!("{}}}", self.indent()));
+        lines.join("\n")
+    }
+
+    fn emit_loop_assignment_pattern(
+        &mut self,
+        target: &AssignmentTarget<'a>,
+        element_type: &str,
+        right_code: &str,
+        body: &Statement<'a>,
+        is_await: bool,
+    ) -> String {
+        let temp = format!("__loop_item_{}", self.destructure_count);
+        self.destructure_count += 1;
+        self.ctx.need(element_type);
+        self.ctx.var_types.insert(temp.clone(), element_type.to_string());
+
+        let old_indent = self.ctx.indent_level;
+        self.ctx.indent_level += 1;
+        let mut assignments = Vec::new();
+        let assignments_ok =
+            self.emit_assignment_pattern(target, &temp, element_type, &mut assignments);
+        let body_lines = self.emit_loop_body_lines(body);
+        self.ctx.indent_level = old_indent;
+        self.ctx.var_types.remove(&temp);
+
+        if !assignments_ok {
+            return format!("{}/* destructuring assignment not supported */", self.indent());
+        }
+        let await_prefix = if is_await { "co_await " } else { "" };
+        let mut lines = vec![format!(
+            "{}for (auto {} : {}{}) {{",
+            self.indent(),
+            temp,
+            await_prefix,
+            right_code
+        )];
+        lines.extend(assignments);
+        lines.extend(body_lines);
+        lines.push(format!("{}}}", self.indent()));
+        lines.join("\n")
+    }
+
+    fn emit_loop_body_lines(&mut self, body: &Statement<'a>) -> Vec<String> {
+        let mut lines = Vec::new();
+        match body {
+            Statement::BlockStatement(block) => {
+                for stmt in &block.body {
+                    if let Some(code) = self.emit_statement(stmt) {
+                        lines.push(code);
+                    }
+                }
+            }
+            _ => {
+                if let Some(code) = self.emit_statement(body) {
+                    lines.push(code);
+                }
+            }
+        }
+        lines
+    }
+
     fn emit_for_in(&mut self, f: &ForInStatement<'a>) -> String {
         let left = self.emit_for_left(&f.left);
         let right = self.emit_expression(&f.right);
@@ -2391,6 +3031,31 @@ impl<'a> CppTranslator<'a> {
     }
 
     fn emit_for_of(&mut self, f: &ForOfStatement<'a>) -> String {
+        if let ForStatementLeft::VariableDeclaration(declaration) = &f.left
+            && let Some(first) = declaration.declarations.first()
+            && !matches!(&first.id, BindingPattern::BindingIdentifier(_))
+        {
+            let element_type = self.for_of_element_type(&f.right);
+            let right = self.emit_expression(&f.right);
+            return self.emit_loop_pattern(&first.id, &element_type, &right, &f.body, f.r#await);
+        }
+        if let Some(target) = f.left.as_assignment_target()
+            && matches!(
+                target,
+                AssignmentTarget::ArrayAssignmentTarget(_)
+                    | AssignmentTarget::ObjectAssignmentTarget(_)
+            )
+        {
+            let element_type = self.for_of_element_type(&f.right);
+            let right = self.emit_expression(&f.right);
+            return self.emit_loop_assignment_pattern(
+                target,
+                &element_type,
+                &right,
+                &f.body,
+                f.r#await,
+            );
+        }
         let left = self.emit_for_left(&f.left);
         let right = self.emit_expression(&f.right);
         // `for (auto x : <js sequence>)` binds a JsValue element. Record the
@@ -5659,6 +6324,13 @@ impl<'a> CppTranslator<'a> {
     }
 
     fn emit_assignment(&mut self, a: &AssignmentExpression<'a>) -> String {
+        if matches!(
+            &a.left,
+            AssignmentTarget::ArrayAssignmentTarget(_)
+                | AssignmentTarget::ObjectAssignmentTarget(_)
+        ) {
+            return self.emit_destructuring_assignment(a);
+        }
         // A plain assignment to a signal-backed binding — `x = ...` where
         // `x` maps to `__st_x.get()` in the ambient state map — lowers to
         // its setter (`__st_x.set(...)`); compound forms read back through
@@ -8231,5 +8903,63 @@ mod tests {
         assert!(out.contains("static void current(JsNumber v)"), "{out}");
         assert!(out.contains("Config::current(__morph_value)"), "{out}");
         assert!(out.contains("Config::current()"), "{out}");
+    }
+
+    #[test]
+    fn destructuring_assignment_lowers_to_staged_lambda() {
+        let out = translate_analyzed(
+            "let a = 0;\n\
+             let b = 0;\n\
+             [a, b = 5] = [1, undefined];\n\
+             const user = { name: \"Ada\", email: \"a@b.c\" };\n\
+             let name = \"\";\n\
+             let rest = {};\n\
+             ({ name, ...rest } = user);",
+        );
+        assert!(out.contains("([]() {"), "{out}");
+        assert!(out.contains("auto __assign_0 = JsArray{1, JsUndefined{}};"), "{out}");
+        assert!(out.contains("a = __assign_0[0];"), "{out}");
+        assert!(out.contains("is_undefined() ? JsValue(5)"), "{out}");
+        assert!(out.contains("name = __assign_1[\"name\"];"), "{out}");
+        assert!(out.contains("morph::js_object_rest(__assign_1, {\"name\"})"), "{out}");
+    }
+
+    #[test]
+    fn destructuring_assignment_supports_computed_and_nested_keys() {
+        let out = translate_stmts(
+            "const key = \"email\";\n\
+             let value = \"\";\n\
+             ({ [key]: value } = user);\n\
+             let city = \"\";\n\
+             ({ extra: { city } } = user);",
+        );
+        assert!(out.contains("auto __key_"), "{out}");
+        assert!(out.contains("morph::js_to_string(key).to_std_string()"), "{out}");
+        assert!(out.contains("[__key_"), "{out}");
+        assert!(out.contains("[\"extra\"][\"city\"]"), "{out}");
+    }
+
+    #[test]
+    fn destructuring_assignment_writes_member_targets() {
+        let out = translate_stmts(
+            "class Box { label = \"\" }\n\
+             const box = new Box();\n\
+             const name = \"Ada\";\n\
+             [box.label] = [name];",
+        );
+        assert!(out.contains("box->label = __assign_0[0];"), "{out}");
+    }
+
+    #[test]
+    fn for_of_patterns_lower_through_a_loop_temp() {
+        let out = translate_stmts(
+            "for (const { value } of items) { console.log(value); }\n\
+             for ([left, right] of pairs) { console.log(left, right); }",
+        );
+        assert!(out.contains("for (auto __loop_item_0 : items) {"), "{out}");
+        assert!(out.contains("auto value = __loop_item_0[\"value\"];"), "{out}");
+        assert!(out.contains("for (auto __loop_item_1 : pairs) {"), "{out}");
+        assert!(out.contains("left = __loop_item_1[0];"), "{out}");
+        assert!(out.contains("right = __loop_item_1[1];"), "{out}");
     }
 }

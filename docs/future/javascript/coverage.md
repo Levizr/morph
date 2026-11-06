@@ -8,6 +8,8 @@ Morph should be able to tell a user: **“Write your app logic in TypeScript.”
 
 `morph check` is the contract. A clean check means the translator has a native representation for everything in the file — and that the generated program preserves JavaScript semantics for the accepted subset. If either half is false, the construct belongs in this plan, not in the supported baseline.
 
+**Scope commitment (2026-11-06):** every gap in this plan that belongs to the JavaScript language or its standard library — Parts 1C through 5G — is committed to implementation. The “implement or keep rejected” choices in those parts are resolved in favor of implementation. Browser DOM and browser globals (`document`, `window`, `location`, `history`, `navigator`, event constructors) remain explicit non-goals; Morph exposes native equivalents where an app needs that capability.
+
 ## The promise
 
 “App logic” means the code behind a normal desktop application, not browser parity:
@@ -58,7 +60,7 @@ Already shipped and **not** on the missing list:
 - **Statements:** `if`/`else`, `while`, `for`, `do-while`, `switch`, `try`/`catch`, `throw`, `return`, `break`, `continue`.
 - **Expressions:** binary/unary/ternary/sequence/update/assignment, template literals, array literals with spread, object literals with spread and computed keys, `new`, member access, calls, optional chaining `?.`, nullish coalescing `??`, `await`.
 - **Functions/classes:** declarations, expressions, arrows, default/optional parameters, class declarations with inferred or annotated fields, `static` and `#private` members, constructor parameter properties, class expressions in module-scope direct `const`/`let` initializers, inheritance, `super`, getters/setters with inferred backing fields, interfaces, generics.
-- **Destructuring declarations:** callable/event payloads, defaults (`{ a = 1 }`), rest elements (`{ ...rest }`, `[head, ...tail]`), computed keys, and nested patterns. Assignment patterns and loop binding patterns are Part 1C.
+- **Destructuring declarations and assignments:** callable/event payloads, defaults (`{ a = 1 }`), rest elements (`{ ...rest }`, `[head, ...tail]`), computed keys, and nested patterns. Assignment patterns (`[a, b] = ...`, `({ c } = o)`, member targets) and `for...of` declaration/assignment patterns are shipped in 1C. `for...in` destructuring is rejected.
 - **Component-body flow:** branches, loops, and calls between declarations lower into the setup effect; reassigned `let` becomes a signal; the functional state updater (`setCount(c => c + 1)`) works.
 - **Late-assigned and widened values:** `let x; x = 5; x = "hi"` works through `JsLateValue` in module and component scope, and initialized bindings widen when a later assignment changes value class (`let x = 0; x = "hi"`, `let x: number | string`, `let x: any`). Mixed numeric classes widen to `JsNumber`; Window handles lower through `window_wid`.
 - **Builtins:** `fetch` (request options plus `Response.text`/`json`/`arrayBuffer`/`clone`, `ok`, `status`, headers), `console.*` (`log`/`warn`/`error`/`info`), timers, `Promise` constructor + `await`, `Error`, `morphState`/`morphEffect`/`morphShared`/`morphEvent`.
@@ -80,16 +82,16 @@ Parts are ordered so that a later part never changes a representation owned by a
 | **0** | Contract integrity: silent-wrong and check-pass/build-fail cases, capability tables, fail fixtures | — | linter capability tables, conformance policy | Zero known ⚠️/🟥 cases; every rejection has a fail fixture |
 | **1A** | Widening bindings: initialized `let`, unions, `any`, late values | 0 | `var_types`, `JsLateValue`, `Signal<T>` | `let x = 0; x = "hi"` builds and matches JS |
 | **1B** | Class model: unannotated/static/private fields, parameter properties, class expressions, getter/setter backing fields | 1A | class emitter | Unannotated and private fields compile |
-| **1C** | Destructuring assignment and loop bindings | 0 | assignment/pattern emitter | `[a,b] = ...`, `({c} = o)`, `for (const [k,v] of ...)` lower |
+| **1C** | Destructuring assignment and loop bindings | 0 | assignment/pattern emitter | ✅ Shipped: `[a,b] = ...`, `({c} = o)`, `for (const [k,v] of ...)` lower |
 | **1D** | Per-iteration closures | 0 | loop emitter | `for (let i...)` closures capture per iteration |
 | **2A** | String `switch` | 0 | statement emitter | `switch` on strings matches JS `===` semantics |
-| **2B** | `new.target` | 0 | expression emitter | No undeclared `JsNull`; correct constructor identity |
+| **2B** | `new.target` | 0 | expression emitter | Correct constructor identity in constructors and called functions |
 | **2C** | `for...in` over arrays | 0 | statement emitter | Indices, not values; own enumerable keys only |
 | **2D** | Hoisting and TDZ | 1A | declaration analysis | `var` is `undefined`; `let`/`const` use-before-declaration errors |
 | **2E** | Imported module side effects | 0 + module-bindings design | module builder | Top-level statements run once in import order |
 | **3A** | JSON return typing and dot access | 0 | `JsValue` member lowering | `JSON.parse(...).name` and `response.json().name` work |
 | **3B** | `await response.json()` | 3A | Response emitter | Await form compiles and returns parsed data |
-| **3C** | `.then`/`.catch` decision | 0 | linter/docs | Either a limited chain works or check rejects it and docs stop showing it |
+| **3C** | `.then`/`.catch` compatibility chain | 0 | Promise chain lowering | Supported `fetch`/`Response` and `Promise` chains build and match JS ordering/error behavior |
 | **3D** | Timer extra arguments | 0 | timer emitter | `setTimeout(fn, 0, ...args)` forwards arguments |
 | **3E** | Promise statics | 0 | Promise runtime | `resolve`/`all`/`allSettled`/`race`/`any` build and match JS result order |
 | **3F** | `fetch` request/response docs | 0 | docs/tests | `fetch(url, { method, headers, body })` documented and fixture-covered |
@@ -99,12 +101,12 @@ Parts are ordered so that a later part never changes a representation owned by a
 | **4D** | `Object`/`Array` statics | 0 | collection runtime | `Object.assign`/`fromEntries`/`hasOwn`, `Array.from`/`of` |
 | **4E** | String/Number/URL/object methods | 0 | runtime helpers | The listed helpers work on native and `JsValue` receivers |
 | **5A** | Rest parameters and general spread | 0 | call/expression emitter | `f(...args)` and `new C(...args)` lower correctly |
-| **5B** | TypeScript enums | 0 | enum emitter | Numeric enums first; string enums documented |
+| **5B** | TypeScript enums | 0 | enum emitter | Numeric and string enums match TypeScript; `const enum` behavior documented |
 | **5C** | `typeof`/`instanceof` | 0 | operator emitter | Runtime type tags and class checks match JS |
 | **5D** | Namespace imports | module-bindings design | module graph | `import * as ns` resolves and compiles |
 | **5E** | Function values in object literals | 0 | closure storage | `{ f: () => 1 }` stores and calls a closure |
-| **5F** | Tagged templates and `arguments` | 0 | expression emitter | Both lower or stay explicitly rejected |
-| **5G** | Lower-priority operators and build-time constants | 0 | operator/docs | `delete`/`void`/`>>>`; `import.meta.env` decision |
+| **5F** | Tagged templates and `arguments` | 0 | expression emitter | Both lower with JS call/argument semantics |
+| **5G** | Lower-priority operators and build-time constants | 0 | operator/docs | `delete`/`void`/`>>>`; `import.meta.env` build-time constants |
 | **6A** | Persistent storage | 0 | platform API | File-backed storage; `localStorage` alias only if semantics match |
 | **6B** | Clipboard | 0 | platform API | Read/write text through a documented API |
 | **6C** | `requestAnimationFrame` | 0 | platform API | Next-frame coroutine |
@@ -142,18 +144,19 @@ The statuses below were probed on 2026-11-06 with `morph check`, `morph --to cpp
 | 0.2.2 | `class A { x = 0 }`; `static count = 0`; `private _x = 0`; getter/setter backing fields | ✅ Fixed in 1B: fields infer from initializers and writes, widening to `JsLateValue` on conflict; accessors lower through methods. | 1B |
 | 0.2.3 | `switch (someString)` | ⛔ Rejected by `morph check`; lowering is 2A. | 2A |
 | 0.2.4 | `for (let i = 0; ...) fns.push(() => i)` | `i is not captured`; no per-iteration binding. | 1D |
-| 0.2.5 | `[a, b] = [b, a]`; `({ c } = o)` | Destructuring-assignment placeholder / invalid C++. | 1C |
+| 0.2.5 | `[a, b] = [b, a]`; `({ c } = o)` | ✅ Fixed in 1C: the right-hand side is staged once and array/object patterns lower with defaults, rest, computed keys, nested patterns, and member targets. | 1C |
 | 0.2.6 | `const C = class { ... }` | ✅ Fixed in 1B: module-scope direct `const`/`let` class expressions lower to a named class declaration; function-local and component-body initializers are rejected. | 1B |
 | 0.2.7 | `constructor(public x: number)` | ✅ Fixed in 1B: parameter properties become fields. | 1B |
 | 0.2.8 | `#private` fields | ✅ Fixed in 1B: mangled to a private member with `->`/`::` access. | 1B |
-| 0.2.9 | `fetch(...).then(...)`; `r.text().then(...)` | ⛔ Rejected by `morph check`; 3C decides chain support. | 3C |
+| 0.2.9 | `fetch(...).then(...)`; `r.text().then(...)` | ⛔ Rejected by `morph check` until 3C ships the supported compatibility chain. | 3C |
 | 0.2.10 | `setTimeout(fn, 0, 1, 2)` | ⛔ Rejected by `morph check`; forwarding is 3D. | 3D |
 | 0.2.11 | `new.target` | ⛔ Rejected by `morph check`; lowering/identity is 2B. | 2B |
-| 0.2.12 | `for (const [k, v] of Object.entries(o))` | `for (auto /* array destructuring */ : ...)`; `k`/`v` undefined. | 1C |
+| 0.2.12 | `for (const [k, v] of Object.entries(o))` | ✅ Fixed in 1C: declaration and assignment patterns lower through a synthetic loop item; `for...in` destructuring is rejected by `morph check`. | 1C |
 | 0.2.13 | `JSON.parse(s).name`; `response.json().name` | `JsValue` has no `.name`; bracket access works. | 3A |
 | 0.2.14 | `await response.json()` | ✅ Fixed in 3B: awaited body readers lower to synchronous calls without `co_await`. | 3B |
 | 0.2.15 | `<Card {...props} />` with required props | `.tsx` check passes; `morph build` fails `mx-component-required`. | 6F |
 | 0.2.16 | `JSON.parse(...)` as the only JSON use | ✅ Fixed in 3A: `JSON.parse`/`stringify` pull the runtime header. | 3A |
+| 0.2.17 | `function make() { class C { x = 0 } return new C() }` then `make().x` outside the function | Class metadata is collected from top-level declaration text, so a class value that escapes its declaring function loses field/accessor metadata and generated member access fails. | 1B follow-up: carry function-local class-declaration metadata into the enclosing translation-unit analysis. |
 
 ### 0.3 One capability table
 
@@ -212,6 +215,8 @@ x = "hello";        // emits JsLateValue x = 0; x = "hello";
 
 Class metadata (names, field types, accessors) crosses translation units through `TranslateOptions.classes`, so `new C()` and member access lower correctly in module functions, imported modules, and snippets translated outside the class-declaration unit.
 
+**Known gap (0.2.17):** a class declared inside a function is emitted in place, but metadata collection starts from top-level declaration text. If the class value escapes its declaring function (`const c = make(); c.x`), later member access can lose field/accessor metadata. The follow-up keeps the 1B class emitter as owner and carries function-local declarations into the enclosing translation-unit analysis.
+
 **Depends on:** 1A.
 
 **Owns:** class emitter.
@@ -220,21 +225,21 @@ Class metadata (names, field types, accessors) crosses translation units through
 
 ### 1C — Destructuring assignment and loop bindings
 
-**Today:** destructuring declarations work; assignment patterns and `for` binding patterns do not.
+**Shipped:** assignment patterns and `for...of` binding patterns now lower with JavaScript semantics:
 
-**Target:**
+- `[a, b] = [b, a]` and `({ c } = o)` stage the right-hand side once inside an immediately-invoked lambda, so swaps and computed keys see a single evaluation;
+- defaults apply only when the value is `undefined`; rest elements, computed keys, nested patterns, and member targets (`[box.label] = ...`) work in assignment position;
+- `for (const [k, v] of Object.entries(o))` and assignment forms (`for ([a, b] of pairs)`) bind through a synthetic loop item;
+- destructuring writes widen native locals to `JsLateValue`; component-body `let` bindings written through a pattern become dynamic `Signal<JsValue>` locals instead of coercing to their initializer type;
+- `for...in` destructuring is rejected by `morph check` with `mx-js-syntax` and a rewrite hint.
 
-- `[a, b] = [b, a]`;
-- `({ c } = o)`;
-- defaults, rest elements, computed keys, and nested patterns in assignment position;
-- `for (const [k, v] of Object.entries(o))` and other loop binding patterns;
-- single evaluation of the right-hand side and computed keys.
+Module-scope assignments use a captureless lambda because C++ forbids a capture-default outside a function; function and component bodies use `[&]`.
 
 **Depends on:** Part 0.
 
 **Owns:** assignment/pattern emitter.
 
-**Exit:** the patterns above build and match JS behavior, including defaults and rest.
+**Exit:** ✅ `tests/runtime/conformance/pass-destructuring-assignments` covers array/object/default/rest/computed/nested/member targets plus `for...of` declaration and assignment patterns; `fail-for-in-pattern` covers the rejection. Translator and analyzer tests cover the emitted staging lambda, loop temporaries, dynamic signals, and native-local widening.
 
 ### 1D — Per-iteration closures
 
@@ -264,17 +269,17 @@ Class metadata (names, field types, accessors) crosses translation units through
 
 **Today:** ⛔ `morph check` rejects `new.target` instead of emitting undeclared `JsNull{}`.
 
-**Target:** either implement constructor identity (for `new.target` checks) or keep the precise rejection. Do not emit an undeclared placeholder.
+**Committed target:** implement constructor identity for `new.target` checks. Do not emit an undeclared placeholder, and do not leave the construct permanently rejected.
 
 **Depends on:** Part 0.
 
-**Exit:** `new.target` inside a constructor and inside a called function behave like JS, or check rejects it.
+**Exit:** `new.target` inside a constructor and inside a called function behave like JS.
 
 ### 2C — `for...in` over arrays
 
 **Today:** ⛔ Array receivers are rejected; object `for...in` remains correct.
 
-**Target:** iterate own enumerable string keys in JavaScript order, or keep rejecting array `for...in` until the correct lowering exists.
+**Committed target:** iterate own enumerable string keys in JavaScript order. The temporary rejection stays only until the correct lowering exists.
 
 **Depends on:** Part 0 (silent-wrong fix).
 
@@ -324,20 +329,15 @@ Class metadata (names, field types, accessors) crosses translation units through
 
 **Exit:** `const data = await response.json()` compiles and matches the synchronous form.
 
-### 3C — `.then`/`.catch` decision
+### 3C — `.then`/`.catch` compatibility chain
 
-**Today:** ⛔ `morph check` rejects `.then`/`.catch` with a hint to use `async`/`await` and `try`/`catch`. The deployment guide already uses that form.
+**Today:** ⛔ `morph check` rejects `.then`/`.catch` with a hint to use `async`/`await` and `try`/`catch`.
 
-**Target:** make an explicit decision:
-
-- implement a small compatibility chain for `fetch`/`Response` results, or
-- keep rejecting `.then`/`.catch` with a clear error and keep the docs on `async`/`await`.
-
-A general Promise chain runtime is not required. The contract only requires that the chosen behavior is honest.
+**Decision:** implement `.then`/`.catch` as a compatibility chain over the supported `fetch`/`Response` and `Promise` surface. A general Promise chain runtime remains a non-goal; forms outside the supported surface keep a precise rejection instead of silently dropping work. The deployment guide may continue to prefer `async`/`await`.
 
 **Depends on:** Part 0.
 
-**Exit:** the deployment example builds, or check rejects it and the docs show the supported form.
+**Exit:** supported `fetch(...).then(...).catch(...)` chains build and match JS ordering and error propagation; unsupported chain forms fail `morph check`.
 
 ### 3D — Timer extra arguments
 
@@ -402,13 +402,15 @@ Insertion order, JS key semantics, `get`/`set`/`has`/`delete`/`size`, and iterat
 
 ## Part 5 — Language surface
 
+Every Part 5 item is committed. The decisions that previously offered “implement or keep rejected” are resolved in favor of implementation; any residual rejection is limited to a form whose JavaScript semantics cannot be preserved.
+
 ### 5A — Rest parameters and general spread
 
 `function f(...args)`, `f(...args)`, and `new C(...args)`. Array spread and variadic array helpers already work; this part covers the general call/constructor cases. Rest destructuring stays supported.
 
 ### 5B — TypeScript enums
 
-Numeric enums first; string enums are optional and must be documented. `const enum` behavior must be decided. The codegen already has an enum emitter; the linter gate is the blocker.
+Implement numeric and string enums. `const enum` behavior is decided during implementation and must not silently change runtime semantics. The codegen already has an enum emitter; the linter gate is the blocker.
 
 ### 5C — `typeof` / `instanceof`
 
@@ -420,11 +422,13 @@ Runtime type tags for `typeof` strings and class identity for `instanceof`, incl
 
 ### 5E — Function values in object literals
 
-`{ f: () => 1 }` requires a closure-storage decision. Implement it with an explicit function type or keep the construct rejected with a clear error; do not pass it through as a method name.
+**Decision:** implement `{ f: () => 1 }` with explicit closure storage rather than leaving the construct rejected. Data-only objects keep `JsObject`; function-valued properties use a callable carrier so captures and `this` semantics survive storage and invocation. Never pass a closure through as a method name.
+
+**Exit:** `{ f: () => 1 }` stores a closure, `obj.f()` calls it, and captured state is preserved.
 
 ### 5F — Tagged templates and `arguments`
 
-Tagged templates and the `arguments` object are currently rejected. Either lower them or keep them as documented limitations. They are lower priority than the app-logic items above.
+**Decision:** implement tagged templates and the `arguments` object. Tagged templates preserve call order plus raw/cooked string arrays; `arguments` reflects the actual call arguments with JavaScript's non-arrow/arrow distinction. Forms that cannot preserve those semantics are rejected precisely rather than approximated.
 
 ### 5G — Lower-priority operators and build-time constants
 
@@ -545,7 +549,7 @@ Do **not** chase browser parity:
 - DOM (`document`, `window`, `location`, `history`, `navigator`), event constructors, `addEventListener`.
 - Full `Intl`, locale/timezone formatting, TypedArrays, `Proxy`, `Reflect`, `WeakMap`, `WeakSet`, `BigInt`, `Symbol`.
 - Generators/`yield`, `with`, labeled jumps, dynamic `import()`, decorators, `eval`, the `Function` constructor.
-- A general `Promise.then` chain runtime — Morph uses `async`/`await` coroutines. A small `fetch`-specific compatibility form is allowed only if Part 3C chooses it.
+- A general `Promise.then` chain runtime — Morph uses `async`/`await` coroutines. Part 3C implements only the supported `fetch`/`Response` and `Promise` compatibility surface.
 - Full npm/Node compatibility; that is a separate plan ([Node.js Support](nodejs.md)).
 - Browser network APIs beyond HTTP `fetch` (`WebSocket`, `EventSource`, `XMLHttpRequest`) until a concrete app requires them.
 
@@ -561,10 +565,12 @@ Morph should expose native equivalents (`useWindow`, clipboard, storage) instead
 | `Response.json()` detection and full `Response` runtime | ✅ Shipped; dot access is Part 3A, awaited form shipped |
 | `morph check` diagnostics for rejected constructs | ✅ Shipped; grows with each part |
 | App-logic contract and docs truth-up | ✅ This pass |
-| Part 0 — contract integrity | 🚧 In progress — shipped rejections for string `switch`, array `for...in`, `.then`/`.catch`, JSON extra args, timer args, and `new.target`; remaining ⚠️/🟥 rows are owned by 1C/1D/2D/2E/3A/6F |
+| Part 0 — contract integrity | 🚧 In progress — shipped rejections for string `switch`, array `for...in`, `.then`/`.catch`, JSON extra args, timer args, and `new.target`; remaining ⚠️/🟥 rows are owned by 1B (0.2.17), 1D, 2D, 2E, 3A, and 6F |
 | Part 1A — widening bindings | ✅ Shipped |
-| Part 1B — class model | ✅ Shipped |
-| Parts 1C–6 | 🚧 Planned |
+| Part 1B — class model | ✅ Shipped; function-local class-declaration metadata follow-up tracked as 0.2.17 |
+| Part 1C — destructuring assignment and loop bindings | ✅ Shipped |
+| Parts 1D–5G — JavaScript language and standard library | 🚧 Committed — all JS-only gaps are in scope for implementation |
+| Parts 6A–6G — platform APIs and JSX | 🚧 Separate product work — browser globals stay out of scope |
 | Part 7 — docs and claims | 📋 Continuous |
 
 ## How to use this page

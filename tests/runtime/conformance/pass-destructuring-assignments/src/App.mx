@@ -1,0 +1,59 @@
+import { morphState } from 'morph'
+
+export const windowConfig = { title: "pass-destructuring-assignments", width: 800, height: 600 }
+
+class Box {
+  label = ""
+}
+
+export default function App() {
+  const [count, setCount] = morphState(0)
+
+  // Array patterns: defaults, rest and native element types.
+  let first = 0
+  let second = 0
+  ;[first, second = 7] = [1, undefined]
+  let head = 0
+  let tail = [0]
+  ;[head, ...tail] = [2, 3, 4]
+
+  // Object patterns: shorthand, nested, computed, defaults and rest.
+  const user = { name: "Ada", email: "ada@example.com", age: 36, extra: { city: "London" } }
+  let name = ""
+  let email = ""
+  ;({ name, email } = user)
+  let city = ""
+  ;({ extra: { city } } = user)
+  const key = "email"
+  let dynamicEmail = ""
+  ;({ [key]: dynamicEmail } = user)
+  let age = 0
+  ;({ age = 18 } = { name: "Grace" })
+  let ignoredAge = 0
+  let rest = {}
+  ;({ age: ignoredAge, ...rest } = user)
+
+  // Member targets.
+  const box = new Box()
+  ;[box.label] = [name]
+
+  // for...of declaration patterns and assignment patterns.
+  let total = 0
+  for (const { value } of [{ value: 1 }, { value: 2 }]) {
+    total = value
+  }
+  let left = 0
+  let right = 0
+  for ([left, right] of [[6, 7], [8, 9]]) {
+    total = left + right
+  }
+
+  return (
+    <body>
+      <button onClick={() => setCount(count + 1)}>tick</button>
+      <span>{first} {second} {head} {tail.length}</span>
+      <span>{name} {email} {city} {dynamicEmail} {age} {Object.keys(rest).length}</span>
+      <span>{box.label} {total} {left} {right} {ignoredAge}</span>
+    </body>
+  )
+}

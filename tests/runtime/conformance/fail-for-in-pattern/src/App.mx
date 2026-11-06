@@ -1,0 +1,13 @@
+export const windowConfig = { title: "fail-for-in-pattern", width: 800, height: 600 }
+
+export default function App() {
+  const source = { a: 1 }
+  for (const [key] in source) {
+    console.log(key)
+  }
+  return (
+    <body>
+      <div>for...in destructuring is rejected</div>
+    </body>
+  )
+}

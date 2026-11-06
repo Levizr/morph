@@ -65,6 +65,7 @@ run_pass pass-const-inits
 run_pass pass-async
 run_pass pass-obj-spread
 run_pass pass-destructuring
+run_pass pass-destructuring-assignments
 run_pass pass-array-methods
 run_pass pass-operators
 run_pass pass-math
@@ -108,6 +109,7 @@ run_fail fail-effect-cb mx-effect-cb
 run_fail fail-object-fn mx-js-syntax
 run_fail fail-string-switch mx-js-syntax
 run_fail fail-array-for-in mx-js-syntax
+run_fail fail-for-in-pattern mx-js-syntax
 run_fail fail-then-chain mx-js-syntax
 run_fail fail-json-args mx-js-syntax
 run_fail fail-timer-args mx-js-syntax

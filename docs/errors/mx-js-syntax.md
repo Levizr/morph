@@ -34,6 +34,8 @@ The current set is:
   fields cannot store closures)
 - `switch` on a string (numeric `switch` is supported)
 - `for...in` over an array (object `for...in` is supported)
+- `for...in` with a destructuring binding (bind the key with a plain name,
+  then destructure the value inside the loop body)
 - Promise `.then` / `.catch` chains (use `async`/`await` and `try`/`catch`)
 - `JSON.parse` reviver and `JSON.stringify` replacer/space arguments
 - trailing timer arguments (`setTimeout(fn, ms, ...args)`)
@@ -48,13 +50,17 @@ error : mx-js-syntax : `enum` declaration cannot be translated to C++
 These lower correctly and are **not** errors: optional chaining `?.`,
 nullish coalescing `??`, object `for...in` / `for...of`, numeric `switch`,
 array spread, object spread and computed keys, getters and setters,
-plain-TS destructuring, destructuring at the top of a component body,
-class declarations / `new`, module-scope class expressions directly
-assigned to a `const`/`let`, type-only imports and exports, default and
-optional parameters, arrow/function consts, data-only object-literal
-consts, and JSX list expressions. Destructuring assignment and loop
-binding patterns are not part of the supported subset yet; they are
-tracked in [Part 1C](../future/javascript/coverage.md#1c--destructuring-assignment-and-loop-bindings).
+plain-TS destructuring declarations, destructuring assignment, `for...of`
+declaration and assignment patterns, destructuring at the top of a
+component body, class declarations / `new`, module-scope class expressions
+directly assigned to a `const`/`let`, type-only imports and exports,
+default and optional parameters, arrow/function consts, data-only
+object-literal consts, and JSX list expressions. `for...in` destructuring
+is rejected; bind the key with a plain name and destructure inside the
+loop body. Every JavaScript language and standard-library gap is committed
+for implementation in the
+[coverage plan](../future/javascript/coverage.md); browser globals remain
+out of scope.
 
 ## Why Morph raises it
 
@@ -141,6 +147,7 @@ async function load() {
 | `{ handler: fn }` | keep `fn` as its own const and call it directly |
 | `switch (name)` on a string | `if`/`else if` with `===`, or switch on a number |
 | `for (const i in array)` | `for (let i = 0; i < array.length; i++)`, or `for...of` for values |
+| `for (const [k] in object)` | `for (const k in object) { … }` — bind the key plainly; destructure the value inside the body |
 | `fetch(...).then(...)` | `const r = await fetch(...)` inside `try`/`catch` |
 | `JSON.parse(text, reviver)` | parse once, then transform the value |
 | `JSON.stringify(value, replacer, 2)` | stringify the value, then format the result |
