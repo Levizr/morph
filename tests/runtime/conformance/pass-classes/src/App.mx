@@ -1,0 +1,98 @@
+export const windowConfig = { title: "pass-classes", width: 800, height: 600 }
+
+// Class model coverage: inferred and widened fields, static and private
+// members, parameter properties, class expressions, and getter/setter
+// lowering. Everything here must compile to C++ with JS semantics.
+class Counter {
+  count = 0
+  label = "hits"
+  static total = 0
+  #secret = "s"
+  static #instances = 0
+
+  constructor(public name: string, private step: number = 1) {
+    Counter.total += 1
+  }
+
+  bump(): number {
+    this.count += this.step
+    return this.count
+  }
+
+  get value(): number {
+    return this.count
+  }
+
+  set value(v: number) {
+    this.count = v
+  }
+
+  static get all(): number {
+    return Counter.total
+  }
+
+  static set all(v: number) {
+    Counter.total = v
+  }
+
+  reveal(): string {
+    return this.#secret
+  }
+
+  static instances(): number {
+    return Counter.#instances
+  }
+}
+
+const Pair = class {
+  left = 1
+  right = 2
+
+  sum(): number {
+    return this.left + this.right
+  }
+}
+
+// Fields declared only by constructor assignment are synthesized.
+class Point {
+  constructor(x: number, y: number) {
+    this.x = x
+    this.y = y
+  }
+
+  sum(): number {
+    return this.x + this.y
+  }
+}
+
+// A setter that accepts a union widens the backing field to a late value.
+class Mixed {
+  value = 0
+
+  set(next: number | string) {
+    this.value = next
+  }
+}
+
+function summarize(): string {
+  const counter = new Counter("primary")
+  counter.bump()
+  counter.value = 5
+  counter.value += 2
+  counter.value++
+
+  const pair = new Pair()
+  const point = new Point(3, 4)
+  const mixed = new Mixed()
+  mixed.set("ready")
+
+  return `${counter.value}:${counter.name}:${counter.reveal()}:${Counter.all}:${Counter.instances()}:${pair.sum()}:${point.sum()}:${mixed.value}`
+}
+
+export default function App() {
+  return (
+    <body>
+      <div>{summarize()}</div>
+    </body>
+  )
+}

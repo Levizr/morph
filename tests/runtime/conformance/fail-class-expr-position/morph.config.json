@@ -1,0 +1,7 @@
+{
+  "name": "fail-class-expr-position",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "fail-class-expr-position" },
+  "dependencies": {},
+  "cpp_sources": []
+}

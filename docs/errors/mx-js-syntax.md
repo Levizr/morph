@@ -27,7 +27,9 @@ The current set is:
 - `import * as ns` namespace imports
 - C++ keywords used as binding names or class member names (`double`,
   `template`, `delete`, …)
-- class expressions, including `const C = class { ... }`
+- class expressions outside a module-scope direct `const`/`let` initializer
+  (module-scope initializers lower to a named class; function-local and
+  every other position are rejected)
 - function-valued object properties (`{ handler: save }` — `JsObject`
   fields cannot store closures)
 - `switch` on a string (numeric `switch` is supported)
@@ -47,7 +49,8 @@ These lower correctly and are **not** errors: optional chaining `?.`,
 nullish coalescing `??`, object `for...in` / `for...of`, numeric `switch`,
 array spread, object spread and computed keys, getters and setters,
 plain-TS destructuring, destructuring at the top of a component body,
-class declarations / `new`, type-only imports and exports, default and
+class declarations / `new`, module-scope class expressions directly
+assigned to a `const`/`let`, type-only imports and exports, default and
 optional parameters, arrow/function consts, data-only object-literal
 consts, and JSX list expressions. Destructuring assignment and loop
 binding patterns are not part of the supported subset yet; they are
@@ -134,7 +137,7 @@ async function load() {
 | `import * as lib` | `import { token, greet } from "./lib.ts"` |
 | `...args` | an explicit array parameter |
 | `f(...args)` / `new C(...args)` | pass each argument explicitly, or use `push`/`unshift`/`splice`/`concat` and `Math.min`/`Math.max` for variadic arrays |
-| `const C = class { … }` | a class declaration |
+| `const C = class { … }` | a module-scope direct `const`/`let` initializer (supported), or a class declaration |
 | `{ handler: fn }` | keep `fn` as its own const and call it directly |
 | `switch (name)` on a string | `if`/`else if` with `===`, or switch on a number |
 | `for (const i in array)` | `for (let i = 0; i < array.length; i++)`, or `for...of` for values |

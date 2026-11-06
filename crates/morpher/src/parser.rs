@@ -7,8 +7,9 @@ use crate::codegen::cpp::{CppTranslator, cpp_string_literal};
 use crate::codegen::rust::RustTranslator;
 use crate::error::MorphJsError;
 
-/// Seed ambient app state into a translator: mapped read expressions plus
-/// recorded types for operand classes and member-access style.
+/// Seed ambient app state into a translator: mapped read expressions,
+/// recorded types for operand classes and member-access style, plus field
+/// and accessor metadata for classes declared in other translation units.
 fn apply_ambient_state(translator: &mut CppTranslator, options: &TranslateOptions) {
     translator.set_omit_param_defaults(options.omit_param_defaults);
     for (name, cpp_type) in &options.state_types {
@@ -17,6 +18,58 @@ fn apply_ambient_state(translator: &mut CppTranslator, options: &TranslateOption
     for (name, expression) in &options.state_vars {
         translator.ctx.state_vars.insert(name.clone(), expression.clone());
     }
+    translator.ctx.class_names.extend(options.classes.names.iter().cloned());
+    for (name, fields) in &options.classes.field_types {
+        translator
+            .ctx
+            .class_field_types
+            .entry(name.clone())
+            .or_default()
+            .extend(fields.iter().map(|(k, v)| (k.clone(), v.clone())));
+    }
+    for (name, accessors) in &options.classes.accessors {
+        translator
+            .ctx
+            .class_accessors
+            .entry(name.clone())
+            .or_default()
+            .extend(accessors.iter().map(|(k, v)| (k.clone(), *v)));
+    }
+}
+
+/// Collect field types and accessor metadata for classes declared in
+/// `sources`.
+///
+/// Sources are top-level class declaration texts. Used when translating
+/// snippets that live outside the class-declaration translation unit.
+pub fn collect_class_metadata(
+    sources: &[&str],
+    filename: &str,
+    options: &TranslateOptions,
+) -> Result<crate::ClassMetadata, MorphJsError> {
+    if sources.is_empty() {
+        return Ok(crate::ClassMetadata::default());
+    }
+    let joined = sources.join("\n");
+    let allocator = Allocator::default();
+    let source_type = SourceType::from_path(filename).unwrap_or_default().with_typescript(true);
+    let ret = Parser::new(&allocator, &joined, source_type).parse();
+    if ret.panicked || !ret.diagnostics.is_empty() {
+        let msgs: Vec<String> = ret.diagnostics.iter().map(|e| e.message.to_string()).collect();
+        return Err(MorphJsError::Parse(format!(
+            "parse errors in class metadata {filename}: {}",
+            msgs.join("; ")
+        )));
+    }
+    let mut translator = CppTranslator::new(
+        &joined,
+        options.indent,
+        options.type_mode,
+        options.runtime_path.clone(),
+    );
+    apply_ambient_state(&mut translator, options);
+    translator.collect_class_metadata(&ret.program);
+    Ok(translator.class_metadata())
 }
 
 pub fn translate_to_cpp(

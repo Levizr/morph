@@ -2641,7 +2641,10 @@ fn premain_names(premain_code: &str) -> std::collections::HashSet<String> {
 /// If a wrapped premain entry defines a module-bound class, return its
 /// `(ns, inner)` for relocation to the header (callers need the full
 /// definition for `new`; a copy left in premain would redefine it).
-/// Anything else stays put.
+///
+/// `var` bindings count too: `const C = class {…}` lowers to a class
+/// declaration named after the binding, and importers/component consts
+/// need that definition before the rest of premain.
 fn move_class_entry(
     entry: &str,
     bindings: &[std::collections::HashMap<String, String>],
@@ -2654,7 +2657,7 @@ fn move_class_entry(
         .and_then(|rest| rest.split(|c: char| !c.is_alphanumeric() && c != '_' && c != '$').next())
         .filter(|name| !name.is_empty())?;
     let bound = bindings.iter().any(|b| {
-        b.get("kind").map_or(false, |k| k == "class")
+        matches!(b.get("kind").map(String::as_str), Some("class" | "var"))
             && b.get("ns").map_or("", String::as_str) == ns
             && b.get("name").map_or("", String::as_str) == class_name
     });
@@ -4044,6 +4047,18 @@ mod tests {
         // Key expression uses the same binding.
         assert!(app.contains("__it[\"id\"]"), "key lowers: {app}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn class_expression_var_binding_moves_to_header() {
+        let mut binding = std::collections::HashMap::new();
+        binding.insert("kind".to_string(), "var".to_string());
+        binding.insert("ns".to_string(), "u".to_string());
+        binding.insert("name".to_string(), "Pair".to_string());
+        let entry = "namespace app {\nnamespace u {\nclass Pair {\npublic:\nint left;\n};\n}\n}";
+        let moved = move_class_entry(entry, &[binding]).expect("class expression var moves");
+        assert_eq!(moved.0, "u");
+        assert!(moved.1.contains("class Pair"), "{}", moved.1);
     }
 
     #[test]

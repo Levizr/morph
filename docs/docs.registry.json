@@ -553,11 +553,14 @@
           "morph js runtime",
           "morph translator coverage",
           "morph math support",
+          "morph class fields",
+          "morph class expressions",
+          "morph private fields",
           "morph late-assigned window handles",
           "morph late-assigned variables",
           "morph uninitialized let"
         ],
-        "lastUpdated": "2026-11-03",
+        "lastUpdated": "2026-11-06",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -2563,7 +2566,7 @@
         "file": "future/javascript/coverage",
         "status": "development",
         "author": "PIYUSH",
-        "description": "The contract and dependency-ordered plan for making Morph's TypeScript subset cover ordinary app logic: check/build/semantics invariants, shipped widening bindings and precise contract rejections, class fields, async/JSON, standard library, language surface, platform services, JSX, and docs truth-up.",
+        "description": "The contract and dependency-ordered plan for making Morph's TypeScript subset cover ordinary app logic: check/build/semantics invariants, shipped widening bindings and class model, precise contract rejections, async/JSON, standard library, language surface, platform services, JSX, and docs truth-up.",
         "keywords": [
           "morph typescript coverage",
           "morph javascript translator",
@@ -2579,6 +2582,10 @@
           "morph json reviver",
           "morph new target",
           "morph class fields",
+          "morph class expressions",
+          "morph private fields",
+          "morph parameter properties",
+          "morph getters setters",
           "morph promise all",
           "morph date regex map set",
           "morph jsx spread props",
@@ -2586,7 +2593,7 @@
           "morph object spread",
           "morph math"
         ],
-        "lastUpdated": "2026-11-04",
+        "lastUpdated": "2026-11-06",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"

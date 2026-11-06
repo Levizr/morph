@@ -760,6 +760,61 @@ struct JsSyntaxVisitor<'s> {
     /// lowering depends on a string/array receiver (`switch` on a string,
     /// `for...in` over an array).
     states: &'s HashMap<String, RecvKind>,
+    /// Class expressions directly assigned to a `const`/`let` binding;
+    /// those lower to a named class declaration.
+    class_expression_starts: &'s HashSet<u32>,
+}
+
+/// Collect class expressions that appear directly as a `const`/`let`
+/// initializer (through parentheses and TS wrappers). Only those have a
+/// well-defined C++ class name; every other position stays rejected.
+struct AllowedClassExpressions {
+    starts: HashSet<u32>,
+    /// Class expressions inside a function body lower to a local C++ class
+    /// whose metadata cannot follow the value out of the function. Only
+    /// module-scope initializers get a module-visible class definition.
+    function_depth: usize,
+}
+
+fn unwrap_class_expression<'a, 'b>(expr: &'b Expression<'a>) -> Option<&'b Class<'a>> {
+    match expr {
+        Expression::ClassExpression(class) => Some(class),
+        Expression::ParenthesizedExpression(p) => unwrap_class_expression(&p.expression),
+        Expression::TSAsExpression(a) => unwrap_class_expression(&a.expression),
+        Expression::TSSatisfiesExpression(s) => unwrap_class_expression(&s.expression),
+        Expression::TSNonNullExpression(n) => unwrap_class_expression(&n.expression),
+        Expression::TSTypeAssertion(t) => unwrap_class_expression(&t.expression),
+        _ => None,
+    }
+}
+
+impl<'a> Visit<'a> for AllowedClassExpressions {
+    fn visit_function(&mut self, function: &Function<'a>, flags: ScopeFlags) {
+        self.function_depth += 1;
+        oxc_ast_visit::walk::walk_function(self, function, flags);
+        self.function_depth -= 1;
+    }
+
+    fn visit_arrow_function_expression(&mut self, function: &ArrowFunctionExpression<'a>) {
+        self.function_depth += 1;
+        oxc_ast_visit::walk::walk_arrow_function_expression(self, function);
+        self.function_depth -= 1;
+    }
+
+    fn visit_variable_declaration(&mut self, decl: &VariableDeclaration<'a>) {
+        if self.function_depth == 0
+            && matches!(decl.kind, VariableDeclarationKind::Const | VariableDeclarationKind::Let)
+        {
+            for d in &decl.declarations {
+                if let Some(init) = &d.init {
+                    if let Some(class) = unwrap_class_expression(init) {
+                        self.starts.insert(class.span.start);
+                    }
+                }
+            }
+        }
+        oxc_ast_visit::walk::walk_variable_declaration(self, decl);
+    }
 }
 
 /// True for expressions provably holding a string at runtime.
@@ -911,11 +966,13 @@ impl<'a> Visit<'a> for JsSyntaxVisitor<'_> {
                     "Check constructor identity explicitly instead of using `new.target`",
                 ));
             }
-            Expression::ClassExpression(c) => {
+            Expression::ClassExpression(c)
+                if !self.class_expression_starts.contains(&c.span.start) =>
+            {
                 self.out.push((
                     c.span.start,
                     "class expression",
-                    "Use a class declaration instead",
+                    "Use a class declaration, or a module-scope const/let initializer",
                 ));
             }
             _ => {}
@@ -1159,11 +1216,14 @@ fn check_js_syntax(
     let mut functions = FunctionSymbolCollector { out: HashSet::new() };
     functions.visit_program(program);
     let states = collect_state_kinds(program, content);
+    let mut allowed_classes = AllowedClassExpressions { starts: HashSet::new(), function_depth: 0 };
+    allowed_classes.visit_program(program);
     let mut st = JsSyntaxVisitor {
         out: Vec::new(),
         function_symbols: &functions.out,
         scoping: semantic.scoping(),
         states: &states,
+        class_expression_starts: &allowed_classes.starts,
     };
     st.visit_program(program);
     st.out
@@ -6744,14 +6804,55 @@ mod tests {
     }
 
     #[test]
-    fn class_expression_consts_error() {
-        let content = "import { morphState } from 'morph'\nexport default function App() {\n  const C = class { m() { return 1; } };\n  return (<div>{C.name}</div>)\n}\n";
-        let errs = check(content, "App.mx");
-        let err = errs
-            .iter()
-            .find(|e| e.code == "mx-js-syntax")
-            .unwrap_or_else(|| panic!("class expression fires mx-js-syntax, got {errs:?}"));
-        assert!(err.message.contains("class expression"), "{err:?}");
+    fn class_expression_positions() {
+        // Module scope gets a module-visible named class.
+        let ok = "const C = class { m() { return 1; } };\nexport default function App() {\n  return (<div>{C.name}</div>)\n}\n";
+        let errs = check(ok, "App.mx");
+        assert!(
+            !errs
+                .iter()
+                .any(|e| e.code == "mx-js-syntax" && e.message.contains("class expression")),
+            "{errs:?}"
+        );
+
+        // Only a direct module-scope const/let initializer lowers to a
+        // named class.
+        for body in [
+            "const make = () => class { m() { return 1; } };",
+            "const arr = [class { m() { return 1; } }];",
+            "var C = class { m() { return 1; } };",
+            "let C; C = class { m() { return 1; } };",
+            "function make() { const C = class { m() { return 1; } }; return new C(); }",
+            "const make = () => { const C = class { m() { return 1; } }; return new C(); };",
+        ] {
+            let content = format!(
+                "import {{ morphState }} from 'morph'\nexport default function App() {{\n  {body}\n  return (<div>x</div>)\n}}\n"
+            );
+            let errs = check(&content, "App.mx");
+            assert!(
+                errs.iter()
+                    .any(|e| e.code == "mx-js-syntax" && e.message.contains("class expression")),
+                "{body}: {errs:?}"
+            );
+        }
+
+        // A module-level function body also gets only a local C++ class;
+        // metadata cannot follow the value to callers, so it stays rejected.
+        let module_fn = "function make() { const C = class { m() { return 1; } }; return new C(); }\nexport default function App() {\n  return (<div>x</div>)\n}\n";
+        let errs = check(module_fn, "App.mx");
+        assert!(
+            errs.iter().any(|e| e.code == "mx-js-syntax" && e.message.contains("class expression")),
+            "{errs:?}"
+        );
+
+        // Component consts translate as expressions, so even a direct
+        // initializer has no class-declaration path.
+        let component = "export default function App() {\n  const C = class { m() { return 1; } };\n  return (<div>{C.name}</div>)\n}\n";
+        let errs = check(component, "App.mx");
+        assert!(
+            errs.iter().any(|e| e.code == "mx-js-syntax" && e.message.contains("class expression")),
+            "{errs:?}"
+        );
     }
 
     #[test]

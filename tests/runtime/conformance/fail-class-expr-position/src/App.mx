@@ -1,0 +1,14 @@
+export const windowConfig = { title: "fail-class-expr-position", width: 800, height: 600 }
+
+export default function App() {
+  // Class expressions lower only as module-scope direct const/let
+  // initializers. A class expression in any other position (here, a
+  // function return) stays rejected so codegen never invents a C++ type
+  // for it.
+  const make = () => class { greet() { return "hi" } }
+  return (
+    <body>
+      <div>{make().name}</div>
+    </body>
+  )
+}

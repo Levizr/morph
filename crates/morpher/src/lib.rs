@@ -3,10 +3,45 @@ pub mod error;
 pub mod linter;
 pub mod parser;
 
-pub use codegen::context::TypeMode;
+pub use codegen::context::{AccessorFlags, TypeMode};
 pub use error::MorphJsError;
-pub use parser::{translate_snippet_to_cpp, translate_str, translate_to_cpp, translate_to_rust};
-pub use std::collections::HashMap;
+pub use parser::{
+    collect_class_metadata, translate_snippet_to_cpp, translate_str, translate_to_cpp,
+    translate_to_rust,
+};
+pub use std::collections::{HashMap, HashSet};
+
+/// Field and accessor metadata for classes visible to a snippet.
+///
+/// Class bodies are translated separately from the functions that use them
+/// (module class declarations vs. function snippets), so the snippet
+/// translator needs the metadata the class emitter inferred. Maps are keyed
+/// by the class's JS-visible name.
+#[derive(Debug, Clone, Default)]
+pub struct ClassMetadata {
+    pub names: HashSet<String>,
+    pub field_types: HashMap<String, HashMap<String, String>>,
+    pub accessors: HashMap<String, HashMap<String, AccessorFlags>>,
+}
+
+impl ClassMetadata {
+    /// Merge `other` into `self`, renaming `from` (the class's declaring
+    /// name) to `to` (the local binding name, which differs for aliased
+    /// imports).
+    pub fn merge_renamed(&mut self, other: &Self, from: &str, to: &str) {
+        self.names.insert(to.to_string());
+        if let Some(fields) = other.field_types.get(from) {
+            self.field_types.insert(to.to_string(), fields.clone());
+        }
+        if let Some(accessors) = other.accessors.get(from) {
+            self.accessors.insert(to.to_string(), accessors.clone());
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.names.is_empty() && self.field_types.is_empty() && self.accessors.is_empty()
+    }
+}
 
 /// Options controlling translation.
 /// Intent-based codegen (escape analysis, type widening, native types) is
@@ -27,6 +62,10 @@ pub struct TranslateOptions {
     /// Ambient types: JS name to recorded C++ type. Feeds operand classes
     /// (comparisons) and member-access style for ambient reads.
     pub state_types: HashMap<String, String>,
+    /// Classes declared in other translation units (module class
+    /// declarations, imported classes). Snippet lowering needs their field
+    /// and accessor metadata to emit member calls instead of bracket access.
+    pub classes: ClassMetadata,
     /// Omit parameter defaults from top-level forward declarations. Project
     /// builds provide them once in `morph_api.h`; standalone translations
     /// keep them on the prototype and omit them from the definition.
@@ -406,5 +445,24 @@ mod tests {
         .unwrap();
         assert!(out.body.starts_with("[]() -> auto"), "body: {}", out.body);
         assert!(!out.body.contains("shared_ptr"), "body: {}", out.body);
+    }
+
+    #[test]
+    fn snippet_uses_ambient_class_metadata() {
+        let class_src = "class Box {\n  value = 0\n  get current(): number { return this.value }\n  set current(v: number) { this.value = v }\n  sum(): number { return this.value + 1 }\n}\n";
+        let metadata =
+            collect_class_metadata(&[class_src], "classes.ts", &TranslateOptions::default())
+                .unwrap();
+        assert!(metadata.names.contains("Box"), "{metadata:?}");
+        let options = TranslateOptions { classes: metadata, ..Default::default() };
+        let out = translate_snippet(
+            "const b = new Box();\nb.current = 2;\nb.current += 1;\nconsole.log(b.current, b.sum());\n",
+            "snippet.ts",
+            options,
+        )
+        .unwrap();
+        assert!(out.body.contains("std::shared_ptr<Box> b"), "{}", out.body);
+        assert!(out.body.contains("__morph_recv->current(__morph_value)"), "{}", out.body);
+        assert!(out.body.contains("b->sum()"), "{}", out.body);
     }
 }

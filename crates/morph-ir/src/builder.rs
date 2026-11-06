@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use oxc_allocator::Allocator;
@@ -112,6 +111,11 @@ impl IRBuilder {
         let mut ambient_types: HashMap<String, String> = HashMap::new();
         let mut fn_types: HashMap<String, String> = HashMap::new();
         let events: HashMap<String, String> = HashMap::new();
+        let mut classes = Self::collect_module_classes(
+            source,
+            &InstanceFrame::root(PathBuf::from(&source.filename)),
+        )
+        .unwrap_or_default();
         let mut all_state: Vec<HashMap<String, String>> = Vec::new();
         for sv in source
             .state_vars
@@ -148,6 +152,7 @@ impl IRBuilder {
                 &mut fn_types,
                 None,
                 false,
+                &classes,
             );
         }
         for gv in &source.global_vars {
@@ -161,6 +166,7 @@ impl IRBuilder {
                 &mut fn_types,
                 None,
                 false,
+                &classes,
             );
         }
         // ── Component consts become reactive lambdas; later translations ──
@@ -182,10 +188,10 @@ impl IRBuilder {
                     vars
                 };
                 let translated = self
-                    .translate_expr(&cst.rhs, &vars, &ambient_types, &events)
+                    .translate_expr(&cst.rhs, &vars, &ambient_types, &events, &classes)
                     .map(|out| (out.body, out.includes, out.ty))
                     .or_else(|| {
-                        self.translate_logic(&cst.rhs, &vars, &ambient_types, &events)
+                        self.translate_logic(&cst.rhs, &vars, &ambient_types, &events, &classes)
                             .map(|out| (out.body, out.includes, None))
                     });
                 if let Some((body, includes, ty)) = translated {
@@ -222,6 +228,7 @@ impl IRBuilder {
                 &mut fn_types,
                 None,
                 false,
+                &classes,
             );
         }
         // ── Effects: transpile callbacks now, emit `create_effect` later ──
@@ -230,7 +237,7 @@ impl IRBuilder {
             source.effects.iter().chain(source.components.iter().flat_map(|c| c.effects.iter()))
         {
             if let Some(out) =
-                self.translate_logic(&e.callback, &ambient_vars, &ambient_types, &events)
+                self.translate_logic(&e.callback, &ambient_vars, &ambient_types, &events, &classes)
             {
                 let lambda = out.body.trim().trim_end_matches(';').trim().to_string();
                 if lambda.is_empty() {
@@ -264,6 +271,7 @@ impl IRBuilder {
                 &[],
                 &ambient_vars,
                 &ambient_types,
+                &classes,
                 &mut extra_headers,
                 css_keyframes,
             ));
@@ -336,8 +344,9 @@ impl IRBuilder {
         ambient_vars: &HashMap<String, String>,
         ambient_types: &HashMap<String, String>,
         events: &HashMap<String, String>,
+        classes: &morpher::ClassMetadata,
     ) -> Option<morpher::SnippetOutput> {
-        self.translate_logic_opts(source, ambient_vars, ambient_types, events, false)
+        self.translate_logic_opts(source, ambient_vars, ambient_types, events, false, classes)
     }
 
     /// [`Self::translate_logic`] with control over parameter defaults.
@@ -350,8 +359,17 @@ impl IRBuilder {
         ambient_types: &HashMap<String, String>,
         events: &HashMap<String, String>,
         omit_param_defaults: bool,
+        classes: &morpher::ClassMetadata,
     ) -> Option<morpher::SnippetOutput> {
-        self.translate_logic_at(source, ambient_vars, ambient_types, events, omit_param_defaults, 0)
+        self.translate_logic_at(
+            source,
+            ambient_vars,
+            ambient_types,
+            events,
+            omit_param_defaults,
+            0,
+            classes,
+        )
     }
 
     /// Translate a logic snippet at a C++ scope depth.
@@ -367,11 +385,13 @@ impl IRBuilder {
         events: &HashMap<String, String>,
         omit_param_defaults: bool,
         indent: usize,
+        classes: &morpher::ClassMetadata,
     ) -> Option<morpher::SnippetOutput> {
         let options = morpher::TranslateOptions {
             type_mode: self.type_mode,
             state_vars: ambient_vars.clone(),
             state_types: ambient_types.clone(),
+            classes: classes.clone(),
             omit_param_defaults,
             indent,
             ..Default::default()
@@ -395,11 +415,13 @@ impl IRBuilder {
         ambient_vars: &HashMap<String, String>,
         ambient_types: &HashMap<String, String>,
         events: &HashMap<String, String>,
+        classes: &morpher::ClassMetadata,
     ) -> Option<morpher::ExpressionOutput> {
         let options = morpher::TranslateOptions {
             type_mode: self.type_mode,
             state_vars: ambient_vars.clone(),
             state_types: ambient_types.clone(),
+            classes: classes.clone(),
             ..Default::default()
         };
         let rebased = rewrite_event_emits(source, events);
@@ -417,6 +439,7 @@ impl IRBuilder {
     /// With `wrap_ns`, the body is wrapped in its defining file's
     /// namespace first (identical wrapped bodies dedupe); without it the
     /// legacy flat emission is kept (single-file builds have no imports).
+    #[allow(clippy::too_many_arguments)]
     fn push_snippet(
         &self,
         premain: &mut Vec<String>,
@@ -428,6 +451,7 @@ impl IRBuilder {
         fn_types: &mut HashMap<String, String>,
         wrap_ns: Option<&str>,
         omit_param_defaults: bool,
+        classes: &morpher::ClassMetadata,
     ) {
         if let Some(out) = self.translate_logic_opts(
             source,
@@ -435,6 +459,7 @@ impl IRBuilder {
             ambient_types,
             events,
             omit_param_defaults,
+            classes,
         ) {
             fn_types.extend(out.fn_return_types.iter().map(|(k, v)| (k.clone(), v.clone())));
             extra_headers.extend(include_lines(&out.includes));
@@ -892,19 +917,11 @@ impl IRBuilder {
     ) {
         let ns = ns_of(ctx.graph, &frame.module).unwrap_or_default();
         let wrap = (!ns.is_empty()).then_some(ns.as_str());
-        for fd in &source.function_declarations {
-            self.push_snippet(
-                &mut ctx.premain,
-                extra_headers,
-                &fd.source,
-                &frame.vars,
-                &frame.types,
-                &frame.events,
-                &mut ctx.fn_types,
-                wrap,
-                false,
-            );
-        }
+        // Classes and globals come first: a function snippet may use a
+        // class expression (`const C = class {…}`) as a real C++ type, so
+        // the class definition must precede the function. Module function
+        // prototypes live in `morph_api.h`, which is included before this
+        // translation unit, so global initializers can still call them.
         for cd in &source.class_declarations {
             self.push_snippet(
                 &mut ctx.premain,
@@ -916,6 +933,7 @@ impl IRBuilder {
                 &mut ctx.fn_types,
                 wrap,
                 false,
+                &frame.classes,
             );
         }
         for gv in source.global_vars.iter().chain(source.exported_vars.iter().map(|v| &v.source)) {
@@ -929,6 +947,21 @@ impl IRBuilder {
                 &mut ctx.fn_types,
                 wrap,
                 false,
+                &frame.classes,
+            );
+        }
+        for fd in &source.function_declarations {
+            self.push_snippet(
+                &mut ctx.premain,
+                extra_headers,
+                &fd.source,
+                &frame.vars,
+                &frame.types,
+                &frame.events,
+                &mut ctx.fn_types,
+                wrap,
+                false,
+                &frame.classes,
             );
         }
     }
@@ -1083,6 +1116,7 @@ impl IRBuilder {
                 &local_frame.vars,
                 &local_frame.types,
                 &local_frame.events,
+                &local_frame.classes,
             ) else {
                 continue;
             };
@@ -1127,8 +1161,13 @@ impl IRBuilder {
                 continue;
             }
             let src = prepare_source(&f.source, frame);
-            let Some(out) = self.translate_logic(&src, &frame.vars, &frame.types, &frame.events)
-            else {
+            let Some(out) = self.translate_logic(
+                &src,
+                &frame.vars,
+                &frame.types,
+                &frame.events,
+                &frame.classes,
+            ) else {
                 continue;
             };
             for (name, ty) in &out.fn_return_types {
@@ -1156,9 +1195,13 @@ impl IRBuilder {
                 );
             }
             let callback = prepare_source(&e.callback, frame);
-            let Some(out) =
-                self.translate_logic(&callback, &frame.vars, &frame.types, &frame.events)
-            else {
+            let Some(out) = self.translate_logic(
+                &callback,
+                &frame.vars,
+                &frame.types,
+                &frame.events,
+                &frame.classes,
+            ) else {
                 continue;
             };
             let lambda = out.body.trim().trim_end_matches(';').trim().to_string();
@@ -1207,7 +1250,9 @@ impl IRBuilder {
                 body_vars.insert(local.name.clone(), peek.clone());
                 body_vars.insert(emitted, peek);
             }
-            if let Some(out) = self.translate_logic(&src, &body_vars, &frame.types, &frame.events) {
+            if let Some(out) =
+                self.translate_logic(&src, &body_vars, &frame.types, &frame.events, &frame.classes)
+            {
                 let body = out.body.trim();
                 if !body.is_empty() {
                     extra_headers.extend(include_lines(&out.includes));
@@ -1367,6 +1412,7 @@ impl IRBuilder {
             &local_frame.events,
             false,
             1,
+            &local_frame.classes,
         ) else {
             anyhow::bail!(
                 "`{}.on(...)` handler could not be translated (in `{comp_name}`)",
@@ -1384,6 +1430,46 @@ impl IRBuilder {
         let stmts = if cpp.is_empty() || cpp.ends_with('}') { cpp } else { format!("{cpp};") };
         let lambda = format!("[](const JsValue& {ch_param}) {{ {stmts} }}");
         Ok(rewrite_channel_access(&lambda, &ch_param))
+    }
+
+    /// Collect field/accessor metadata for the classes a module declares.
+    /// Class declarations translate separately from the snippets that use
+    /// them, so the frame carries this metadata into every snippet
+    /// translation in the module.
+    fn collect_module_classes(
+        module: &morph_parser::MxSource,
+        frame: &InstanceFrame,
+    ) -> anyhow::Result<morpher::ClassMetadata> {
+        let mut sources: Vec<&str> =
+            module.class_declarations.iter().map(|c| c.source.as_str()).collect();
+        sources.extend(module.global_vars.iter().map(String::as_str));
+        sources.extend(module.exported_vars.iter().map(|v| v.source.as_str()));
+        sources.sort_unstable();
+        sources.dedup();
+        if sources.is_empty() {
+            return Ok(morpher::ClassMetadata::default());
+        }
+        let options =
+            morpher::TranslateOptions { classes: frame.classes.clone(), ..Default::default() };
+        morpher::collect_class_metadata(&sources, "classes.ts", &options)
+            .map_err(|err| anyhow::anyhow!("failed to infer class metadata: {err}"))
+    }
+
+    /// Register a class imported under `local` (which may differ from the
+    /// declaration name) so snippets can lower `new local()` and member
+    /// access through the class's field/accessor metadata.
+    fn seed_imported_class(
+        target: &morph_parser::MxSource,
+        local: &str,
+        original: &str,
+        frame: &mut InstanceFrame,
+    ) -> anyhow::Result<()> {
+        if local == original && frame.classes.names.contains(local) {
+            return Ok(());
+        }
+        let metadata = Self::collect_module_classes(target, frame)?;
+        frame.classes.merge_renamed(&metadata, original, local);
+        Ok(())
     }
 
     /// Register a module's exported `morphShared`/`morphEvent` bindings plus
@@ -1487,6 +1573,10 @@ impl IRBuilder {
             Self::seed_frame_name(frame, module_path, &cd.name, &qualified)?;
             seeded.insert(cd.name.clone());
         }
+        // Class metadata is needed by function snippets translated after
+        // this pass; collect it before imports so imported classes can use
+        // the module's own classes for type inference.
+        frame.classes = Self::collect_module_classes(module, frame)?;
         // Own re-export aliases (`export { x } from`, `export *`).
         Self::seed_re_exports(module, module_path, graph, &ns, ctx)?;
         // Named imports of directly-imported modules expose their bindings.
@@ -1646,6 +1736,7 @@ impl IRBuilder {
             let qualified = format!("::{MODULE_NS_ROOT}::{target_ns}::{}", binding_ident(original));
             Self::seed_frame_name(frame, module_path, local, &qualified)?;
             Self::register_import(module_path, local, &target_ns, original, &qualified, ctx);
+            Self::seed_imported_class(target, local, original, frame)?;
             return Ok(());
         }
         if listed || target.function_declarations.iter().any(|f| f.name == original && f.exported) {
@@ -1750,6 +1841,9 @@ impl IRBuilder {
         let qualified = format!("::{MODULE_NS_ROOT}::{target_ns}::{}", binding_ident(&decl));
         Self::seed_frame_name(frame, module_path, local, &qualified)?;
         Self::register_import(module_path, local, &target_ns, &decl, &qualified, ctx);
+        if kind == "class" {
+            Self::seed_imported_class(target, local, &decl, frame)?;
+        }
         Ok(())
     }
 
@@ -2548,6 +2642,7 @@ impl IRBuilder {
                     &parent_frame.vars,
                     &parent_frame.types,
                     &parent_frame.events,
+                    &parent_frame.classes,
                 )
                 .map(|out| {
                     extra_headers.extend(include_lines(&out.includes));
@@ -2564,6 +2659,7 @@ impl IRBuilder {
                     &parent_frame.vars,
                     &parent_frame.types,
                     &parent_frame.events,
+                    &parent_frame.classes,
                 )
                 .map(|out| {
                     extra_headers.extend(include_lines(&out.includes));
@@ -2723,6 +2819,7 @@ impl IRBuilder {
             &local_frame.vars,
             &local_frame.types,
             &local_frame.events,
+            &local_frame.classes,
         ) else {
             anyhow::bail!(
                 "function prop `{}` on <{tag}> ({}:{}) could not be translated",
@@ -2765,6 +2862,7 @@ impl IRBuilder {
         ancestors: &[AncestorHint],
         ambient_vars: &HashMap<String, String>,
         ambient_types: &HashMap<String, String>,
+        ambient_classes: &morpher::ClassMetadata,
         extra_headers: &mut Vec<String>,
         keyframes: &HashMap<String, Vec<morph_parser::CssKeyframe>>,
     ) -> IRNode {
@@ -2778,6 +2876,7 @@ impl IRBuilder {
         let mut frame = InstanceFrame::root(PathBuf::new());
         frame.vars.clone_from(ambient_vars);
         frame.types.clone_from(ambient_types);
+        frame.classes.clone_from(ambient_classes);
         // Infallible here: with an empty graph, instance expansion never
         // triggers, and capture/subst helpers cannot fail.
         self.build_node_in(
@@ -3308,6 +3407,7 @@ impl IRBuilder {
                                 &frame.vars,
                                 &frame.types,
                                 &frame.events,
+                                &frame.classes,
                             ) {
                                 extra_headers.extend(include_lines(&out.includes));
                                 let body = out.body.trim().trim_end_matches(';').trim().to_string();
@@ -3557,6 +3657,10 @@ struct InstanceFrame {
     module: PathBuf,
     vars: HashMap<String, String>,
     types: HashMap<String, String>,
+    /// Field/accessor metadata for classes visible in this scope. Snippets
+    /// translate separately from class declarations, so lowering needs the
+    /// metadata up front to emit method calls instead of bracket access.
+    classes: morpher::ClassMetadata,
     /// Visible event channel ids keyed by local name (own exports + imports).
     events: HashMap<String, String>,
     /// Declared parameter counts of visible functions (inner + module
@@ -3577,6 +3681,7 @@ impl InstanceFrame {
             module,
             vars: HashMap::new(),
             types: HashMap::new(),
+            classes: morpher::ClassMetadata::default(),
             events: HashMap::new(),
             fn_arity: HashMap::new(),
             props_param: String::new(),
@@ -3591,6 +3696,7 @@ impl InstanceFrame {
             module,
             vars: HashMap::new(),
             types: HashMap::new(),
+            classes: morpher::ClassMetadata::default(),
             events: HashMap::new(),
             fn_arity: HashMap::new(),
             props_param: String::new(),
@@ -7928,6 +8034,7 @@ mod tests {
             &[],
             &HashMap::new(),
             &HashMap::new(),
+            &morpher::ClassMetadata::default(),
             &mut Vec::new(),
             &HashMap::new(),
         );
@@ -7958,6 +8065,7 @@ mod tests {
             &[],
             &HashMap::new(),
             &HashMap::new(),
+            &morpher::ClassMetadata::default(),
             &mut Vec::new(),
             &HashMap::new(),
         );
@@ -8224,6 +8332,7 @@ mod tests {
             &[],
             &HashMap::new(),
             &HashMap::new(),
+            &morpher::ClassMetadata::default(),
             &mut Vec::new(),
             &HashMap::new(),
         );
@@ -8247,6 +8356,7 @@ mod tests {
             &[],
             &HashMap::new(),
             &HashMap::new(),
+            &morpher::ClassMetadata::default(),
             &mut Vec::new(),
             &HashMap::new(),
         );
@@ -8279,6 +8389,7 @@ mod tests {
             &[],
             &HashMap::new(),
             &HashMap::new(),
+            &morpher::ClassMetadata::default(),
             &mut Vec::new(),
             &HashMap::new(),
         );
@@ -8395,6 +8506,7 @@ mod tests {
             &[],
             &HashMap::new(),
             &HashMap::new(),
+            &morpher::ClassMetadata::default(),
             &mut Vec::new(),
             &keyframes,
         );
@@ -8432,6 +8544,7 @@ mod tests {
             &[],
             &HashMap::new(),
             &HashMap::new(),
+            &morpher::ClassMetadata::default(),
             &mut Vec::new(),
             &keyframes,
         );
@@ -8460,6 +8573,7 @@ mod tests {
             &[],
             &HashMap::new(),
             &HashMap::new(),
+            &morpher::ClassMetadata::default(),
             &mut Vec::new(),
             &HashMap::new(),
         );
@@ -9853,6 +9967,7 @@ export default function App() {
             module: PathBuf::new(),
             vars: HashMap::new(),
             types: HashMap::new(),
+            classes: morpher::ClassMetadata::default(),
             events: HashMap::new(),
             fn_arity: HashMap::new(),
             props_param: String::new(),
@@ -9867,6 +9982,7 @@ export default function App() {
             module: PathBuf::new(),
             vars: HashMap::new(),
             types: HashMap::new(),
+            classes: morpher::ClassMetadata::default(),
             events: HashMap::new(),
             fn_arity: HashMap::new(),
             props_param: "props".to_string(),
@@ -9973,6 +10089,7 @@ export default function App() {
             &[],
             &HashMap::new(),
             &HashMap::new(),
+            &morpher::ClassMetadata::default(),
             &mut Vec::new(),
             &HashMap::new(),
         );

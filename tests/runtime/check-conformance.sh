@@ -72,6 +72,7 @@ run_pass pass-window
 run_pass pass-late-values
 run_pass pass-control-flow
 run_pass pass-widening
+run_pass pass-classes
 run_pass pass-rule-warnings
 run_pass pass-lint-config
 
@@ -95,7 +96,7 @@ run_fail fail-missing-css mx-css-file-missing
 run_fail fail-inline-style mx-style-prop
 run_fail fail-state-init mx-state-init
 run_fail fail-state-pattern mx-state-pattern
-run_fail fail-const-init mx-js-syntax
+run_fail fail-class-expr-position mx-js-syntax
 run_fail fail-effect-nested mx-effect-nested
 run_fail fail-img-src mx-img-src
 run_fail fail-event-value mx-event-value

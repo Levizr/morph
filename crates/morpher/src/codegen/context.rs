@@ -34,6 +34,26 @@ impl std::fmt::Display for TypeMode {
     }
 }
 
+/// Which accessor halves a class property declares. Static and instance
+/// accessors of the same name can coexist, so each half records its kind.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AccessorFlags {
+    pub getter: bool,
+    pub setter: bool,
+    pub static_getter: bool,
+    pub static_setter: bool,
+}
+
+impl AccessorFlags {
+    pub const fn has_getter(&self, is_static: bool) -> bool {
+        if is_static { self.static_getter } else { self.getter }
+    }
+
+    pub const fn has_setter(&self, is_static: bool) -> bool {
+        if is_static { self.static_setter } else { self.setter }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Ctx {
     pub indent_level: usize,
@@ -45,6 +65,10 @@ pub struct Ctx {
     pub template_params: HashSet<String>,
     pub class_names: HashSet<String>,
     pub interface_props: HashMap<String, HashMap<String, String>>, // iface name -> prop -> cpp type
+    /// Inferred/declared field types per class (`#field` keys keep the `#`).
+    pub class_field_types: HashMap<String, HashMap<String, String>>,
+    /// Accessor properties per class: property -> getter/setter presence.
+    pub class_accessors: HashMap<String, HashMap<String, AccessorFlags>>,
     pub var_types: HashMap<String, String>,
     pub shared_ptr_vars: HashSet<String>,
     pub unique_ptr_vars: HashSet<String>,
@@ -56,6 +80,8 @@ pub struct Ctx {
     pub drop_return_value: bool,
     pub class_name: Option<String>,
     pub super_class_name: Option<String>,
+    /// True while emitting a `static` method body: `this` denotes the class.
+    pub in_static_method: bool,
     pub event_handler: bool,
     pub state_vars: HashMap<String, String>,
     pub js_object_params: HashSet<String>,
@@ -81,6 +107,8 @@ impl Default for Ctx {
             template_params: HashSet::new(),
             class_names: HashSet::new(),
             interface_props: HashMap::new(),
+            class_field_types: HashMap::new(),
+            class_accessors: HashMap::new(),
             var_types: HashMap::new(),
             shared_ptr_vars: HashSet::new(),
             unique_ptr_vars: HashSet::new(),
@@ -92,6 +120,7 @@ impl Default for Ctx {
             drop_return_value: false,
             class_name: None,
             super_class_name: None,
+            in_static_method: false,
             event_handler: false,
             state_vars: HashMap::new(),
             js_object_params: HashSet::new(),
@@ -118,6 +147,8 @@ impl Ctx {
             template_params: self.template_params.clone(),
             class_names: self.class_names.clone(),
             interface_props: self.interface_props.clone(),
+            class_field_types: self.class_field_types.clone(),
+            class_accessors: self.class_accessors.clone(),
             var_types: self.var_types.clone(),
             shared_ptr_vars: self.shared_ptr_vars.clone(),
             unique_ptr_vars: self.unique_ptr_vars.clone(),
@@ -129,6 +160,7 @@ impl Ctx {
             drop_return_value: self.drop_return_value,
             class_name: self.class_name.clone(),
             super_class_name: self.super_class_name.clone(),
+            in_static_method: self.in_static_method,
             event_handler: self.event_handler,
             state_vars: self.state_vars.clone(),
             js_object_params: self.js_object_params.clone(),
@@ -168,6 +200,12 @@ impl Ctx {
         }
         for (k, v) in child.private_fields {
             self.private_fields.entry(k).or_default().extend(v);
+        }
+        for (k, v) in child.class_field_types {
+            self.class_field_types.entry(k).or_default().extend(v);
+        }
+        for (k, v) in child.class_accessors {
+            self.class_accessors.entry(k).or_default().extend(v);
         }
     }
 

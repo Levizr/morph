@@ -57,7 +57,7 @@ Already shipped and **not** on the missing list:
 
 - **Statements:** `if`/`else`, `while`, `for`, `do-while`, `switch`, `try`/`catch`, `throw`, `return`, `break`, `continue`.
 - **Expressions:** binary/unary/ternary/sequence/update/assignment, template literals, array literals with spread, object literals with spread and computed keys, `new`, member access, calls, optional chaining `?.`, nullish coalescing `??`, `await`.
-- **Functions/classes:** declarations, expressions, arrows, default/optional parameters, classes with explicitly typed fields, inheritance, `super`, getters/setters with typed backing fields, interfaces, generics.
+- **Functions/classes:** declarations, expressions, arrows, default/optional parameters, class declarations with inferred or annotated fields, `static` and `#private` members, constructor parameter properties, class expressions in module-scope direct `const`/`let` initializers, inheritance, `super`, getters/setters with inferred backing fields, interfaces, generics.
 - **Destructuring declarations:** callable/event payloads, defaults (`{ a = 1 }`), rest elements (`{ ...rest }`, `[head, ...tail]`), computed keys, and nested patterns. Assignment patterns and loop binding patterns are Part 1C.
 - **Component-body flow:** branches, loops, and calls between declarations lower into the setup effect; reassigned `let` becomes a signal; the functional state updater (`setCount(c => c + 1)`) works.
 - **Late-assigned and widened values:** `let x; x = 5; x = "hi"` works through `JsLateValue` in module and component scope, and initialized bindings widen when a later assignment changes value class (`let x = 0; x = "hi"`, `let x: number | string`, `let x: any`). Mixed numeric classes widen to `JsNumber`; Window handles lower through `window_wid`.
@@ -69,7 +69,7 @@ Already shipped and **not** on the missing list:
 - **Operators with JS semantics:** `==`/`!=`, `===`/`!==`, relational, `in`, `**`/`**=`, `&&=`/`||=`/`??=`, truthiness, string concatenation, `ToNumber` in numeric contexts.
 - **JSX:** elements, fragments, and list `.map` in direct JSX-child position.
 
-`Response.json()` returns a `JsValue`; dot access is Part 3A, while `await response.json()` lowers to the synchronous reader. `JSON.parse`/`stringify` extra arguments, string `switch`, array `for...in`, `.then`/`.catch`, timer trailing arguments, `new.target`, and class expressions are rejected by `morph check`. Unannotated class fields are Part 1B.
+`Response.json()` returns a `JsValue`; dot access is Part 3A, while `await response.json()` lowers to the synchronous reader. `JSON.parse`/`stringify` extra arguments, string `switch`, array `for...in`, `.then`/`.catch`, timer trailing arguments, and `new.target` are rejected by `morph check`. Class expressions are accepted only as module-scope direct `const`/`let` initializers; every other position is rejected.
 
 ## Part map
 
@@ -120,7 +120,7 @@ Parts 0–4 plus 6A–6D are the current app-logic path and block the three refe
 
 **This is the gate.** Every item below is a known violation of the contract. Part 0 either lowers it correctly or rejects it with a precise `morph check` error. Each later part removes its own rejection and adds a pass fixture; no part is allowed to leave a check-pass/build-fail gap in between.
 
-The statuses below were probed on 2026-11-04 with `morph check`, `morph --to cpp`, and `g++ -std=c++23 -fsyntax-only`. Re-probe before changing a row. Rows marked ⛔ now fail `morph check` with a precise error and a conformance fail fixture; rows marked ✅ are lowered and covered by a pass fixture. The remaining ⚠️/🟥 rows are owned by the part named in the table and stay on the contract-gate checklist.
+The statuses below were probed on 2026-11-06 with `morph check`, `morph --to cpp`, and `g++ -std=c++23 -fsyntax-only`. Re-probe before changing a row. Rows marked ⛔ now fail `morph check` with a precise error and a conformance fail fixture; rows marked ✅ are lowered and covered by a pass fixture. The remaining ⚠️/🟥 rows are owned by the part named in the table and stay on the contract-gate checklist.
 
 ### 0.1 Silent-wrong behavior
 
@@ -139,13 +139,13 @@ The statuses below were probed on 2026-11-04 with `morph check`, `morph --to cpp
 | ID | Construct | Generated failure | Owning part |
 |---|---|---|---|
 | 0.2.1 | `let x = 0; x = "hi"`; `let x: number \| string`; `let y: any` | ✅ Fixed in 1A: the binding widens to `JsLateValue` or `JsNumber`. | 1A |
-| 0.2.2 | `class A { x = 0 }`; `static count = 0`; `private _x = 0`; getter/setter backing fields | Emits `auto` data members — invalid C++. | 1B |
+| 0.2.2 | `class A { x = 0 }`; `static count = 0`; `private _x = 0`; getter/setter backing fields | ✅ Fixed in 1B: fields infer from initializers and writes, widening to `JsLateValue` on conflict; accessors lower through methods. | 1B |
 | 0.2.3 | `switch (someString)` | ⛔ Rejected by `morph check`; lowering is 2A. | 2A |
 | 0.2.4 | `for (let i = 0; ...) fns.push(() => i)` | `i is not captured`; no per-iteration binding. | 1D |
 | 0.2.5 | `[a, b] = [b, a]`; `({ c } = o)` | Destructuring-assignment placeholder / invalid C++. | 1C |
-| 0.2.6 | `const C = class { ... }` | ⛔ Rejected by `morph check`; lowering is 1B. | 1B |
-| 0.2.7 | `constructor(public x: number)` | Parameter property is never declared as a field. | 1B |
-| 0.2.8 | `#private` fields | `auto` placeholder. | 1B |
+| 0.2.6 | `const C = class { ... }` | ✅ Fixed in 1B: module-scope direct `const`/`let` class expressions lower to a named class declaration; function-local and component-body initializers are rejected. | 1B |
+| 0.2.7 | `constructor(public x: number)` | ✅ Fixed in 1B: parameter properties become fields. | 1B |
+| 0.2.8 | `#private` fields | ✅ Fixed in 1B: mangled to a private member with `->`/`::` access. | 1B |
 | 0.2.9 | `fetch(...).then(...)`; `r.text().then(...)` | ⛔ Rejected by `morph check`; 3C decides chain support. | 3C |
 | 0.2.10 | `setTimeout(fn, 0, 1, 2)` | ⛔ Rejected by `morph check`; forwarding is 3D. | 3D |
 | 0.2.11 | `new.target` | ⛔ Rejected by `morph check`; lowering/identity is 2B. | 2B |
@@ -200,22 +200,23 @@ x = "hello";        // emits JsLateValue x = 0; x = "hello";
 
 ### 1B — Class model
 
-**Today:** annotated fields work; unannotated fields, static fields, private fields, parameter properties, class expressions, and getter/setter backing fields do not.
+**Shipped:** the class emitter now covers the ordinary class shapes app logic uses:
 
-**Target:**
+- unannotated fields infer their type from the initializer and from `this.<field>` / `ClassName.<field>` writes; conflicting value classes widen to `JsLateValue`;
+- `static` fields and methods, including static `this` resolving to the class (`Class::member`);
+- `#private` fields and methods mangle to `__private_<Class>_<field>` and use `->` on instances / `::` on the class;
+- constructor parameter properties (`public`/`private`/`readonly`) become real fields;
+- module-scope class expressions in direct `const`/`let` initializers lower to a named class declaration; every other class-expression position (function-local and component-body consts included) stays `mx-js-syntax`;
+- getters/setters lower to accessor methods, including compound assignment and `++`/`--`, with the receiver evaluated once;
+- fields annotated `any`/`unknown`/unions/intersections store a JS carrier (`JsValue`/`JsLateValue`) instead of `auto`.
 
-- infer field types from the initializer and constructor assignments;
-- widen fields to `JsLateValue` when later assignments require it;
-- turn constructor parameter properties into real fields;
-- lower `#private` to a private member with the same access rules;
-- lower class expressions assigned to `const`/`let` into a named local class;
-- keep getters/setters working when the backing field is unannotated.
+Class metadata (names, field types, accessors) crosses translation units through `TranslateOptions.classes`, so `new C()` and member access lower correctly in module functions, imported modules, and snippets translated outside the class-declaration unit.
 
 **Depends on:** 1A.
 
 **Owns:** class emitter.
 
-**Exit:** `class A { x = 0 }`, `static count = 0`, `#x`, `constructor(public x: number)`, `const C = class { ... }`, and getter/setter classes compile and run.
+**Exit:** ✅ `class A { x = 0 }`, `static count = 0`, `#x`, `constructor(public x: number)`, a module-scope `const Pair = class { ... }`, and getter/setter classes compile and run. Function-local and component-body class-expression consts are rejected because their class metadata cannot escape the function. Covered by `tests/runtime/conformance/pass-classes` plus translator tests; the runtime probe output matches Node (`8:primary:s:1:0:3:7:ready`).
 
 ### 1C — Destructuring assignment and loop bindings
 
@@ -560,9 +561,10 @@ Morph should expose native equivalents (`useWindow`, clipboard, storage) instead
 | `Response.json()` detection and full `Response` runtime | ✅ Shipped; dot access is Part 3A, awaited form shipped |
 | `morph check` diagnostics for rejected constructs | ✅ Shipped; grows with each part |
 | App-logic contract and docs truth-up | ✅ This pass |
-| Part 0 — contract integrity | 🚧 In progress — shipped rejections for string `switch`, array `for...in`, `.then`/`.catch`, JSON extra args, timer args, `new.target`, and class expressions; remaining ⚠️/🟥 rows are owned by 1B/1C/1D/2D/2E/3A/6F |
+| Part 0 — contract integrity | 🚧 In progress — shipped rejections for string `switch`, array `for...in`, `.then`/`.catch`, JSON extra args, timer args, and `new.target`; remaining ⚠️/🟥 rows are owned by 1C/1D/2D/2E/3A/6F |
 | Part 1A — widening bindings | ✅ Shipped |
-| Parts 1B–6 | 🚧 Planned |
+| Part 1B — class model | ✅ Shipped |
+| Parts 1C–6 | 🚧 Planned |
 | Part 7 — docs and claims | 📋 Continuous |
 
 ## How to use this page

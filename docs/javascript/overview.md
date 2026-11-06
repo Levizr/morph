@@ -46,7 +46,7 @@ This module is provided by `node_modules/morph/index.d.ts` — it ships with eve
   arrows, methods, function-prop callbacks, and `.on()` event handlers
   (lowered to one synthetic argument plus local bindings)
 - Object/array literal consts, including nested object member access
-- Classes with constructors, methods, `super()`, `this`
+- Classes with constructors, methods, `super()`, `this`, inferred or annotated fields, `static` and `#private` members, constructor parameter properties, getters/setters, and module-scope class expressions in direct `const`/`let` initializers
 - Interfaces and type aliases
 - Type-only imports and exports (`import type`, inline `type`, `export type`)
 
@@ -88,6 +88,10 @@ Binary (`+`, `-`, `*`, `/`, `**`, `===`, `!==`, `==`, `!=`, `<`, `>`, etc.), una
 - Initialized bindings widen when a later assignment changes value class
   (`let x = 0; x = "hi"`), including `number | string`, `any`, and
   `unknown` annotations; mixed numeric classes widen to `JsNumber`
+- Class fields infer their type from initializers and `this.field` /
+  `ClassName.field` writes; conflicting assignments widen the field to
+  `JsLateValue`, and static/private members and accessors keep JS access
+  rules
 - Array `push`/`pop`/index access, plus `map`, `filter`, `forEach`, `reduce`, `find`, `findIndex`, `some`, `every`, `sort`, `splice`, `shift`, `unshift`, `fill`, `flat`, `flatMap` on arrays and `JsArray` (callbacks receive `(item)`, `(item, index)`, or `(item, index, array)`)
 - Object `has`/`keys`/index access
 - String methods on both `JsString` and native `std::string`: `trim`, `toUpperCase`, `toLowerCase`, `indexOf`, `substring`, `slice`, `replace`, `charAt`, plus `split`, `startsWith`, `endsWith`, `includes`, `repeat`, `padStart`, `padEnd` — natives lower to `morph::str::*` helpers, chains nest (see [Native C++ Types](./native-types.md#js-methods-on-natives))
@@ -111,7 +115,9 @@ Binary (`+`, `-`, `*`, `/`, `**`, `===`, `!==`, `==`, `!=`, `<`, `>`, etc.), una
 - TypeScript `enum` declarations
 - `import * as ns` namespace imports and `import.meta`
 - Browser globals (`document`, `window`, `localStorage`, …)
-- Class expressions (`const C = class { … }` is rejected by `morph check`)
+- Class expressions outside a module-scope direct `const`/`let` initializer
+  (module-scope initializers lower to a named class; function-local and
+  every other position are rejected)
 - String `switch`, array `for...in`, `new.target`, and trailing timer
   arguments (`setTimeout(fn, ms, ...args)`) — rejected by `morph check`
   with a precise error
@@ -126,8 +132,7 @@ for `morph build`; the two commands share the same parser, graph, lint, and
 IR pipeline.
 
 > **Known contract gaps:** some constructs still pass `morph check` and
-> fail in generated C++ — unannotated/private class fields, constructor
-> parameter properties, destructuring assignment and loop bindings,
+> fail in generated C++ — destructuring assignment and loop bindings,
 > per-iteration closures, `var` hoisting/TDZ, imported module side effects,
 > JSON dot access, JSX spread props, and others. The
 > [TypeScript App-Logic Coverage](../future/javascript/coverage.md) plan

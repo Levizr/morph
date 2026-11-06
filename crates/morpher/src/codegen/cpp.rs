@@ -4,7 +4,7 @@ use oxc_span::GetSpan;
 use std::collections::{HashMap, HashSet};
 
 use super::analyzer::{AnalysisResult, EscapeAnalyzer, EscapeKind, WidenedType};
-use super::context::{Ctx, INDENT, TypeMode};
+use super::context::{AccessorFlags, Ctx, INDENT, TypeMode};
 use super::js_comparison::{
     ComparisonKind, ComparisonSections, ComparisonSignature, OperandClass, build_header,
     cpp_type_to_class, required_includes,
@@ -195,6 +195,19 @@ fn is_nullish_value_expr(expr: &Expression<'_>) -> bool {
     }
 }
 
+/// Unwrap wrappers that do not change a class expression's value.
+fn class_expression_of<'a, 'b>(expr: &'b Expression<'a>) -> Option<&'b Class<'a>> {
+    match expr {
+        Expression::ClassExpression(class) => Some(class),
+        Expression::ParenthesizedExpression(p) => class_expression_of(&p.expression),
+        Expression::TSAsExpression(a) => class_expression_of(&a.expression),
+        Expression::TSSatisfiesExpression(s) => class_expression_of(&s.expression),
+        Expression::TSNonNullExpression(n) => class_expression_of(&n.expression),
+        Expression::TSTypeAssertion(t) => class_expression_of(&t.expression),
+        _ => None,
+    }
+}
+
 /// A single-char value as a C++ character literal.
 fn cpp_char_literal(value: &str) -> String {
     let mut out = String::with_capacity(value.len() + 2);
@@ -253,6 +266,147 @@ fn optional_param_default(cpp_type: &str) -> &'static str {
     } else {
         "{}"
     }
+}
+
+/// Metadata key for a class field. Private names keep their `#` so `#x`
+/// and `x` can coexist exactly as they do in JavaScript.
+fn class_field_key(key: &PropertyKey<'_>) -> Option<String> {
+    match key {
+        PropertyKey::StaticIdentifier(id) => Some(id.name.to_string()),
+        PropertyKey::StringLiteral(s) => Some(s.value.to_string()),
+        PropertyKey::NumericLiteral(n) => Some(n.value.to_string()),
+        PropertyKey::PrivateIdentifier(p) => Some(format!("#{}", p.name)),
+        _ => None,
+    }
+}
+
+fn is_numeric_field_type(ty: &str) -> bool {
+    matches!(ty, "JsNumber" | "float" | "double" | "size_t")
+        || ty.starts_with("int")
+        || ty.starts_with("uint")
+        || ty.starts_with("long")
+        || ty.starts_with("short")
+}
+
+fn is_text_field_type(ty: &str) -> bool {
+    matches!(ty, "std::string" | "JsString")
+}
+
+fn is_array_field_type(ty: &str) -> bool {
+    ty == "JsArray" || ty.starts_with("std::vector<")
+}
+
+/// How a `this.<field>` write constrains the field's C++ type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FieldUseKind {
+    Plain,
+    AddAssign,
+    NumericAssign,
+    Update,
+}
+
+fn this_field_target_key(target: &AssignmentTarget<'_>) -> Option<String> {
+    match target {
+        AssignmentTarget::StaticMemberExpression(m)
+            if matches!(&m.object, Expression::ThisExpression(_)) =>
+        {
+            Some(m.property.name.to_string())
+        }
+        AssignmentTarget::PrivateFieldExpression(p)
+            if matches!(&p.object, Expression::ThisExpression(_)) =>
+        {
+            Some(format!("#{}", p.field.name))
+        }
+        _ => None,
+    }
+}
+
+fn this_simple_field_target_key(target: &SimpleAssignmentTarget<'_>) -> Option<String> {
+    match target {
+        SimpleAssignmentTarget::StaticMemberExpression(m)
+            if matches!(&m.object, Expression::ThisExpression(_)) =>
+        {
+            Some(m.property.name.to_string())
+        }
+        SimpleAssignmentTarget::PrivateFieldExpression(p)
+            if matches!(&p.object, Expression::ThisExpression(_)) =>
+        {
+            Some(format!("#{}", p.field.name))
+        }
+        _ => None,
+    }
+}
+
+fn class_field_target_key(target: &AssignmentTarget<'_>, class: &str) -> Option<String> {
+    match target {
+        AssignmentTarget::StaticMemberExpression(m) if matches!(&m.object, Expression::Identifier(id) if id.name.as_str() == class) => {
+            Some(m.property.name.to_string())
+        }
+        AssignmentTarget::PrivateFieldExpression(p) if matches!(&p.object, Expression::Identifier(id) if id.name.as_str() == class) => {
+            Some(format!("#{}", p.field.name))
+        }
+        _ => None,
+    }
+}
+
+fn class_simple_field_target_key(
+    target: &SimpleAssignmentTarget<'_>,
+    class: &str,
+) -> Option<String> {
+    match target {
+        SimpleAssignmentTarget::StaticMemberExpression(m) if matches!(&m.object, Expression::Identifier(id) if id.name.as_str() == class) => {
+            Some(m.property.name.to_string())
+        }
+        SimpleAssignmentTarget::PrivateFieldExpression(p) if matches!(&p.object, Expression::Identifier(id) if id.name.as_str() == class) => {
+            Some(format!("#{}", p.field.name))
+        }
+        _ => None,
+    }
+}
+
+/// True for annotations that promise a dynamic JS value (`any`, `unknown`,
+/// unions, intersections). The C++ storage type must be a Js* carrier —
+/// `auto` cannot hold either branch.
+fn dynamic_annotation(ann: Option<&TSTypeAnnotation<'_>>) -> bool {
+    fn is_dynamic(ty: &TSType<'_>) -> bool {
+        match ty {
+            TSType::TSAnyKeyword(_)
+            | TSType::TSUnknownKeyword(_)
+            | TSType::TSUnionType(_)
+            | TSType::TSIntersectionType(_) => true,
+            TSType::TSParenthesizedType(p) => is_dynamic(&p.type_annotation),
+            _ => false,
+        }
+    }
+    ann.is_some_and(|ann| is_dynamic(&ann.type_annotation))
+}
+
+/// Merge two candidate types for the same class field. Conflicting value
+/// classes widen to `JsLateValue` so later assignments keep JS semantics;
+/// numeric/text/array pairs pick the JS-visible runtime type.
+fn merge_field_types(current: &str, next: &str) -> String {
+    if current == next {
+        return current.to_string();
+    }
+    if current.is_empty() || current == "auto" {
+        return next.to_string();
+    }
+    if next.is_empty() || next == "auto" {
+        return current.to_string();
+    }
+    if is_numeric_field_type(current) && is_numeric_field_type(next) {
+        return "JsNumber".to_string();
+    }
+    if is_text_field_type(current) && is_text_field_type(next) {
+        return "JsString".to_string();
+    }
+    if is_array_field_type(current) && is_array_field_type(next) {
+        return "JsArray".to_string();
+    }
+    if matches!(current, "JsValue" | "JsLateValue") || matches!(next, "JsValue" | "JsLateValue") {
+        return "JsLateValue".to_string();
+    }
+    "JsLateValue".to_string()
 }
 
 impl<'a> CppTranslator<'a> {
@@ -472,6 +626,7 @@ impl<'a> CppTranslator<'a> {
                 _ => {}
             }
         }
+        self.collect_class_metadata(program);
         // First pass: forward declarations for top-level functions
         // (needed for mutual recursion where a() calls later-defined b()).
         // Nested functions lower to capturing lambdas inline instead.
@@ -705,6 +860,11 @@ impl<'a> CppTranslator<'a> {
         let (name, _) = self.binding_to_identifier(&d.id);
         if name.starts_with("/*") {
             return Some(format!("{}/* destructuring not supported */", self.indent()));
+        }
+        // `const C = class { ... }` lowers to a named class declaration;
+        // class expressions elsewhere stay rejected by `morph check`.
+        if let Some(class) = d.init.as_ref().and_then(class_expression_of) {
+            return Some(self.emit_class_named(class, Some(&name)));
         }
         // Track Window handles for method/property lowering: direct
         // `useWindow(...)` / `new Window(...)` initializers keep their WID
@@ -1875,9 +2035,32 @@ impl<'a> CppTranslator<'a> {
                 None
             }
             Expression::StaticMemberExpression(m) => {
+                if matches!(&m.object, Expression::ThisExpression(_))
+                    && let Some(class) = &self.ctx.class_name
+                    && let Some(ty) = self
+                        .ctx
+                        .class_field_types
+                        .get(class)
+                        .and_then(|fields| fields.get(m.property.name.as_str()))
+                {
+                    return Some(ty.clone());
+                }
                 let obj_type = self.infer_type_from_init(&m.object)?;
                 if obj_type == "JsObject" || obj_type == "JsValue" || obj_type == "JsArray" {
                     return Some("JsValue".to_string());
+                }
+                None
+            }
+            Expression::PrivateFieldExpression(p) => {
+                if matches!(&p.object, Expression::ThisExpression(_))
+                    && let Some(class) = &self.ctx.class_name
+                {
+                    return self
+                        .ctx
+                        .class_field_types
+                        .get(class)
+                        .and_then(|fields| fields.get(&format!("#{}", p.field.name)))
+                        .cloned();
                 }
                 None
             }
@@ -1904,7 +2087,10 @@ impl<'a> CppTranslator<'a> {
                         return Some(format!("morph::Result<{}>", inner));
                     }
                     if self.ctx.class_names.contains(id.name.as_str()) {
-                        return Some(format!("std::shared_ptr<{}>", id.name));
+                        return Some(format!(
+                            "std::shared_ptr<{}>",
+                            self.class_cpp_name(id.name.as_str())
+                        ));
                     }
                 }
                 Some("JsValue".to_string())
@@ -3166,10 +3352,352 @@ impl<'a> CppTranslator<'a> {
         cpp_type.to_string()
     }
 
+    /// Register field types and accessors for every named class before
+    /// emission, so a method can use an accessor on a class declared later
+    /// in the file.
+    pub(crate) fn collect_class_metadata(&mut self, program: &Program<'a>) {
+        // Names first: field inference may construct a class declared later
+        // (`items = new Item()`), and `infer_type_from_init` consults
+        // `class_names` to choose a pointer type.
+        struct NameFinder {
+            names: Vec<String>,
+        }
+        impl<'a> Visit<'a> for NameFinder {
+            fn visit_class(&mut self, class: &Class<'a>) {
+                if let Some(id) = &class.id {
+                    self.names.push(id.name.to_string());
+                }
+                oxc_ast_visit::walk::walk_class(self, class);
+            }
+
+            fn visit_variable_declarator(&mut self, declarator: &VariableDeclarator<'a>) {
+                if let (BindingPattern::BindingIdentifier(id), Some(init)) =
+                    (&declarator.id, &declarator.init)
+                    && class_expression_of(init).is_some()
+                {
+                    self.names.push(id.name.to_string());
+                }
+                oxc_ast_visit::walk::walk_variable_declarator(self, declarator);
+            }
+        }
+        struct Finder<'t, 'a> {
+            translator: &'t mut CppTranslator<'a>,
+        }
+        impl<'a> Visit<'a> for Finder<'_, 'a> {
+            fn visit_class(&mut self, class: &Class<'a>) {
+                if let Some(id) = &class.id {
+                    let name = id.name.to_string();
+                    self.translator.register_class_metadata(class, &name);
+                }
+                oxc_ast_visit::walk::walk_class(self, class);
+            }
+
+            // `const C = class { ... }` gets metadata under the binding
+            // name, matching the declaration it lowers to.
+            fn visit_variable_declarator(&mut self, declarator: &VariableDeclarator<'a>) {
+                if let (BindingPattern::BindingIdentifier(id), Some(init)) =
+                    (&declarator.id, &declarator.init)
+                    && let Some(class) = class_expression_of(init)
+                {
+                    let name = id.name.to_string();
+                    self.translator.register_class_metadata(class, &name);
+                }
+                oxc_ast_visit::walk::walk_variable_declarator(self, declarator);
+            }
+        }
+
+        let mut names = NameFinder { names: Vec::new() };
+        names.visit_program(program);
+        self.ctx.class_names.extend(names.names);
+
+        let mut finder = Finder { translator: self };
+        finder.visit_program(program);
+    }
+
+    /// Snapshot of the class metadata collected so far, for snippet
+    /// translations in other translation units.
+    pub(crate) fn class_metadata(&self) -> crate::ClassMetadata {
+        crate::ClassMetadata {
+            names: self.ctx.class_names.clone(),
+            field_types: self.ctx.class_field_types.clone(),
+            accessors: self.ctx.class_accessors.clone(),
+        }
+    }
+
+    /// Infer the C++ type of every field on one class.
+    ///
+    /// The declaration annotation wins; otherwise the initializer and every
+    /// `this.<field> = ...` write are merged. Conflicting value classes
+    /// widen to `JsLateValue`. Fields assigned but never declared are
+    /// synthesized so plain constructor assignment still lowers.
+    fn register_class_metadata(&mut self, class: &Class<'a>, name: &str) {
+        let mut fields: HashMap<String, String> = HashMap::new();
+        let mut accessors: HashMap<String, AccessorFlags> = HashMap::new();
+        for el in &class.body.body {
+            match el {
+                ClassElement::PropertyDefinition(p) => {
+                    let Some(key) = class_field_key(&p.key) else { continue };
+                    if let Some(ty) = self.class_field_decl_type(p) {
+                        fields.insert(key, ty);
+                    }
+                }
+                ClassElement::MethodDefinition(m) => {
+                    if matches!(m.kind, MethodDefinitionKind::Get | MethodDefinitionKind::Set) {
+                        let Some(key) = class_field_key(&m.key) else { continue };
+                        let flags = accessors.entry(key).or_default();
+                        if m.kind == MethodDefinitionKind::Get {
+                            if m.r#static {
+                                flags.static_getter = true;
+                            } else {
+                                flags.getter = true;
+                            }
+                        } else if m.r#static {
+                            flags.static_setter = true;
+                        } else {
+                            flags.setter = true;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        // Constructor parameter properties are fields too; their annotated
+        // or initializer type feeds later `this.<field>` inference.
+        for (field, ty, _) in self.constructor_parameter_properties(class) {
+            fields.entry(field).or_insert(ty);
+        }
+        // Make the declared types visible while merging method writes so
+        // `this.count += this.step` can resolve `this.step`'s type.
+        self.ctx.class_field_types.insert(name.to_string(), fields.clone());
+        let old_class = self.ctx.class_name.replace(name.to_string());
+        let field_uses = self.collect_this_field_uses(class, name);
+        self.ctx.class_name = old_class;
+        for (key, value, kind) in field_uses {
+            // Accessor writes call the setter; they never declare a field.
+            if accessors.contains_key(&key) {
+                continue;
+            }
+            let Some(ty) = Self::field_use_type(value, kind) else { continue };
+            match fields.get_mut(&key) {
+                Some(current) => *current = merge_field_types(current, &ty),
+                None => {
+                    fields.insert(key, ty);
+                }
+            }
+        }
+        // A declared field with no type evidence is `undefined` in JS.
+        for el in &class.body.body {
+            if let ClassElement::PropertyDefinition(p) = el {
+                let Some(key) = class_field_key(&p.key) else { continue };
+                fields.entry(key).or_insert_with(|| "JsValue".to_string());
+            }
+        }
+        self.ctx.class_field_types.insert(name.to_string(), fields);
+        if !accessors.is_empty() {
+            self.ctx.class_accessors.insert(name.to_string(), accessors);
+        }
+    }
+
+    /// Field type from an annotation, or from the initializer when the
+    /// annotation is absent.
+    fn class_field_decl_type(&self, p: &PropertyDefinition<'a>) -> Option<String> {
+        if let Some(ann) = &p.type_annotation {
+            if dynamic_annotation(Some(ann)) {
+                return Some("JsValue".to_string());
+            }
+            return Some(resolve_type_annotation(
+                Some(ann),
+                "auto",
+                &self.ctx.template_params,
+                true,
+                &self.ctx.class_names,
+            ));
+        }
+        p.value.as_ref().and_then(|value| self.infer_type_from_init(value))
+    }
+
+    /// Every `this.<field> = ...` / `this.<field>++` inside a method body,
+    /// together with the inferred type of the assigned value.
+    fn collect_this_field_uses(
+        &self,
+        class: &Class<'a>,
+        class_name: &str,
+    ) -> Vec<(String, Option<String>, FieldUseKind)> {
+        struct Collector<'t, 'a> {
+            translator: &'t CppTranslator<'a>,
+            class_name: &'t str,
+            /// Types of the method parameters currently being visited;
+            /// metadata collection runs before parameter emission.
+            param_types: HashMap<String, String>,
+            uses: Vec<(String, Option<String>, FieldUseKind)>,
+        }
+        impl<'a> Collector<'_, 'a> {
+            fn infer_use_type(&self, expr: &Expression<'a>) -> Option<String> {
+                if let Expression::Identifier(id) = expr
+                    && let Some(ty) = self.param_types.get(id.name.as_str())
+                {
+                    return Some(ty.clone());
+                }
+                self.translator.infer_type_from_init(expr)
+            }
+        }
+        impl<'a> Visit<'a> for Collector<'_, 'a> {
+            fn visit_assignment_expression(&mut self, a: &AssignmentExpression<'a>) {
+                let key = this_field_target_key(&a.left)
+                    .or_else(|| class_field_target_key(&a.left, self.class_name));
+                if let Some(key) = key {
+                    let kind = match a.operator.as_str() {
+                        "=" | "&&=" | "||=" | "??=" => FieldUseKind::Plain,
+                        "+=" => FieldUseKind::AddAssign,
+                        _ => FieldUseKind::NumericAssign,
+                    };
+                    let ty = self.infer_use_type(&a.right);
+                    self.uses.push((key, ty, kind));
+                }
+                oxc_ast_visit::walk::walk_assignment_expression(self, a);
+            }
+
+            fn visit_update_expression(&mut self, u: &UpdateExpression<'a>) {
+                let key = this_simple_field_target_key(&u.argument)
+                    .or_else(|| class_simple_field_target_key(&u.argument, self.class_name));
+                if let Some(key) = key {
+                    self.uses.push((key, None, FieldUseKind::Update));
+                }
+                oxc_ast_visit::walk::walk_update_expression(self, u);
+            }
+
+            // A nested class has its own `this`.
+            fn visit_class(&mut self, _class: &Class<'a>) {}
+        }
+        let mut collector = Collector {
+            translator: self,
+            class_name,
+            param_types: HashMap::new(),
+            uses: Vec::new(),
+        };
+        for el in &class.body.body {
+            if let ClassElement::MethodDefinition(m) = el
+                && let Some(body) = &m.value.body
+            {
+                collector.param_types.clear();
+                for p in &m.value.params.items {
+                    let (name, _) = self.binding_to_identifier(&p.pattern);
+                    if name.starts_with("/*") {
+                        continue;
+                    }
+                    let ty = p.type_annotation.as_ref().map_or_else(
+                        || {
+                            p.initializer
+                                .as_ref()
+                                .and_then(|init| self.infer_type_from_init(init))
+                                .unwrap_or_else(|| "auto".to_string())
+                        },
+                        |ta| {
+                            if dynamic_annotation(Some(ta)) {
+                                "JsValue".to_string()
+                            } else {
+                                resolve_type_annotation(
+                                    Some(ta),
+                                    "auto",
+                                    &self.ctx.template_params,
+                                    false,
+                                    &self.ctx.class_names,
+                                )
+                            }
+                        },
+                    );
+                    collector.param_types.insert(name, ty);
+                }
+                collector.visit_function_body(body);
+            }
+        }
+        collector.uses
+    }
+
+    fn field_use_type(value: Option<String>, kind: FieldUseKind) -> Option<String> {
+        match kind {
+            FieldUseKind::Update => Some("int64_t".to_string()),
+            FieldUseKind::NumericAssign => {
+                let ty = value.unwrap_or_else(|| "JsNumber".to_string());
+                Some(if is_numeric_field_type(&ty) { ty } else { "JsNumber".to_string() })
+            }
+            FieldUseKind::AddAssign => {
+                let ty = value.unwrap_or_else(|| "JsValue".to_string());
+                Some(if is_text_field_type(&ty) {
+                    "JsString".to_string()
+                } else if is_numeric_field_type(&ty) {
+                    ty
+                } else {
+                    "JsLateValue".to_string()
+                })
+            }
+            FieldUseKind::Plain => value,
+        }
+    }
+
+    /// Constructor parameter properties (`constructor(public x: number)`):
+    /// every parameter with an accessibility modifier or `readonly` also
+    /// declares an instance field initialized from that argument.
+    fn constructor_parameter_properties(&self, class: &Class<'a>) -> Vec<(String, String, String)> {
+        let mut out = Vec::new();
+        for el in &class.body.body {
+            let ClassElement::MethodDefinition(m) = el else { continue };
+            if m.kind != MethodDefinitionKind::Constructor {
+                continue;
+            }
+            for p in &m.value.params.items {
+                if p.accessibility.is_none() && !p.readonly {
+                    continue;
+                }
+                let (field, _) = self.binding_to_identifier(&p.pattern);
+                if field.starts_with("/*") {
+                    continue;
+                }
+                let ty = p.type_annotation.as_ref().map_or_else(
+                    || {
+                        p.initializer
+                            .as_ref()
+                            .and_then(|init| self.infer_type_from_init(init))
+                            .unwrap_or_else(|| "JsValue".to_string())
+                    },
+                    |ann| {
+                        if dynamic_annotation(Some(ann)) {
+                            "JsValue".to_string()
+                        } else {
+                            resolve_type_annotation(
+                                Some(ann),
+                                "auto",
+                                &self.ctx.template_params,
+                                true,
+                                &self.ctx.class_names,
+                            )
+                        }
+                    },
+                );
+                let access = match p.accessibility {
+                    Some(TSAccessibility::Private) => "private",
+                    Some(TSAccessibility::Protected) => "protected",
+                    _ => "public",
+                }
+                .to_string();
+                out.push((field, ty, access));
+            }
+        }
+        out
+    }
+
     fn emit_class(&mut self, class: &Class<'a>) -> String {
-        let name = class.id.as_ref().map(|id| id.name.to_string()).unwrap_or_default();
+        self.emit_class_named(class, None)
+    }
+
+    fn emit_class_named(&mut self, class: &Class<'a>, override_name: Option<&str>) -> String {
+        let name = override_name
+            .map(str::to_string)
+            .or_else(|| class.id.as_ref().map(|id| id.name.to_string()))
+            .unwrap_or_else(|| "DefaultClass".to_string());
         if !name.is_empty() {
             self.ctx.class_names.insert(name.clone());
+            self.register_class_metadata(class, &name);
         }
         let old_tp = self.ctx.template_params.clone();
         let old_class = self.ctx.class_name.clone();
@@ -3239,7 +3767,51 @@ impl<'a> CppTranslator<'a> {
         let old_indent = self.ctx.indent_level;
         self.ctx.indent_level = 1;
         let mut access_map: HashMap<String, Vec<String>> = HashMap::new();
+        // Parameter properties are real fields even though they never have
+        // a PropertyDefinition. A declared field of the same name wins.
+        let declared_fields: HashSet<String> = class
+            .body
+            .body
+            .iter()
+            .filter_map(|el| match el {
+                ClassElement::PropertyDefinition(p) => class_field_key(&p.key),
+                _ => None,
+            })
+            .collect();
+        let mut known_fields = declared_fields;
+        for (field, ty, access) in self.constructor_parameter_properties(class) {
+            if !known_fields.insert(field.clone()) {
+                continue;
+            }
+            let ty = self.wrap_type(&ty);
+            self.ctx.need(&ty);
+            access_map.entry(access).or_default().push(format!("{} {};", ty, field));
+        }
+        // Fields assigned only through `this.x = ...` / `Counter.x = ...`
+        // still need a declaration. Sort for stable output.
+        let mut synthesized: Vec<(String, String)> = self
+            .ctx
+            .class_field_types
+            .get(&name)
+            .map(|fields| fields.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+            .unwrap_or_default();
+        synthesized.sort_by(|a, b| a.0.cmp(&b.0));
+        for (field, ty) in synthesized {
+            if field.starts_with('#') || !known_fields.insert(field.clone()) {
+                continue;
+            }
+            let ty = self.wrap_type(&ty);
+            self.ctx.need(&ty);
+            access_map.entry("public".to_string()).or_default().push(format!("{} {};", ty, field));
+        }
         for el in &class.body.body {
+            // `#field` declarations emit in the private section below with
+            // their mangled name and inferred type.
+            if matches!(el, ClassElement::PropertyDefinition(p)
+                if matches!(p.key, PropertyKey::PrivateIdentifier(_)))
+            {
+                continue;
+            }
             let (access, code) = self.emit_class_element(el, &name);
             access_map.entry(access).or_default().push(code);
         }
@@ -3277,13 +3849,48 @@ impl<'a> CppTranslator<'a> {
                 lines.push(format!("{}{}", INDENT, m));
             }
         }
-        // Emit private fields (mangled names)
-        if let Some(fields) = self.ctx.private_fields.get(&name) {
-            if !fields.is_empty() {
-                lines.push("private:".to_string());
-                for field in fields {
-                    let mangled = format!("__private_{}_{}", name, field);
-                    lines.push(format!("{}JsValue {};", INDENT, mangled));
+        // Emit `#private` fields with mangled names and inferred types.
+        let private_defs: Vec<&PropertyDefinition<'a>> = class
+            .body
+            .body
+            .iter()
+            .filter_map(|el| match el {
+                ClassElement::PropertyDefinition(p)
+                    if matches!(p.key, PropertyKey::PrivateIdentifier(_)) =>
+                {
+                    Some(p.as_ref())
+                }
+                _ => None,
+            })
+            .collect();
+        if !private_defs.is_empty() {
+            if !first {
+                lines.push(String::new());
+            }
+            lines.push("private:".to_string());
+            for p in private_defs {
+                let PropertyKey::PrivateIdentifier(priv_id) = &p.key else { continue };
+                let field = priv_id.name.to_string();
+                let mangled = format!("__private_{}_{}", name, field);
+                let cpp_type = self
+                    .ctx
+                    .class_field_types
+                    .get(&name)
+                    .and_then(|fields| fields.get(&format!("#{field}")))
+                    .cloned()
+                    .unwrap_or_else(|| "JsValue".to_string());
+                let cpp_type = self.wrap_type(&cpp_type);
+                self.ctx.need(&cpp_type);
+                let prefix = if p.r#static { "static inline " } else { "" };
+                if let Some(value) = &p.value {
+                    let saved_static = self.ctx.in_static_method;
+                    self.ctx.in_static_method = p.r#static;
+                    let value = self.emit_expression(value);
+                    self.ctx.in_static_method = saved_static;
+                    lines
+                        .push(format!("{}{}{} {} = {};", INDENT, prefix, cpp_type, mangled, value));
+                } else {
+                    lines.push(format!("{}{}{} {};", INDENT, prefix, cpp_type, mangled));
                 }
             }
         }
@@ -3347,7 +3954,13 @@ impl<'a> CppTranslator<'a> {
             if param_type_str == "std::string_view" {
                 self.ctx.needed.insert("<string_view>".to_string());
             }
-            parts.push(format!("{} p_{}", param_type_str, name));
+            let mut decl = format!("{} p_{}", param_type_str, name);
+            if let Some(init) = &p.initializer {
+                decl.push_str(&format!(" = {}", self.emit_expression(init)));
+            } else if p.optional {
+                decl.push_str(&format!(" = {}", optional_param_default(&cpp_type)));
+            }
+            parts.push(decl);
         }
         if let Some(rest) = &params.rest {
             let (name, _) = self.binding_to_identifier(&rest.rest.argument);
@@ -3359,15 +3972,24 @@ impl<'a> CppTranslator<'a> {
     fn emit_class_element(&mut self, el: &ClassElement<'a>, class_name: &str) -> (String, String) {
         match el {
             ClassElement::MethodDefinition(m) => {
-                let name = self.property_key_to_string(&m.key).unwrap_or_default();
+                let private_key = matches!(m.key, PropertyKey::PrivateIdentifier(_));
+                let name = if let PropertyKey::PrivateIdentifier(p) = &m.key {
+                    format!("__private_{}_{}", class_name, p.name)
+                } else {
+                    self.property_key_to_string(&m.key).unwrap_or_default()
+                };
                 let access = m
                     .accessibility
                     .map(|a| format!("{:?}", a).to_lowercase())
                     .unwrap_or_else(|| "public".to_string());
-                let access = match access.as_str() {
-                    "private" => "private".to_string(),
-                    "protected" => "protected".to_string(),
-                    _ => "public".to_string(),
+                let access = if private_key {
+                    "private".to_string()
+                } else {
+                    match access.as_str() {
+                        "private" => "private".to_string(),
+                        "protected" => "protected".to_string(),
+                        _ => "public".to_string(),
+                    }
                 };
                 if m.kind == MethodDefinitionKind::Constructor {
                     // Use constructor-specific formatting with p_ prefix and initializer list (like Python)
@@ -3388,7 +4010,21 @@ impl<'a> CppTranslator<'a> {
                             if n.starts_with("/*") { None } else { Some(n) }
                         })
                         .collect();
+                    let mut super_entries: Vec<String> = Vec::new();
                     let mut init_entries: Vec<String> = Vec::new();
+                    let mut initialized_fields: HashSet<String> = HashSet::new();
+                    // Parameter properties initialize before the body, like
+                    // the `this.x = p_x` form they desugar to.
+                    for p in &m.value.params.items {
+                        if p.accessibility.is_none() && !p.readonly {
+                            continue;
+                        }
+                        let (field, _) = self.binding_to_identifier(&p.pattern);
+                        if field.starts_with("/*") || !initialized_fields.insert(field.clone()) {
+                            continue;
+                        }
+                        init_entries.push(format!("{field}(std::move(p_{field}))"));
+                    }
                     let mut remaining: Vec<&Statement<'a>> = Vec::new();
                     let mut super_seen = false;
                     if let Some(body) = &m.value.body {
@@ -3426,7 +4062,7 @@ impl<'a> CppTranslator<'a> {
                                                     self.emit_expression(e)
                                                 })
                                                 .collect();
-                                            init_entries.push(format!(
+                                            super_entries.push(format!(
                                                 "{}({})",
                                                 base,
                                                 super_args.join(", ")
@@ -3457,7 +4093,9 @@ impl<'a> CppTranslator<'a> {
                                                 } else {
                                                     self.emit_expression(&assign.right)
                                                 };
-                                                if !has_destructured {
+                                                if !has_destructured
+                                                    && initialized_fields.insert(prop.clone())
+                                                {
                                                     init_entries.push(format!(
                                                         "{prop}(std::move({rhs_str}))"
                                                     ));
@@ -3474,6 +4112,8 @@ impl<'a> CppTranslator<'a> {
                             remaining.push(stmt);
                         }
                     }
+                    let init_entries: Vec<String> =
+                        super_entries.into_iter().chain(init_entries).collect();
                     let init_str = if init_entries.is_empty() {
                         String::new()
                     } else {
@@ -3553,6 +4193,8 @@ impl<'a> CppTranslator<'a> {
                         .map(|b| {
                             let saved_drop = self.ctx.drop_return_value;
                             self.ctx.drop_return_value = false;
+                            let saved_static = self.ctx.in_static_method;
+                            self.ctx.in_static_method = m.r#static;
                             // Method bodies count as function scope: nested
                             // arrows capture `this` via `[&]`, and nested
                             // declarations lower to lambdas.
@@ -3560,6 +4202,7 @@ impl<'a> CppTranslator<'a> {
                             let body =
                                 self.emit_function_body_with_params(b, Some(&m.value.params));
                             self.ctx.fn_body_depth -= 1;
+                            self.ctx.in_static_method = saved_static;
                             self.ctx.drop_return_value = saved_drop;
                             body
                         })
@@ -3594,16 +4237,23 @@ impl<'a> CppTranslator<'a> {
                         &self.ctx.class_names,
                     )
                 } else {
-                    "auto".to_string()
+                    let key = class_field_key(&p.key).unwrap_or_else(|| name.clone());
+                    self.ctx
+                        .class_field_types
+                        .get(class_name)
+                        .and_then(|fields| fields.get(&key))
+                        .cloned()
+                        .unwrap_or_else(|| "JsValue".to_string())
                 };
                 let cpp_type = self.wrap_type(&cpp_type);
                 self.ctx.need(&cpp_type);
                 let prefix = if p.r#static { "static inline " } else { "" };
                 if let Some(val) = &p.value {
-                    (
-                        access,
-                        format!("{}{} {} = {};", prefix, cpp_type, name, self.emit_expression(val)),
-                    )
+                    let saved_static = self.ctx.in_static_method;
+                    self.ctx.in_static_method = p.r#static;
+                    let value = self.emit_expression(val);
+                    self.ctx.in_static_method = saved_static;
+                    (access, format!("{}{} {} = {};", prefix, cpp_type, name, value))
                 } else {
                     (access, format!("{}{} {};", prefix, cpp_type, name))
                 }
@@ -3846,6 +4496,9 @@ impl<'a> CppTranslator<'a> {
                     let bin = if u.operator.as_str() == "++" { "+" } else { "-" };
                     return format!("{set_head}(({read}) {bin} 1)");
                 }
+                if let Some(rendered) = self.emit_accessor_update(u) {
+                    return rendered;
+                }
                 let arg = self.emit_simple_target(&u.argument);
                 if u.prefix {
                     format!("{}{}", u.operator.as_str(), arg)
@@ -3872,6 +4525,8 @@ impl<'a> CppTranslator<'a> {
             Expression::ThisExpression(_) => {
                 if self.ctx.fn_expr_depth > 0 {
                     "_jsThis".to_string()
+                } else if self.ctx.in_static_method {
+                    self.ctx.class_name.clone().unwrap_or_else(|| "this".to_string())
                 } else {
                     "this".to_string()
                 }
@@ -3889,22 +4544,7 @@ impl<'a> CppTranslator<'a> {
             Expression::PrivateFieldExpression(p) => {
                 let obj = self.emit_expression(&p.object);
                 let field_name = p.field.name.to_string();
-                // Look up class name to mangle private field: __private_ClassName_fieldName
-                let mangled = if let Some(class_name) = &self.ctx.class_name {
-                    format!("__private_{}_{}", class_name, field_name)
-                } else if obj == "this" {
-                    // Fallback: use the current class if available
-                    if let Some(class_name) = &self.ctx.class_name {
-                        format!("__private_{}_{}", class_name, field_name)
-                    } else {
-                        format!("__private_{}", field_name)
-                    }
-                } else {
-                    format!("__private_{}", field_name)
-                };
-                // Use -> for this pointer, . for other objects
-                let accessor = if obj == "this" { "->" } else { "." };
-                format!("{}{}{}", obj, accessor, mangled)
+                self.private_field_access(&p.object, &field_name, &obj)
             }
             Expression::ChainExpression(chain) => self.emit_chain(chain),
             Expression::TaggedTemplateExpression(t) => format!(
@@ -5080,6 +5720,11 @@ impl<'a> CppTranslator<'a> {
             }
             // `??=` / `&&=` / `||=` keep their default lowering.
         }
+        // Getter/setter properties read and write through their accessor
+        // methods, not as data members.
+        if let Some(rendered) = self.emit_accessor_assignment(a) {
+            return rendered;
+        }
         // `win.title = x` on any Window-handle receiver lowers to a
         // registry write. Handles may be tracked locals, `Window`-typed
         // bindings, lazy component-body placeholders, or direct
@@ -5203,6 +5848,119 @@ impl<'a> CppTranslator<'a> {
         format!("({} {} {})", left, op, right)
     }
 
+    /// Lower an assignment whose target is an accessor property. Returns
+    /// None for plain fields, unknown receivers, or setter-less accessors.
+    ///
+    /// The receiver is evaluated once into a lambda local so compound and
+    /// update forms never call it twice; setters return void, so the lambda
+    /// returns the assigned value like a JS assignment expression.
+    fn emit_accessor_assignment(&mut self, a: &AssignmentExpression<'a>) -> Option<String> {
+        let AssignmentTarget::StaticMemberExpression(member) = &a.left else {
+            return None;
+        };
+        let prop = member.property.name.to_string();
+        let (class, is_static) = self.accessor_receiver_class(&member.object)?;
+        let (getter, setter) = self.accessor_halves(&class, &prop, is_static)?;
+        if !setter {
+            return None;
+        }
+        let obj_code = self.emit_expression(&member.object);
+        let sep = self.accessor_member_sep(&member.object, &obj_code, is_static);
+        let bind_receiver =
+            if is_static { String::new() } else { format!("auto&& __morph_recv = ({obj_code}); ") };
+        let read = if is_static {
+            format!("{obj_code}{sep}{prop}()")
+        } else {
+            format!("__morph_recv{sep}{prop}()")
+        };
+        let set_call = |value: &str| {
+            if is_static {
+                format!("{obj_code}{sep}{prop}({value});")
+            } else {
+                format!("__morph_recv{sep}{prop}({value});")
+            }
+        };
+        let op = a.operator.as_str();
+        if op == "=" {
+            let rhs = self.emit_expression(&a.right);
+            let set = set_call("__morph_value");
+            return Some(format!(
+                "([&]() {{ {bind_receiver}auto __morph_value = ({rhs}); {set} return __morph_value; }})()"
+            ));
+        }
+        if !getter {
+            return None;
+        }
+        let rhs = self.emit_expression(&a.right);
+        if matches!(op, "&&=" | "||=" | "??=") {
+            // Both helpers live in js_convert.h.
+            self.ctx.need("JsValue");
+            let test = match op {
+                "&&=" => "morph::js_to_boolean(__morph_value)".to_string(),
+                "||=" => "!morph::js_to_boolean(__morph_value)".to_string(),
+                _ => "morph::js_is_nullish(__morph_value)".to_string(),
+            };
+            let set = set_call("__morph_value");
+            return Some(format!(
+                "([&]() {{ {bind_receiver}auto __morph_value = ({read}); \
+                 if ({test}) {{ __morph_value = ({rhs}); {set} }} return __morph_value; }})()"
+            ));
+        }
+        let value = if op == "**=" {
+            self.emit_pow(&read, &rhs)
+        } else if let Some(bin) = compound_assign_binop(op) {
+            format!("({read}) {bin} ({rhs})")
+        } else {
+            return None;
+        };
+        let set = set_call("__morph_value");
+        Some(format!(
+            "([&]() {{ {bind_receiver}auto __morph_value = {value}; {set} return __morph_value; }})()"
+        ))
+    }
+
+    /// Lower `a.value++` / `--a.value` through the getter and setter,
+    /// preserving the prefix/postfix result value.
+    fn emit_accessor_update(&mut self, u: &UpdateExpression<'a>) -> Option<String> {
+        let SimpleAssignmentTarget::StaticMemberExpression(member) = &u.argument else {
+            return None;
+        };
+        let prop = member.property.name.to_string();
+        let (class, is_static) = self.accessor_receiver_class(&member.object)?;
+        let (getter, setter) = self.accessor_halves(&class, &prop, is_static)?;
+        if !getter || !setter {
+            return None;
+        }
+        let obj_code = self.emit_expression(&member.object);
+        let sep = self.accessor_member_sep(&member.object, &obj_code, is_static);
+        let bind_receiver =
+            if is_static { String::new() } else { format!("auto&& __morph_recv = ({obj_code}); ") };
+        let read = if is_static {
+            format!("{obj_code}{sep}{prop}()")
+        } else {
+            format!("__morph_recv{sep}{prop}()")
+        };
+        let set_call = |value: &str| {
+            if is_static {
+                format!("{obj_code}{sep}{prop}({value});")
+            } else {
+                format!("__morph_recv{sep}{prop}({value});")
+            }
+        };
+        let bin = if u.operator.as_str() == "++" { "+" } else { "-" };
+        if u.prefix {
+            let set = set_call("__morph_next");
+            Some(format!(
+                "([&]() {{ {bind_receiver}auto __morph_next = ({read}) {bin} 1; {set} return __morph_next; }})()"
+            ))
+        } else {
+            let set = set_call(&format!("(__morph_old {bin} 1)"));
+            Some(format!(
+                "([&]() {{ {bind_receiver}auto __morph_old = ({read}); {set} return __morph_old; }})()"
+            ))
+        }
+    }
+
     /// Emit JS exponentiation (`a ** b`): both operands go through ToNumber,
     /// matching `2 ** "3"` and `(-1) ** 0.5` (NaN).
     fn emit_pow(&mut self, left: &str, right: &str) -> String {
@@ -5267,6 +6025,11 @@ impl<'a> CppTranslator<'a> {
                 let prop = m.property.name.to_string();
                 // this.x -> this->x (check both via type and string fallback)
                 if let Expression::ThisExpression(_) = &m.object {
+                    if self.ctx.in_static_method {
+                        let class =
+                            self.ctx.class_name.clone().unwrap_or_else(|| "this".to_string());
+                        return format!("{}::{}", class, prop);
+                    }
                     return format!("this->{}", prop);
                 }
                 if obj_str == "this" || obj_str == "this->" {
@@ -5298,12 +6061,7 @@ impl<'a> CppTranslator<'a> {
             AssignmentTarget::PrivateFieldExpression(p) => {
                 let obj = self.emit_expression(&p.object);
                 let field_name = p.field.name.to_string();
-                let mangled = if let Some(class_name) = &self.ctx.class_name {
-                    format!("__private_{}_{}", class_name, field_name)
-                } else {
-                    format!("__private_{}", field_name)
-                };
-                format!("{}.{}", obj, mangled)
+                self.private_field_access(&p.object, &field_name, &obj)
             }
             AssignmentTarget::ArrayAssignmentTarget(a) => self.span_text(a.span).to_string(),
             AssignmentTarget::ObjectAssignmentTarget(o) => self.span_text(o.span).to_string(),
@@ -5341,12 +6099,7 @@ impl<'a> CppTranslator<'a> {
             SimpleAssignmentTarget::PrivateFieldExpression(p) => {
                 let obj = self.emit_expression(&p.object);
                 let field_name = p.field.name.to_string();
-                let mangled = if let Some(class_name) = &self.ctx.class_name {
-                    format!("__private_{}_{}", class_name, field_name)
-                } else {
-                    format!("__private_{}", field_name)
-                };
-                format!("{}.{}", obj, mangled)
+                self.private_field_access(&p.object, &field_name, &obj)
             }
             _ => self.span_text(target.span()).to_string(),
         }
@@ -6159,6 +6912,134 @@ impl<'a> CppTranslator<'a> {
         false
     }
 
+    /// Class whose accessors apply to a member receiver, plus whether the
+    /// receiver is the class object itself (`A.value`) or an instance.
+    fn accessor_receiver_class(&self, object: &Expression<'a>) -> Option<(String, bool)> {
+        match object {
+            Expression::ThisExpression(_) => {
+                // Inside a function expression `this` is the JS `_jsThis`
+                // object, not the enclosing C++ instance.
+                if self.ctx.fn_expr_depth > 0 {
+                    return None;
+                }
+                let class = self.ctx.class_name.clone()?;
+                Some((class, self.ctx.in_static_method))
+            }
+            Expression::Identifier(id) => {
+                let name = id.name.as_str();
+                if self.ctx.class_names.contains(name) {
+                    Some((name.to_string(), true))
+                } else {
+                    let ty = self.ctx.var_types.get(name)?;
+                    let class = self.class_name_from_cpp_type(ty)?;
+                    Some((class, false))
+                }
+            }
+            Expression::NewExpression(n) => match &n.callee {
+                Expression::Identifier(id) if self.ctx.class_names.contains(id.name.as_str()) => {
+                    Some((id.name.to_string(), false))
+                }
+                _ => None,
+            },
+            Expression::ParenthesizedExpression(p) => self.accessor_receiver_class(&p.expression),
+            Expression::TSAsExpression(a) => self.accessor_receiver_class(&a.expression),
+            Expression::TSSatisfiesExpression(s) => self.accessor_receiver_class(&s.expression),
+            Expression::TSNonNullExpression(n) => self.accessor_receiver_class(&n.expression),
+            _ => None,
+        }
+    }
+
+    /// Class name inside a C++ storage type (`std::shared_ptr<C>`, `C&`, ...).
+    /// Ambient class bindings may carry a qualified C++ path
+    /// (`::app::other::Counter`); metadata is keyed by the local name.
+    fn class_name_from_cpp_type(&self, ty: &str) -> Option<String> {
+        let mut ty = ty.trim();
+        if let Some(inner) = ty.strip_prefix("std::shared_ptr<") {
+            ty = inner.strip_suffix('>')?.trim();
+        } else if let Some(inner) = ty.strip_prefix("std::unique_ptr<") {
+            ty = inner.strip_suffix('>')?.trim();
+        }
+        let ty = ty.trim_start_matches("const ").trim_end_matches('&').trim();
+        if self.ctx.class_names.contains(ty) {
+            return Some(ty.to_string());
+        }
+        let bare = ty.rsplit("::").next().unwrap_or(ty);
+        if bare != ty && self.ctx.class_names.contains(bare) {
+            return Some(bare.to_string());
+        }
+        None
+    }
+
+    /// C++ spelling of a class name. Snippets spliced into another
+    /// translation unit see classes through a qualified ambient binding
+    /// (`Counter` → `::app::app::Counter`); full-file translations emit
+    /// classes in the current scope and keep the bare name.
+    fn class_cpp_name(&self, name: &str) -> String {
+        if let Some(mapped) = self.ctx.state_vars.get(name) {
+            let mapped = mapped.trim();
+            if mapped.starts_with("::") && !mapped.contains('(') && !mapped.contains('.') {
+                return mapped.to_string();
+            }
+        }
+        name.to_string()
+    }
+
+    fn accessor_member_sep(
+        &self,
+        object: &Expression<'a>,
+        obj_code: &str,
+        is_static: bool,
+    ) -> &'static str {
+        if is_static {
+            "::"
+        } else if matches!(object, Expression::ThisExpression(_))
+            || matches!(object, Expression::NewExpression(_))
+            || self.ptr_arrow_access(object, obj_code)
+        {
+            "->"
+        } else {
+            "."
+        }
+    }
+
+    fn accessor_halves(&self, class: &str, prop: &str, is_static: bool) -> Option<(bool, bool)> {
+        let flags = self.ctx.class_accessors.get(class)?.get(prop)?;
+        Some((flags.has_getter(is_static), flags.has_setter(is_static)))
+    }
+
+    /// Lower a getter read (`a.value` -> `a->value()`), or None when the
+    /// receiver's class is unknown or the property is not an accessor.
+    fn accessor_read(&self, object: &Expression<'a>, prop: &str, obj_code: &str) -> Option<String> {
+        let (class, is_static) = self.accessor_receiver_class(object)?;
+        let (getter, _) = self.accessor_halves(&class, prop, is_static)?;
+        if !getter {
+            return None;
+        }
+        let sep = self.accessor_member_sep(object, obj_code, is_static);
+        Some(format!("{obj_code}{sep}{prop}()"))
+    }
+
+    /// Mangled private-field access with the right member operator.
+    fn private_field_access(&self, object: &Expression<'a>, field: &str, obj_code: &str) -> String {
+        let mangled = match &self.ctx.class_name {
+            Some(class) => format!("__private_{}_{}", class, field),
+            None => format!("__private_{}", field),
+        };
+        let sep = if matches!(object, Expression::ThisExpression(_)) && self.ctx.in_static_method {
+            "::"
+        } else if matches!(object, Expression::ThisExpression(_))
+            || matches!(object, Expression::NewExpression(_))
+            || self.ptr_arrow_access(object, obj_code)
+        {
+            "->"
+        } else if let Expression::Identifier(id) = object {
+            if self.ctx.class_names.contains(id.name.as_str()) { "::" } else { "." }
+        } else {
+            "."
+        };
+        format!("{obj_code}{sep}{mangled}")
+    }
+
     fn emit_static_member(&mut self, m: &StaticMemberExpression<'a>) -> String {
         let obj = self.emit_expression(&m.object);
         let prop = m.property.name.to_string();
@@ -6168,9 +7049,16 @@ impl<'a> CppTranslator<'a> {
                 return format!("morph::js_math::{prop}");
             }
         }
+        if let Some(read) = self.accessor_read(&m.object, &prop, &obj) {
+            return read;
+        }
         if let Expression::ThisExpression(_) = &m.object {
             if self.ctx.fn_expr_depth > 0 {
                 return format!("_jsThis[\"{}\"]", prop);
+            }
+            if self.ctx.in_static_method {
+                let class = self.ctx.class_name.clone().unwrap_or_else(|| "this".to_string());
+                return format!("{}::{}", class, prop);
             }
             return format!("this->{}", prop);
         }
@@ -6255,6 +7143,10 @@ impl<'a> CppTranslator<'a> {
                 return format!("{}::{}", obj, prop);
             }
         }
+        // `new C()` yields a shared_ptr, so members go through `->`.
+        if matches!(&m.object, Expression::NewExpression(_)) {
+            return format!("{}->{}", obj, prop);
+        }
         format!("{}.{}", obj, prop)
     }
 
@@ -6299,12 +7191,7 @@ impl<'a> CppTranslator<'a> {
             ChainElement::PrivateFieldExpression(p) => {
                 let obj = self.emit_expression(&p.object);
                 let field_name = p.field.name.to_string();
-                let mangled = if let Some(class_name) = &self.ctx.class_name {
-                    format!("__private_{}_{}", class_name, field_name)
-                } else {
-                    format!("__private_{}", field_name)
-                };
-                format!("{}.{}", obj, mangled)
+                self.private_field_access(&p.object, &field_name, &obj)
             }
             _ => "/* chain */".to_string(),
         }
@@ -7264,5 +8151,85 @@ mod tests {
         let out = translate_stmts("const cleanup = () => clearInterval(id);\n");
         assert!(out.contains("[]() -> void { morph::clear_timer(id); }"), "{out}");
         assert!(!out.contains("return morph::clear_timer"), "{out}");
+    }
+
+    #[test]
+    fn class_fields_infer_private_and_parameter_properties() {
+        let out = translate_stmts(
+            "class Counter {\n\
+               count = 0\n\
+               label = \"hits\"\n\
+               static total = 0\n\
+               #secret = \"s\"\n\
+               constructor(public name: string, private step: number = 1) { Counter.total += 1 }\n\
+               bump(): number { this.count += this.step; return this.count }\n\
+               reveal(): string { return this.#secret }\n\
+               static get all(): number { return Counter.total }\n\
+               static set all(v: number) { Counter.total = v }\n\
+             }",
+        );
+        // `this.count += this.step` makes count a JsNumber; `total` widens
+        // because the static setter accepts a number.
+        assert!(out.contains("JsNumber count = 0;"), "{out}");
+        assert!(out.contains("std::string label = \"hits\";"), "{out}");
+        assert!(out.contains("static inline JsNumber total = 0;"), "{out}");
+        assert!(out.contains("JsString name;"), "{out}");
+        assert!(out.contains("JsNumber step;"), "{out}");
+        assert!(out.contains("JsNumber p_step = 1"), "{out}");
+        assert!(out.contains("std::string __private_Counter_secret = \"s\";"), "{out}");
+        assert!(out.contains("return this->__private_Counter_secret;"), "{out}");
+    }
+
+    #[test]
+    fn dynamic_field_annotations_widen_to_late_values() {
+        let out = translate_stmts(
+            "class Mixed {\n  value = 0\n  set(next: number | string) { this.value = next }\n}\n",
+        );
+        assert!(out.contains("JsLateValue value = 0;"), "{out}");
+    }
+
+    #[test]
+    fn class_expressions_and_accessors_lower_through_methods() {
+        let out = translate_stmts(
+            "class Box {\n\
+               value = 0\n\
+               get current(): number { return this.value }\n\
+               set current(v: number) { this.value = v }\n\
+             }\n\
+             const Pair = class {\n\
+               left = 1\n\
+               right = 2\n\
+               sum(): number { return this.left + this.right }\n\
+             }\n\
+             const b = new Box()\n\
+             b.current = 5\n\
+             b.current += 2\n\
+             b.current++\n\
+             const read = b.current\n\
+             const pair = new Pair()",
+        );
+        assert!(out.contains("class Pair {"), "{out}");
+        assert!(out.contains("__morph_recv->current(__morph_value)"), "{out}");
+        assert!(out.contains("auto __morph_value = (__morph_recv->current()) + (2)"), "{out}");
+        assert!(out.contains("auto __morph_old = (__morph_recv->current())"), "{out}");
+        assert!(out.contains("auto read = b->current()"), "{out}");
+        assert!(out.contains("std::make_shared<Pair>()"), "{out}");
+    }
+
+    #[test]
+    fn static_accessors_use_class_scope() {
+        let out = translate_stmts(
+            "class Config {\n\
+               static value = 0\n\
+               static get current(): number { return Config.value }\n\
+               static set current(v: number) { Config.value = v }\n\
+             }\n\
+             Config.current = 3\n\
+             const v = Config.current",
+        );
+        assert!(out.contains("static JsNumber current()"), "{out}");
+        assert!(out.contains("static void current(JsNumber v)"), "{out}");
+        assert!(out.contains("Config::current(__morph_value)"), "{out}");
+        assert!(out.contains("Config::current()"), "{out}");
     }
 }
