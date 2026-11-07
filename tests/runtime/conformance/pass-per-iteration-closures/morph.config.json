@@ -1,0 +1,8 @@
+{
+  "name": "pass-per-iteration-closures",
+  "entry": "src/App.mx",
+  "types": "strict",
+  "window": { "width": 800, "height": 600, "title": "pass-per-iteration-closures" },
+  "dependencies": {},
+  "cpp_sources": []
+}

@@ -105,6 +105,7 @@ Binary (`+`, `-`, `*`, `/`, `**`, `===`, `!==`, `==`, `!=`, `<`, `>`, etc.), una
 - Console output: `console.log` / `console.warn` / `console.error` / `console.info` print natively (visible in the DevTools **Logs** tab)
 - Destructuring declarations (including at the top of a component body) and callable/event payloads, including defaults (`{ a = 1 }`), rest elements (`{ ...rest }`, `[head, ...tail]`), and computed keys (`{ [key]: value }`). Defaults are lazy and apply only when the value is `undefined`; computed keys evaluate once.
 - Destructuring assignments and `for...of` binding patterns. The right-hand side is evaluated once, so `[a, b] = [b, a]` swaps correctly; defaults, rest, computed keys, nested patterns, and member targets (`[box.label] = ...`) all lower. `for...in` destructuring is rejected — bind the key with a plain name and destructure inside the loop body.
+- Per-iteration `let`/`const` bindings in `for`, `for...of`, and `for...in`. A closure created during the loop keeps that iteration's value (`for (let i = 0; i < 3; i++) { fns[i] = () => i }` records `0`, `1`, `2`), and closures sharing one iteration's scalar binding see each other's mutations. `continue` preserves the same per-iteration copy semantics. Class and container values keep their existing carriers.
 
 ## What's Not Supported Yet
 
@@ -138,8 +139,9 @@ for `morph build`; the two commands share the same parser, graph, lint, and
 IR pipeline.
 
 > **Known contract gaps:** some constructs still pass `morph check` and
-> fail in generated C++ — per-iteration closures, `var` hoisting/TDZ,
-> imported module side effects, JSON dot access, JSX spread props,
+> fail in generated C++ — `var` hoisting/TDZ, imported module side
+> effects, JSON dot access, JSX spread props, closures stored in JS
+> arrays (`Array<() => T>`; use a native `std::function` vector alias),
 > function-local class metadata that escapes its declaring function, and
 > others. The
 > [TypeScript App-Logic Coverage](../future/javascript/coverage.md) plan

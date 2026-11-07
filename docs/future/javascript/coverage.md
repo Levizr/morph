@@ -61,6 +61,7 @@ Already shipped and **not** on the missing list:
 - **Expressions:** binary/unary/ternary/sequence/update/assignment, template literals, array literals with spread, object literals with spread and computed keys, `new`, member access, calls, optional chaining `?.`, nullish coalescing `??`, `await`.
 - **Functions/classes:** declarations, expressions, arrows, default/optional parameters, class declarations with inferred or annotated fields, `static` and `#private` members, constructor parameter properties, class expressions in module-scope direct `const`/`let` initializers, inheritance, `super`, getters/setters with inferred backing fields, interfaces, generics.
 - **Destructuring declarations and assignments:** callable/event payloads, defaults (`{ a = 1 }`), rest elements (`{ ...rest }`, `[head, ...tail]`), computed keys, and nested patterns. Assignment patterns (`[a, b] = ...`, `({ c } = o)`, member targets) and `for...of` declaration/assignment patterns are shipped in 1C. `for...in` destructuring is rejected.
+- **Per-iteration closures:** `let`/`const` bindings in `for`, `for...of`, and `for...in` get a fresh binding per iteration, so closures stored during the loop capture that iteration's value. Captured scalar bindings lower to per-iteration `shared_ptr` boxes; closures sharing one iteration's binding still observe each other's mutations. Class and container values keep their existing carriers and per-iteration capture behavior.
 - **Component-body flow:** branches, loops, and calls between declarations lower into the setup effect; reassigned `let` becomes a signal; the functional state updater (`setCount(c => c + 1)`) works.
 - **Late-assigned and widened values:** `let x; x = 5; x = "hi"` works through `JsLateValue` in module and component scope, and initialized bindings widen when a later assignment changes value class (`let x = 0; x = "hi"`, `let x: number | string`, `let x: any`). Mixed numeric classes widen to `JsNumber`; Window handles lower through `window_wid`.
 - **Builtins:** `fetch` (request options plus `Response.text`/`json`/`arrayBuffer`/`clone`, `ok`, `status`, headers), `console.*` (`log`/`warn`/`error`/`info`), timers, `Promise` constructor + `await`, `Error`, `morphState`/`morphEffect`/`morphShared`/`morphEvent`.
@@ -83,7 +84,7 @@ Parts are ordered so that a later part never changes a representation owned by a
 | **1A** | Widening bindings: initialized `let`, unions, `any`, late values | 0 | `var_types`, `JsLateValue`, `Signal<T>` | `let x = 0; x = "hi"` builds and matches JS |
 | **1B** | Class model: unannotated/static/private fields, parameter properties, class expressions, getter/setter backing fields | 1A | class emitter | Unannotated and private fields compile |
 | **1C** | Destructuring assignment and loop bindings | 0 | assignment/pattern emitter | ✅ Shipped: `[a,b] = ...`, `({c} = o)`, `for (const [k,v] of ...)` lower |
-| **1D** | Per-iteration closures | 0 | loop emitter | `for (let i...)` closures capture per iteration |
+| **1D** | Per-iteration closures | 0 | loop emitter | ✅ Shipped: `for`, `for...of`, and `for...in` bindings re-box per iteration |
 | **2A** | String `switch` | 0 | statement emitter | `switch` on strings matches JS `===` semantics |
 | **2B** | `new.target` | 0 | expression emitter | Correct constructor identity in constructors and called functions |
 | **2C** | `for...in` over arrays | 0 | statement emitter | Indices, not values; own enumerable keys only |
@@ -143,7 +144,7 @@ The statuses below were probed on 2026-11-06 with `morph check`, `morph --to cpp
 | 0.2.1 | `let x = 0; x = "hi"`; `let x: number \| string`; `let y: any` | ✅ Fixed in 1A: the binding widens to `JsLateValue` or `JsNumber`. | 1A |
 | 0.2.2 | `class A { x = 0 }`; `static count = 0`; `private _x = 0`; getter/setter backing fields | ✅ Fixed in 1B: fields infer from initializers and writes, widening to `JsLateValue` on conflict; accessors lower through methods. | 1B |
 | 0.2.3 | `switch (someString)` | ⛔ Rejected by `morph check`; lowering is 2A. | 2A |
-| 0.2.4 | `for (let i = 0; ...) fns.push(() => i)` | `i is not captured`; no per-iteration binding. | 1D |
+| 0.2.4 | `for (let i = 0; ...) fns.push(() => i)` | ✅ Fixed in 1D: captured scalar `let`/`const` loop bindings re-box each iteration for `for`, `for...of`, `for...in`, destructuring patterns, and `continue`. | 1D |
 | 0.2.5 | `[a, b] = [b, a]`; `({ c } = o)` | ✅ Fixed in 1C: the right-hand side is staged once and array/object patterns lower with defaults, rest, computed keys, nested patterns, and member targets. | 1C |
 | 0.2.6 | `const C = class { ... }` | ✅ Fixed in 1B: module-scope direct `const`/`let` class expressions lower to a named class declaration; function-local and component-body initializers are rejected. | 1B |
 | 0.2.7 | `constructor(public x: number)` | ✅ Fixed in 1B: parameter properties become fields. | 1B |
@@ -243,15 +244,15 @@ Module-scope assignments use a captureless lambda because C++ forbids a capture-
 
 ### 1D — Per-iteration closures
 
-**Today:** `for (let i = 0; ...) fns.push(() => i)` emits `i is not captured`.
+**Today:** ✅ each loop iteration gets its own binding. Captured scalar `let`/`const` bindings lower to `std::shared_ptr<T>` boxes: classic `for` allocates the box before the loop and copies it before the update runs, while `for...of`/`for...in` box the hidden loop item inside each iteration (including destructured patterns). `continue` in a captured classic `for` performs the same box copy + update before jumping. Closures sharing one iteration's box observe each other's mutations, but a later iteration never overwrites an earlier closure's value. Class/container bindings keep their existing `shared_ptr` carriers or per-iteration C++ variables.
 
-**Target:** each loop iteration gets its own binding, so closures created in the body capture that iteration's value. This applies to `for`, `for...of`, and `for...in` where the binding is `let`/`const`.
+**Target:** closures created in the body capture that iteration's value for `for`, `for...of`, and `for...in` where the binding is `let`/`const`.
 
 **Depends on:** Part 0.
 
 **Owns:** loop emitter.
 
-**Exit:** a loop that pushes closures prints `0, 1, 2`, not the final value three times.
+**Exit:** ✅ `tests/runtime/conformance/pass-per-iteration-closures` covers classic `for`, `for...of`, `for...in`, destructured `for...of`, and `continue`; translator tests assert the emitted boxes and Python runtime tests cover `3`, `60`, `ab`, `30`, `4`, and `65`. The fixture stores closures in native `std::function` vectors because JS array storage for closures remains a separate unsupported gap.
 
 ## Part 2 — Semantics and control flow
 
@@ -565,11 +566,12 @@ Morph should expose native equivalents (`useWindow`, clipboard, storage) instead
 | `Response.json()` detection and full `Response` runtime | ✅ Shipped; dot access is Part 3A, awaited form shipped |
 | `morph check` diagnostics for rejected constructs | ✅ Shipped; grows with each part |
 | App-logic contract and docs truth-up | ✅ This pass |
-| Part 0 — contract integrity | 🚧 In progress — shipped rejections for string `switch`, array `for...in`, `.then`/`.catch`, JSON extra args, timer args, and `new.target`; remaining ⚠️/🟥 rows are owned by 1B (0.2.17), 1D, 2D, 2E, 3A, and 6F |
+| Part 0 — contract integrity | 🚧 In progress — shipped rejections for string `switch`, array `for...in`, `.then`/`.catch`, JSON extra args, timer args, and `new.target`; remaining ⚠️/🟥 rows are owned by 1B (0.2.17), 2D, 2E, 3A, and 6F |
 | Part 1A — widening bindings | ✅ Shipped |
 | Part 1B — class model | ✅ Shipped; function-local class-declaration metadata follow-up tracked as 0.2.17 |
 | Part 1C — destructuring assignment and loop bindings | ✅ Shipped |
-| Parts 1D–5G — JavaScript language and standard library | 🚧 Committed — all JS-only gaps are in scope for implementation |
+| Part 1D — per-iteration closures | ✅ Shipped |
+| Parts 2A–5G — JavaScript language and standard library | 🚧 Committed — all JS-only gaps are in scope for implementation |
 | Parts 6A–6G — platform APIs and JSX | 🚧 Separate product work — browser globals stay out of scope |
 | Part 7 — docs and claims | 📋 Continuous |
 

@@ -45,6 +45,24 @@ pub struct CppTranslator<'a> {
     /// Project builds declare the defaults once in `morph_api.h`; repeating
     /// them on the premain prototype is a C++ redefinition error.
     omit_param_defaults: bool,
+    /// Per-iteration binding work a `continue` must run before jumping to
+    /// the next iteration. `None` entries are ordinary loops; the captured
+    /// `for` emitter pushes `Some` so `continue` creates the next binding
+    /// and runs the update expression exactly like fall-through does.
+    loop_continue_actions: Vec<Option<LoopContinueAction>>,
+    /// True while binding a `for...of` destructuring pattern. Captured
+    /// names become per-iteration `shared_ptr` boxes instead of plain
+    /// locals that a closure would reference after the iteration ends.
+    box_loop_bindings: bool,
+}
+
+#[derive(Clone)]
+struct LoopContinueAction {
+    /// `(name, pointee_type)` for every loop binding that needs a fresh
+    /// box before the update runs.
+    copy_vars: Vec<(String, String)>,
+    /// The emitted update expression, empty when the loop has none.
+    update: String,
 }
 
 /// Array methods lowered to `morph::js_array_*` runtime helpers.
@@ -418,6 +436,10 @@ impl<'a> CppTranslator<'a> {
     ) -> Self {
         let mut ctx = Ctx::default();
         ctx.indent_level = indent_level;
+        // A non-zero indent marks a snippet that will be spliced inside a
+        // function or lambda. Nested arrows there may capture the host's
+        // locals, so they must not emit a captureless `[]` list.
+        ctx.arrow_depth = usize::from(indent_level > 0);
         ctx.runtime_path = runtime_path;
         ctx.type_mode = type_mode;
         let this = Self {
@@ -433,6 +455,8 @@ impl<'a> CppTranslator<'a> {
             late_window_vars: HashSet::new(),
             late_value_vars: HashSet::new(),
             omit_param_defaults: false,
+            loop_continue_actions: Vec::new(),
+            box_loop_bindings: false,
         };
         this
     }
@@ -738,7 +762,7 @@ impl<'a> CppTranslator<'a> {
             Statement::ForInStatement(f) => Some(self.emit_for_in(f)),
             Statement::ForOfStatement(f) => Some(self.emit_for_of(f)),
             Statement::BreakStatement(_) => Some(format!("{}break;", self.indent())),
-            Statement::ContinueStatement(_) => Some(format!("{}continue;", self.indent())),
+            Statement::ContinueStatement(_) => Some(self.emit_continue()),
             Statement::SwitchStatement(sw) => Some(self.emit_switch(sw)),
             Statement::TryStatement(t) => Some(self.emit_try(t)),
             Statement::ThrowStatement(t) => Some(self.emit_throw(t)),
@@ -1049,6 +1073,30 @@ impl<'a> CppTranslator<'a> {
         lines: &mut Vec<String>,
     ) {
         self.ctx.need(source_type);
+        let pointee =
+            source_type.trim_start_matches("const ").trim_end_matches('&').trim().to_string();
+        if self.box_loop_bindings
+            && self.is_captured_name(name)
+            && Self::is_scalar_pointee(&pointee)
+        {
+            let boxed_type = format!("std::shared_ptr<{pointee}>");
+            self.ctx.need(&pointee);
+            self.ctx.need(&boxed_type);
+            self.ctx.need("std::make_shared");
+            self.ctx.var_types.insert(name.to_string(), boxed_type.clone());
+            self.ctx.shared_ptr_vars.insert(name.to_string());
+            let prefix = if self.ctx.indent_level == 0 { "static " } else { "" };
+            lines.push(format!(
+                "{}{}{} {} = std::make_shared<{}>({});",
+                self.indent(),
+                prefix,
+                boxed_type,
+                name,
+                pointee,
+                source
+            ));
+            return;
+        }
         self.ctx.var_types.insert(name.to_string(), source_type.to_string());
         let prefix = if self.ctx.indent_level == 0 { "static " } else { "" };
         lines.push(format!("{}{}auto {} = {};", self.indent(), prefix, name, source));
@@ -2674,9 +2722,33 @@ impl<'a> CppTranslator<'a> {
         result
     }
 
+    /// `continue` in a captured `for` must first create the next iteration
+    /// binding and run the update, because those steps normally live at the
+    /// end of the loop body and `continue` skips them.
+    fn emit_continue(&self) -> String {
+        let action = self.loop_continue_actions.last().cloned().flatten();
+        let Some(action) = action else {
+            return format!("{}continue;", self.indent());
+        };
+        let base = self.indent();
+        let inner = format!("{base}{INDENT}");
+        let mut lines = vec![format!("{base}{{")];
+        for (name, ty) in &action.copy_vars {
+            lines.push(format!("{inner}{name} = std::make_shared<{ty}>(*{name});"));
+        }
+        if !action.update.trim().is_empty() {
+            lines.push(format!("{inner}{};", action.update.trim().trim_end_matches(';')));
+        }
+        lines.push(format!("{inner}continue;"));
+        lines.push(format!("{base}}}"));
+        lines.join("\n")
+    }
+
     fn emit_while(&mut self, w: &WhileStatement<'a>) -> String {
         let cond = self.emit_truthy_test(&w.test);
+        self.loop_continue_actions.push(None);
         let body_code = self.emit_statement(&w.body).unwrap_or_else(|| "{}".to_string());
+        self.loop_continue_actions.pop();
         let is_infinite = cond.trim().trim_matches(|c| c == '(' || c == ')').trim() == "true"
             || cond.trim() == "1";
         // For exact Python match, wrap true in extra parens to get ((true))
@@ -2720,12 +2792,24 @@ impl<'a> CppTranslator<'a> {
     }
 
     fn emit_do_while(&mut self, d: &DoWhileStatement<'a>) -> String {
+        self.loop_continue_actions.push(None);
         let body = self.emit_statement(&d.body).unwrap_or_else(|| "{}".to_string());
+        self.loop_continue_actions.pop();
         let cond = self.emit_truthy_test(&d.test);
         format!("{}do {} while ({});", self.indent(), body, cond)
     }
 
     fn emit_for(&mut self, f: &ForStatement<'a>) -> String {
+        if let Some(code) = self.emit_for_captured_bindings(f) {
+            return code;
+        }
+        self.loop_continue_actions.push(None);
+        let out = self.emit_for_plain(f);
+        self.loop_continue_actions.pop();
+        out
+    }
+
+    fn emit_for_plain(&mut self, f: &ForStatement<'a>) -> String {
         let init = f.init.as_ref().and_then(|init| self.emit_for_init(init)).unwrap_or_default();
         let cond = f.test.as_ref().map(|e| self.emit_truthy_test(e)).unwrap_or_default();
         let update = f.update.as_ref().map(|e| self.emit_expression(e)).unwrap_or_default();
@@ -2784,6 +2868,160 @@ impl<'a> CppTranslator<'a> {
         }
     }
 
+    /// C++ type for one `for`-init declarator, before escape wrapping.
+    fn for_init_declarator_type(&mut self, decl: &VariableDeclarator<'a>) -> String {
+        match self.type_mode {
+            TypeMode::Strict => {
+                if let Some(ta) = &decl.type_annotation {
+                    resolve_type_annotation(
+                        Some(ta),
+                        "auto",
+                        &self.ctx.template_params,
+                        false,
+                        &self.ctx.class_names,
+                    )
+                } else if let Some(init) = &decl.init {
+                    self.infer_type_from_init(init).unwrap_or_else(|| "auto".to_string())
+                } else {
+                    "auto".to_string()
+                }
+            }
+            TypeMode::Infer => {
+                if let Some(init) = &decl.init {
+                    self.infer_type_from_init(init).unwrap_or_else(|| "auto".to_string())
+                } else {
+                    "auto".to_string()
+                }
+            }
+        }
+    }
+
+    /// Lower a classic `for (let/const ...)` loop whose binding is captured
+    /// by a closure. Each iteration gets a fresh `shared_ptr` box: closures
+    /// capture the box by value, the body mutates the current box, and a
+    /// copy is made before the update runs so the next iteration owns a new
+    /// binding. `continue` performs that same copy + update through
+    /// [`Self::emit_continue`].
+    fn emit_for_captured_bindings(&mut self, f: &ForStatement<'a>) -> Option<String> {
+        let ForStatementInit::VariableDeclaration(declaration) = f.init.as_ref()? else {
+            return None;
+        };
+        if !matches!(
+            declaration.kind,
+            VariableDeclarationKind::Let | VariableDeclarationKind::Const
+        ) {
+            return None;
+        }
+        let mut captured_any = false;
+        for decl in &declaration.declarations {
+            let BindingPattern::BindingIdentifier(id) = &decl.id else {
+                return None;
+            };
+            captured_any |= self.is_captured_name(id.name.as_str());
+        }
+        if !captured_any {
+            return None;
+        }
+
+        // Only scalar bindings get an extra box. Class/container bindings
+        // already lower to `shared_ptr` carriers (or value copies that share
+        // their runtime storage), and wrapping those again would change
+        // member-access and method-call lowering.
+        let mut planned = Vec::new();
+        for decl in &declaration.declarations {
+            let BindingPattern::BindingIdentifier(id) = &decl.id else {
+                return None;
+            };
+            let mut cpp_type = self.for_init_declarator_type(decl);
+            if cpp_type == "auto" {
+                cpp_type = "JsValue".to_string();
+            }
+            if !Self::is_scalar_pointee(&cpp_type) {
+                return None;
+            }
+            planned.push((id, cpp_type));
+        }
+
+        self.ctx.need("std::make_shared");
+        self.ctx.need("JsUndefined");
+        let mut declarations = Vec::new();
+        let mut copy_vars = Vec::new();
+        let mut saved = Vec::new();
+        for (decl, (id, cpp_type)) in declaration.declarations.iter().zip(planned) {
+            let name = id.name.to_string();
+            self.ctx.need(&cpp_type);
+            let boxed_type = format!("std::shared_ptr<{cpp_type}>");
+            self.ctx.need(&boxed_type);
+            let init_code = if let Some(init) = &decl.init {
+                if cpp_type == "char" && matches!(init, Expression::StringLiteral(_)) {
+                    self.emit_char_literal(init)
+                } else {
+                    self.emit_expression(init)
+                }
+            } else {
+                "JsUndefined{}".to_string()
+            };
+            saved.push((
+                name.clone(),
+                self.ctx.var_types.get(&name).cloned(),
+                self.ctx.shared_ptr_vars.contains(&name),
+            ));
+            self.ctx.var_types.insert(name.clone(), boxed_type.clone());
+            self.ctx.shared_ptr_vars.insert(name.clone());
+            declarations
+                .push(format!("{boxed_type} {name} = std::make_shared<{cpp_type}>({init_code});"));
+            copy_vars.push((name, cpp_type));
+        }
+
+        let cond = f.test.as_ref().map(|e| self.emit_truthy_test(e)).unwrap_or_default();
+        let update = f.update.as_ref().map(|e| self.emit_expression(e)).unwrap_or_default();
+
+        let old_indent = self.ctx.indent_level;
+        self.ctx.indent_level += 1;
+        let for_indent = self.indent();
+        let mut lines = vec![format!("{}{{", self.indent())];
+        for declaration in &declarations {
+            lines.push(format!("{for_indent}{declaration}"));
+        }
+        self.ctx.indent_level += 1;
+        let body_indent = self.indent();
+        self.loop_continue_actions.push(Some(LoopContinueAction {
+            copy_vars: copy_vars.clone(),
+            update: update.clone(),
+        }));
+        let body_lines = self.emit_loop_body_lines(&f.body);
+        self.loop_continue_actions.pop();
+        self.ctx.indent_level = old_indent + 1;
+        lines.push(format!("{for_indent}for (; {}; ) {{", cond));
+        lines.extend(body_lines);
+        for (name, ty) in &copy_vars {
+            lines.push(format!("{body_indent}{name} = std::make_shared<{ty}>(*{name});"));
+        }
+        if !update.trim().is_empty() {
+            lines.push(format!("{body_indent}{};", update.trim().trim_end_matches(';')));
+        }
+        lines.push(format!("{for_indent}}}"));
+        self.ctx.indent_level = old_indent;
+        lines.push(format!("{}}}", self.indent()));
+
+        for (name, previous, was_shared) in saved {
+            match previous {
+                Some(ty) => {
+                    self.ctx.var_types.insert(name.clone(), ty);
+                }
+                None => {
+                    self.ctx.var_types.remove(&name);
+                }
+            }
+            if was_shared {
+                self.ctx.shared_ptr_vars.insert(name);
+            } else {
+                self.ctx.shared_ptr_vars.remove(&name);
+            }
+        }
+        Some(lines.join("\n"))
+    }
+
     fn emit_for_init(&mut self, init: &ForStatementInit<'a>) -> Option<String> {
         match init {
             ForStatementInit::VariableDeclaration(d) => {
@@ -2795,32 +3033,7 @@ impl<'a> CppTranslator<'a> {
                     if name.starts_with("/*") {
                         continue;
                     }
-                    let cpp_type = match self.type_mode {
-                        TypeMode::Strict => {
-                            if let Some(ta) = &decl.type_annotation {
-                                resolve_type_annotation(
-                                    Some(ta),
-                                    "auto",
-                                    &self.ctx.template_params,
-                                    false,
-                                    &self.ctx.class_names,
-                                )
-                            } else if let Some(init) = &decl.init {
-                                self.infer_type_from_init(init)
-                                    .unwrap_or_else(|| "auto".to_string())
-                            } else {
-                                "auto".to_string()
-                            }
-                        }
-                        TypeMode::Infer => {
-                            if let Some(init) = &decl.init {
-                                self.infer_type_from_init(init)
-                                    .unwrap_or_else(|| "auto".to_string())
-                            } else {
-                                "auto".to_string()
-                            }
-                        }
-                    };
+                    let cpp_type = self.for_init_declarator_type(decl);
                     self.ctx.need(&cpp_type);
                     self.ctx.var_types.insert(name.to_string(), cpp_type.clone());
                     let final_type = if kind == "const"
@@ -2921,9 +3134,14 @@ impl<'a> CppTranslator<'a> {
         let old_indent = self.ctx.indent_level;
         self.ctx.indent_level += 1;
         let mut binding_lines = Vec::new();
+        let old_box = self.box_loop_bindings;
+        self.box_loop_bindings = true;
         let bindings_ok =
             self.emit_pattern_bindings(pattern, &temp, element_type, &mut binding_lines);
+        self.box_loop_bindings = old_box;
+        self.loop_continue_actions.push(None);
         let body_lines = self.emit_loop_body_lines(body);
+        self.loop_continue_actions.pop();
         self.ctx.indent_level = old_indent;
 
         self.ctx.var_types.remove(&temp);
@@ -2973,7 +3191,9 @@ impl<'a> CppTranslator<'a> {
         let mut assignments = Vec::new();
         let assignments_ok =
             self.emit_assignment_pattern(target, &temp, element_type, &mut assignments);
+        self.loop_continue_actions.push(None);
         let body_lines = self.emit_loop_body_lines(body);
+        self.loop_continue_actions.pop();
         self.ctx.indent_level = old_indent;
         self.ctx.var_types.remove(&temp);
 
@@ -3013,7 +3233,85 @@ impl<'a> CppTranslator<'a> {
         lines
     }
 
+    fn emit_for_in_captured(&mut self, f: &ForInStatement<'a>) -> Option<String> {
+        let ForStatementLeft::VariableDeclaration(declaration) = &f.left else {
+            return None;
+        };
+        if !matches!(
+            declaration.kind,
+            VariableDeclarationKind::Let | VariableDeclarationKind::Const
+        ) {
+            return None;
+        }
+        let first = declaration.declarations.first()?;
+        let BindingPattern::BindingIdentifier(id) = &first.id else {
+            return None;
+        };
+        let name = id.name.to_string();
+        if !self.is_captured_name(&name) {
+            return None;
+        }
+        let right = self.emit_expression(&f.right);
+        let is_obj = if let Expression::Identifier(id) = &f.right {
+            self.ctx
+                .var_types
+                .get(id.name.as_str())
+                .map(|t| t == "JsObject" || t == "JsValue")
+                .unwrap_or(false)
+        } else {
+            false
+        };
+        let iter = if is_obj { format!("{}.sorted_keys()", right) } else { right };
+        let temp = format!("__loop_item_{}", self.destructure_count);
+        self.destructure_count += 1;
+        let ty = "std::string";
+        let boxed_type = format!("std::shared_ptr<{ty}>");
+        self.ctx.need(ty);
+        self.ctx.need(&boxed_type);
+        self.ctx.need("std::make_shared");
+        let previous = self.ctx.var_types.get(&name).cloned();
+        let was_shared = self.ctx.shared_ptr_vars.contains(&name);
+        self.ctx.var_types.insert(name.clone(), boxed_type.clone());
+        self.ctx.shared_ptr_vars.insert(name.clone());
+
+        let old_indent = self.ctx.indent_level;
+        self.ctx.indent_level += 1;
+        let mut lines = vec![format!("{}for (auto {} : {}) {{", self.indent(), temp, iter)];
+        lines.push(format!(
+            "{}std::shared_ptr<{}> {} = std::make_shared<{}>({});",
+            self.indent(),
+            ty,
+            name,
+            ty,
+            temp
+        ));
+        self.ctx.indent_level += 1;
+        self.loop_continue_actions.push(None);
+        lines.extend(self.emit_loop_body_lines(&f.body));
+        self.loop_continue_actions.pop();
+        self.ctx.indent_level = old_indent;
+        lines.push(format!("{}}}", self.indent()));
+
+        match previous {
+            Some(previous) => {
+                self.ctx.var_types.insert(name.clone(), previous);
+            }
+            None => {
+                self.ctx.var_types.remove(&name);
+            }
+        }
+        if was_shared {
+            self.ctx.shared_ptr_vars.insert(name);
+        } else {
+            self.ctx.shared_ptr_vars.remove(&name);
+        }
+        Some(lines.join("\n"))
+    }
+
     fn emit_for_in(&mut self, f: &ForInStatement<'a>) -> String {
+        if let Some(code) = self.emit_for_in_captured(f) {
+            return code;
+        }
         let left = self.emit_for_left(&f.left);
         let right = self.emit_expression(&f.right);
         let is_obj = if let Expression::Identifier(id) = &f.right {
@@ -3026,8 +3324,82 @@ impl<'a> CppTranslator<'a> {
             false
         };
         let iter = if is_obj { format!("{}.sorted_keys()", right) } else { right };
+        self.loop_continue_actions.push(None);
         let body = self.emit_statement(&f.body).unwrap_or_else(|| "{}".to_string());
+        self.loop_continue_actions.pop();
         format!("{}for (auto {} : {}) {}", self.indent(), left, iter, body)
+    }
+
+    fn emit_for_of_captured_binding(
+        &mut self,
+        declarator: &VariableDeclarator<'a>,
+        right: &Expression<'a>,
+        body: &Statement<'a>,
+        is_await: bool,
+    ) -> Option<String> {
+        let BindingPattern::BindingIdentifier(id) = &declarator.id else {
+            return None;
+        };
+        let name = id.name.to_string();
+        let element_type = self.for_of_element_type(right);
+        // A plain `for (auto x : ...)` already creates a fresh C++ variable
+        // per iteration. Only scalar elements need an extra box so mutations
+        // inside one iteration stay visible to that iteration's closures;
+        // class/container carriers keep their existing lowering.
+        if !Self::is_scalar_pointee(&element_type) {
+            return None;
+        }
+        let boxed_type = format!("std::shared_ptr<{element_type}>");
+        self.ctx.need(&element_type);
+        self.ctx.need(&boxed_type);
+        self.ctx.need("std::make_shared");
+        let temp = format!("__loop_item_{}", self.destructure_count);
+        self.destructure_count += 1;
+        let right_code = self.emit_expression(right);
+        let previous = self.ctx.var_types.get(&name).cloned();
+        let was_shared = self.ctx.shared_ptr_vars.contains(&name);
+        self.ctx.var_types.insert(name.clone(), boxed_type.clone());
+        self.ctx.shared_ptr_vars.insert(name.clone());
+
+        let old_indent = self.ctx.indent_level;
+        self.ctx.indent_level += 1;
+        let await_prefix = if is_await { "co_await " } else { "" };
+        let mut lines = vec![format!(
+            "{}for (auto {} : {}{}) {{",
+            self.indent(),
+            temp,
+            await_prefix,
+            right_code
+        )];
+        lines.push(format!(
+            "{}std::shared_ptr<{}> {} = std::make_shared<{}>({});",
+            self.indent(),
+            element_type,
+            name,
+            element_type,
+            temp
+        ));
+        self.ctx.indent_level += 1;
+        self.loop_continue_actions.push(None);
+        lines.extend(self.emit_loop_body_lines(body));
+        self.loop_continue_actions.pop();
+        self.ctx.indent_level = old_indent;
+        lines.push(format!("{}}}", self.indent()));
+
+        match previous {
+            Some(previous) => {
+                self.ctx.var_types.insert(name.clone(), previous);
+            }
+            None => {
+                self.ctx.var_types.remove(&name);
+            }
+        }
+        if was_shared {
+            self.ctx.shared_ptr_vars.insert(name);
+        } else {
+            self.ctx.shared_ptr_vars.remove(&name);
+        }
+        Some(lines.join("\n"))
     }
 
     fn emit_for_of(&mut self, f: &ForOfStatement<'a>) -> String {
@@ -3056,6 +3428,19 @@ impl<'a> CppTranslator<'a> {
                 f.r#await,
             );
         }
+        if let ForStatementLeft::VariableDeclaration(declaration) = &f.left
+            && matches!(
+                declaration.kind,
+                VariableDeclarationKind::Let | VariableDeclarationKind::Const
+            )
+            && let Some(first) = declaration.declarations.first()
+            && let BindingPattern::BindingIdentifier(id) = &first.id
+            && self.is_captured_name(id.name.as_str())
+            && let Some(code) =
+                self.emit_for_of_captured_binding(first, &f.right, &f.body, f.r#await)
+        {
+            return code;
+        }
         let left = self.emit_for_left(&f.left);
         let right = self.emit_expression(&f.right);
         // `for (auto x : <js sequence>)` binds a JsValue element. Record the
@@ -3072,7 +3457,9 @@ impl<'a> CppTranslator<'a> {
             .as_ref()
             .filter(|_| js_seq)
             .map(|name| self.ctx.var_types.insert(name.clone(), "JsValue".to_string()));
+        self.loop_continue_actions.push(None);
         let body = self.emit_statement(&f.body).unwrap_or_else(|| "{}".to_string());
+        self.loop_continue_actions.pop();
         match (loop_var, prev_type) {
             (Some(name), Some(Some(prev))) => {
                 self.ctx.var_types.insert(name, prev);
@@ -5521,6 +5908,11 @@ impl<'a> CppTranslator<'a> {
             return true;
         }
         if let Expression::Identifier(id) = obj_node {
+            // Scalar pointees are already dereferenced at the use site by
+            // `deref_shared_scalar`; `(*x)->field` would be ill-formed.
+            if self.deref_shared_scalar(id.name.as_str()).is_some() {
+                return false;
+            }
             return self
                 .ctx
                 .var_types
@@ -7827,10 +8219,17 @@ impl<'a> CppTranslator<'a> {
             if self.ctx.js_object_params.contains(id.name.as_str()) {
                 return true;
             }
-            return matches!(
-                self.ctx.var_types.get(id.name.as_str()).map(|s| s.as_str()),
-                Some("JsObject") | Some("JsValue") | Some("JsLateValue")
-            );
+            if let Some(ty) = self.ctx.var_types.get(id.name.as_str()) {
+                // Boxed JS values are read through `(*x)`, so member access
+                // is a bracket lookup on the dereferenced value.
+                if let Some(inner) =
+                    ty.strip_prefix("std::shared_ptr<").and_then(|value| value.strip_suffix('>'))
+                {
+                    return matches!(inner.trim(), "JsValue" | "JsLateValue");
+                }
+                return matches!(ty.as_str(), "JsObject" | "JsValue" | "JsLateValue");
+            }
+            return false;
         }
         // For chained access like `a.b.c` or `arr[i].prop`, infer the
         // receiver type. `users[0]` on `std::vector<JsObject>` is a
@@ -8203,6 +8602,17 @@ impl<'a> CppTranslator<'a> {
             self.ctx.drop_return_value = saved_drop;
             return format!("{}({}) -> {} {}", capture, params, ret, body);
         }
+    }
+
+    /// True when a closure in the current function scope captures `name`.
+    /// Loop lowering uses this to decide whether a `let`/`const` binding
+    /// needs a fresh per-iteration box.
+    fn is_captured_name(&self, name: &str) -> bool {
+        let scope = self.ctx.current_fn.clone().unwrap_or_default();
+        self.analysis
+            .as_ref()
+            .and_then(|analysis| analysis.closure_captures.get(&scope))
+            .is_some_and(|captured| captured.contains(name))
     }
 
     /// Capture list for a lambda. Shared locals the enclosing function
@@ -8961,5 +9371,125 @@ mod tests {
         assert!(out.contains("for (auto __loop_item_1 : pairs) {"), "{out}");
         assert!(out.contains("left = __loop_item_1[0];"), "{out}");
         assert!(out.contains("right = __loop_item_1[1];"), "{out}");
+    }
+
+    #[test]
+    fn captured_classic_for_binding_reboxes_each_iteration() {
+        let out = translate_analyzed(
+            "function main(): void {\n\
+                 for (let i = 0; i < 3; i++) {\n\
+                     const read = () => i;\n\
+                     console.log(read());\n\
+                 }\n\
+             }",
+        );
+        assert!(
+            out.contains("std::shared_ptr<int64_t> i = std::make_shared<int64_t>(0);"),
+            "{out}"
+        );
+        assert!(out.contains("for (; (*i) < 3; ) {"), "{out}");
+        assert!(out.contains("auto read = [&, i]() -> auto { return (*i); };"), "{out}");
+        let rebind =
+            out.find("i = std::make_shared<int64_t>(*i);").expect("per-iteration box copy");
+        let update = out.find("(*i)++;").expect("loop update");
+        assert!(rebind < update, "box copy must run before the update:\n{out}");
+    }
+
+    #[test]
+    fn captured_pointer_loop_binding_keeps_its_carrier() {
+        let out = translate_analyzed(
+            "class Box {\n\
+                 value = 0\n\
+             }\n\
+             function main(): void {\n\
+                 for (let box = new Box(); box.value < 3; box.value++) {\n\
+                     const read = () => box.value;\n\
+                     console.log(read());\n\
+                 }\n\
+             }",
+        );
+        assert!(out.contains("for (std::shared_ptr<Box> box ="), "{out}");
+        assert!(!out.contains("std::shared_ptr<std::shared_ptr<Box>>"), "{out}");
+        assert!(out.contains("auto read = [&, box]() -> auto { return box->value; };"), "{out}");
+    }
+
+    #[test]
+    fn captured_for_of_binding_boxes_the_loop_item() {
+        let out = translate_analyzed(
+            "function main(): void {\n\
+                 const values: Array<int> = [10, 20];\n\
+                 for (const value of values) {\n\
+                     const read = () => value;\n\
+                     console.log(read());\n\
+                 }\n\
+             }",
+        );
+        assert!(out.contains("for (auto __loop_item_0 : values) {"), "{out}");
+        assert!(
+            out.contains(
+                "std::shared_ptr<int64_t> value = std::make_shared<int64_t>(__loop_item_0);"
+            ),
+            "{out}"
+        );
+        assert!(out.contains("auto read = [&, value]() -> auto { return (*value); };"), "{out}");
+    }
+
+    #[test]
+    fn captured_for_in_binding_boxes_the_key() {
+        let out = translate_analyzed(
+            "function main(): void {\n\
+                 const obj = { a: 1 };\n\
+                 for (const key in obj) {\n\
+                     const read = () => key;\n\
+                     console.log(read());\n\
+                 }\n\
+             }",
+        );
+        assert!(out.contains("for (auto __loop_item_0 : obj.sorted_keys()) {"), "{out}");
+        assert!(
+            out.contains(
+                "std::shared_ptr<std::string> key = std::make_shared<std::string>(__loop_item_0);"
+            ),
+            "{out}"
+        );
+        assert!(out.contains("auto read = [&, key]() -> auto { return (*key); };"), "{out}");
+    }
+
+    #[test]
+    fn continue_in_captured_for_copies_binding_before_update() {
+        let out = translate_analyzed(
+            "function main(): void {\n\
+                 for (let i = 0; i < 3; i++) {\n\
+                     if (i === 1) { continue; }\n\
+                     const read = () => i;\n\
+                     console.log(read());\n\
+                 }\n\
+             }",
+        );
+        let continue_pos = out.find("continue;").expect("continue statement");
+        let before = &out[..continue_pos];
+        let rebind =
+            before.rfind("i = std::make_shared<int64_t>(*i);").expect("box copy before continue");
+        let update = before.rfind("(*i)++;").expect("update before continue");
+        assert!(rebind < update, "continue must copy the binding then update:\n{out}");
+    }
+
+    #[test]
+    fn captured_for_of_pattern_bindings_are_boxed() {
+        let out = translate_analyzed(
+            "function main(): void {\n\
+                 for (const { value } of items) {\n\
+                     const read = () => value;\n\
+                     console.log(read());\n\
+                 }\n\
+             }",
+        );
+        assert!(
+            out.contains(
+                "std::shared_ptr<JsValue> value = std::make_shared<JsValue>(__loop_item_0[\"value\"]);"
+            ),
+            "{out}"
+        );
+        assert!(out.contains("auto read = [&, value]() -> auto { return (*value); };"), "{out}");
     }
 }

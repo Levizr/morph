@@ -1,0 +1,42 @@
+import { touchNative } from './native.cpp'
+
+export const windowConfig = { title: "pass-per-iteration-closures", width: 800, height: 600 }
+
+// Every loop form must give each iteration its own binding: closures stored
+// for later must return that iteration's value, not the final one.
+function closureTotal(): number {
+  const numFns: Array<NumFn> = [() => 0, () => 0, () => 0]
+  for (let i = 0; i < 3; i++) {
+    numFns[i] = () => i
+  }
+  let total = numFns[0]() + numFns[1]() + numFns[2]()
+
+  const values: Array<int> = [10, 20, 30]
+  const ofFns: Array<NumFn> = [() => 0, () => 0, () => 0]
+  let index = 0
+  for (const value of values) {
+    ofFns[index] = () => value
+    index = index + 1
+  }
+  total = total + ofFns[0]() + ofFns[1]() + ofFns[2]()
+
+  const keyFns: Array<StrFn> = [() => "", () => ""]
+  const obj = { a: 1, b: 2 }
+  index = 0
+  for (const key in obj) {
+    keyFns[index] = () => key
+    index = index + 1
+  }
+  total = total + (keyFns[0]() === "a" ? 1 : 0) + (keyFns[1]() === "b" ? 1 : 0)
+  return total
+}
+
+export default function App() {
+  touchNative()
+  const total = closureTotal()
+  return (
+    <body>
+      <div>{total}</div>
+    </body>
+  )
+}

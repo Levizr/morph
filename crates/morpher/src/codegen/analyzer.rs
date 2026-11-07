@@ -963,13 +963,36 @@ impl EscapeAnalyzer {
         self.current_scope_depth -= 1;
     }
 
-    /// Record a for-of/for-in target rebinding an outer variable.
+    /// Record a for-of/for-in target. Declarations register their bound
+    /// names so a closure in the body is recognized as capturing the loop
+    /// binding; assignment targets only rebind an existing variable.
     fn record_for_target(&mut self, left: &ForStatementLeft) {
         match left {
             ForStatementLeft::VariableDeclaration(d) => {
+                let is_global = self.current_scope_depth == 0;
+                let is_mutable = d.kind == VariableDeclarationKind::Let;
                 for decl in &d.declarations {
-                    if let BindingPattern::BindingIdentifier(id) = &decl.id {
-                        self.record_def(id.name.as_str(), OperandClass::Other, None, None);
+                    match &decl.id {
+                        BindingPattern::BindingIdentifier(id) => {
+                            self.analyze_identifier_declaration(
+                                &id.name,
+                                decl.type_annotation
+                                    .as_ref()
+                                    .map(|ta| self.type_annotation_to_string(ta)),
+                                is_global,
+                                is_mutable,
+                                decl.init.as_ref(),
+                            );
+                            self.record_def(id.name.as_str(), OperandClass::Other, None, None);
+                        }
+                        pattern => {
+                            self.analyze_destructured_pattern(
+                                pattern,
+                                decl.init.as_ref(),
+                                is_global,
+                                is_mutable,
+                            );
+                        }
                     }
                 }
             }

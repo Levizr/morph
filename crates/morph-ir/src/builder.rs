@@ -1254,9 +1254,18 @@ impl IRBuilder {
                 body_vars.insert(local.name.clone(), peek.clone());
                 body_vars.insert(emitted, peek);
             }
-            if let Some(out) =
-                self.translate_logic(&src, &body_vars, &frame.types, &frame.events, &frame.classes)
-            {
+            // The body flow is spliced inside `[]() -> auto { ... }`, so
+            // translate it as function scope: locals must not become
+            // module statics, and nested closures may capture them.
+            if let Some(out) = self.translate_logic_at(
+                &src,
+                &body_vars,
+                &frame.types,
+                &frame.events,
+                false,
+                1,
+                &frame.classes,
+            ) {
                 let body = out.body.trim();
                 if !body.is_empty() {
                     extra_headers.extend(include_lines(&out.includes));

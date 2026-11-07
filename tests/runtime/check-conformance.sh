@@ -66,6 +66,7 @@ run_pass pass-async
 run_pass pass-obj-spread
 run_pass pass-destructuring
 run_pass pass-destructuring-assignments
+run_pass pass-per-iteration-closures
 run_pass pass-array-methods
 run_pass pass-operators
 run_pass pass-math
