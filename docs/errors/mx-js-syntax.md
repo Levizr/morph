@@ -32,7 +32,6 @@ The current set is:
   every other position are rejected)
 - function-valued object properties (`{ handler: save }` — `JsObject`
   fields cannot store closures)
-- `switch` on a string (numeric `switch` is supported)
 - `for...in` over an array (object `for...in` is supported)
 - `for...in` with a destructuring binding (bind the key with a plain name,
   then destructure the value inside the loop body)
@@ -48,8 +47,9 @@ error : mx-js-syntax : `enum` declaration cannot be translated to C++
 ```
 
 These lower correctly and are **not** errors: optional chaining `?.`,
-nullish coalescing `??`, object `for...in` / `for...of`, numeric `switch`,
-array spread, object spread and computed keys, getters and setters,
+nullish coalescing `??`, object `for...in` / `for...of`, `switch` on
+strings, numbers, and mixed case values (JavaScript `===` semantics with
+fallthrough), array spread, object spread and computed keys, getters and setters,
 plain-TS destructuring declarations, destructuring assignment, `for...of`
 declaration and assignment patterns, destructuring at the top of a
 component body, class declarations / `new`, module-scope class expressions
@@ -69,8 +69,7 @@ purpose: generators need resumable frames; `with` needs dynamic scope;
 labeled jumps have no C++ equivalent; `import.meta` / dynamic `import()`
 need a module loader; namespaces
 and decorators vanish in translation; enums and regex literals have no
-lowering yet. String `switch` needs JavaScript `===`/fallthrough
-semantics, `.then`/`.catch` needs a promise-chain runtime, and JSON/timer
+lowering yet. `.then`/`.catch` needs a promise-chain runtime, and JSON/timer
 extra arguments would be silently dropped. Supporting any of them
 approximately would change program meaning — so each is rejected with an
 explicit rewrite. See
@@ -113,19 +112,6 @@ export default function App() {
 ```
 
 ```tsx
-// ❌ String switch — mx-js-syntax (use if/else with ===)
-export default function App() {
-  const status = "ready";
-  switch (status) {
-    case "ready":
-      return <div>Ready</div>;
-    default:
-      return <div>Waiting</div>;
-  }
-}
-```
-
-```tsx
 // ❌ Promise chain — mx-js-syntax (use async/await)
 async function load() {
   fetch("https://api.example.com/data")
@@ -145,7 +131,6 @@ async function load() {
 | `f(...args)` / `new C(...args)` | pass each argument explicitly, or use `push`/`unshift`/`splice`/`concat` and `Math.min`/`Math.max` for variadic arrays |
 | `const C = class { … }` | a module-scope direct `const`/`let` initializer (supported), or a class declaration |
 | `{ handler: fn }` | keep `fn` as its own const and call it directly |
-| `switch (name)` on a string | `if`/`else if` with `===`, or switch on a number |
 | `for (const i in array)` | `for (let i = 0; i < array.length; i++)`, or `for...of` for values |
 | `for (const [k] in object)` | `for (const k in object) { … }` — bind the key plainly; destructure the value inside the body |
 | `fetch(...).then(...)` | `const r = await fetch(...)` inside `try`/`catch` |

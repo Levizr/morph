@@ -57,7 +57,7 @@ Until those pass, coverage work is measured against them rather than against the
 
 Already shipped and **not** on the missing list:
 
-- **Statements:** `if`/`else`, `while`, `for`, `do-while`, `switch`, `try`/`catch`, `throw`, `return`, `break`, `continue`.
+- **Statements:** `if`/`else`, `while`, `for`, `do-while`, `switch` (string, number, and mixed case values), `try`/`catch`, `throw`, `return`, `break`, `continue`.
 - **Expressions:** binary/unary/ternary/sequence/update/assignment, template literals, array literals with spread, object literals with spread and computed keys, `new`, member access, calls, optional chaining `?.`, nullish coalescing `??`, `await`.
 - **Functions/classes:** declarations, expressions, arrows, default/optional parameters, class declarations with inferred or annotated fields, `static` and `#private` members, constructor parameter properties, class expressions in module-scope direct `const`/`let` initializers, inheritance, `super`, getters/setters with inferred backing fields, interfaces, generics.
 - **Destructuring declarations and assignments:** callable/event payloads, defaults (`{ a = 1 }`), rest elements (`{ ...rest }`, `[head, ...tail]`), computed keys, and nested patterns. Assignment patterns (`[a, b] = ...`, `({ c } = o)`, member targets) and `for...of` declaration/assignment patterns are shipped in 1C. `for...in` destructuring is rejected.
@@ -72,7 +72,7 @@ Already shipped and **not** on the missing list:
 - **Operators with JS semantics:** `==`/`!=`, `===`/`!==`, relational, `in`, `**`/`**=`, `&&=`/`||=`/`??=`, truthiness, string concatenation, `ToNumber` in numeric contexts.
 - **JSX:** elements, fragments, and list `.map` in direct JSX-child position.
 
-`Response.json()` returns a `JsValue`; dot access is Part 3A, while `await response.json()` lowers to the synchronous reader. `JSON.parse`/`stringify` extra arguments, string `switch`, array `for...in`, `.then`/`.catch`, timer trailing arguments, and `new.target` are rejected by `morph check`. Class expressions are accepted only as module-scope direct `const`/`let` initializers; every other position is rejected.
+`Response.json()` returns a `JsValue`; dot access is Part 3A, while `await response.json()` lowers to the synchronous reader. `JSON.parse`/`stringify` extra arguments, array `for...in`, `.then`/`.catch`, timer trailing arguments, and `new.target` are rejected by `morph check`. Class expressions are accepted only as module-scope direct `const`/`let` initializers; every other position is rejected.
 
 ## Part map
 
@@ -85,7 +85,7 @@ Parts are ordered so that a later part never changes a representation owned by a
 | **1B** | Class model: unannotated/static/private fields, parameter properties, class expressions, getter/setter backing fields | 1A | class emitter | Unannotated and private fields compile |
 | **1C** | Destructuring assignment and loop bindings | 0 | assignment/pattern emitter | ✅ Shipped: `[a,b] = ...`, `({c} = o)`, `for (const [k,v] of ...)` lower |
 | **1D** | Per-iteration closures | 0 | loop emitter | ✅ Shipped: `for`, `for...of`, and `for...in` bindings re-box per iteration |
-| **2A** | String `switch` | 0 | statement emitter | `switch` on strings matches JS `===` semantics |
+| **2A** | String `switch` | 0 | statement emitter | ✅ Shipped: dispatch uses JS `===` and preserves fallthrough/`default` |
 | **2B** | `new.target` | 0 | expression emitter | Correct constructor identity in constructors and called functions |
 | **2C** | `for...in` over arrays | 0 | statement emitter | Indices, not values; own enumerable keys only |
 | **2D** | Hoisting and TDZ | 1A | declaration analysis | `var` is `undefined`; `let`/`const` use-before-declaration errors |
@@ -143,7 +143,7 @@ The statuses below were probed on 2026-11-06 with `morph check`, `morph --to cpp
 |---|---|---|---|
 | 0.2.1 | `let x = 0; x = "hi"`; `let x: number \| string`; `let y: any` | ✅ Fixed in 1A: the binding widens to `JsLateValue` or `JsNumber`. | 1A |
 | 0.2.2 | `class A { x = 0 }`; `static count = 0`; `private _x = 0`; getter/setter backing fields | ✅ Fixed in 1B: fields infer from initializers and writes, widening to `JsLateValue` on conflict; accessors lower through methods. | 1B |
-| 0.2.3 | `switch (someString)` | ⛔ Rejected by `morph check`; lowering is 2A. | 2A |
+| 0.2.3 | `switch (someString)` | ✅ Fixed in 2A: dispatch evaluates case expressions in order with JS `===` semantics, then runs the selected body through a native tagged switch so fallthrough, `break`, `continue`, and a mid-body `default` keep their JS meaning. | 2A |
 | 0.2.4 | `for (let i = 0; ...) fns.push(() => i)` | ✅ Fixed in 1D: captured scalar `let`/`const` loop bindings re-box each iteration for `for`, `for...of`, `for...in`, destructuring patterns, and `continue`. | 1D |
 | 0.2.5 | `[a, b] = [b, a]`; `({ c } = o)` | ✅ Fixed in 1C: the right-hand side is staged once and array/object patterns lower with defaults, rest, computed keys, nested patterns, and member targets. | 1C |
 | 0.2.6 | `const C = class { ... }` | ✅ Fixed in 1B: module-scope direct `const`/`let` class expressions lower to a named class declaration; function-local and component-body initializers are rejected. | 1B |
@@ -258,13 +258,13 @@ Module-scope assignments use a captureless lambda because C++ forbids a capture-
 
 ### 2A — String `switch`
 
-**Today:** ⛔ `morph check` rejects `switch` on a string receiver; numeric `switch` still lowers natively.
+**Today:** ✅ `switch` accepts string, number, and mixed case values. The discriminant is evaluated once into a `JsValue`; case expressions run in source order through `morph::js_cmp::strict_eq`, and the first match (or `default`) sets an integer tag. A native C++ switch on that tag then runs the body, so fallthrough, `break`, `continue` inside an enclosing loop, and a `default` placed anywhere all keep their JavaScript meaning.
 
 **Target:** lower to an if/else chain or a tagged `JsValue` switch with JavaScript `===` semantics, including fallthrough and `default`.
 
 **Depends on:** Part 0.
 
-**Exit:** string, number, and mixed cases match Node; no fallthrough regressions.
+**Exit:** ✅ `tests/runtime/conformance/pass-string-switch` builds; `tests/translate/test_switch_semantics.py` covers string fallthrough, `default` first/middle, numeric and mixed-type cases, string-vs-number strict equality, and `break`/`continue` inside a switch.
 
 ### 2B — `new.target`
 
@@ -566,12 +566,13 @@ Morph should expose native equivalents (`useWindow`, clipboard, storage) instead
 | `Response.json()` detection and full `Response` runtime | ✅ Shipped; dot access is Part 3A, awaited form shipped |
 | `morph check` diagnostics for rejected constructs | ✅ Shipped; grows with each part |
 | App-logic contract and docs truth-up | ✅ This pass |
-| Part 0 — contract integrity | 🚧 In progress — shipped rejections for string `switch`, array `for...in`, `.then`/`.catch`, JSON extra args, timer args, and `new.target`; remaining ⚠️/🟥 rows are owned by 1B (0.2.17), 2D, 2E, 3A, and 6F |
+| Part 0 — contract integrity | 🚧 In progress — shipped rejections for array `for...in`, `.then`/`.catch`, JSON extra args, timer args, and `new.target`; remaining ⚠️/🟥 rows are owned by 1B (0.2.17), 2D, 2E, 3A, and 6F |
 | Part 1A — widening bindings | ✅ Shipped |
 | Part 1B — class model | ✅ Shipped; function-local class-declaration metadata follow-up tracked as 0.2.17 |
 | Part 1C — destructuring assignment and loop bindings | ✅ Shipped |
 | Part 1D — per-iteration closures | ✅ Shipped |
-| Parts 2A–5G — JavaScript language and standard library | 🚧 Committed — all JS-only gaps are in scope for implementation |
+| Part 2A — string `switch` | ✅ Shipped |
+| Parts 2B–5G — JavaScript language and standard library | 🚧 Committed — all JS-only gaps are in scope for implementation |
 | Parts 6A–6G — platform APIs and JSX | 🚧 Separate product work — browser globals stay out of scope |
 | Part 7 — docs and claims | 📋 Continuous |
 

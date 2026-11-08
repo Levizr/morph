@@ -70,7 +70,7 @@ This module is provided by `node_modules/morph/index.d.ts` — it ships with eve
 
 ### Statements
 
-`if`/`else`, `while`, `for`, `do-while`, `switch`/`case`/`default` (numeric; string `switch` is rejected), `try`/`catch`/`throw`, `return`, `break`, `continue`
+`if`/`else`, `while`, `for`, `do-while`, `switch`/`case`/`default` (string, number, and mixed case values with JavaScript `===`, fallthrough, and `default`), `try`/`catch`/`throw`, `return`, `break`, `continue`
 
 Inside a component body, statements written between the declarations (branches, loops, calls) lower into a setup effect that re-runs when the state it reads changes — see [Locals Reassigned in the Component Body](./state.md#locals-reassigned-in-the-component-body).
 
@@ -124,10 +124,9 @@ Binary (`+`, `-`, `*`, `/`, `**`, `===`, `!==`, `==`, `!=`, `<`, `>`, etc.), una
 - Class expressions outside a module-scope direct `const`/`let` initializer
   (module-scope initializers lower to a named class; function-local and
   every other position are rejected)
-- String `switch`, array `for...in`, destructuring in `for...in`,
-  `new.target`, and trailing timer arguments
-  (`setTimeout(fn, ms, ...args)`) — rejected by `morph check` with a
-  precise error
+- Array `for...in`, destructuring in `for...in`, `new.target`, and trailing
+  timer arguments (`setTimeout(fn, ms, ...args)`) — rejected by `morph check`
+  with a precise error
 - C++ keywords used as JS binding or class member names (`double`,
   `template`, `delete`, …)
 - A few JS methods whose receiver is provably a native type (for example

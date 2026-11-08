@@ -1,0 +1,35 @@
+export const windowConfig = { title: "pass-string-switch", width: 800, height: 600 }
+
+// String switches use JavaScript `===` semantics and fall through until
+// `break`; a `default` in the middle joins the fallthrough chain.
+export default function App() {
+  const status = "ready"
+  let label = 0
+  switch (status) {
+    case "ready":
+      label = label + 1
+    case "done":
+      label = label + 10
+      break
+    default:
+      label = label + 100
+  }
+
+  let mixed = 0
+  switch (status) {
+    case "1":
+      mixed = mixed + 1
+      break
+    case 1:
+      mixed = mixed + 10
+      break
+    default:
+      mixed = mixed + 100
+  }
+
+  return (
+    <body>
+      <div>{label} {mixed}</div>
+    </body>
+  )
+}

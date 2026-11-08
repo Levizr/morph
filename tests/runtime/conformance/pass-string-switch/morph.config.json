@@ -1,0 +1,7 @@
+{
+  "name": "pass-string-switch",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "pass-string-switch" },
+  "dependencies": {},
+  "cpp_sources": []
+}

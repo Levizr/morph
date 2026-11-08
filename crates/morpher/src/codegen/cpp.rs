@@ -3529,18 +3529,53 @@ impl<'a> CppTranslator<'a> {
     }
 
     fn emit_switch(&mut self, sw: &SwitchStatement<'a>) -> String {
+        // JavaScript `switch` uses strict equality, accepts arbitrary case
+        // expressions, and allows fallthrough. C++ case labels are integral
+        // constants, so dispatch in JS order first and switch on the
+        // resulting tag: `break`/`continue`/fallthrough then keep their
+        // native C++ meaning, including a `default` in the middle.
         let disc = self.emit_expression(&sw.discriminant);
-        // Only apply .as_int() if discriminant is JsValue type
-        let disc_code = if self.is_jsvalue_type(&sw.discriminant) {
-            format!("({}).as_int()", disc)
-        } else {
-            disc
-        };
-        let mut lines = vec![format!("{}switch ({}) {{", self.indent(), disc_code)];
         let bi = INDENT.repeat(self.ctx.indent_level + 1);
-        for case in &sw.cases {
-            if let Some(test) = &case.test {
-                lines.push(format!("{}case {}:", bi, self.emit_expression(test)));
+        self.ctx.need("JsValue");
+        let mut lines = vec![format!("{}{{", self.indent())];
+        lines.push(format!("{}JsValue __morph_switch_disc = {};", bi, disc));
+        lines.push(format!("{}int __morph_switch_tag = -1;", bi));
+
+        let mut default_tag = None;
+        let mut emitted_test = false;
+        for (tag, case) in sw.cases.iter().enumerate() {
+            let Some(test) = &case.test else {
+                default_tag = Some(tag);
+                continue;
+            };
+            let test_code = self.emit_expression(test);
+            let test_class = self.operand_class_of(test);
+            self.record_comparison_use(
+                ComparisonKind::StrictEqual,
+                OperandClass::JsValue,
+                test_class,
+            );
+            let keyword = if emitted_test { "else if" } else { "if" };
+            lines.push(format!(
+                "{}{} (morph::js_cmp::strict_eq(__morph_switch_disc, {})) {{ __morph_switch_tag = {}; }}",
+                bi, keyword, test_code, tag
+            ));
+            emitted_test = true;
+        }
+        if let Some(tag) = default_tag {
+            if emitted_test {
+                lines.push(format!("{}else {{ __morph_switch_tag = {}; }}", bi, tag));
+            } else {
+                lines.push(format!("{}__morph_switch_tag = {};", bi, tag));
+            }
+        } else if emitted_test {
+            lines.push(format!("{}else {{ __morph_switch_tag = -1; }}", bi));
+        }
+
+        lines.push(format!("{}switch (__morph_switch_tag) {{", bi));
+        for (tag, case) in sw.cases.iter().enumerate() {
+            if case.test.is_some() {
+                lines.push(format!("{}case {}:", bi, tag));
             } else {
                 lines.push(format!("{}default:", bi));
             }
@@ -3550,6 +3585,7 @@ impl<'a> CppTranslator<'a> {
                 }
             }
         }
+        lines.push(format!("{}}}", bi));
         lines.push(format!("{}}}", self.indent()));
         lines.join("\n")
     }
@@ -6580,19 +6616,6 @@ impl<'a> CppTranslator<'a> {
         false
     }
 
-    fn is_jsvalue_type(&self, expr: &Expression<'a>) -> bool {
-        // Check if expression is a JsValue type
-        if let Expression::Identifier(id) = expr {
-            if let Some(var_type) = self.ctx.var_types.get(id.name.as_str()) {
-                return matches!(
-                    var_type.as_str(),
-                    "JsValue" | "JsLateValue" | "JsArray" | "JsObject"
-                );
-            }
-        }
-        false
-    }
-
     /// Decide whether a string-method call should use morph::strutil:: helpers (native)
     /// Returns Some(true) = use helper, Some(false) = use direct Js call, None = not applicable
     fn str_helper_decision(&self, recv: &Expression<'a>) -> Option<bool> {
@@ -9371,6 +9394,50 @@ mod tests {
         assert!(out.contains("for (auto __loop_item_1 : pairs) {"), "{out}");
         assert!(out.contains("left = __loop_item_1[0];"), "{out}");
         assert!(out.contains("right = __loop_item_1[1];"), "{out}");
+    }
+
+    #[test]
+    fn string_switch_dispatches_with_strict_equality_and_falls_through() {
+        let out = translate_stmts(
+            "let status = \"ready\";\n\
+             let label = \"\";\n\
+             switch (status) {\n\
+                 case \"ready\":\n\
+                     label = \"r\";\n\
+                 case \"done\":\n\
+                     label = label + \"d\";\n\
+                     break;\n\
+                 default:\n\
+                     label = \"?\";\n\
+             }",
+        );
+        assert!(out.contains("JsValue __morph_switch_disc = status;"), "{out}");
+        assert!(out.contains("int __morph_switch_tag = -1;"), "{out}");
+        assert!(
+            out.contains(
+                "if (morph::js_cmp::strict_eq(__morph_switch_disc, \"ready\")) { __morph_switch_tag = 0; }"
+            ),
+            "{out}"
+        );
+        assert!(
+            out.contains(
+                "else if (morph::js_cmp::strict_eq(__morph_switch_disc, \"done\")) { __morph_switch_tag = 1; }"
+            ),
+            "{out}"
+        );
+        assert!(out.contains("else { __morph_switch_tag = 2; }"), "{out}");
+        assert!(out.contains("switch (__morph_switch_tag) {"), "{out}");
+        assert!(out.contains("case 0:"), "{out}");
+        assert!(out.contains("case 1:"), "{out}");
+        assert!(out.contains("default:"), "{out}");
+    }
+
+    #[test]
+    fn switch_with_only_default_does_not_emit_a_dangling_else() {
+        let out = translate_stmts("let x = 1;\nswitch (x) { default: x = 2; }");
+        assert!(out.contains("__morph_switch_tag = 0;"), "{out}");
+        assert!(!out.contains("else { __morph_switch_tag"), "{out}");
+        assert!(out.contains("default:"), "{out}");
     }
 
     #[test]

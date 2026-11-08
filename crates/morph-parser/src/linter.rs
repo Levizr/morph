@@ -757,8 +757,7 @@ struct JsSyntaxVisitor<'s> {
     function_symbols: &'s HashSet<SymbolId>,
     scoping: &'s Scoping,
     /// Literal-derived receiver kinds, used to reject constructs whose
-    /// lowering depends on a string/array receiver (`switch` on a string,
-    /// `for...in` over an array).
+    /// lowering depends on an array receiver (`for...in` over an array).
     states: &'s HashMap<String, RecvKind>,
     /// Class expressions directly assigned to a `const`/`let` binding;
     /// those lower to a named class declaration.
@@ -814,15 +813,6 @@ impl<'a> Visit<'a> for AllowedClassExpressions {
             }
         }
         oxc_ast_visit::walk::walk_variable_declaration(self, decl);
-    }
-}
-
-/// True for expressions provably holding a string at runtime.
-fn syntax_string_like(expr: &Expression<'_>, states: &HashMap<String, RecvKind>) -> bool {
-    match unwrap_ts_expr(expr) {
-        Expression::StringLiteral(_) | Expression::TemplateLiteral(_) => true,
-        Expression::Identifier(id) => states.get(id.name.as_str()) == Some(&RecvKind::Str),
-        _ => false,
     }
 }
 
@@ -905,16 +895,6 @@ impl<'a> Visit<'a> for JsSyntaxVisitor<'_> {
             }
         }
         oxc_ast_visit::walk::walk_call_expression(self, e);
-    }
-    fn visit_switch_statement(&mut self, s: &SwitchStatement<'a>) {
-        if syntax_string_like(&s.discriminant, self.states) {
-            self.out.push((
-                s.span.start,
-                "`switch` on a string",
-                "Use `if`/`else if` with `===`, or switch on a number",
-            ));
-        }
-        oxc_ast_visit::walk::walk_switch_statement(self, s);
     }
     fn visit_for_in_statement(&mut self, f: &ForInStatement<'a>) {
         let pattern_binding = match &f.left {
@@ -6878,7 +6858,6 @@ mod tests {
     #[test]
     fn part0_contract_violations_error() {
         for (body, expected) in [
-            ("const s = \"a\"; switch (s) { case \"a\": break; }", "`switch` on a string"),
             ("for (const i in [10, 20]) { console.log(i); }", "`for...in` over an array"),
             ("fetch(\"http://example.com\").then((r) => r);", "Promise `.then`/`.catch` chains"),
             ("JSON.parse(\"{}\", (k, v) => v);", "`JSON.parse` reviver arguments"),
@@ -6899,8 +6878,8 @@ mod tests {
     }
 
     #[test]
-    fn numeric_switch_and_object_for_in_stay_quiet() {
-        let content = "import { morphState } from 'morph'\nexport default function App() {\n  const level = 2;\n  switch (level) { case 2: break; default: break; }\n  const obj = { a: 1 };\n  for (const k in obj) { console.log(k); }\n  return (<div>x</div>)\n}\n";
+    fn numeric_and_string_switch_and_object_for_in_stay_quiet() {
+        let content = "import { morphState } from 'morph'\nexport default function App() {\n  const level = 2;\n  switch (level) { case 2: break; default: break; }\n  const status = \"ready\";\n  switch (status) { case \"ready\": break; default: break; }\n  const obj = { a: 1 };\n  for (const k in obj) { console.log(k); }\n  return (<div>x</div>)\n}\n";
         let errs = check(content, "App.mx");
         assert!(!codes(&errs).contains(&"mx-js-syntax"), "{errs:?}");
     }
