@@ -32,7 +32,6 @@ The current set is:
   every other position are rejected)
 - function-valued object properties (`{ handler: save }` — `JsObject`
   fields cannot store closures)
-- `for...in` over an array (object `for...in` is supported)
 - `for...in` with a destructuring binding (bind the key with a plain name,
   then destructure the value inside the loop body)
 - Promise `.then` / `.catch` chains (use `async`/`await` and `try`/`catch`)
@@ -47,7 +46,7 @@ error : mx-js-syntax : `enum` declaration cannot be translated to C++
 ```
 
 These lower correctly and are **not** errors: optional chaining `?.`,
-nullish coalescing `??`, object `for...in` / `for...of`, `switch` on
+nullish coalescing `??`, `for...in` over objects and arrays / `for...of`, `switch` on
 strings, numbers, and mixed case values (JavaScript `===` semantics with
 fallthrough), array spread, object spread and computed keys, getters and setters,
 plain-TS destructuring declarations, destructuring assignment, `for...of`
@@ -131,7 +130,6 @@ async function load() {
 | `f(...args)` / `new C(...args)` | pass each argument explicitly, or use `push`/`unshift`/`splice`/`concat` and `Math.min`/`Math.max` for variadic arrays |
 | `const C = class { … }` | a module-scope direct `const`/`let` initializer (supported), or a class declaration |
 | `{ handler: fn }` | keep `fn` as its own const and call it directly |
-| `for (const i in array)` | `for (let i = 0; i < array.length; i++)`, or `for...of` for values |
 | `for (const [k] in object)` | `for (const k in object) { … }` — bind the key plainly; destructure the value inside the body |
 | `fetch(...).then(...)` | `const r = await fetch(...)` inside `try`/`catch` |
 | `JSON.parse(text, reviver)` | parse once, then transform the value |

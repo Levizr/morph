@@ -72,7 +72,7 @@ Already shipped and **not** on the missing list:
 - **Operators with JS semantics:** `==`/`!=`, `===`/`!==`, relational, `in`, `**`/`**=`, `&&=`/`||=`/`??=`, truthiness, string concatenation, `ToNumber` in numeric contexts.
 - **JSX:** elements, fragments, and list `.map` in direct JSX-child position.
 
-`Response.json()` returns a `JsValue`; dot access is Part 3A, while `await response.json()` lowers to the synchronous reader. `JSON.parse`/`stringify` extra arguments, array `for...in`, `.then`/`.catch`, timer trailing arguments, and `new.target` are rejected by `morph check`. Class expressions are accepted only as module-scope direct `const`/`let` initializers; every other position is rejected.
+`Response.json()` returns a `JsValue`; dot access is Part 3A, while `await response.json()` lowers to the synchronous reader. `JSON.parse`/`stringify` extra arguments, `.then`/`.catch`, timer trailing arguments, and `new.target` are rejected by `morph check`. Class expressions are accepted only as module-scope direct `const`/`let` initializers; every other position is rejected.
 
 ## Part map
 
@@ -87,7 +87,7 @@ Parts are ordered so that a later part never changes a representation owned by a
 | **1D** | Per-iteration closures | 0 | loop emitter | ✅ Shipped: `for`, `for...of`, and `for...in` bindings re-box per iteration |
 | **2A** | String `switch` | 0 | statement emitter | ✅ Shipped: dispatch uses JS `===` and preserves fallthrough/`default` |
 | **2B** | `new.target` | 0 | expression emitter | Correct constructor identity in constructors and called functions |
-| **2C** | `for...in` over arrays | 0 | statement emitter | Indices, not values; own enumerable keys only |
+| **2C** | `for...in` over arrays | 0 | statement emitter | ✅ Shipped: array receivers enumerate own index keys as strings; object `for...in` unchanged |
 | **2D** | Hoisting and TDZ | 1A | declaration analysis | `var` is `undefined`; `let`/`const` use-before-declaration errors |
 | **2E** | Imported module side effects | 0 + module-bindings design | module builder | Top-level statements run once in import order |
 | **3A** | JSON return typing and dot access | 0 | `JsValue` member lowering | `JSON.parse(...).name` and `response.json().name` work |
@@ -129,7 +129,7 @@ The statuses below were probed on 2026-11-06 with `morph check`, `morph --to cpp
 
 | ID | Construct | Today | Target |
 |---|---|---|---|
-| 0.1.1 | `for (const i in [10, 20])` | ⛔ Rejected by `morph check`; object `for...in` still lowers correctly. | Lower array `for...in` to own enumerable keys when implemented (Part 2C). |
+| 0.1.1 | `for (const i in [10, 20])` | ✅ Fixed in 2C: array receivers lower to an index loop and yield `"0"`, `"1"` as strings; object `for...in` keeps enumerating object keys. | 2C |
 | 0.1.2 | `console.log(x); var x = 1` | 🟥 Prints `1`; JS prints `undefined`. | Hoist `var` with `undefined` initialization. |
 | 0.1.3 | `console.log(x); let x = 1` | 🟥 Prints `1`; JS throws a TDZ `ReferenceError`. | Emit a TDZ check/error, or reject use-before-declaration. |
 | 0.1.4 | `JSON.stringify(v, replacer, 2)` | ⛔ Rejected with a hint. | Implement `replacer`/`space` when needed. |
@@ -278,7 +278,7 @@ Module-scope assignments use a captureless lambda because C++ forbids a capture-
 
 ### 2C — `for...in` over arrays
 
-**Today:** ⛔ Array receivers are rejected; object `for...in` remains correct.
+**Today:** ✅ Shipped. Array receivers lower to an index loop over `.size()` and yield each index as a `std::string`; object `for...in` keeps `.sorted_keys()`.
 
 **Committed target:** iterate own enumerable string keys in JavaScript order. The temporary rejection stays only until the correct lowering exists.
 
@@ -566,13 +566,14 @@ Morph should expose native equivalents (`useWindow`, clipboard, storage) instead
 | `Response.json()` detection and full `Response` runtime | ✅ Shipped; dot access is Part 3A, awaited form shipped |
 | `morph check` diagnostics for rejected constructs | ✅ Shipped; grows with each part |
 | App-logic contract and docs truth-up | ✅ This pass |
-| Part 0 — contract integrity | 🚧 In progress — shipped rejections for array `for...in`, `.then`/`.catch`, JSON extra args, timer args, and `new.target`; remaining ⚠️/🟥 rows are owned by 1B (0.2.17), 2D, 2E, 3A, and 6F |
+| Part 0 — contract integrity | 🚧 In progress — shipped rejections for `.then`/`.catch`, JSON extra args, timer args, and `new.target`; remaining ⚠️/🟥 rows are owned by 1B (0.2.17), 2D, 2E, 3A, and 6F |
 | Part 1A — widening bindings | ✅ Shipped |
 | Part 1B — class model | ✅ Shipped; function-local class-declaration metadata follow-up tracked as 0.2.17 |
 | Part 1C — destructuring assignment and loop bindings | ✅ Shipped |
 | Part 1D — per-iteration closures | ✅ Shipped |
 | Part 2A — string `switch` | ✅ Shipped |
-| Parts 2B–5G — JavaScript language and standard library | 🚧 Committed — all JS-only gaps are in scope for implementation |
+| Part 2C — `for...in` over arrays | ✅ Shipped |
+| Parts 2B, 2D–5G — JavaScript language and standard library | 🚧 Committed — all JS-only gaps are in scope for implementation |
 | Parts 6A–6G — platform APIs and JSX | 🚧 Separate product work — browser globals stay out of scope |
 | Part 7 — docs and claims | 📋 Continuous |
 

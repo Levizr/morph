@@ -65,6 +65,16 @@ struct LoopContinueAction {
     update: String,
 }
 
+/// Receiver categories for `for...in` that enumerate index keys. Arrays and
+/// vectors can borrow the receiver, while strings need a concrete
+/// `std::string` temporary so literals and `JsString` convert before
+/// `.size()` is called.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ForInSequence {
+    Array,
+    Text,
+}
+
 /// Array methods lowered to `morph::js_array_*` runtime helpers.
 const JS_ARRAY_METHODS: &[&str] = &[
     "map",
@@ -3233,6 +3243,176 @@ impl<'a> CppTranslator<'a> {
         lines
     }
 
+    /// Classify a `for...in` receiver that enumerates index keys rather than
+    /// values. Both arrays/vectors and strings have `.size()`; `None` keeps
+    /// the object-key path.
+    fn for_in_sequence(&self, expr: &Expression<'a>) -> Option<ForInSequence> {
+        let expr = Self::unwrap_expr(expr);
+        match expr {
+            Expression::StringLiteral(_) | Expression::TemplateLiteral(_) => {
+                Some(ForInSequence::Text)
+            }
+            _ => {
+                let ty = self.infer_type_from_init(expr)?;
+                let bare = Self::bare_type(&ty);
+                if bare == "JsArray" || bare.starts_with("std::vector<") {
+                    Some(ForInSequence::Array)
+                } else if bare == "std::string" || bare == "JsString" {
+                    Some(ForInSequence::Text)
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    fn emit_for_in_sequence_captured(
+        &mut self,
+        f: &ForInStatement<'a>,
+        name: &str,
+        sequence: ForInSequence,
+    ) -> Option<String> {
+        let right = self.emit_expression(&f.right);
+        let serial = self.destructure_count;
+        self.destructure_count += 1;
+        let seq_temp = format!("__morph_for_in_seq_{serial}");
+        let index_temp = format!("__morph_for_in_index_{serial}");
+        let ty = "std::string";
+        let boxed_type = format!("std::shared_ptr<{ty}>");
+        self.ctx.need(ty);
+        self.ctx.need(&boxed_type);
+        self.ctx.need("std::make_shared");
+        let previous = self.ctx.var_types.get(name).cloned();
+        let was_shared = self.ctx.shared_ptr_vars.contains(name);
+        self.ctx.var_types.insert(name.to_string(), boxed_type.clone());
+        self.ctx.shared_ptr_vars.insert(name.to_string());
+
+        let old_indent = self.ctx.indent_level;
+        let mut lines = vec![match sequence {
+            ForInSequence::Array => {
+                format!("{}const auto& {} = {};", self.indent(), seq_temp, right)
+            }
+            ForInSequence::Text => {
+                format!("{}std::string {} = {};", self.indent(), seq_temp, right)
+            }
+        }];
+        self.ctx.indent_level += 1;
+        lines.push(format!(
+            "{}for (std::size_t {} = 0; {} < {}.size(); ++{}) {{",
+            self.indent(),
+            index_temp,
+            index_temp,
+            seq_temp,
+            index_temp
+        ));
+        lines.push(format!(
+            "{}std::shared_ptr<{}> {} = std::make_shared<{}>(std::to_string({}));",
+            self.indent(),
+            ty,
+            name,
+            ty,
+            index_temp
+        ));
+        self.ctx.indent_level += 1;
+        self.loop_continue_actions.push(None);
+        lines.extend(self.emit_loop_body_lines(&f.body));
+        self.loop_continue_actions.pop();
+        self.ctx.indent_level = old_indent;
+        lines.push(format!("{}}}", self.indent()));
+
+        match previous {
+            Some(previous) => {
+                self.ctx.var_types.insert(name.to_string(), previous);
+            }
+            None => {
+                self.ctx.var_types.remove(name);
+            }
+        }
+        if was_shared {
+            self.ctx.shared_ptr_vars.insert(name.to_string());
+        } else {
+            self.ctx.shared_ptr_vars.remove(name);
+        }
+        Some(lines.join("\n"))
+    }
+
+    fn emit_for_in_sequence(
+        &mut self,
+        f: &ForInStatement<'a>,
+        sequence: ForInSequence,
+    ) -> Option<String> {
+        let declaration_name = match &f.left {
+            ForStatementLeft::VariableDeclaration(declaration) => {
+                let first = declaration.declarations.first()?;
+                let BindingPattern::BindingIdentifier(id) = &first.id else {
+                    return None;
+                };
+                Some(id.name.to_string())
+            }
+            _ => None,
+        };
+        let right = self.emit_expression(&f.right);
+        let serial = self.destructure_count;
+        self.destructure_count += 1;
+        let seq_temp = format!("__morph_for_in_seq_{serial}");
+        let index_temp = format!("__morph_for_in_index_{serial}");
+        self.ctx.need("std::string");
+
+        let previous =
+            declaration_name.as_ref().and_then(|name| self.ctx.var_types.get(name).cloned());
+        if let Some(name) = &declaration_name {
+            self.ctx.var_types.insert(name.clone(), "std::string".to_string());
+        }
+
+        let old_indent = self.ctx.indent_level;
+        let mut lines = vec![match sequence {
+            ForInSequence::Array => {
+                format!("{}const auto& {} = {};", self.indent(), seq_temp, right)
+            }
+            ForInSequence::Text => {
+                format!("{}std::string {} = {};", self.indent(), seq_temp, right)
+            }
+        }];
+        self.ctx.indent_level += 1;
+        lines.push(format!(
+            "{}for (std::size_t {} = 0; {} < {}.size(); ++{}) {{",
+            self.indent(),
+            index_temp,
+            index_temp,
+            seq_temp,
+            index_temp
+        ));
+        if let Some(name) = &declaration_name {
+            lines.push(format!(
+                "{}std::string {} = std::to_string({});",
+                self.indent(),
+                name,
+                index_temp
+            ));
+        } else {
+            let target = self.emit_for_left(&f.left);
+            lines.push(format!("{}{} = std::to_string({});", self.indent(), target, index_temp));
+        }
+        self.ctx.indent_level += 1;
+        self.loop_continue_actions.push(None);
+        lines.extend(self.emit_loop_body_lines(&f.body));
+        self.loop_continue_actions.pop();
+        self.ctx.indent_level = old_indent;
+        lines.push(format!("{}}}", self.indent()));
+
+        if let Some(name) = declaration_name {
+            match previous {
+                Some(ty) => {
+                    self.ctx.var_types.insert(name, ty);
+                }
+                None => {
+                    self.ctx.var_types.remove(&name);
+                }
+            }
+        }
+        Some(lines.join("\n"))
+    }
+
     fn emit_for_in_captured(&mut self, f: &ForInStatement<'a>) -> Option<String> {
         let ForStatementLeft::VariableDeclaration(declaration) = &f.left else {
             return None;
@@ -3250,6 +3430,9 @@ impl<'a> CppTranslator<'a> {
         let name = id.name.to_string();
         if !self.is_captured_name(&name) {
             return None;
+        }
+        if let Some(sequence) = self.for_in_sequence(&f.right) {
+            return self.emit_for_in_sequence_captured(f, &name, sequence);
         }
         let right = self.emit_expression(&f.right);
         let is_obj = if let Expression::Identifier(id) = &f.right {
@@ -3310,6 +3493,11 @@ impl<'a> CppTranslator<'a> {
 
     fn emit_for_in(&mut self, f: &ForInStatement<'a>) -> String {
         if let Some(code) = self.emit_for_in_captured(f) {
+            return code;
+        }
+        if let Some(sequence) = self.for_in_sequence(&f.right)
+            && let Some(code) = self.emit_for_in_sequence(f, sequence)
+        {
             return code;
         }
         let left = self.emit_for_left(&f.left);
@@ -9218,6 +9406,81 @@ mod tests {
         let out = t.emit_for_in(f);
         assert!(out.contains("obj.sorted_keys()"), "{out}");
         assert!(!out.contains(".keys()"), "{out}");
+    }
+
+    #[test]
+    fn for_in_over_array_iterates_indices_as_strings() {
+        let out = translate_analyzed(
+            "function main(): void {\n\
+                 const xs = [10, 20];\n\
+                 for (const index in xs) {\n\
+                     console.log(index);\n\
+                 }\n\
+             }",
+        );
+        assert!(out.contains("const auto& __morph_for_in_seq_0 = xs;"), "{out}");
+        assert!(
+            out.contains(
+                "for (std::size_t __morph_for_in_index_0 = 0; __morph_for_in_index_0 < __morph_for_in_seq_0.size(); ++__morph_for_in_index_0) {"
+            ),
+            "{out}"
+        );
+        assert!(
+            out.contains("std::string index = std::to_string(__morph_for_in_index_0);"),
+            "{out}"
+        );
+        assert!(!out.contains("for (auto index : xs)"), "{out}");
+    }
+
+    #[test]
+    fn captured_array_for_in_boxes_the_index_key() {
+        let out = translate_analyzed(
+            "function main(): void {\n\
+                 const xs = [10, 20];\n\
+                 for (const key in xs) {\n\
+                     const read = () => key;\n\
+                     console.log(read());\n\
+                 }\n\
+             }",
+        );
+        assert!(
+            out.contains(
+                "std::shared_ptr<std::string> key = std::make_shared<std::string>(std::to_string(__morph_for_in_index_0));"
+            ),
+            "{out}"
+        );
+        assert!(out.contains("auto read = [&, key]() -> auto { return (*key); };"), "{out}");
+    }
+
+    #[test]
+    fn for_in_over_string_literal_iterates_index_keys() {
+        let out = translate_analyzed(
+            "function main(): void {\n\
+                 for (const index in \"ab\") {\n\
+                     console.log(index);\n\
+                 }\n\
+             }",
+        );
+        assert!(out.contains("std::string __morph_for_in_seq_0 = \"ab\";"), "{out}");
+        assert!(
+            out.contains("std::string index = std::to_string(__morph_for_in_index_0);"),
+            "{out}"
+        );
+        assert!(!out.contains("for (auto index : \"ab\")"), "{out}");
+    }
+
+    #[test]
+    fn for_in_over_typed_string_iterates_index_keys() {
+        let out = translate_analyzed(
+            "function main(): void {\n\
+                 const label: string = \"ab\";\n\
+                 for (const index in label) {\n\
+                     console.log(index);\n\
+                 }\n\
+             }",
+        );
+        assert!(out.contains("std::string __morph_for_in_seq_0 = label;"), "{out}");
+        assert!(!out.contains("for (auto index : label)"), "{out}");
     }
 
     #[test]

@@ -756,9 +756,6 @@ struct JsSyntaxVisitor<'s> {
     out: Vec<(u32, &'static str, &'static str)>,
     function_symbols: &'s HashSet<SymbolId>,
     scoping: &'s Scoping,
-    /// Literal-derived receiver kinds, used to reject constructs whose
-    /// lowering depends on an array receiver (`for...in` over an array).
-    states: &'s HashMap<String, RecvKind>,
     /// Class expressions directly assigned to a `const`/`let` binding;
     /// those lower to a named class declaration.
     class_expression_starts: &'s HashSet<u32>,
@@ -813,15 +810,6 @@ impl<'a> Visit<'a> for AllowedClassExpressions {
             }
         }
         oxc_ast_visit::walk::walk_variable_declaration(self, decl);
-    }
-}
-
-/// True for expressions provably holding an array at runtime.
-fn syntax_array_like(expr: &Expression<'_>, states: &HashMap<String, RecvKind>) -> bool {
-    match unwrap_ts_expr(expr) {
-        Expression::ArrayExpression(_) => true,
-        Expression::Identifier(id) => states.get(id.name.as_str()) == Some(&RecvKind::Arr),
-        _ => false,
     }
 }
 
@@ -915,13 +903,6 @@ impl<'a> Visit<'a> for JsSyntaxVisitor<'_> {
                 f.left.span().start,
                 "`for...in` with a destructuring binding",
                 "Bind the key with a plain name, then destructure the value inside the loop body",
-            ));
-        }
-        if syntax_array_like(&f.right, self.states) {
-            self.out.push((
-                f.span.start,
-                "`for...in` over an array",
-                "Iterate indices with `for (let i = 0; i < xs.length; i++)`, or use `for...of` for values",
             ));
         }
         oxc_ast_visit::walk::walk_for_in_statement(self, f);
@@ -1206,23 +1187,16 @@ impl<'a> Visit<'a> for FunctionSymbolCollector {
     }
 }
 
-fn check_js_syntax(
-    program: &Program,
-    content: &str,
-    file_path: &str,
-    offsets: &[usize],
-) -> Vec<LintError> {
+fn check_js_syntax(program: &Program, file_path: &str, offsets: &[usize]) -> Vec<LintError> {
     let semantic = SemanticBuilder::new().with_build_nodes(true).build(program).semantic;
     let mut functions = FunctionSymbolCollector { out: HashSet::new() };
     functions.visit_program(program);
-    let states = collect_state_kinds(program, content);
     let mut allowed_classes = AllowedClassExpressions { starts: HashSet::new(), function_depth: 0 };
     allowed_classes.visit_program(program);
     let mut st = JsSyntaxVisitor {
         out: Vec::new(),
         function_symbols: &functions.out,
         scoping: semantic.scoping(),
-        states: &states,
         class_expression_starts: &allowed_classes.starts,
     };
     st.visit_program(program);
@@ -1978,7 +1952,7 @@ pub fn check(source: &str, file_path: &str) -> Vec<LintError> {
         // Unemittable operators (`typeof`, `delete`, `>>>`, ...).
         errors.extend(check_js_operators(&ret.program, file_path, &offsets));
         // Unhandleable syntax (generators, `with`, call spread, ...).
-        errors.extend(check_js_syntax(&ret.program, source, file_path, &offsets));
+        errors.extend(check_js_syntax(&ret.program, file_path, &offsets));
         // Unimplemented methods on provably-typed receivers.
         errors.extend(check_js_method_calls(&ret.program, source, file_path, &offsets));
         // Unsupported members on provable `Window` handles.
@@ -6858,7 +6832,6 @@ mod tests {
     #[test]
     fn part0_contract_violations_error() {
         for (body, expected) in [
-            ("for (const i in [10, 20]) { console.log(i); }", "`for...in` over an array"),
             ("fetch(\"http://example.com\").then((r) => r);", "Promise `.then`/`.catch` chains"),
             ("JSON.parse(\"{}\", (k, v) => v);", "`JSON.parse` reviver arguments"),
             ("JSON.stringify({}, null, 2);", "`JSON.stringify` replacer/space arguments"),
@@ -6878,8 +6851,8 @@ mod tests {
     }
 
     #[test]
-    fn numeric_and_string_switch_and_object_for_in_stay_quiet() {
-        let content = "import { morphState } from 'morph'\nexport default function App() {\n  const level = 2;\n  switch (level) { case 2: break; default: break; }\n  const status = \"ready\";\n  switch (status) { case \"ready\": break; default: break; }\n  const obj = { a: 1 };\n  for (const k in obj) { console.log(k); }\n  return (<div>x</div>)\n}\n";
+    fn switch_and_for_in_stay_quiet() {
+        let content = "import { morphState } from 'morph'\nexport default function App() {\n  const level = 2;\n  switch (level) { case 2: break; default: break; }\n  const status = \"ready\";\n  switch (status) { case \"ready\": break; default: break; }\n  const obj = { a: 1 };\n  for (const k in obj) { console.log(k); }\n  const xs = [10, 20];\n  for (const i in xs) { console.log(i); }\n  return (<div>x</div>)\n}\n";
         let errs = check(content, "App.mx");
         assert!(!codes(&errs).contains(&"mx-js-syntax"), "{errs:?}");
     }

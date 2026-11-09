@@ -630,14 +630,16 @@ impl EscapeAnalyzer {
             }
             Statement::ForOfStatement(f) => {
                 self.analyze_expression(&f.right);
-                self.record_for_target(&f.left);
+                self.record_for_target(&f.left, false);
                 self.loop_depth += 1;
                 self.analyze_statement(&f.body);
                 self.loop_depth -= 1;
             }
             Statement::ForInStatement(f) => {
                 self.analyze_expression(&f.right);
-                self.record_for_target(&f.left);
+                // `for...in` keys are always strings, including assignment
+                // targets, so a key binding never widens the target's type.
+                self.record_for_target(&f.left, true);
                 self.loop_depth += 1;
                 self.analyze_statement(&f.body);
                 self.loop_depth -= 1;
@@ -966,7 +968,8 @@ impl EscapeAnalyzer {
     /// Record a for-of/for-in target. Declarations register their bound
     /// names so a closure in the body is recognized as capturing the loop
     /// binding; assignment targets only rebind an existing variable.
-    fn record_for_target(&mut self, left: &ForStatementLeft) {
+    fn record_for_target(&mut self, left: &ForStatementLeft, key_is_text: bool) {
+        let target_class = if key_is_text { OperandClass::Text } else { OperandClass::Other };
         match left {
             ForStatementLeft::VariableDeclaration(d) => {
                 let is_global = self.current_scope_depth == 0;
@@ -983,7 +986,7 @@ impl EscapeAnalyzer {
                                 is_mutable,
                                 decl.init.as_ref(),
                             );
-                            self.record_def(id.name.as_str(), OperandClass::Other, None, None);
+                            self.record_def(id.name.as_str(), target_class, None, None);
                         }
                         pattern => {
                             self.analyze_destructured_pattern(
@@ -998,7 +1001,7 @@ impl EscapeAnalyzer {
             }
             ForStatementLeft::AssignmentTargetIdentifier(id) => {
                 self.note_unbounded_native_mutation(id.name.as_str());
-                self.record_def(id.name.as_str(), OperandClass::Other, None, None);
+                self.record_def(id.name.as_str(), target_class, None, None);
             }
             _ => {}
         }
@@ -2711,6 +2714,12 @@ mod tests {
             "    return doubled;\n}",
         ));
         assert_eq!(result.escapes.get("doubled"), Some(&EscapeKind::Return));
+    }
+
+    #[test]
+    fn for_in_assignment_target_keeps_string_key() {
+        let result = analyze_source("let key = \"\";\nfor (key in [1, 2]) {\nconsole.log(key);\n}");
+        assert!(result.widens.get("key").is_none(), "{:?}", result.widens.get("key"));
     }
 
     #[test]

@@ -1,0 +1,35 @@
+export const windowConfig = { title: "pass-array-for-in", width: 800, height: 600 }
+
+// `for...in` over an array enumerates own index keys as strings, in
+// ascending order. Object `for...in` still enumerates object keys.
+export default function App() {
+  let keys = ""
+  for (const index in [10, 20]) {
+    keys = keys + index
+  }
+
+  const values = [3, 4]
+  let score = 0
+  for (const index in values) {
+    if (index === "0") score = score + 1
+    if (index === "1") score = score + 10
+    if (index === 0) score = score + 100
+  }
+
+  const obj = { a: 1, b: 2 }
+  let objKeys = ""
+  for (const key in obj) {
+    objKeys = objKeys + key
+  }
+
+  let textKeys = ""
+  for (const index in "hi") {
+    textKeys = textKeys + index
+  }
+
+  return (
+    <body>
+      <div>{keys} {score} {objKeys} {textKeys}</div>
+    </body>
+  )
+}

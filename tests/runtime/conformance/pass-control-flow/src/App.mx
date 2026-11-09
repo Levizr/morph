@@ -1,8 +1,7 @@
 export const windowConfig = { title: "pass-control-flow", width: 800, height: 600 }
 
-// Numeric switch and object for...in keep their native lowering. String
-// switch and array for...in are rejected by `morph check` until their
-// JS semantics are implemented.
+// Numeric switch and object for...in stay covered here; string switch and
+// array for...in have dedicated conformance fixtures.
 export default function App() {
   const level = 2
   let label = ""

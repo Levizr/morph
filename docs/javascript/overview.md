@@ -106,6 +106,7 @@ Binary (`+`, `-`, `*`, `/`, `**`, `===`, `!==`, `==`, `!=`, `<`, `>`, etc.), una
 - Destructuring declarations (including at the top of a component body) and callable/event payloads, including defaults (`{ a = 1 }`), rest elements (`{ ...rest }`, `[head, ...tail]`), and computed keys (`{ [key]: value }`). Defaults are lazy and apply only when the value is `undefined`; computed keys evaluate once.
 - Destructuring assignments and `for...of` binding patterns. The right-hand side is evaluated once, so `[a, b] = [b, a]` swaps correctly; defaults, rest, computed keys, nested patterns, and member targets (`[box.label] = ...`) all lower. `for...in` destructuring is rejected — bind the key with a plain name and destructure inside the loop body.
 - Per-iteration `let`/`const` bindings in `for`, `for...of`, and `for...in`. A closure created during the loop keeps that iteration's value (`for (let i = 0; i < 3; i++) { fns[i] = () => i }` records `0`, `1`, `2`), and closures sharing one iteration's scalar binding see each other's mutations. `continue` preserves the same per-iteration copy semantics. Class and container values keep their existing carriers.
+- Array `for...in` enumerates own index keys as strings (`for (const i in [10, 20])` yields `"0"`, `"1"`); object `for...in` keeps enumerating object keys.
 
 ## What's Not Supported Yet
 
@@ -124,7 +125,7 @@ Binary (`+`, `-`, `*`, `/`, `**`, `===`, `!==`, `==`, `!=`, `<`, `>`, etc.), una
 - Class expressions outside a module-scope direct `const`/`let` initializer
   (module-scope initializers lower to a named class; function-local and
   every other position are rejected)
-- Array `for...in`, destructuring in `for...in`, `new.target`, and trailing
+- Destructuring in `for...in`, `new.target`, and trailing
   timer arguments (`setTimeout(fn, ms, ...args)`) — rejected by `morph check`
   with a precise error
 - C++ keywords used as JS binding or class member names (`double`,
