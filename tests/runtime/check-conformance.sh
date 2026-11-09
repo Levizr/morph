@@ -74,6 +74,7 @@ run_pass pass-window
 run_pass pass-late-values
 run_pass pass-control-flow
 run_pass pass-array-for-in
+run_pass pass-new-target
 run_pass pass-string-switch
 run_pass pass-widening
 run_pass pass-classes
@@ -114,7 +115,6 @@ run_fail fail-for-in-pattern mx-js-syntax
 run_fail fail-then-chain mx-js-syntax
 run_fail fail-json-args mx-js-syntax
 run_fail fail-timer-args mx-js-syntax
-run_fail fail-new-target mx-js-syntax
 run_fail fail-lint-severity mx-key-misuse
 
 echo "[conformance] $checks checks, $failures failures"

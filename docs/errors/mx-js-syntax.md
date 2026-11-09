@@ -37,7 +37,6 @@ The current set is:
 - Promise `.then` / `.catch` chains (use `async`/`await` and `try`/`catch`)
 - `JSON.parse` reviver and `JSON.stringify` replacer/space arguments
 - trailing timer arguments (`setTimeout(fn, ms, ...args)`)
-- `new.target`
 
 ```
 error : mx-js-syntax : `enum` declaration cannot be translated to C++
@@ -46,7 +45,8 @@ error : mx-js-syntax : `enum` declaration cannot be translated to C++
 ```
 
 These lower correctly and are **not** errors: optional chaining `?.`,
-nullish coalescing `??`, `for...in` over objects and arrays / `for...of`, `switch` on
+nullish coalescing `??`, `for...in` over objects and arrays / `for...of`, `new.target`
+in constructors and functions, `switch` on
 strings, numbers, and mixed case values (JavaScript `===` semantics with
 fallthrough), array spread, object spread and computed keys, getters and setters,
 plain-TS destructuring declarations, destructuring assignment, `for...of`
@@ -135,7 +135,6 @@ async function load() {
 | `JSON.parse(text, reviver)` | parse once, then transform the value |
 | `JSON.stringify(value, replacer, 2)` | stringify the value, then format the result |
 | `setTimeout(fn, ms, a, b)` | `setTimeout(() => fn(a, b), ms)` |
-| `new.target` | an explicit constructor-identity check |
 | generator / `yield` | a state machine with `morphState` |
 | `with (o) { ... }` | explicit `o.` qualification |
 | labeled `break`/`continue` | a flag variable or early return |

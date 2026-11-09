@@ -684,6 +684,7 @@ impl<'a> CppEmitter<'a> {
             &moved_classes,
             &wrapped,
         );
+        let api_header = morpher::codegen::js_comparison::hoist_js_cmp_preludes(&api_header);
         std::fs::write(output_dir.join("morph_api.h"), api_header)?;
 
         // Route manifest: RID consts for every route.mx (`app::routes::`).
@@ -2650,7 +2651,12 @@ fn move_class_entry(
     bindings: &[std::collections::HashMap<String, String>],
 ) -> Option<(String, String)> {
     let (ns, inner) = logic_emitter::split_module_ns(entry)?;
-    let first_line = inner.trim_start().lines().next().unwrap_or("");
+    // Snippets that compare values carry a generated `morph::js_cmp`
+    // prelude before the class body; ignore it when locating the
+    // declaration. The prelude travels with the class and is hoisted
+    // into the final header.
+    let probe = morpher::codegen::js_comparison::strip_js_cmp_preludes(&inner);
+    let first_line = probe.trim_start().lines().next().unwrap_or("");
     let class_name = first_line
         .strip_prefix("class ")
         .or_else(|| first_line.strip_prefix("struct "))

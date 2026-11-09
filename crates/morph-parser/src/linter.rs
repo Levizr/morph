@@ -940,13 +940,6 @@ impl<'a> Visit<'a> for JsSyntaxVisitor<'_> {
                     "Use a `.cpp` helper or plain string checks instead",
                 ));
             }
-            Expression::NewTarget(n) => {
-                self.out.push((
-                    n.span.start,
-                    "`new.target`",
-                    "Check constructor identity explicitly instead of using `new.target`",
-                ));
-            }
             Expression::ClassExpression(c)
                 if !self.class_expression_starts.contains(&c.span.start) =>
             {
@@ -6836,7 +6829,6 @@ mod tests {
             ("JSON.parse(\"{}\", (k, v) => v);", "`JSON.parse` reviver arguments"),
             ("JSON.stringify({}, null, 2);", "`JSON.stringify` replacer/space arguments"),
             ("setTimeout(() => {}, 0, 1);", "timer callback arguments"),
-            ("function f() { return new.target; }", "`new.target`"),
         ] {
             let content = format!(
                 "import {{ morphState }} from 'morph'\nexport default function App() {{\n  {body}\n  return (<div>x</div>)\n}}\n"

@@ -56,6 +56,14 @@ struct std::formatter<JsString> {
 };
 
 template <>
+struct std::formatter<JsConstructor> {
+    constexpr auto parse(auto& ctx) { return ctx.begin(); }
+    auto format(const JsConstructor& v, auto& ctx) const {
+        return std::format_to(ctx.out(), "[class {}]", v.name);
+    }
+};
+
+template <>
 struct std::formatter<JsValue> {
     constexpr auto parse(auto& ctx) { return ctx.begin(); }
     auto format(const JsValue& v, auto& ctx) const {
@@ -67,6 +75,10 @@ struct std::formatter<JsValue> {
         if (v.is_array()) return std::format_to(ctx.out(), "[object Array]");
         if (v.is_object()) return std::format_to(ctx.out(), "[object Object]");
         if (v.is_function()) return std::format_to(ctx.out(), "function");
+        if (v.is_constructor()) {
+            return std::format_to(ctx.out(), "[class {}]",
+                                  std::get<JsConstructor>(v.inner).name);
+        }
         return std::format_to(ctx.out(), "undefined");
     }
 };

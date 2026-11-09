@@ -72,7 +72,7 @@ Already shipped and **not** on the missing list:
 - **Operators with JS semantics:** `==`/`!=`, `===`/`!==`, relational, `in`, `**`/`**=`, `&&=`/`||=`/`??=`, truthiness, string concatenation, `ToNumber` in numeric contexts.
 - **JSX:** elements, fragments, and list `.map` in direct JSX-child position.
 
-`Response.json()` returns a `JsValue`; dot access is Part 3A, while `await response.json()` lowers to the synchronous reader. `JSON.parse`/`stringify` extra arguments, `.then`/`.catch`, timer trailing arguments, and `new.target` are rejected by `morph check`. Class expressions are accepted only as module-scope direct `const`/`let` initializers; every other position is rejected.
+`Response.json()` returns a `JsValue`; dot access is Part 3A, while `await response.json()` lowers to the synchronous reader. `JSON.parse`/`stringify` extra arguments, `.then`/`.catch`, and timer trailing arguments are rejected by `morph check`. Class expressions are accepted only as module-scope direct `const`/`let` initializers; every other position is rejected.
 
 ## Part map
 
@@ -86,7 +86,7 @@ Parts are ordered so that a later part never changes a representation owned by a
 | **1C** | Destructuring assignment and loop bindings | 0 | assignment/pattern emitter | ✅ Shipped: `[a,b] = ...`, `({c} = o)`, `for (const [k,v] of ...)` lower |
 | **1D** | Per-iteration closures | 0 | loop emitter | ✅ Shipped: `for`, `for...of`, and `for...in` bindings re-box per iteration |
 | **2A** | String `switch` | 0 | statement emitter | ✅ Shipped: dispatch uses JS `===` and preserves fallthrough/`default` |
-| **2B** | `new.target` | 0 | expression emitter | Correct constructor identity in constructors and called functions |
+| **2B** | `new.target` | 0 | expression emitter | ✅ Shipped: constructors see the most-derived target; field initializers, methods, and plain functions see `undefined` |
 | **2C** | `for...in` over arrays | 0 | statement emitter | ✅ Shipped: array receivers enumerate own index keys as strings; object `for...in` unchanged |
 | **2D** | Hoisting and TDZ | 1A | declaration analysis | `var` is `undefined`; `let`/`const` use-before-declaration errors |
 | **2E** | Imported module side effects | 0 + module-bindings design | module builder | Top-level statements run once in import order |
@@ -151,7 +151,7 @@ The statuses below were probed on 2026-11-06 with `morph check`, `morph --to cpp
 | 0.2.8 | `#private` fields | ✅ Fixed in 1B: mangled to a private member with `->`/`::` access. | 1B |
 | 0.2.9 | `fetch(...).then(...)`; `r.text().then(...)` | ⛔ Rejected by `morph check` until 3C ships the supported compatibility chain. | 3C |
 | 0.2.10 | `setTimeout(fn, 0, 1, 2)` | ⛔ Rejected by `morph check`; forwarding is 3D. | 3D |
-| 0.2.11 | `new.target` | ⛔ Rejected by `morph check`; lowering/identity is 2B. | 2B |
+| 0.2.11 | `new.target` | ✅ Fixed in 2B: constructors observe the most-derived target (including parameter defaults, initializer lists, and arrows lexically nested in the constructor); field initializers, methods, and plain functions observe `undefined`; class identifiers compare as constructor values. | 2B |
 | 0.2.12 | `for (const [k, v] of Object.entries(o))` | ✅ Fixed in 1C: declaration and assignment patterns lower through a synthetic loop item; `for...in` destructuring is rejected by `morph check`. | 1C |
 | 0.2.13 | `JSON.parse(s).name`; `response.json().name` | `JsValue` has no `.name`; bracket access works. | 3A |
 | 0.2.14 | `await response.json()` | ✅ Fixed in 3B: awaited body readers lower to synchronous calls without `co_await`. | 3B |
@@ -268,13 +268,13 @@ Module-scope assignments use a captureless lambda because C++ forbids a capture-
 
 ### 2B — `new.target`
 
-**Today:** ⛔ `morph check` rejects `new.target` instead of emitting undeclared `JsNull{}`.
+**Today:** ✅ Shipped. Class construction routes through `morph::js_new<T>` / `morph::js_new_unique<T>`, which push the most-derived constructor identity for the constructor call. `new.target` reads that stack inside constructors (including parameter defaults, initializer lists, and arrows lexically nested there); field initializers, methods, function expressions, and plain functions read `undefined`. Class identifiers in comparisons lower to `morph::js_constructor_value<T>`, so `new.target === Base` keeps JS identity semantics.
 
 **Committed target:** implement constructor identity for `new.target` checks. Do not emit an undeclared placeholder, and do not leave the construct permanently rejected.
 
 **Depends on:** Part 0.
 
-**Exit:** `new.target` inside a constructor and inside a called function behave like JS.
+**Exit:** ✅ `new.target` inside a constructor and inside a called function behave like JS. `tests/translate/test_new_target.py` covers base/derived identity, parameter defaults, field initializers, methods, plain functions, nested arrows, truthiness, loose/strict equality, and printing; `tests/runtime/conformance/pass-new-target` builds in project mode.
 
 ### 2C — `for...in` over arrays
 
@@ -566,14 +566,15 @@ Morph should expose native equivalents (`useWindow`, clipboard, storage) instead
 | `Response.json()` detection and full `Response` runtime | ✅ Shipped; dot access is Part 3A, awaited form shipped |
 | `morph check` diagnostics for rejected constructs | ✅ Shipped; grows with each part |
 | App-logic contract and docs truth-up | ✅ This pass |
-| Part 0 — contract integrity | 🚧 In progress — shipped rejections for `.then`/`.catch`, JSON extra args, timer args, and `new.target`; remaining ⚠️/🟥 rows are owned by 1B (0.2.17), 2D, 2E, 3A, and 6F |
+| Part 0 — contract integrity | 🚧 In progress — shipped rejections for `.then`/`.catch`, JSON extra args, and timer args; remaining ⚠️/🟥 rows are owned by 1B (0.2.17), 2D, 2E, 3A, and 6F |
 | Part 1A — widening bindings | ✅ Shipped |
 | Part 1B — class model | ✅ Shipped; function-local class-declaration metadata follow-up tracked as 0.2.17 |
 | Part 1C — destructuring assignment and loop bindings | ✅ Shipped |
 | Part 1D — per-iteration closures | ✅ Shipped |
 | Part 2A — string `switch` | ✅ Shipped |
+| Part 2B — `new.target` | ✅ Shipped |
 | Part 2C — `for...in` over arrays | ✅ Shipped |
-| Parts 2B, 2D–5G — JavaScript language and standard library | 🚧 Committed — all JS-only gaps are in scope for implementation |
+| Parts 2D–5G — JavaScript language and standard library | 🚧 Committed — all JS-only gaps are in scope for implementation |
 | Parts 6A–6G — platform APIs and JSX | 🚧 Separate product work — browser globals stay out of scope |
 | Part 7 — docs and claims | 📋 Continuous |
 

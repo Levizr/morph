@@ -1,0 +1,27 @@
+export const windowConfig = { title: "pass-new-target", width: 800, height: 600 }
+
+class Base {
+  same = false
+  constructor() {
+    this.same = new.target === Base
+  }
+}
+
+class Derived extends Base {}
+
+export default function App() {
+  const base = new Base()
+  const derived = new Derived()
+
+  function make(): boolean {
+    const inner = () => new.target === undefined
+    return inner()
+  }
+
+  console.log(base.same, derived.same, make())
+  return (
+    <body>
+      <div>new.target lowers to constructor identity</div>
+    </body>
+  )
+}

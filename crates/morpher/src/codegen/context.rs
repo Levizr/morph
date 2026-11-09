@@ -82,6 +82,10 @@ pub struct Ctx {
     pub super_class_name: Option<String>,
     /// True while emitting a `static` method body: `this` denotes the class.
     pub in_static_method: bool,
+    /// True while emitting a class constructor body (and its parameter
+    /// defaults/initializer list). `new.target` reads the active target;
+    /// plain functions and methods emit `undefined`.
+    pub in_constructor: bool,
     pub event_handler: bool,
     pub state_vars: HashMap<String, String>,
     pub js_object_params: HashSet<String>,
@@ -121,6 +125,7 @@ impl Default for Ctx {
             class_name: None,
             super_class_name: None,
             in_static_method: false,
+            in_constructor: false,
             event_handler: false,
             state_vars: HashMap::new(),
             js_object_params: HashSet::new(),
@@ -161,6 +166,7 @@ impl Ctx {
             class_name: self.class_name.clone(),
             super_class_name: self.super_class_name.clone(),
             in_static_method: self.in_static_method,
+            in_constructor: self.in_constructor,
             event_handler: self.event_handler,
             state_vars: self.state_vars.clone(),
             js_object_params: self.js_object_params.clone(),

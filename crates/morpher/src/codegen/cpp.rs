@@ -2225,10 +2225,18 @@ impl<'a> CppTranslator<'a> {
         };
         let new_class_alloc: Option<(String, String)> =
             match (&new_class_name, &new_class_args, &escape_kind) {
-                (Some(class_name), Some(args), EscapeKind::Return | EscapeKind::Global) => Some((
-                    format!("std::unique_ptr<{}>", class_name),
-                    format!("std::make_unique<{}>({})", class_name, args),
-                )),
+                (Some(class_name), Some(args), EscapeKind::Return | EscapeKind::Global) => {
+                    self.ctx.need("JsValue");
+                    let call_args = if args.is_empty() {
+                        format!("\"{class_name}\"")
+                    } else {
+                        format!("\"{class_name}\", {args}")
+                    };
+                    Some((
+                        format!("std::unique_ptr<{}>", class_name),
+                        format!("morph::js_new_unique<{}>({})", class_name, call_args),
+                    ))
+                }
                 (
                     Some(class_name),
                     Some(args),
@@ -2236,13 +2244,21 @@ impl<'a> CppTranslator<'a> {
                     | EscapeKind::MultipleRefs
                     | EscapeKind::AsyncBoundary
                     | EscapeKind::None,
-                ) => Some((
-                    // Non-escaping `new` keeps shared ownership: callers may
-                    // hold the value in `shared_ptr` parameters a stack value
-                    // could not satisfy.
-                    format!("std::shared_ptr<{}>", class_name),
-                    format!("std::make_shared<{}>({})", class_name, args),
-                )),
+                ) => {
+                    self.ctx.need("JsValue");
+                    let call_args = if args.is_empty() {
+                        format!("\"{class_name}\"")
+                    } else {
+                        format!("\"{class_name}\", {args}")
+                    };
+                    Some((
+                        // Non-escaping `new` keeps shared ownership: callers may
+                        // hold the value in `shared_ptr` parameters a stack value
+                        // could not satisfy.
+                        format!("std::shared_ptr<{}>", class_name),
+                        format!("morph::js_new<{}>({})", class_name, call_args),
+                    ))
+                }
                 _ => None,
             };
         let (alloc_type, init_code) = match new_class_alloc {
@@ -2526,6 +2542,7 @@ impl<'a> CppTranslator<'a> {
                 }
             }
             Expression::NullLiteral(_) => Some("JsNull".to_string()),
+            Expression::NewTarget(_) => Some("JsValue".to_string()),
             Expression::Identifier(id) => {
                 if id.name.as_str() == "undefined" {
                     Some("JsUndefined".to_string())
@@ -3992,6 +4009,11 @@ impl<'a> CppTranslator<'a> {
         if f.generator {
             return Some(format!("/* error: generators not supported (function {}) */", name));
         }
+        // Functions own their `new.target`: only a `new` call on this
+        // function would make it defined, and Morph lowers `new` for
+        // classes only.
+        let old_in_constructor = self.ctx.in_constructor;
+        self.ctx.in_constructor = false;
         // Nested functions lower to capturing lambdas: C++ forbids
         // function definitions inside function bodies, while a lambda
         // keeps the definition local and captures outer locals by reference.
@@ -4037,6 +4059,7 @@ impl<'a> CppTranslator<'a> {
         if name == "main" && is_async {
             let code = self.emit_async_main(f, &ret, &params);
             self.ctx.has_infinite_loop = old_has_loop || self.ctx.has_infinite_loop;
+            self.ctx.in_constructor = old_in_constructor;
             return Some(code);
         }
         let mut final_ret = ret.clone();
@@ -4143,6 +4166,7 @@ impl<'a> CppTranslator<'a> {
         self.ctx.has_infinite_loop = old_has_loop || self.ctx.has_infinite_loop;
         self.ctx.current_fn = outer_fn;
         self.ctx.js_object_params = old_handlers;
+        self.ctx.in_constructor = old_in_constructor;
         Some(result)
     }
 
@@ -4978,6 +5002,8 @@ impl<'a> CppTranslator<'a> {
         let old_tp = self.ctx.template_params.clone();
         let old_class = self.ctx.class_name.clone();
         let old_super = self.ctx.super_class_name.clone();
+        let old_in_constructor = self.ctx.in_constructor;
+        self.ctx.in_constructor = false;
         self.ctx.class_name = Some(name.clone());
         // Store super class name for constructor super() handling
         if let Some(heritage) = &class.heritage {
@@ -5197,6 +5223,7 @@ impl<'a> CppTranslator<'a> {
         self.ctx.class_name = old_class;
         self.ctx.super_class_name = old_super;
         self.ctx.template_params = old_tp;
+        self.ctx.in_constructor = old_in_constructor;
         lines.join("\n")
     }
 
@@ -5268,6 +5295,10 @@ impl<'a> CppTranslator<'a> {
                     }
                 };
                 if m.kind == MethodDefinitionKind::Constructor {
+                    // Parameter defaults and the initializer list run inside
+                    // the constructor call, so `new.target` is available.
+                    let old_in_constructor = self.ctx.in_constructor;
+                    self.ctx.in_constructor = true;
                     // Use constructor-specific formatting with p_ prefix and initializer list (like Python)
                     let has_destructured = m.value.params.items.iter().any(|p| {
                         matches!(
@@ -5420,10 +5451,10 @@ impl<'a> CppTranslator<'a> {
                         lines.push(format!("{}}}", self.indent()));
                         lines.join("\n")
                     };
-                    return (
-                        access,
-                        format!("{}({}){} {}", class_name, params_str, init_str, body_str),
-                    );
+                    let rendered =
+                        format!("{}({}){} {}", class_name, params_str, init_str, body_str);
+                    self.ctx.in_constructor = old_in_constructor;
+                    return (access, rendered);
                 } else {
                     let params = self.format_params(&m.value.params);
                     let ret = if let Some(rt) = &m.value.return_type {
@@ -5847,8 +5878,15 @@ impl<'a> CppTranslator<'a> {
             Expression::TSInstantiationExpression(e) => self.emit_expression(&e.expression),
             Expression::V8IntrinsicExpression(_) => "/* v8 intrinsic */".to_string(),
             Expression::NewTarget(_) => {
-                // new.target is only valid in constructors; emit null as placeholder
-                "JsNull{}".to_string()
+                // Only constructors observe a target; the lowering for
+                // `new` installs it for the most-derived class. Plain
+                // functions, methods and field initializers see undefined.
+                if self.ctx.in_constructor {
+                    self.ctx.need("JsValue");
+                    "morph::js_new_target()".to_string()
+                } else {
+                    "JsUndefined{}".to_string()
+                }
             }
             Expression::ImportMeta(_) => "/* import.meta */".to_string(),
             Expression::RegExpLiteral(r) => self.span_text(r.span).to_string(),
@@ -6216,6 +6254,7 @@ impl<'a> CppTranslator<'a> {
                 .map(|cpp_type| cpp_type_to_class(&cpp_type))
                 .unwrap_or(OperandClass::JsArray),
             Expression::ObjectExpression(_) => OperandClass::JsObject,
+            Expression::NewTarget(_) => OperandClass::JsValue,
             Expression::CallExpression(call) => self.call_result_class(call),
             Expression::AwaitExpression(_)
             | Expression::YieldExpression(_)
@@ -6312,6 +6351,34 @@ impl<'a> CppTranslator<'a> {
             Expression::TSTypeAssertion(cast) => self.operand_class_of(&cast.expression),
             _ => OperandClass::Other,
         }
+    }
+
+    /// Class identifier operand in a comparison lowers to its constructor
+    /// value (`new.target === Foo`). Everywhere else class names keep their
+    /// native spelling (`new Foo()`, `Foo.bar`).
+    fn comparison_operand_class(&self, expr: &Expression<'a>) -> OperandClass {
+        match Self::unwrap_expr(expr) {
+            Expression::NewTarget(_) => OperandClass::JsValue,
+            Expression::Identifier(id)
+                if self.ctx.class_names.contains(id.name.as_str())
+                    && !self.ctx.var_types.contains_key(id.name.as_str()) =>
+            {
+                OperandClass::JsValue
+            }
+            other => self.operand_class_of(other),
+        }
+    }
+
+    fn emit_comparison_operand(&mut self, expr: &Expression<'a>) -> String {
+        if let Expression::Identifier(id) = Self::unwrap_expr(expr)
+            && self.ctx.class_names.contains(id.name.as_str())
+            && !self.ctx.var_types.contains_key(id.name.as_str())
+        {
+            self.ctx.need("JsValue");
+            let name = id.name.as_str();
+            return format!("morph::js_constructor_value<{name}>(\"{name}\")");
+        }
+        self.emit_expression(expr)
     }
 
     fn is_response_obj(
@@ -6642,8 +6709,8 @@ impl<'a> CppTranslator<'a> {
         }
 
         if let Some(comparison_kind) = ComparisonKind::from_binary_operator(op) {
-            let left_class = self.operand_class_of(&b.left);
-            let right_class = self.operand_class_of(&b.right);
+            let left_class = self.comparison_operand_class(&b.left);
+            let right_class = self.comparison_operand_class(&b.right);
             if Self::should_use_js_comparison(
                 comparison_kind,
                 &b.left,
@@ -6651,8 +6718,8 @@ impl<'a> CppTranslator<'a> {
                 left_class,
                 right_class,
             ) {
-                let left = self.emit_expression(&b.left);
-                let right = self.emit_expression(&b.right);
+                let left = self.emit_comparison_operand(&b.left);
+                let right = self.emit_comparison_operand(&b.right);
                 self.record_comparison_use(comparison_kind, left_class, right_class);
                 return format!(
                     "morph::js_cmp::{}({}, {})",
@@ -8694,6 +8761,19 @@ impl<'a> CppTranslator<'a> {
         } else {
             String::new()
         };
+        // Class construction goes through the runtime helper so the
+        // constructor (including inherited constructors) can read
+        // `new.target`. Constructor arguments are evaluated before the
+        // target guard is installed, matching JS evaluation order.
+        if let Expression::Identifier(id) = Self::unwrap_expr(&n.callee)
+            && self.ctx.class_names.contains(id.name.as_str())
+        {
+            self.ctx.need("JsValue");
+            let name = id.name.as_str();
+            let mut all_args = vec![format!("\"{name}\"")];
+            all_args.extend(args);
+            return format!("morph::js_new<{}{}>({})", callee, type_args, all_args.join(", "));
+        }
         self.ctx.need("std::make_shared");
         format!("std::make_shared<{}{}>({})", callee, type_args, args.join(", "))
     }
@@ -8859,6 +8939,10 @@ impl<'a> CppTranslator<'a> {
 
     fn emit_function_expression(&mut self, f: &Function<'a>) -> String {
         self.ctx.fn_expr_depth += 1;
+        // Function expressions own their `new.target`: Morph has no `new`
+        // lowering for them, so the target is always undefined here.
+        let old_in_constructor = self.ctx.in_constructor;
+        self.ctx.in_constructor = false;
         let is_async = f.r#async;
         let params = self.format_params(&f.params);
         let ret = if is_async {
@@ -8905,6 +8989,7 @@ impl<'a> CppTranslator<'a> {
         };
         self.ctx.drop_return_value = saved_drop;
         self.ctx.fn_expr_depth -= 1;
+        self.ctx.in_constructor = old_in_constructor;
         self.ctx.need("JsValue");
         let lambda_params = if params.is_empty() {
             "JsValue _jsThis".to_string()
@@ -9549,6 +9634,77 @@ mod tests {
     }
 
     #[test]
+    fn new_target_lowers_in_constructors() {
+        let out = translate_stmts(
+            "class Base {\n\
+               same = false\n\
+               constructor(label: string = new.target === Base ? \"base\" : \"other\") {\n\
+                 this.same = new.target === Base\n\
+               }\n\
+             }\n\
+             class Derived extends Base {}\n\
+             const b = new Base()\n\
+             const d = new Derived()",
+        );
+        assert!(out.contains("morph::js_new<Base>(\"Base\")"), "{out}");
+        assert!(out.contains("morph::js_new<Derived>(\"Derived\")"), "{out}");
+        assert!(out.contains("morph::js_new_target()"), "{out}");
+        assert!(out.contains("morph::js_constructor_value<Base>(\"Base\")"), "{out}");
+    }
+
+    #[test]
+    fn new_target_in_plain_functions_and_methods_is_undefined() {
+        let out = translate_stmts(
+            "class Box {\n\
+               method(): any { return new.target }\n\
+             }\n\
+             function plain(): any { return new.target }",
+        );
+        assert!(out.contains("return JsUndefined{};"), "{out}");
+        assert!(!out.contains("morph::js_new_target()"), "{out}");
+    }
+
+    #[test]
+    fn new_target_field_initializers_are_undefined() {
+        let out = translate_stmts(
+            "class Box {\n\
+               instance = new.target\n\
+               static shared = new.target\n\
+             }",
+        );
+        assert!(out.contains("JsValue instance = JsUndefined{};"), "{out}");
+        assert!(out.contains("static inline JsValue shared = JsUndefined{};"), "{out}");
+        assert!(!out.contains("morph::js_new_target()"), "{out}");
+    }
+
+    #[test]
+    fn new_target_arrows_inherit_and_function_expressions_clear() {
+        let arrow = translate_stmts(
+            "class Box {\n\
+               constructor() { const f = () => new.target }\n\
+             }",
+        );
+        assert!(arrow.contains("[&]() -> auto { return morph::js_new_target(); }"), "{arrow}");
+
+        let function = translate_stmts(
+            "class Box {\n\
+               constructor() { const f = function (): any { return new.target } }\n\
+             }",
+        );
+        assert!(function.contains("return JsUndefined{};"), "{function}");
+        assert!(!function.contains("morph::js_new_target()"), "{function}");
+    }
+
+    #[test]
+    fn class_identifier_comparisons_use_constructor_values() {
+        let out = translate_stmts(
+            "class Box {}\nfunction same(value: any): boolean { return value === Box }",
+        );
+        assert!(out.contains("morph::js_constructor_value<Box>(\"Box\")"), "{out}");
+        assert!(out.contains("morph::js_cmp::strict_eq(value,"), "{out}");
+    }
+
+    #[test]
     fn dynamic_field_annotations_widen_to_late_values() {
         let out = translate_stmts(
             "class Mixed {\n  value = 0\n  set(next: number | string) { this.value = next }\n}\n",
@@ -9581,7 +9737,7 @@ mod tests {
         assert!(out.contains("auto __morph_value = (__morph_recv->current()) + (2)"), "{out}");
         assert!(out.contains("auto __morph_old = (__morph_recv->current())"), "{out}");
         assert!(out.contains("auto read = b->current()"), "{out}");
-        assert!(out.contains("std::make_shared<Pair>()"), "{out}");
+        assert!(out.contains("morph::js_new<Pair>(\"Pair\")"), "{out}");
     }
 
     #[test]

@@ -11,6 +11,7 @@
 #include "js_string.h"
 #include "js_array.h"
 #include "js_object.h"
+#include "js_constructor.h"
 
 // ── Helper types ──
 
@@ -57,7 +58,8 @@ struct JsValue {
         JsString,
         JsArray,
         JsObject,
-        JsFunction
+        JsFunction,
+        JsConstructor
     > inner;
 
     JsValue() : inner(JsUndefined{}) {}
@@ -69,6 +71,7 @@ struct JsValue {
     JsValue(JsArray v) : inner(v) {}
     JsValue(JsObject v) : inner(v) {}
     JsValue(JsFunction v) : inner(v) {}
+    JsValue(JsConstructor v) : inner(std::move(v)) {}
 
     // Implicit from primitives
     JsValue(bool v) : inner(JsBoolean(v)) {}
@@ -88,6 +91,7 @@ struct JsValue {
     bool is_array() const { return std::holds_alternative<JsArray>(inner); }
     bool is_object() const { return std::holds_alternative<JsObject>(inner); }
     bool is_function() const { return std::holds_alternative<JsFunction>(inner); }
+    bool is_constructor() const { return std::holds_alternative<JsConstructor>(inner); }
 
     // ── JS typeof ──
 
@@ -100,6 +104,7 @@ struct JsValue {
         if (is_array()) return "object";  // JS: typeof [] === "object"
         if (is_object()) return "object";
         if (is_function()) return "function";
+        if (is_constructor()) return "function";
         return "undefined";
     }
 
@@ -120,6 +125,7 @@ struct JsValue {
         if (is_array()) return true;
         if (is_object()) return true;
         if (is_function()) return true;
+        if (is_constructor()) return true;
         return false;
     }
 
@@ -152,6 +158,7 @@ struct JsValue {
         if (is_number()) return std::get<JsNumber>(inner).as_string();
         if (is_boolean()) return std::get<JsBoolean>(inner).value ? "true" : "false";
         if (is_null()) return "null";
+        if (is_constructor()) return std::get<JsConstructor>(inner).name;
         return "";
     }
 
@@ -185,6 +192,9 @@ struct JsValue {
         if (is_array() && o.is_array()) {
             return std::get<JsArray>(inner).elements
                 == std::get<JsArray>(o.inner).elements;
+        }
+        if (is_constructor() && o.is_constructor()) {
+            return std::get<JsConstructor>(inner) == std::get<JsConstructor>(o.inner);
         }
         if (is_null() && o.is_null()) return true;
         if (is_undefined() && o.is_undefined()) return true;
@@ -418,6 +428,23 @@ using JsWindowHandle = JsValue;
 /// distinct spelling to pick JS operator overloads instead of the numeric
 /// narrowing applied to ordinary `JsValue` locals.
 using JsLateValue = JsValue;
+
+namespace morph {
+
+/// The active `new.target`, or `undefined` outside a constructor call.
+inline JsValue js_new_target() {
+    if (js_new_targets.empty()) return JsValue(JsUndefined{});
+    return JsValue(js_new_targets.back());
+}
+
+/// Constructor value for class `T` used by identity checks such as
+/// `new.target === Foo`. The token is shared with `js_new<T>`.
+template <typename T>
+JsValue js_constructor_value(const char* name) {
+    return JsValue(JsConstructor{js_constructor_token<T>(), name});
+}
+
+} // namespace morph
 
 // ── JsString methods that depend on JsValue ──
 
@@ -939,6 +966,7 @@ static std::string _js_to_string(const JsValue& v) {
     if (v.is_array()) return "[object Array]";
     if (v.is_object()) return "[object Object]";
     if (v.is_function()) return "function";
+    if (v.is_constructor()) return std::get<JsConstructor>(v.inner).name;
     return "undefined";
 }
 

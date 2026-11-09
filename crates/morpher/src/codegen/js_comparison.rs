@@ -80,7 +80,7 @@ pub fn cpp_type_to_class(cpp_type: &str) -> OperandClass {
         "JsBoolean" => OperandClass::JsBoolean,
         "JsNumber" => OperandClass::JsNumber,
         "JsString" => OperandClass::JsString,
-        "JsValue" | "JsWindowHandle" | "JsLateValue" => OperandClass::JsValue,
+        "JsValue" | "JsWindowHandle" | "JsLateValue" | "JsConstructor" => OperandClass::JsValue,
         "JsArray" => OperandClass::JsArray,
         "JsObject" => OperandClass::JsObject,
         "JsNull" | "std::nullptr_t" | "nullptr_t" => OperandClass::Null,
@@ -403,10 +403,87 @@ pub fn full_sections() -> ComparisonSections {
 /// a single union header after the leading `#include` cluster, adding
 /// any missing system includes. Sources without a generated block are
 /// returned unchanged.
+///
+/// The union header is wrapped in an include guard: project builds put
+/// moved classes in `morph_api.h` and the same prelude may also be
+/// hoisted into `app.cpp`, so the first definition in a translation
+/// unit must win.
 pub fn hoist_js_cmp_preludes(source: &str) -> String {
+    let spans = js_cmp_block_spans(source);
+    if spans.is_empty() {
+        return source.to_string();
+    }
+    let rest = blank_js_cmp_spans(source, &spans);
+    // Split the leading #include cluster (tolerating blanks/comments —
+    // generated TUs interleave banner comments between includes).
+    let mut head_end = 0;
+    for line in rest.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with("#include")
+            || trimmed.starts_with("#pragma once")
+            || trimmed.starts_with("//")
+        {
+            head_end += line.len() + 1;
+        } else {
+            break;
+        }
+    }
+    let head_end = head_end.min(rest.len());
+    let (head, body) = rest.split_at(head_end);
+    let mut missing: Vec<&str> = Vec::new();
+    for inc in required_includes(full_sections()) {
+        let line = format!("#include {inc}");
+        if !head.lines().any(|l| l.trim() == line) {
+            missing.push(inc);
+        }
+    }
+    let mut out = String::with_capacity(rest.len() + 4096);
+    out.push_str(head);
+    if !head.ends_with('\n') {
+        out.push('\n');
+    }
+    for inc in missing {
+        out.push_str(&format!("#include {inc}\n"));
+    }
+    out.push('\n');
+    out.push_str("#ifndef MORPH_JS_CMP_PRELUDE_DEFINED\n");
+    out.push_str("#define MORPH_JS_CMP_PRELUDE_DEFINED\n");
+    out.push_str(&build_header(full_sections()));
+    out.push('\n');
+    out.push_str("#endif // MORPH_JS_CMP_PRELUDE_DEFINED\n");
+    out.push_str(body);
+    out
+}
+
+/// Remove machine-generated `morph::js_cmp` prelude blocks, preserving
+/// line count so diagnostics stay aligned. Used to inspect an entry's
+/// real declaration before class relocation.
+pub fn strip_js_cmp_preludes(source: &str) -> String {
+    let spans = js_cmp_block_spans(source);
+    if spans.is_empty() {
+        return source.to_string();
+    }
+    blank_js_cmp_spans(source, &spans)
+}
+
+fn blank_js_cmp_spans(source: &str, spans: &[(usize, usize)]) -> String {
+    // Blank removed spans (preserving line numbers for diagnostics).
+    let mut rest = String::with_capacity(source.len());
+    let mut cursor = 0;
+    for (start, end) in spans {
+        rest.push_str(&source[cursor..*start]);
+        rest.push_str(&"\n".repeat(source[*start..*end].matches('\n').count()));
+        cursor = *end;
+    }
+    rest.push_str(&source[cursor..]);
+    rest
+}
+
+fn js_cmp_block_spans(source: &str) -> Vec<(usize, usize)> {
     const MARKER: &str = "namespace morph::js_cmp";
     if !source.contains(MARKER) {
-        return source.to_string();
+        return Vec::new();
     }
     // Collect generated block spans: `namespace morph::js_cmp` + optional
     // whitespace + balanced `{...}` containing the machine marker.
@@ -446,51 +523,7 @@ pub fn hoist_js_cmp_preludes(source: &str) -> String {
             }
         }
     }
-    if spans.is_empty() {
-        return source.to_string();
-    }
-    // Blank removed spans (preserving line numbers for diagnostics).
-    let mut rest = String::with_capacity(source.len());
-    let mut cursor = 0;
-    for (start, end) in &spans {
-        rest.push_str(&source[cursor..*start]);
-        rest.push_str(&"\n".repeat(source[*start..*end].matches('\n').count()));
-        cursor = *end;
-    }
-    rest.push_str(&source[cursor..]);
-    // Split the leading #include cluster (tolerating blanks/comments —
-    // generated TUs interleave banner comments between includes).
-    let mut head_end = 0;
-    for line in rest.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with("#include") || trimmed.starts_with("//") {
-            head_end += line.len() + 1;
-        } else {
-            break;
-        }
-    }
-    let head_end = head_end.min(rest.len());
-    let (head, body) = rest.split_at(head_end);
-    let mut missing: Vec<&str> = Vec::new();
-    for inc in required_includes(full_sections()) {
-        let line = format!("#include {inc}");
-        if !head.lines().any(|l| l.trim() == line) {
-            missing.push(inc);
-        }
-    }
-    let mut out = String::with_capacity(rest.len() + 4096);
-    out.push_str(head);
-    if !head.ends_with('\n') {
-        out.push('\n');
-    }
-    for inc in missing {
-        out.push_str(&format!("#include {inc}\n"));
-    }
-    out.push('\n');
-    out.push_str(&build_header(full_sections()));
-    out.push('\n');
-    out.push_str(body);
-    out
+    spans
 }
 
 /// Byte index just past the balanced closing brace of the `{` at `open`.
@@ -1218,6 +1251,12 @@ inline bool loose_eq_js_values(const JsValue& left_value, const JsValue& right_v
     {
         return left_nullish && right_nullish;
     }
+    if (left_value.is_constructor() || right_value.is_constructor())
+    {
+        return left_value.is_constructor() && right_value.is_constructor()
+            && std::get<JsConstructor>(left_value.inner)
+                == std::get<JsConstructor>(right_value.inner);
+    }
     if (left_value.is_array() || left_value.is_object())
     {
         if (left_value.is_array() && right_value.is_array())
@@ -1255,6 +1294,11 @@ inline bool loose_eq_js_values(const JsValue& left_value, const JsValue& right_v
 
 inline bool strict_eq_js_values(const JsValue& left_value, const JsValue& right_value)
 {
+    if (left_value.is_constructor() && right_value.is_constructor())
+    {
+        return std::get<JsConstructor>(left_value.inner)
+            == std::get<JsConstructor>(right_value.inner);
+    }
     if (left_value.is_number() && right_value.is_number())
     {
         return std::get<JsNumber>(left_value.inner) == std::get<JsNumber>(right_value.inner);
