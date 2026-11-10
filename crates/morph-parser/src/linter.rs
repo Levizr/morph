@@ -6,10 +6,10 @@ use oxc_allocator::Allocator;
 use oxc_ast::ast::*;
 use oxc_ast_visit::Visit;
 use oxc_parser::Parser;
-use oxc_semantic::{Scoping, SemanticBuilder};
+use oxc_semantic::{AstNodes, ScopeId, Scoping, SemanticBuilder};
 use oxc_span::{GetSpan, LabeledSpan};
 use oxc_syntax::scope::ScopeFlags;
-use oxc_syntax::symbol::SymbolId;
+use oxc_syntax::symbol::{SymbolFlags, SymbolId};
 
 #[allow(dead_code)]
 fn offset_to_line_col(source: &str, offset: u32) -> (usize, usize) {
@@ -1209,6 +1209,193 @@ fn check_js_syntax(program: &Program, file_path: &str, offsets: &[usize]) -> Vec
         })
         .collect()
 }
+/// Collect every identifier bound by a binding pattern.
+fn collect_pattern_identifiers<'b, 'a>(
+    pattern: &'b BindingPattern<'a>,
+    out: &mut Vec<&'b BindingIdentifier<'a>>,
+) {
+    match pattern {
+        BindingPattern::BindingIdentifier(id) => out.push(id),
+        BindingPattern::AssignmentPattern(assign) => {
+            collect_pattern_identifiers(&assign.left, out);
+        }
+        BindingPattern::ObjectPattern(object) => {
+            for property in &object.properties {
+                collect_pattern_identifiers(&property.value, out);
+            }
+            if let Some(rest) = &object.rest {
+                collect_pattern_identifiers(&rest.argument, out);
+            }
+        }
+        BindingPattern::ArrayPattern(array) => {
+            for element in array.elements.iter().flatten() {
+                collect_pattern_identifiers(element, out);
+            }
+            if let Some(rest) = &array.rest {
+                collect_pattern_identifiers(&rest.argument, out);
+            }
+        }
+    }
+}
+
+/// True when `ref_scope` sits inside a function/arrow nested under
+/// `decl_scope`. References in nested functions run later (or on demand),
+/// so they neither prove a TDZ hit nor force a `var` to start `undefined`.
+fn is_nested_execution_scope(scoping: &Scoping, ref_scope: ScopeId, decl_scope: ScopeId) -> bool {
+    if ref_scope == decl_scope {
+        return false;
+    }
+    for scope in scoping.scope_ancestors(ref_scope) {
+        if scope == decl_scope {
+            return false;
+        }
+        if scoping.scope_flags(scope).is_var() {
+            return true;
+        }
+    }
+    false
+}
+
+/// Initializers a hoisted `var` cannot represent once it must start as
+/// `undefined`: lambdas, class instances, and heap values have no
+/// `JsValue` conversion.
+fn unsupported_late_var_init(expr: &Expression) -> bool {
+    match expr {
+        Expression::ArrowFunctionExpression(_)
+        | Expression::FunctionExpression(_)
+        | Expression::ClassExpression(_)
+        | Expression::NewExpression(_) => true,
+        Expression::ParenthesizedExpression(p) => unsupported_late_var_init(&p.expression),
+        Expression::TSAsExpression(e) => unsupported_late_var_init(&e.expression),
+        Expression::TSSatisfiesExpression(e) => unsupported_late_var_init(&e.expression),
+        Expression::TSNonNullExpression(e) => unsupported_late_var_init(&e.expression),
+        _ => false,
+    }
+}
+
+struct DeclarationCheckVisitor<'s, 'a> {
+    scoping: &'s Scoping,
+    nodes: &'s AstNodes<'a>,
+    out: Vec<(u32, String, String)>,
+}
+
+impl<'a> Visit<'a> for DeclarationCheckVisitor<'_, 'a> {
+    fn visit_variable_declaration(&mut self, decl: &VariableDeclaration<'a>) {
+        let lexical = decl.kind.is_lexical();
+        for declarator in &decl.declarations {
+            let mut ids = Vec::new();
+            collect_pattern_identifiers(&declarator.id, &mut ids);
+            let init_span = declarator.init.as_ref().map(GetSpan::span);
+            let destructured = !matches!(&declarator.id, BindingPattern::BindingIdentifier(_));
+            for id in ids {
+                let Some(symbol_id) = id.symbol_id.get() else { continue };
+                let decl_scope = self.scoping.symbol_scope_id(symbol_id);
+                let decl_pos = id.span.start;
+                let mut tdz_start: Option<u32> = None;
+                let mut late = false;
+                for &reference_id in self.scoping.get_resolved_reference_ids(symbol_id) {
+                    let reference = self.scoping.get_reference(reference_id);
+                    let span = self.nodes.get_node(reference.node_id()).span();
+                    let in_own_init = init_span
+                        .is_some_and(|init| span.start >= init.start && span.end <= init.end);
+                    let nested =
+                        is_nested_execution_scope(self.scoping, reference.scope_id(), decl_scope);
+                    if lexical {
+                        if nested {
+                            continue;
+                        }
+                        if span.start < decl_pos || in_own_init {
+                            tdz_start.get_or_insert(span.start);
+                        }
+                    } else {
+                        let read_before = !nested && reference.is_read() && span.start < decl_pos;
+                        let read_own_init = !nested && reference.is_read() && in_own_init;
+                        let nested_outside_init = nested && !in_own_init;
+                        if read_before || read_own_init || nested_outside_init {
+                            late = true;
+                        }
+                    }
+                }
+                if lexical {
+                    if let Some(start) = tdz_start {
+                        self.out.push((
+                            start,
+                            format!(
+                                "`{}` is used before its declaration (temporal dead zone)",
+                                id.name
+                            ),
+                            "Move the declaration before the first use, or use `var`".into(),
+                        ));
+                    }
+                    continue;
+                }
+                if destructured {
+                    self.out.push((
+                        declarator.id.span().start,
+                        "destructured `var` declarations are not supported".into(),
+                        "Use `let` or `const` destructuring instead".into(),
+                    ));
+                }
+                if declarator.init.is_some() {
+                    let flags = self.scoping.symbol_flags(symbol_id);
+                    if flags.intersects(SymbolFlags::Function | SymbolFlags::Class) {
+                        self.out.push((
+                            declarator.span().start,
+                            format!(
+                                "`var {}` redeclares a function or class in the same scope",
+                                id.name
+                            ),
+                            "Rename the binding, or use `let`/`const`".into(),
+                        ));
+                    }
+                }
+                if late {
+                    if let Some(init) = &declarator.init {
+                        if unsupported_late_var_init(init) {
+                            self.out.push((
+                                init.span().start,
+                                format!(
+                                    "`var {}` is read before its declaration and its initializer cannot start as `undefined`",
+                                    id.name
+                                ),
+                                "Move the declaration before the first use, or use `let`/`const`"
+                                    .into(),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        oxc_ast_visit::walk::walk_variable_declaration(self, decl);
+    }
+}
+
+fn check_js_declarations(program: &Program, file_path: &str, offsets: &[usize]) -> Vec<LintError> {
+    let semantic = SemanticBuilder::new().with_build_nodes(true).build(program).semantic;
+    let mut visitor = DeclarationCheckVisitor {
+        scoping: semantic.scoping(),
+        nodes: semantic.nodes(),
+        out: Vec::new(),
+    };
+    visitor.visit_program(program);
+    visitor
+        .out
+        .iter()
+        .map(|(start, message, hint)| {
+            let (line, col) = offset_to_line_col_fast(offsets, *start);
+            LintError {
+                severity: "error".into(),
+                code: "mx-js-syntax".into(),
+                message: message.clone(),
+                suggestion: Some(hint.clone()),
+                file_path: file_path.into(),
+                line,
+                col,
+            }
+        })
+        .collect()
+}
+
 /// Receiver kinds the method rule can prove: literals, and state
 /// bindings whose type argument or initializer pins them down.
 /// Anything else (params, call results, reassigned bindings) stays
@@ -1946,6 +2133,8 @@ pub fn check(source: &str, file_path: &str) -> Vec<LintError> {
         errors.extend(check_js_operators(&ret.program, file_path, &offsets));
         // Unhandleable syntax (generators, `with`, call spread, ...).
         errors.extend(check_js_syntax(&ret.program, file_path, &offsets));
+        // Hoisting and temporal-dead-zone rules for `var`/`let`/`const`.
+        errors.extend(check_js_declarations(&ret.program, file_path, &offsets));
         // Unimplemented methods on provably-typed receivers.
         errors.extend(check_js_method_calls(&ret.program, source, file_path, &offsets));
         // Unsupported members on provable `Window` handles.

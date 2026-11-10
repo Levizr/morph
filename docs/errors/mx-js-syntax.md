@@ -37,6 +37,11 @@ The current set is:
 - Promise `.then` / `.catch` chains (use `async`/`await` and `try`/`catch`)
 - `JSON.parse` reviver and `JSON.stringify` replacer/space arguments
 - trailing timer arguments (`setTimeout(fn, ms, ...args)`)
+- `let`/`const` reads before the declaration line (the temporal dead zone),
+  including self-referential initializers such as `let x = x`
+- destructured `var` declarations (`var { a } = obj`) and late `var`
+  initializers that cannot start as `undefined` (arrow, function, class,
+  or `new` expressions)
 
 ```
 error : mx-js-syntax : `enum` declaration cannot be translated to C++
@@ -51,7 +56,8 @@ strings, numbers, and mixed case values (JavaScript `===` semantics with
 fallthrough), array spread, object spread and computed keys, getters and setters,
 plain-TS destructuring declarations, destructuring assignment, `for...of`
 declaration and assignment patterns, destructuring at the top of a
-component body, class declarations / `new`, module-scope class expressions
+component body, `var` hoisting with `undefined` initialization (including
+block, loop, and component-body declarations), class declarations / `new`, module-scope class expressions
 directly assigned to a `const`/`let`, type-only imports and exports,
 default and optional parameters, arrow/function consts, data-only
 object-literal consts, and JSX list expressions. `for...in` destructuring

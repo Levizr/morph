@@ -1,0 +1,62 @@
+import { morphState } from 'morph'
+
+export const windowConfig = { title: "pass-hoisting", width: 800, height: 600 }
+
+// `var` hoists to its function scope: reads before the declaration line
+// see `undefined`, block declarations stay visible after the block, and
+// `for (var ...)` reuses one binding after the loop.
+function readBeforeVar() {
+  let seen = 0
+  function capture() {
+    seen = seen + (v ? 1 : 0)
+  }
+  capture()
+  var v = 7
+  capture()
+  return seen * 10 + v
+}
+
+function blockVar() {
+  if (true) {
+    var b = 3
+  }
+  return b
+}
+
+function loopVar() {
+  const items = [1, 2, 3]
+  let sum = 0
+  for (var i = 0; i < items.length; i++) {
+    sum = sum + items[i]
+  }
+  return sum + i
+}
+
+class Tag {
+  label: string = ""
+  constructor(label: string) {
+    this.label = label
+  }
+}
+
+function makeTagLabel(): string {
+  return "made"
+}
+
+export default function App() {
+  console.log(label)
+  var label = "ready"
+  // Non-early `var` declarations keep their native lowering: class
+  // instances and call results must not widen to a JS signal.
+  var tag = new Tag("direct")
+  var madeLabel = makeTagLabel()
+  const summary = readBeforeVar() + blockVar() + loopVar()
+  const [count, setCount] = morphState(0)
+
+  return (
+    <body>
+      <div>{label} {summary} {tag.label} {madeLabel} {count}</div>
+      <button onClick={() => setCount(count + 1)}>bump</button>
+    </body>
+  )
+}

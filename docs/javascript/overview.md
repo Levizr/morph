@@ -31,6 +31,12 @@ This module is provided by `node_modules/morph/index.d.ts` — it ships with eve
 ### Declarations
 
 - `const`, `let`, `var` with type annotations
+- `var` hoisting: a `var` binding is function-scoped and starts as
+  `undefined`, so `console.log(x); var x = 1` prints `undefined` and then
+  `1`; block and `for` declarations stay visible after their block
+- Temporal dead zone: `let`/`const` reads before the declaration line are
+  rejected by `morph check` (JS throws a `ReferenceError`), including
+  self-referential initializers such as `let x = x`
 - Late-assigned bindings: `let x;` and `let x = null/undefined` read
   `undefined` until the first assignment, then hold any JS value — number,
   string, boolean, object, array, or window handle — with real operator
@@ -140,11 +146,10 @@ for `morph build`; the two commands share the same parser, graph, lint, and
 IR pipeline.
 
 > **Known contract gaps:** some constructs still pass `morph check` and
-> fail in generated C++ — `var` hoisting/TDZ, imported module side
-> effects, JSON dot access, JSX spread props, closures stored in JS
-> arrays (`Array<() => T>`; use a native `std::function` vector alias),
-> function-local class metadata that escapes its declaring function, and
-> others. The
+> fail in generated C++ — imported module side effects, JSON dot access,
+> JSX spread props, closures stored in JS arrays (`Array<() => T>`; use a
+> native `std::function` vector alias), function-local class metadata
+> that escapes its declaring function, and others. The
 > [TypeScript App-Logic Coverage](../future/javascript/coverage.md) plan
 > tracks every case and gates them behind Part 0.
 >

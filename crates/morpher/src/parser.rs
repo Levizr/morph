@@ -12,6 +12,7 @@ use crate::error::MorphJsError;
 /// and accessor metadata for classes declared in other translation units.
 fn apply_ambient_state(translator: &mut CppTranslator, options: &TranslateOptions) {
     translator.set_omit_param_defaults(options.omit_param_defaults);
+    translator.set_hoist_program_vars(options.hoist_program_vars);
     for (name, cpp_type) in &options.state_types {
         translator.ctx.var_types.insert(name.clone(), cpp_type.clone());
     }

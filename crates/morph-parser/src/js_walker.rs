@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use oxc_ast::ast::*;
 use oxc_ast_visit::Visit;
@@ -1644,6 +1644,29 @@ impl<'src> MxWalker<'src> {
         true
     }
 
+    /// Top-level `var` declarators whose value can flow through a component
+    /// signal. Function-valued declarators lower to inner functions, `morph*`
+    /// calls are owned by the state/shared/event passes, and class instances
+    /// or class expressions have no `JsValue` conversion.
+    fn var_flows_through_body(decl: &VariableDeclarator) -> bool {
+        match decl.init.as_ref() {
+            None => true,
+            Some(
+                Expression::ArrowFunctionExpression(_)
+                | Expression::FunctionExpression(_)
+                | Expression::ClassExpression(_)
+                | Expression::NewExpression(_),
+            ) => false,
+            Some(Expression::CallExpression(call)) => {
+                !(matches!(&call.callee, Expression::Identifier(id) if matches!(
+                    id.name.as_str(),
+                    "morphState" | "morphShared" | "morphEvent" | "morphOn" | "morphEmit"
+                )) || is_member_expr_callee(&call.callee, "morphState", ""))
+            }
+            Some(_) => true,
+        }
+    }
+
     fn stmt_is_declarative(stmt: &Statement) -> bool {
         match stmt {
             Statement::FunctionDeclaration(_) | Statement::ReturnStatement(_) => true,
@@ -1687,9 +1710,60 @@ impl<'src> MxWalker<'src> {
         destructured.visit_function_body(body);
         let mut window_assigned = WindowAssignedNames::default();
         window_assigned.visit_function_body(body);
+        // Top-level `var` declarations are function-scoped: JS reads them as
+        // `undefined` before the declaration line. Promote a declaration to a
+        // signal seeded with `undefined` only when it is read before its
+        // declaration (or has no initializer); otherwise the existing
+        // const/mutable-local lowering preserves its native type. Function,
+        // class, `new`, and morph* declarators keep their dedicated lowering.
+        let mut hoisted: HashSet<String> = HashSet::new();
+        let mut preceding_refs: HashSet<String> = HashSet::new();
+        for stmt in &body.statements {
+            if let Statement::VariableDeclaration(vd) = stmt {
+                if vd.kind == VariableDeclarationKind::Var {
+                    for decl in &vd.declarations {
+                        if let Some(name) = binding_ident_name(&decl.id) {
+                            if !name.is_empty() && Self::var_flows_through_body(decl) {
+                                let self_read = decl.init.as_ref().is_some_and(|init| {
+                                    let mut scan = ReferenceNames::default();
+                                    scan.visit_expression(init);
+                                    scan.names.contains(&name)
+                                });
+                                if decl.init.is_none()
+                                    || preceding_refs.contains(&name)
+                                    || self_read
+                                {
+                                    hoisted.insert(name);
+                                }
+                            }
+                        }
+                        if let Some(init) = &decl.init {
+                            let mut scan = ReferenceNames::default();
+                            scan.visit_expression(init);
+                            preceding_refs.extend(scan.names);
+                        }
+                    }
+                    continue;
+                }
+            }
+            let mut scan = ReferenceNames::default();
+            scan.visit_statement(stmt);
+            preceding_refs.extend(scan.names);
+        }
         let mut locals: Vec<MutableLocal> = Vec::new();
         let mut kept: Vec<ComponentConst> = Vec::new();
         for cst in consts.drain(..) {
+            if hoisted.contains(&cst.name) {
+                let window = window_assigned.names.contains(&cst.name);
+                let dynamic = destructured.names.contains(&cst.name);
+                locals.push(MutableLocal {
+                    name: cst.name,
+                    init: "undefined".to_string(),
+                    window,
+                    dynamic,
+                });
+                continue;
+            }
             if cst.name.is_empty() || !assigned.names.contains(&cst.name) {
                 kept.push(cst);
             } else {
@@ -1699,10 +1773,33 @@ impl<'src> MxWalker<'src> {
             }
         }
         *consts = kept;
+        for name in &hoisted {
+            if !locals.iter().any(|local| local.name == *name) {
+                locals.push(MutableLocal {
+                    name: name.clone(),
+                    init: "undefined".to_string(),
+                    window: window_assigned.names.contains(name),
+                    dynamic: destructured.names.contains(name),
+                });
+            }
+        }
 
         let mut stmts: Vec<String> = Vec::new();
         for stmt in &body.statements {
             if let Statement::VariableDeclaration(vd) = stmt {
+                if vd.kind == VariableDeclarationKind::Var {
+                    for decl in &vd.declarations {
+                        let Some(name) = binding_ident_name(&decl.id) else { continue };
+                        if !hoisted.contains(&name) {
+                            continue;
+                        }
+                        if let Some(init) = &decl.init {
+                            let init = self.span_text(init.span());
+                            stmts.push(format!("{name} = {init};"));
+                        }
+                    }
+                    continue;
+                }
                 let mut undecided = false;
                 for decl in &vd.declarations {
                     let Some(name) = binding_ident_name(&decl.id) else {
@@ -1977,6 +2074,20 @@ impl<'a> Visit<'a> for WindowAssignedNames {
             collect_assignment_target_names(&expr.left, &mut self.names);
         }
         oxc_ast_visit::walk::walk_assignment_expression(self, expr);
+    }
+}
+
+/// Every identifier reference (reads and assignment targets) in source order.
+/// Property names and binding identifiers are not references, so a component
+/// `var` only hoists when its name is genuinely used earlier.
+#[derive(Default)]
+struct ReferenceNames {
+    names: std::collections::HashSet<String>,
+}
+
+impl<'a> Visit<'a> for ReferenceNames {
+    fn visit_identifier_reference(&mut self, id: &IdentifierReference<'a>) {
+        self.names.insert(id.name.to_string());
     }
 }
 

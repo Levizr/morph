@@ -130,8 +130,8 @@ The statuses below were probed on 2026-11-06 with `morph check`, `morph --to cpp
 | ID | Construct | Today | Target |
 |---|---|---|---|
 | 0.1.1 | `for (const i in [10, 20])` | ✅ Fixed in 2C: array receivers lower to an index loop and yield `"0"`, `"1"` as strings; object `for...in` keeps enumerating object keys. | 2C |
-| 0.1.2 | `console.log(x); var x = 1` | 🟥 Prints `1`; JS prints `undefined`. | Hoist `var` with `undefined` initialization. |
-| 0.1.3 | `console.log(x); let x = 1` | 🟥 Prints `1`; JS throws a TDZ `ReferenceError`. | Emit a TDZ check/error, or reject use-before-declaration. |
+| 0.1.2 | `console.log(x); var x = 1` | ✅ Fixed in 2D: the binding hoists and prints `undefined`; the declaration site assigns. | 2D |
+| 0.1.3 | `console.log(x); let x = 1` | ✅ Fixed in 2D: `morph check` rejects the read with a temporal-dead-zone error. | 2D |
 | 0.1.4 | `JSON.stringify(v, replacer, 2)` | ⛔ Rejected with a hint. | Implement `replacer`/`space` when needed. |
 | 0.1.5 | `JSON.parse(text, reviver)` | ⛔ Rejected with a hint. | Implement `reviver` when needed. |
 | 0.1.6 | Top-level statements in an imported `.ts` | 🟥 Dropped; module initialization never runs. | Execute once in import order (Part 2E). |
@@ -288,7 +288,7 @@ Module-scope assignments use a captureless lambda because C++ forbids a capture-
 
 ### 2D — Hoisting and TDZ
 
-**Today:** use-before-declaration reads the initializer for both `var` and `let`.
+**Shipped:** `var` bindings hoist to their function/program scope and start as `undefined`; the declaration site becomes an assignment. Native types are preserved when every reference follows the declaration; early or nested-closure reads widen to `JsLateValue`. `for (var ...)` initializers and `for...in`/`for...of` declarations assign the hoisted binding instead of shadowing it, and top-level `var` declarations in component bodies lower to signals seeded with `undefined`. `let`/`const` reads before the declaration line — including `let x = x` — are rejected by `morph check` with `mx-js-syntax`; references inside nested functions stay quiet. Destructured `var` declarations and late `var` initializers that cannot start as `undefined` (arrows, functions, classes, `new`) are rejected precisely.
 
 **Target:** `var` is hoisted and initialized to `undefined`; `let`/`const` use-before-declaration produces a TDZ error (or a check error where runtime TDZ is not representable).
 
@@ -566,7 +566,7 @@ Morph should expose native equivalents (`useWindow`, clipboard, storage) instead
 | `Response.json()` detection and full `Response` runtime | ✅ Shipped; dot access is Part 3A, awaited form shipped |
 | `morph check` diagnostics for rejected constructs | ✅ Shipped; grows with each part |
 | App-logic contract and docs truth-up | ✅ This pass |
-| Part 0 — contract integrity | 🚧 In progress — shipped rejections for `.then`/`.catch`, JSON extra args, and timer args; remaining ⚠️/🟥 rows are owned by 1B (0.2.17), 2D, 2E, 3A, and 6F |
+| Part 0 — contract integrity | 🚧 In progress — shipped rejections for `.then`/`.catch`, JSON extra args, and timer args; remaining ⚠️/🟥 rows are owned by 1B (0.2.17), 2E, 3A, and 6F |
 | Part 1A — widening bindings | ✅ Shipped |
 | Part 1B — class model | ✅ Shipped; function-local class-declaration metadata follow-up tracked as 0.2.17 |
 | Part 1C — destructuring assignment and loop bindings | ✅ Shipped |
@@ -574,7 +574,8 @@ Morph should expose native equivalents (`useWindow`, clipboard, storage) instead
 | Part 2A — string `switch` | ✅ Shipped |
 | Part 2B — `new.target` | ✅ Shipped |
 | Part 2C — `for...in` over arrays | ✅ Shipped |
-| Parts 2D–5G — JavaScript language and standard library | 🚧 Committed — all JS-only gaps are in scope for implementation |
+| Part 2D — hoisting and TDZ | ✅ Shipped |
+| Parts 2E–5G — JavaScript language and standard library | 🚧 Committed — all JS-only gaps are in scope for implementation |
 | Parts 6A–6G — platform APIs and JSX | 🚧 Separate product work — browser globals stay out of scope |
 | Part 7 — docs and claims | 📋 Continuous |
 

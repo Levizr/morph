@@ -1,5 +1,6 @@
 use oxc_ast::ast::*;
 use oxc_ast_visit::Visit;
+use oxc_semantic::{ScopeFlags, ScopeId, SemanticBuilder, SymbolId};
 use oxc_span::GetSpan;
 use std::collections::{HashMap, HashSet};
 
@@ -14,6 +15,117 @@ use super::type_resolver::{
     native_number_annotation_type, param_type, resolve_type, resolve_type_annotation,
     ts_type_name_to_string,
 };
+
+/// One `var` binding hoisted to its function (or program) scope.
+struct HoistBinding {
+    name: String,
+    /// Read before its declaration, or referenced from a nested function:
+    /// the binding must start as `undefined`, so it uses `JsLateValue`.
+    late: bool,
+    /// The name is already bound by a parameter or a hoisted function
+    /// declaration in this scope. No new declaration is emitted.
+    existing: bool,
+    /// Resolved C++ storage type.
+    alloc_type: String,
+}
+
+/// `var` bindings for one function/program scope.
+struct HoistScope {
+    bindings: Vec<HoistBinding>,
+    by_name: HashMap<String, usize>,
+    saved_var_types: Vec<(String, Option<String>)>,
+    saved_shared: Vec<(String, bool)>,
+    saved_unique: Vec<(String, bool)>,
+}
+
+impl HoistScope {
+    fn empty() -> Self {
+        Self {
+            bindings: Vec::new(),
+            by_name: HashMap::new(),
+            saved_var_types: Vec::new(),
+            saved_shared: Vec::new(),
+            saved_unique: Vec::new(),
+        }
+    }
+
+    fn get(&self, name: &str) -> Option<&HoistBinding> {
+        self.by_name.get(name).and_then(|idx| self.bindings.get(*idx))
+    }
+
+    fn restore(&self, ctx: &mut Ctx) {
+        for (name, ty) in &self.saved_var_types {
+            match ty {
+                Some(ty) => {
+                    ctx.var_types.insert(name.clone(), ty.clone());
+                }
+                None => {
+                    ctx.var_types.remove(name);
+                }
+            }
+        }
+        for (name, had) in &self.saved_shared {
+            if *had {
+                ctx.shared_ptr_vars.insert(name.clone());
+            } else {
+                ctx.shared_ptr_vars.remove(name);
+            }
+        }
+        for (name, had) in &self.saved_unique {
+            if *had {
+                ctx.unique_ptr_vars.insert(name.clone());
+            } else {
+                ctx.unique_ptr_vars.remove(name);
+            }
+        }
+    }
+}
+
+/// Resolved reference facts for one symbol, used by `var` hoisting.
+struct VarSymbolInfo {
+    /// A read occurs before the declaration, or a reference sits inside a
+    /// nested function: the hoisted binding must start as `undefined`.
+    late: bool,
+}
+
+/// Type/escape decisions for one variable declarator. Split out of
+/// [`CppTranslator::emit_typed_variable_declarator`] so hoisted `var`
+/// declarations can reuse the same inference and emit only the assignment
+/// at the original declaration site.
+struct DeclaratorStorage {
+    alloc_type: String,
+    cpp_type: String,
+    widened: WidenedType,
+    escape_kind: EscapeKind,
+    new_class_name: Option<String>,
+    shared_wrap_call: bool,
+}
+
+/// Translation output split by lifetime: includes go at the top of the
+/// translation unit, prelude declarations at namespace scope, and body
+/// statements where the code executes.
+pub struct ProgramParts {
+    pub includes: String,
+    pub prelude: String,
+    pub body: String,
+}
+
+impl ProgramParts {
+    /// Join the pieces in emission order (includes, prelude, body).
+    pub fn join(&self) -> String {
+        let mut out = String::new();
+        for section in [&self.includes, &self.prelude, &self.body] {
+            if section.is_empty() {
+                continue;
+            }
+            if !out.is_empty() {
+                out.push_str("\n\n");
+            }
+            out.push_str(section);
+        }
+        out
+    }
+}
 
 pub struct CppTranslator<'a> {
     source: &'a str,
@@ -54,6 +166,16 @@ pub struct CppTranslator<'a> {
     /// names become per-iteration `shared_ptr` boxes instead of plain
     /// locals that a closure would reference after the iteration ends.
     box_loop_bindings: bool,
+    /// Resolved reference facts per symbol, used to decide whether a
+    /// hoisted `var` must start as `undefined`.
+    var_symbol_info: HashMap<SymbolId, VarSymbolInfo>,
+    /// Active function/program `var` scopes. Nested functions push their
+    /// own entry so declaration sites resolve to the innermost binding.
+    hoist_stack: Vec<HoistScope>,
+    /// Hoist program-level `var` bindings. Module globals turn this off:
+    /// their declaration sites sit at namespace scope, where an assignment
+    /// statement cannot be emitted.
+    hoist_program_vars: bool,
 }
 
 #[derive(Clone)]
@@ -437,6 +559,243 @@ fn merge_field_types(current: &str, next: &str) -> String {
     "JsLateValue".to_string()
 }
 
+fn collect_binding_identifiers<'b, 'a>(
+    pattern: &'b BindingPattern<'a>,
+    out: &mut Vec<&'b BindingIdentifier<'a>>,
+) {
+    match pattern {
+        BindingPattern::BindingIdentifier(id) => out.push(id),
+        BindingPattern::AssignmentPattern(assign) => {
+            collect_binding_identifiers(&assign.left, out);
+        }
+        BindingPattern::ObjectPattern(object) => {
+            for property in &object.properties {
+                collect_binding_identifiers(&property.value, out);
+            }
+            if let Some(rest) = &object.rest {
+                collect_binding_identifiers(&rest.argument, out);
+            }
+        }
+        BindingPattern::ArrayPattern(array) => {
+            for element in array.elements.iter().flatten() {
+                collect_binding_identifiers(element, out);
+            }
+            if let Some(rest) = &array.rest {
+                collect_binding_identifiers(&rest.argument, out);
+            }
+        }
+    }
+}
+
+fn collect_formal_param_names(params: &FormalParameters<'_>, out: &mut HashSet<String>) {
+    for param in &params.items {
+        let mut ids = Vec::new();
+        collect_binding_identifiers(&param.pattern, &mut ids);
+        for id in ids {
+            out.insert(id.name.to_string());
+        }
+    }
+    if let Some(rest) = &params.rest {
+        let mut ids = Vec::new();
+        collect_binding_identifiers(&rest.rest.argument, &mut ids);
+        for id in ids {
+            out.insert(id.name.to_string());
+        }
+    }
+}
+
+/// Initializers a hoisted `var` cannot hold once it must start as
+/// `undefined`: lambdas, class instances, and class expressions have no
+/// `JsValue` conversion.
+fn hoist_value_is_unrepresentable(init: Option<&Expression<'_>>) -> bool {
+    match init {
+        Some(
+            Expression::ArrowFunctionExpression(_)
+            | Expression::FunctionExpression(_)
+            | Expression::ClassExpression(_)
+            | Expression::NewExpression(_),
+        ) => true,
+        Some(Expression::ParenthesizedExpression(p)) => {
+            hoist_value_is_unrepresentable(Some(&p.expression))
+        }
+        Some(Expression::TSAsExpression(e)) => hoist_value_is_unrepresentable(Some(&e.expression)),
+        Some(Expression::TSSatisfiesExpression(e)) => {
+            hoist_value_is_unrepresentable(Some(&e.expression))
+        }
+        Some(Expression::TSNonNullExpression(e)) => {
+            hoist_value_is_unrepresentable(Some(&e.expression))
+        }
+        _ => false,
+    }
+}
+
+/// Collect function declarations in one function/program scope so a
+/// same-named `var` reuses the hoisted function binding instead of
+/// declaring a second C++ local.
+struct FunctionNameScan {
+    functions: HashSet<String>,
+}
+
+impl<'a> Visit<'a> for FunctionNameScan {
+    fn visit_function(&mut self, _function: &Function<'a>, _flags: ScopeFlags) {}
+
+    fn visit_arrow_function_expression(&mut self, _function: &ArrowFunctionExpression<'a>) {}
+
+    fn visit_statement(&mut self, stmt: &Statement<'a>) {
+        if let Statement::FunctionDeclaration(function) = stmt {
+            if let Some(id) = &function.id {
+                self.functions.insert(id.name.to_string());
+            }
+            return;
+        }
+        oxc_ast_visit::walk::walk_statement(self, stmt);
+    }
+
+    fn visit_declaration(&mut self, decl: &Declaration<'a>) {
+        if let Declaration::FunctionDeclaration(function) = decl {
+            if let Some(id) = &function.id {
+                self.functions.insert(id.name.to_string());
+            }
+            return;
+        }
+        oxc_ast_visit::walk::walk_declaration(self, decl);
+    }
+}
+
+/// Build one [`HoistScope`] by walking the declarations in source order.
+/// Types are inferred with the same declarator machinery as ordinary
+/// locals; early-read bindings force `JsLateValue` instead.
+struct TypeScan<'t, 'a> {
+    translator: &'t mut CppTranslator<'a>,
+    scope: HoistScope,
+    params: HashSet<String>,
+    functions: HashSet<String>,
+    seen: HashSet<String>,
+}
+
+impl<'t, 'a> Visit<'a> for TypeScan<'t, 'a> {
+    fn visit_variable_declaration(&mut self, decl: &VariableDeclaration<'a>) {
+        if decl.kind == VariableDeclarationKind::Var {
+            for declarator in &decl.declarations {
+                let mut ids = Vec::new();
+                collect_binding_identifiers(&declarator.id, &mut ids);
+                for id in ids {
+                    let name = id.name.to_string();
+                    if !self.seen.insert(name.clone()) {
+                        continue;
+                    }
+                    let existing = self.params.contains(&name) || self.functions.contains(&name);
+                    let late = !existing && self.translator.binding_is_late(id);
+                    let saved_var_type = self.translator.ctx.var_types.get(&name).cloned();
+                    let saved_shared = self.translator.ctx.shared_ptr_vars.contains(&name);
+                    let saved_unique = self.translator.ctx.unique_ptr_vars.contains(&name);
+                    let mut storage = None;
+                    let alloc_type = if existing {
+                        self.translator
+                            .ctx
+                            .var_types
+                            .get(&name)
+                            .cloned()
+                            .unwrap_or_else(|| "JsLateValue".to_string())
+                    } else {
+                        let resolved = self.translator.declarator_storage(declarator, &name);
+                        let native_type = resolved.alloc_type.clone();
+                        storage = Some(resolved);
+                        let unnamed_type = native_type == "auto" || native_type.contains("auto");
+                        if unnamed_type
+                            || (late && hoist_value_is_unrepresentable(declarator.init.as_ref()))
+                        {
+                            // The hoister cannot name a storage type for this
+                            // declarator (lambdas, class expressions, and
+                            // untyped call results), or the initializer has no
+                            // `JsLateValue` conversion. Keep the original
+                            // declaration-site lowering instead of widening.
+                            // Early reads of these kinds are rejected by
+                            // `morph check`; nested-closure reads keep the
+                            // native type and are captured by reference.
+                            match saved_var_type {
+                                Some(ty) => {
+                                    self.translator.ctx.var_types.insert(name.clone(), ty);
+                                }
+                                None => {
+                                    self.translator.ctx.var_types.remove(&name);
+                                }
+                            }
+                            continue;
+                        }
+                        if late {
+                            if self.translator.late_window_vars.contains(&name) {
+                                "JsWindowHandle".to_string()
+                            } else {
+                                "JsLateValue".to_string()
+                            }
+                        } else {
+                            native_type
+                        }
+                    };
+
+                    self.scope.saved_var_types.push((name.clone(), saved_var_type));
+                    self.scope.saved_shared.push((name.clone(), saved_shared));
+                    self.scope.saved_unique.push((name.clone(), saved_unique));
+                    if !existing {
+                        self.translator.ctx.var_types.insert(name.clone(), alloc_type.clone());
+                        if late {
+                            // Late storage is `JsLateValue`/`JsWindowHandle`,
+                            // never a smart pointer.
+                            self.translator.ctx.shared_ptr_vars.remove(&name);
+                            self.translator.ctx.unique_ptr_vars.remove(&name);
+                        } else if let Some(storage) = &storage {
+                            if storage.alloc_type.starts_with("std::shared_ptr<") {
+                                self.translator.ctx.shared_ptr_vars.insert(name.clone());
+                            } else {
+                                self.translator.ctx.shared_ptr_vars.remove(&name);
+                            }
+                            if storage.alloc_type.starts_with("std::unique_ptr<") {
+                                self.translator.ctx.unique_ptr_vars.insert(name.clone());
+                            } else {
+                                self.translator.ctx.unique_ptr_vars.remove(&name);
+                            }
+                        } else {
+                            self.translator.ctx.shared_ptr_vars.remove(&name);
+                            self.translator.ctx.unique_ptr_vars.remove(&name);
+                        }
+                        self.translator.ctx.need(&alloc_type);
+                    }
+                    self.scope.by_name.insert(name.clone(), self.scope.bindings.len());
+                    self.scope.bindings.push(HoistBinding { name, late, existing, alloc_type });
+                }
+            }
+        }
+        oxc_ast_visit::walk::walk_variable_declaration(self, decl);
+    }
+
+    fn visit_function(&mut self, _function: &Function<'a>, _flags: ScopeFlags) {}
+
+    fn visit_arrow_function_expression(&mut self, _function: &ArrowFunctionExpression<'a>) {}
+}
+
+/// True when `ref_scope` sits inside a function/arrow nested under
+/// `decl_scope`. References in nested functions are conservative `var`
+/// hoisting candidates: the closure can run before the declaration.
+fn is_nested_var_scope(
+    scoping: &oxc_semantic::Scoping,
+    ref_scope: ScopeId,
+    decl_scope: ScopeId,
+) -> bool {
+    if ref_scope == decl_scope {
+        return false;
+    }
+    for scope in scoping.scope_ancestors(ref_scope) {
+        if scope == decl_scope {
+            return false;
+        }
+        if scoping.scope_flags(scope).is_var() {
+            return true;
+        }
+    }
+    false
+}
+
 impl<'a> CppTranslator<'a> {
     pub fn new(
         source: &'a str,
@@ -467,12 +826,19 @@ impl<'a> CppTranslator<'a> {
             omit_param_defaults: false,
             loop_continue_actions: Vec::new(),
             box_loop_bindings: false,
+            var_symbol_info: HashMap::new(),
+            hoist_stack: Vec::new(),
+            hoist_program_vars: true,
         };
         this
     }
 
     pub fn set_omit_param_defaults(&mut self, omit: bool) {
         self.omit_param_defaults = omit;
+    }
+
+    pub fn set_hoist_program_vars(&mut self, hoist: bool) {
+        self.hoist_program_vars = hoist;
     }
 
     fn span_text(&self, span: oxc_span::Span) -> &'a str {
@@ -554,6 +920,9 @@ impl<'a> CppTranslator<'a> {
         if self.analysis.is_none() {
             self.run_analysis(program);
         }
+        if self.var_symbol_info.is_empty() {
+            self.collect_var_symbol_info(program);
+        }
         if let Some(analysis) = self.analysis.as_ref() {
             for split in &analysis.narrow_splits {
                 self.narrow_index.insert(
@@ -564,6 +933,35 @@ impl<'a> CppTranslator<'a> {
         }
         self.collect_late_vars(program);
         self.collect_js_array_receivers(program);
+    }
+
+    /// Resolve every symbol's reference spans once, so `var` hoisting can
+    /// tell an early read (or a closure reference) from an ordinary
+    /// declaration-order use.
+    fn collect_var_symbol_info(&mut self, program: &Program<'a>) {
+        let semantic = SemanticBuilder::new().with_build_nodes(true).build(program).semantic;
+        let scoping = semantic.scoping();
+        let mut info = HashMap::new();
+        for symbol_id in scoping.symbol_ids() {
+            let decl_scope = scoping.symbol_scope_id(symbol_id);
+            let decl_start = scoping.symbol_span(symbol_id).start;
+            let mut late = false;
+            for &reference_id in scoping.get_resolved_reference_ids(symbol_id) {
+                let reference = scoping.get_reference(reference_id);
+                let span = semantic.nodes().get_node(reference.node_id()).span();
+                if reference.is_read() && span.start < decl_start {
+                    late = true;
+                }
+                if is_nested_var_scope(scoping, reference.scope_id(), decl_scope) {
+                    late = true;
+                }
+                if late {
+                    break;
+                }
+            }
+            info.insert(symbol_id, VarSymbolInfo { late });
+        }
+        self.var_symbol_info = info;
     }
 
     /// Record names assigned later in the program.
@@ -639,7 +1037,103 @@ impl<'a> CppTranslator<'a> {
         self.infer_type_from_init(expr)
     }
 
+    fn hoisted_binding(&self, name: &str) -> Option<&HoistBinding> {
+        self.hoist_stack.last().and_then(|scope| scope.get(name))
+    }
+
+    /// True when the binding was read before its declaration or is
+    /// referenced from a nested function.
+    fn binding_is_late(&self, id: &BindingIdentifier<'_>) -> bool {
+        id.symbol_id
+            .get()
+            .and_then(|symbol| self.var_symbol_info.get(&symbol))
+            .is_some_and(|info| info.late)
+    }
+
+    /// Build the `var` hoist plan for one function/program scope.
+    fn scan_hoists(
+        &mut self,
+        statements: &[Statement<'a>],
+        params: Option<&FormalParameters<'a>>,
+    ) -> HoistScope {
+        let mut param_names = HashSet::new();
+        if let Some(params) = params {
+            collect_formal_param_names(params, &mut param_names);
+        }
+        let mut function_scan = FunctionNameScan { functions: HashSet::new() };
+        for stmt in statements {
+            function_scan.visit_statement(stmt);
+        }
+        let mut scan = TypeScan {
+            translator: self,
+            scope: HoistScope {
+                bindings: Vec::new(),
+                by_name: HashMap::new(),
+                saved_var_types: Vec::new(),
+                saved_shared: Vec::new(),
+                saved_unique: Vec::new(),
+            },
+            params: param_names,
+            functions: function_scan.functions,
+            seen: HashSet::new(),
+        };
+        for stmt in statements {
+            scan.visit_statement(stmt);
+        }
+        scan.scope
+    }
+
+    fn emit_hoist_prelude(&self, scope: &HoistScope) -> Option<String> {
+        let prefix = if self.ctx.indent_level == 0 { "static " } else { "" };
+        let mut lines = Vec::new();
+        for binding in &scope.bindings {
+            if binding.existing || binding.alloc_type.is_empty() {
+                continue;
+            }
+            lines.push(format!(
+                "{}{}{} {}{{}};",
+                self.indent(),
+                prefix,
+                binding.alloc_type,
+                binding.name
+            ));
+        }
+        if lines.is_empty() { None } else { Some(lines.join("\n")) }
+    }
+
+    /// Initializer for a hoisted `var` declaration site. Late bindings
+    /// assign a JS value; ordinary bindings reuse the declarator's native
+    /// init code.
+    fn hoisted_init_code(
+        &mut self,
+        d: &VariableDeclarator<'a>,
+        name: &str,
+        late: bool,
+    ) -> Option<String> {
+        let init = d.init.as_ref()?;
+        if late {
+            let code = self.emit_expression(init);
+            if let Some(inferred) = self.infer_type_from_init(init) {
+                if inferred.starts_with("std::vector<") {
+                    return Some(format!("JsArray({code})"));
+                }
+            }
+            Some(code)
+        } else {
+            let storage = self.declarator_storage(d, name);
+            self.declarator_init_code(d, &storage)
+        }
+    }
+
     pub fn translate_program(&mut self, program: &Program<'a>) -> String {
+        self.translate_program_parts(program).join()
+    }
+
+    /// Translate a program into separately addressable pieces. Module
+    /// initializers need the hoisted declarations at namespace scope and
+    /// the executable statements inside a function; ordinary callers use
+    /// [`Self::translate_program`] to join them back in emission order.
+    pub fn translate_program_parts(&mut self, program: &Program<'a>) -> ProgramParts {
         self.analyze_program(program);
         // Pre-register every class-like name so later-defined bases,
         // `new C()` sites, and `instanceof` targets resolve regardless
@@ -661,6 +1155,11 @@ impl<'a> CppTranslator<'a> {
             }
         }
         self.collect_class_metadata(program);
+        let scope = if self.hoist_program_vars {
+            self.scan_hoists(&program.body, None)
+        } else {
+            HoistScope::empty()
+        };
         // First pass: forward declarations for top-level functions
         // (needed for mutual recursion where a() calls later-defined b()).
         // Nested functions lower to capturing lambdas inline instead.
@@ -672,25 +1171,28 @@ impl<'a> CppTranslator<'a> {
                 }
             }
         }
-        let mut lines = Vec::new();
-        // Emit forward declarations
+        let hoist_prelude = self.emit_hoist_prelude(&scope);
+        let mut fn_prelude = Vec::new();
         for (_, sig) in &fn_decls {
-            lines.push(format!("static inline {};", sig));
+            fn_prelude.push(format!("static inline {};", sig));
         }
-        if !fn_decls.is_empty() {
-            lines.push(String::new()); // blank line after forward decls
-        }
+        self.hoist_stack.push(scope);
+        let mut body_lines = Vec::new();
         for stmt in &program.body {
             if self.is_main_call(stmt) {
                 continue;
             }
             if let Some(code) = self.emit_statement(stmt) {
                 if !code.trim().is_empty() {
-                    lines.push(code);
+                    body_lines.push(code);
                 }
             }
         }
-        let body = lines.join("\n");
+        let scope = self.hoist_stack.pop();
+        if let Some(scope) = scope {
+            scope.restore(&mut self.ctx);
+        }
+        let body = body_lines.join("\n");
         if self.ctx.needed.contains("<print>") {
             // C++23 <print> is self-contained, no need for iostream sync
         }
@@ -732,13 +1234,17 @@ impl<'a> CppTranslator<'a> {
             }
         }
         let includes = self.ctx.generate_includes();
-        if js_comparison_block.is_empty() {
-            if includes.is_empty() { body } else { format!("{}\n\n{}", includes, body) }
-        } else if includes.is_empty() {
-            format!("{}\n\n{}", js_comparison_block, body)
-        } else {
-            format!("{}\n\n{}\n\n{}", includes, js_comparison_block, body)
+        let mut prelude_sections = Vec::new();
+        if !js_comparison_block.is_empty() {
+            prelude_sections.push(js_comparison_block);
         }
+        if let Some(hoist_prelude) = hoist_prelude {
+            prelude_sections.push(hoist_prelude);
+        }
+        if !fn_prelude.is_empty() {
+            prelude_sections.push(fn_prelude.join("\n"));
+        }
+        ProgramParts { includes, prelude: prelude_sections.join("\n\n"), body }
     }
 
     fn is_main_call(&self, stmt: &Statement<'a>) -> bool {
@@ -889,11 +1395,33 @@ impl<'a> CppTranslator<'a> {
         kind: &str,
     ) -> Option<String> {
         if !matches!(&d.id, BindingPattern::BindingIdentifier(_)) {
+            if kind == "var" && !self.hoist_stack.is_empty() {
+                // `var {a} = obj` binds into the hoisted scope; the
+                // destructuring emitters declare fresh locals, which would
+                // redeclare the prelude binding. `morph check` rejects this
+                // precisely before codegen.
+                return Some(format!(
+                    "{}/* error: destructured var declarations are not supported */",
+                    self.indent()
+                ));
+            }
             return self.emit_destructured(d, kind);
         }
         let (name, _) = self.binding_to_identifier(&d.id);
         if name.starts_with("/*") {
             return Some(format!("{}/* destructuring not supported */", self.indent()));
+        }
+        // Hoisted `var`: the declaration became a prelude binding at the
+        // top of the function/program, so the original site only assigns.
+        if kind == "var"
+            && let Some(binding) = self.hoist_stack.last().and_then(|scope| scope.get(&name))
+        {
+            let late = binding.late;
+            let Some(_) = d.init.as_ref() else {
+                return None;
+            };
+            let init_code = self.hoisted_init_code(d, &name, late)?;
+            return Some(format!("{}{} = {};", self.indent(), name, init_code));
         }
         // `const C = class { ... }` lowers to a named class declaration;
         // class expressions elsewhere stay rejected by `morph check`.
@@ -2100,35 +2628,21 @@ impl<'a> CppTranslator<'a> {
         false
     }
 
-    fn emit_typed_variable_declarator(
-        &mut self,
-        d: &VariableDeclarator<'a>,
-        name: &str,
-        kind: &str,
-    ) -> Option<String> {
-        // `await fetch()` whose result uses the Response API (r.ok(),
-        // r.status, r.text(), ...) declares the full Response and awaits
-        // fetch_response. Body-text-only awaits keep the JsString path
-        // below, so existing fixtures are unaffected.
+    fn declarator_storage(&mut self, d: &VariableDeclarator<'a>, name: &str) -> DeclaratorStorage {
         if let Some(init) = &d.init {
             if let Expression::AwaitExpression(awaited) = init {
                 if let Expression::CallExpression(call) = &awaited.argument {
                     if let Expression::Identifier(callee) = &call.callee {
                         if callee.name.as_str() == "fetch" && self.uses_response_api(name) {
                             self.ctx.needed.insert("\"../../runtime/cpp/net/net.h\"".to_string());
-                            let args: Vec<String> =
-                                call.arguments.iter().map(|a| self.emit_argument(a)).collect();
-                            self.ctx
-                                .var_types
-                                .insert(name.to_string(), "morph::net::Response".to_string());
-                            let prefix = if self.ctx.indent_level == 0 { "static " } else { "" };
-                            return Some(format!(
-                                "{}{}morph::net::Response {} = co_await morph::net::fetch_response({});",
-                                self.indent(),
-                                prefix,
-                                name,
-                                args.join(", ")
-                            ));
+                            return DeclaratorStorage {
+                                alloc_type: "morph::net::Response".to_string(),
+                                cpp_type: "morph::net::Response".to_string(),
+                                widened: WidenedType::None,
+                                escape_kind: EscapeKind::None,
+                                new_class_name: None,
+                                shared_wrap_call: false,
+                            };
                         }
                     }
                 }
@@ -2141,7 +2655,7 @@ impl<'a> CppTranslator<'a> {
             .and_then(|analysis| analysis.widens.get(name))
             .cloned()
             .unwrap_or(WidenedType::None);
-        let mut cpp_type = self.apply_declaration_widening(d, name, base_type, widened);
+        let mut cpp_type = self.apply_declaration_widening(d, name, base_type, widened.clone());
         // Intent-based: Promise<T> annotated but init is sync plain call -> use T (match JS runtime)
         if let Some(init) = &d.init {
             if let Some(stripped) = self.strip_result_for_sync_call(&cpp_type, init) {
@@ -2186,8 +2700,6 @@ impl<'a> CppTranslator<'a> {
         if let Some(class_name) = &new_class_name {
             cpp_type = class_name.clone();
         }
-        let new_class_args =
-            if new_class_name.is_some() { self.new_class_args(&d.init) } else { None };
         let escape_kind = self
             .analysis
             .as_ref()
@@ -2223,142 +2735,175 @@ impl<'a> CppTranslator<'a> {
                 other => other,
             }
         };
-        let new_class_alloc: Option<(String, String)> =
-            match (&new_class_name, &new_class_args, &escape_kind) {
-                (Some(class_name), Some(args), EscapeKind::Return | EscapeKind::Global) => {
-                    self.ctx.need("JsValue");
-                    let call_args = if args.is_empty() {
-                        format!("\"{class_name}\"")
-                    } else {
-                        format!("\"{class_name}\", {args}")
-                    };
-                    Some((
-                        format!("std::unique_ptr<{}>", class_name),
-                        format!("morph::js_new_unique<{}>({})", class_name, call_args),
-                    ))
+        let alloc_type = if let Some(class_name) = &new_class_name {
+            self.ctx.need("JsValue");
+            match escape_kind {
+                EscapeKind::Return | EscapeKind::Global => {
+                    format!("std::unique_ptr<{class_name}>")
                 }
-                (
-                    Some(class_name),
-                    Some(args),
-                    EscapeKind::ClosureCapture
-                    | EscapeKind::MultipleRefs
-                    | EscapeKind::AsyncBoundary
-                    | EscapeKind::None,
-                ) => {
-                    self.ctx.need("JsValue");
-                    let call_args = if args.is_empty() {
-                        format!("\"{class_name}\"")
-                    } else {
-                        format!("\"{class_name}\", {args}")
-                    };
-                    Some((
-                        // Non-escaping `new` keeps shared ownership: callers may
-                        // hold the value in `shared_ptr` parameters a stack value
-                        // could not satisfy.
-                        format!("std::shared_ptr<{}>", class_name),
-                        format!("morph::js_new<{}>({})", class_name, call_args),
-                    ))
+                _ => format!("std::shared_ptr<{class_name}>"),
+            }
+        } else if d.init.is_some() {
+            match escape_kind {
+                EscapeKind::None => cpp_type.clone(),
+                EscapeKind::Return | EscapeKind::Global => {
+                    format!("std::unique_ptr<{cpp_type}>")
                 }
-                _ => None,
+                EscapeKind::ClosureCapture
+                | EscapeKind::MultipleRefs
+                | EscapeKind::AsyncBoundary => {
+                    format!("std::shared_ptr<{cpp_type}>")
+                }
+            }
+        } else {
+            match escape_kind {
+                EscapeKind::ClosureCapture
+                | EscapeKind::MultipleRefs
+                | EscapeKind::AsyncBoundary => {
+                    format!("std::shared_ptr<{cpp_type}>")
+                }
+                EscapeKind::Return | EscapeKind::Global => {
+                    format!("std::unique_ptr<{cpp_type}>")
+                }
+                _ => cpp_type.clone(),
+            }
+        };
+        DeclaratorStorage {
+            alloc_type,
+            cpp_type,
+            widened,
+            escape_kind,
+            new_class_name,
+            shared_wrap_call,
+        }
+    }
+
+    fn apply_declarator_storage(&mut self, name: &str, storage: &DeclaratorStorage) {
+        if storage.alloc_type.starts_with("std::shared_ptr<") {
+            self.ctx.shared_ptr_vars.insert(name.to_string());
+        }
+        if storage.alloc_type.starts_with("std::unique_ptr<") {
+            self.ctx.unique_ptr_vars.insert(name.to_string());
+        }
+        self.ctx.need(&storage.alloc_type);
+        self.ctx.var_types.insert(name.to_string(), storage.alloc_type.clone());
+    }
+
+    fn declarator_init_code(
+        &mut self,
+        d: &VariableDeclarator<'a>,
+        storage: &DeclaratorStorage,
+    ) -> Option<String> {
+        let init = d.init.as_ref()?;
+        if let Expression::AwaitExpression(awaited) = init {
+            if let Expression::CallExpression(call) = &awaited.argument {
+                if let Expression::Identifier(callee) = &call.callee {
+                    if callee.name.as_str() == "fetch"
+                        && storage.alloc_type == "morph::net::Response"
+                    {
+                        let args: Vec<String> =
+                            call.arguments.iter().map(|a| self.emit_argument(a)).collect();
+                        return Some(format!(
+                            "co_await morph::net::fetch_response({})",
+                            args.join(", ")
+                        ));
+                    }
+                }
+            }
+        }
+        let init_code = if let Some(class_name) = &storage.new_class_name {
+            let args = self.new_class_args(&d.init).unwrap_or_default();
+            let call_args = if args.is_empty() {
+                format!("\"{class_name}\"")
+            } else {
+                format!("\"{class_name}\", {args}")
             };
-        let (alloc_type, init_code) = match new_class_alloc {
-            Some(pair) => pair,
-            None => {
-                if let Some(init) = &d.init {
-                    match escape_kind {
-                        EscapeKind::None => {
-                            if shared_wrap_call {
-                                (
-                                    cpp_type.clone(),
-                                    format!("{}({})", cpp_type, self.emit_expression(init)),
-                                )
-                            } else {
-                                let init_code = if cpp_type.starts_with("std::vector<")
-                                    && matches!(init, Expression::ArrayExpression(_))
-                                {
-                                    self.emit_vector_literal_typed(init, Some(&cpp_type))
-                                } else if cpp_type == "char"
-                                    && matches!(init, Expression::StringLiteral(_))
-                                {
-                                    self.emit_char_literal(init)
-                                } else {
-                                    self.emit_expression(init)
-                                };
-                                (cpp_type.clone(), init_code)
+            match storage.escape_kind {
+                EscapeKind::Return | EscapeKind::Global => {
+                    format!("morph::js_new_unique<{class_name}>({call_args})")
+                }
+                _ => format!("morph::js_new<{class_name}>({call_args})"),
+            }
+        } else {
+            match storage.escape_kind {
+                EscapeKind::None => {
+                    if storage.shared_wrap_call {
+                        format!("{}({})", storage.alloc_type, self.emit_expression(init))
+                    } else if storage.cpp_type.starts_with("std::vector<")
+                        && matches!(init, Expression::ArrayExpression(_))
+                    {
+                        self.emit_vector_literal_typed(init, Some(&storage.cpp_type))
+                    } else if storage.cpp_type == "char"
+                        && matches!(init, Expression::StringLiteral(_))
+                    {
+                        self.emit_char_literal(init)
+                    } else {
+                        let code = self.emit_expression(init);
+                        if matches!(storage.cpp_type.as_str(), "JsValue" | "JsLateValue") {
+                            if let Some(inferred) = self.infer_type_from_init(init) {
+                                if inferred.starts_with("std::vector<") {
+                                    return Some(format!("JsArray({code})"));
+                                }
                             }
                         }
-                        EscapeKind::Return | EscapeKind::Global => {
-                            let alloc = format!("std::unique_ptr<{}>", cpp_type);
-                            let init_code = if matches!(init, Expression::ArrayExpression(_)) {
-                                format!(
-                                    "std::make_unique<{}>(std::vector{{{}}})",
-                                    cpp_type,
-                                    self.emit_vector_literal_typed(init, Some(&cpp_type))
-                                        .trim_start_matches('{')
-                                        .trim_end_matches('}')
-                                )
-                            } else {
-                                format!(
-                                    "std::make_unique<{}>({})",
-                                    cpp_type,
-                                    self.emit_expression(init)
-                                )
-                            };
-                            (alloc, init_code)
-                        }
-                        EscapeKind::ClosureCapture
-                        | EscapeKind::MultipleRefs
-                        | EscapeKind::AsyncBoundary => {
-                            let alloc = format!("std::shared_ptr<{}>", cpp_type);
-                            let init_code = format!(
-                                "std::make_shared<{}>({})",
-                                cpp_type,
-                                self.emit_expression(init)
-                            );
-                            (alloc, init_code)
-                        }
+                        code
                     }
-                } else if matches!(
-                    escape_kind,
-                    EscapeKind::ClosureCapture
-                        | EscapeKind::MultipleRefs
-                        | EscapeKind::AsyncBoundary
-                ) {
-                    (format!("std::shared_ptr<{}>", cpp_type), String::new())
-                } else if matches!(escape_kind, EscapeKind::Return | EscapeKind::Global) {
-                    (format!("std::unique_ptr<{}>", cpp_type), String::new())
-                } else {
-                    (cpp_type.clone(), String::new())
+                }
+                EscapeKind::Return | EscapeKind::Global => {
+                    if matches!(init, Expression::ArrayExpression(_)) {
+                        format!(
+                            "std::make_unique<{}>(std::vector{{{}}})",
+                            storage.cpp_type,
+                            self.emit_vector_literal_typed(init, Some(&storage.cpp_type))
+                                .trim_start_matches('{')
+                                .trim_end_matches('}')
+                        )
+                    } else {
+                        format!(
+                            "std::make_unique<{}>({})",
+                            storage.cpp_type,
+                            self.emit_expression(init)
+                        )
+                    }
+                }
+                EscapeKind::ClosureCapture
+                | EscapeKind::MultipleRefs
+                | EscapeKind::AsyncBoundary => {
+                    format!(
+                        "std::make_shared<{}>({})",
+                        storage.cpp_type,
+                        self.emit_expression(init)
+                    )
                 }
             }
         };
-
-        if alloc_type.starts_with("std::shared_ptr<") {
-            self.ctx.shared_ptr_vars.insert(name.to_string());
-        }
-        if alloc_type.starts_with("std::unique_ptr<") {
-            self.ctx.unique_ptr_vars.insert(name.to_string());
-        }
-        let init_code = match &d.init {
-            Some(init) if Self::is_trusted_native_number(d, &widened).is_some() => {
-                self.convert_number_value(&cpp_type, init, init_code)
-            }
-            Some(init)
-                if cpp_type == "JsString"
-                    && matches!(
-                        self.operand_class_of(init),
-                        OperandClass::Integer | OperandClass::Float
-                    ) =>
+        let init_code = match Self::is_trusted_native_number(d, &storage.widened) {
+            Some(_) => self.convert_number_value(&storage.cpp_type, init, init_code),
+            None if storage.cpp_type == "JsString"
+                && matches!(
+                    self.operand_class_of(init),
+                    OperandClass::Integer | OperandClass::Float
+                ) =>
             {
                 format!("JsString(JsNumber({}))", init_code)
             }
-            _ => init_code,
+            None => init_code,
         };
-        self.ctx.need(&alloc_type);
-        self.ctx.var_types.insert(name.to_string(), alloc_type.clone());
+        Some(init_code)
+    }
+
+    fn emit_typed_variable_declarator(
+        &mut self,
+        d: &VariableDeclarator<'a>,
+        name: &str,
+        kind: &str,
+    ) -> Option<String> {
+        let storage = self.declarator_storage(d, name);
+        let init_code = self.declarator_init_code(d, &storage).unwrap_or_default();
+        self.apply_declarator_storage(name, &storage);
 
         let prefix = if self.ctx.indent_level == 0 { "static " } else { "" };
-        let mut final_type = alloc_type;
+        let mut final_type = storage.alloc_type;
         if kind == "const"
             && matches!(
                 final_type.as_str(),
@@ -3052,8 +3597,38 @@ impl<'a> CppTranslator<'a> {
     fn emit_for_init(&mut self, init: &ForStatementInit<'a>) -> Option<String> {
         match init {
             ForStatementInit::VariableDeclaration(d) => {
-                // For init, don't add `static` and emit as `type name = init` without trailing `;` and without indent
                 let kind = d.kind.as_str().to_string();
+                // Hoisted `var` init: the binding already exists, so the
+                // for-init contributes assignments only.
+                let hoisted_var = kind == "var"
+                    && d.declarations.iter().any(|decl| {
+                        let (name, _) = self.binding_to_identifier(&decl.id);
+                        self.hoisted_binding(&name).is_some()
+                    });
+                if hoisted_var {
+                    let mut parts = Vec::new();
+                    for decl in &d.declarations {
+                        if !matches!(&decl.id, BindingPattern::BindingIdentifier(_)) {
+                            continue;
+                        }
+                        let (name, _) = self.binding_to_identifier(&decl.id);
+                        if name.starts_with("/*") {
+                            continue;
+                        }
+                        let Some(_) = decl.init.as_ref() else {
+                            continue;
+                        };
+                        let late = self
+                            .hoist_stack
+                            .last()
+                            .and_then(|scope| scope.get(&name))
+                            .is_some_and(|binding| binding.late);
+                        let init_code = self.hoisted_init_code(decl, &name, late)?;
+                        parts.push(format!("{} = {}", name, init_code));
+                    }
+                    return if parts.is_empty() { None } else { Some(parts.join(", ")) };
+                }
+                // For init, don't add `static` and emit as `type name = init` without trailing `;` and without indent
                 let mut parts = Vec::new();
                 for decl in &d.declarations {
                     let (name, _) = self.binding_to_identifier(&decl.id);
@@ -3375,10 +3950,18 @@ impl<'a> CppTranslator<'a> {
         let index_temp = format!("__morph_for_in_index_{serial}");
         self.ctx.need("std::string");
 
-        let previous =
-            declaration_name.as_ref().and_then(|name| self.ctx.var_types.get(name).cloned());
-        if let Some(name) = &declaration_name {
-            self.ctx.var_types.insert(name.clone(), "std::string".to_string());
+        let hoisted = declaration_name.as_ref().is_some_and(|name| {
+            self.hoist_stack.last().is_some_and(|scope| scope.get(name).is_some())
+        });
+        let previous = if hoisted {
+            None
+        } else {
+            declaration_name.as_ref().and_then(|name| self.ctx.var_types.get(name).cloned())
+        };
+        if !hoisted {
+            if let Some(name) = &declaration_name {
+                self.ctx.var_types.insert(name.clone(), "std::string".to_string());
+            }
         }
 
         let old_indent = self.ctx.indent_level;
@@ -3400,12 +3983,16 @@ impl<'a> CppTranslator<'a> {
             index_temp
         ));
         if let Some(name) = &declaration_name {
-            lines.push(format!(
-                "{}std::string {} = std::to_string({});",
-                self.indent(),
-                name,
-                index_temp
-            ));
+            if hoisted {
+                lines.push(format!("{}{} = std::to_string({});", self.indent(), name, index_temp));
+            } else {
+                lines.push(format!(
+                    "{}std::string {} = std::to_string({});",
+                    self.indent(),
+                    name,
+                    index_temp
+                ));
+            }
         } else {
             let target = self.emit_for_left(&f.left);
             lines.push(format!("{}{} = std::to_string({});", self.indent(), target, index_temp));
@@ -3417,13 +4004,15 @@ impl<'a> CppTranslator<'a> {
         self.ctx.indent_level = old_indent;
         lines.push(format!("{}}}", self.indent()));
 
-        if let Some(name) = declaration_name {
-            match previous {
-                Some(ty) => {
-                    self.ctx.var_types.insert(name, ty);
-                }
-                None => {
-                    self.ctx.var_types.remove(&name);
+        if !hoisted {
+            if let Some(name) = declaration_name {
+                match previous {
+                    Some(ty) => {
+                        self.ctx.var_types.insert(name, ty);
+                    }
+                    None => {
+                        self.ctx.var_types.remove(&name);
+                    }
                 }
             }
         }
@@ -3532,7 +4121,24 @@ impl<'a> CppTranslator<'a> {
         self.loop_continue_actions.push(None);
         let body = self.emit_statement(&f.body).unwrap_or_else(|| "{}".to_string());
         self.loop_continue_actions.pop();
-        format!("{}for (auto {} : {}) {}", self.indent(), left, iter, body)
+        if self.for_left_binds_new_var(&f.left) {
+            format!("{}for (auto {} : {}) {}", self.indent(), left, iter, body)
+        } else {
+            // A C++ range-for always declares its binding. Assign the
+            // existing target (hoisted `var` or plain assignment target)
+            // from a per-iteration temporary instead.
+            let temp = format!("__morph_loop_value_{}", self.destructure_count);
+            self.destructure_count += 1;
+            format!(
+                "{}for (auto {} : {}) {{ {} = {}; {} }}",
+                self.indent(),
+                temp,
+                iter,
+                left,
+                temp,
+                body
+            )
+        }
     }
 
     fn emit_for_of_captured_binding(
@@ -3674,10 +4280,36 @@ impl<'a> CppTranslator<'a> {
             }
             _ => {}
         }
-        if f.r#await {
-            format!("{}for (auto {} : co_await {}) {}", self.indent(), left, right, body)
+        if self.for_left_binds_new_var(&f.left) {
+            if f.r#await {
+                format!("{}for (auto {} : co_await {}) {}", self.indent(), left, right, body)
+            } else {
+                format!("{}for (auto {} : {}) {}", self.indent(), left, right, body)
+            }
         } else {
-            format!("{}for (auto {} : {}) {}", self.indent(), left, right, body)
+            let temp = format!("__morph_loop_value_{}", self.destructure_count);
+            self.destructure_count += 1;
+            if f.r#await {
+                format!(
+                    "{}for (auto {} : co_await {}) {{ {} = {}; {} }}",
+                    self.indent(),
+                    temp,
+                    right,
+                    left,
+                    temp,
+                    body
+                )
+            } else {
+                format!(
+                    "{}for (auto {} : {}) {{ {} = {}; {} }}",
+                    self.indent(),
+                    temp,
+                    right,
+                    left,
+                    temp,
+                    body
+                )
+            }
         }
     }
 
@@ -3710,9 +4342,36 @@ impl<'a> CppTranslator<'a> {
         }
     }
 
+    /// `for (var x ...)` binds into the hoisted function scope, so the loop
+    /// header must assign the existing binding instead of declaring a new
+    /// one. Every other declaration form still declares its own C++ local.
+    fn for_left_binds_new_var(&self, left: &ForStatementLeft<'a>) -> bool {
+        match left {
+            ForStatementLeft::VariableDeclaration(d) => {
+                if d.kind != VariableDeclarationKind::Var {
+                    return true;
+                }
+                let Some(first) = d.declarations.first() else {
+                    return true;
+                };
+                let (name, _) = self.binding_to_identifier(&first.id);
+                self.hoisted_binding(&name).is_none()
+            }
+            _ => false,
+        }
+    }
+
     fn emit_for_left(&mut self, left: &ForStatementLeft<'a>) -> String {
         match left {
             ForStatementLeft::VariableDeclaration(d) => {
+                if let Some(first) = d.declarations.first() {
+                    let (name, _) = self.binding_to_identifier(&first.id);
+                    if d.kind == VariableDeclarationKind::Var
+                        && self.hoisted_binding(&name).is_some()
+                    {
+                        return name;
+                    }
+                }
                 if let Some(first) = d.declarations.first() {
                     let (name, _) = self.binding_to_identifier(&first.id);
                     name
@@ -4399,13 +5058,9 @@ impl<'a> CppTranslator<'a> {
         )
     }
 
-    fn emit_function_body(&mut self, body: &FunctionBody<'a>) -> String {
-        self.emit_function_body_with_params(body, None)
-    }
-
-    /// Like [`Self::emit_function_body`], but emits destructuring bindings
-    /// for `params` before the first user statement. The parameter list itself
-    /// carries one synthetic argument per destructured pattern.
+    /// Emit a function body, including destructuring bindings for `params`
+    /// before the first user statement. The parameter list itself carries one
+    /// synthetic argument per destructured pattern.
     fn emit_function_body_with_params(
         &mut self,
         body: &FunctionBody<'a>,
@@ -4420,10 +5075,19 @@ impl<'a> CppTranslator<'a> {
         if let Some(prelude) = params.and_then(|params| self.destructured_param_prelude(params)) {
             lines.push(prelude);
         }
+        let scope = self.scan_hoists(&body.statements, params);
+        if let Some(prelude) = self.emit_hoist_prelude(&scope) {
+            lines.push(prelude);
+        }
+        self.hoist_stack.push(scope);
         for stmt in &body.statements {
             if let Some(code) = self.emit_statement(stmt) {
                 lines.push(code);
             }
+        }
+        let scope = self.hoist_stack.pop();
+        if let Some(scope) = scope {
+            scope.restore(&mut self.ctx);
         }
         self.ctx.indent_level = old;
         lines.push(format!("{}}}", self.indent()));
@@ -8831,7 +9495,10 @@ impl<'a> CppTranslator<'a> {
             } else {
                 let saved_drop = self.ctx.drop_return_value;
                 self.ctx.drop_return_value = false;
-                let body = self.emit_function_body(f.body.as_function_body().unwrap());
+                let body = self.emit_function_body_with_params(
+                    f.body.as_function_body().unwrap(),
+                    Some(&f.params),
+                );
                 self.ctx.drop_return_value = saved_drop;
                 return format!("{}( {} ) -> void {}", capture, event_params, body);
             }

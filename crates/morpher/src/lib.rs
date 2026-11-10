@@ -46,7 +46,7 @@ impl ClassMetadata {
 /// Options controlling translation.
 /// Intent-based codegen (escape analysis, type widening, native types) is
 /// always on; there is no optimize flag.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct TranslateOptions {
     /// Type resolution mode (default: Infer)
     pub type_mode: TypeMode,
@@ -70,6 +70,26 @@ pub struct TranslateOptions {
     /// builds provide them once in `morph_api.h`; standalone translations
     /// keep them on the prototype and omit them from the definition.
     pub omit_param_defaults: bool,
+    /// Hoist program-level `var` bindings to a prelude (default). Module
+    /// globals disable this: their declaration sites live at namespace
+    /// scope, where an assignment statement is invalid. Late module vars
+    /// are moved into the module initializer instead.
+    pub hoist_program_vars: bool,
+}
+
+impl Default for TranslateOptions {
+    fn default() -> Self {
+        Self {
+            type_mode: TypeMode::default(),
+            runtime_path: None,
+            indent: 0,
+            state_vars: HashMap::new(),
+            state_types: HashMap::new(),
+            classes: ClassMetadata::default(),
+            omit_param_defaults: false,
+            hoist_program_vars: true,
+        }
+    }
 }
 
 impl TranslateOptions {

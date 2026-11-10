@@ -1,0 +1,10 @@
+export const windowConfig = { title: "fail-tdz", width: 800, height: 600 }
+
+// `let` bindings are in their temporal dead zone until the declaration
+// line; reading one earlier throws a ReferenceError in JS. Morph rejects
+// it at check time instead of silently printing the later value.
+export default function App() {
+  console.log(count)
+  let count = 1
+  return <body><div>{count}</div></body>
+}
