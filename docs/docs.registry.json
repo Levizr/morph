@@ -558,9 +558,10 @@
           "morph private fields",
           "morph late-assigned window handles",
           "morph late-assigned variables",
-          "morph uninitialized let"
+          "morph uninitialized let",
+          "morph timer arguments"
         ],
-        "lastUpdated": "2026-11-06",
+        "lastUpdated": "2026-11-11",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -614,15 +615,18 @@
         "file": "javascript/async",
         "status": "production",
         "author": "PIYUSH",
-        "description": "How to do async work in Morph: use async/await with coroutines and the built-in fetch() client to make network requests, compiled to native.",
+        "description": "How to do async work in Morph: async/await coroutines, the built-in fetch() client, timers with trailing arguments, and supported Promise compatibility chains, compiled to native.",
         "keywords": [
           "morph async await",
           "morph fetch example",
           "morph networking",
           "morph promises",
-          "morph http request"
+          "morph http request",
+          "morph timer arguments",
+          "morph promise then catch",
+          "morph fetch response"
         ],
-        "lastUpdated": "2026-09-10",
+        "lastUpdated": "2026-11-11",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -1742,7 +1746,7 @@
           "morph import json",
           "morph import unsupported"
         ],
-        "lastUpdated": "2026-10-23",
+        "lastUpdated": "2026-11-11",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -2036,9 +2040,11 @@
           "morph enum error",
           "morph namespace import",
           "morph regex literal",
-          "morph call spread"
+          "morph call spread",
+          "morph timer arguments",
+          "morph promise then"
         ],
-        "lastUpdated": "2026-10-31",
+        "lastUpdated": "2026-11-11",
         "publishedAt": "2026-09-21",
         "priority": 0.7,
         "changefreq": "monthly"
@@ -2591,9 +2597,11 @@
           "morph jsx spread props",
           "morph array methods",
           "morph object spread",
-          "morph math"
+          "morph math",
+          "morph timer arguments",
+          "morph promise then catch"
         ],
-        "lastUpdated": "2026-11-06",
+        "lastUpdated": "2026-11-11",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"
