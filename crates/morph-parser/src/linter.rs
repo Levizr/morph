@@ -759,6 +759,10 @@ struct JsSyntaxVisitor<'s> {
     /// Class expressions directly assigned to a `const`/`let` binding;
     /// those lower to a named class declaration.
     class_expression_starts: &'s HashSet<u32>,
+    /// `.then`/`.catch` call spans that lower to an inline `co_await`
+    /// chain (statement-level `fetch(...).then(...).catch(...)` inside an
+    /// async function). Everything else keeps the Part 0 rejection.
+    allowed_then_chains: &'s HashSet<u32>,
 }
 
 /// Collect class expressions that appear directly as a `const`/`let`
@@ -813,6 +817,98 @@ impl<'a> Visit<'a> for AllowedClassExpressions {
     }
 }
 
+/// Collect `.then`/`.catch` calls that lower to an inline `co_await` chain.
+/// Only statement-level `fetch(...)` chains inside an async function are
+/// supported: the chain is flattened into `co_await fetch_response(...)`
+/// followed by the callbacks, so ordering and error propagation match JS.
+struct AllowedThenChains {
+    starts: HashSet<u32>,
+    /// `true` for the innermost function/arrow when it is async. A chain in
+    /// a nested non-async arrow is rejected even inside an async function.
+    function_async: Vec<bool>,
+}
+
+impl<'a> Visit<'a> for AllowedThenChains {
+    fn visit_function(&mut self, function: &Function<'a>, flags: ScopeFlags) {
+        self.function_async.push(function.r#async);
+        oxc_ast_visit::walk::walk_function(self, function, flags);
+        self.function_async.pop();
+    }
+
+    fn visit_arrow_function_expression(&mut self, function: &ArrowFunctionExpression<'a>) {
+        self.function_async.push(function.r#async);
+        oxc_ast_visit::walk::walk_arrow_function_expression(self, function);
+        self.function_async.pop();
+    }
+
+    fn visit_expression_statement(&mut self, stmt: &ExpressionStatement<'a>) {
+        if self.function_async.last().copied().unwrap_or(false) {
+            if let Some(spans) = supported_then_chain(&stmt.expression) {
+                self.starts.extend(spans);
+            }
+        }
+        oxc_ast_visit::walk::walk_expression_statement(self, stmt);
+    }
+}
+
+/// Spans of the `.then`/`.catch` calls in a supported chain, or `None` when
+/// the shape is outside the lowering. Supported: `fetch(...)` optionally
+/// followed by one `.then(callback)` and one `.catch(callback)`, in that
+/// order, with non-async arrow callbacks of at most one parameter.
+fn supported_then_chain(expr: &Expression<'_>) -> Option<Vec<u32>> {
+    // Walk outside-in, then reverse into source order before validating.
+    let mut steps: Vec<(&str, u32)> = Vec::new();
+    let mut cur = expr;
+    loop {
+        let Expression::CallExpression(call) = cur else { break };
+        let Some(MemberExpression::StaticMemberExpression(member)) =
+            call.callee.as_member_expression()
+        else {
+            break;
+        };
+        let prop = member.property.name.as_str();
+        if prop != "then" && prop != "catch" {
+            return None;
+        }
+        // A second `.then` argument is the onRejected callback; the inline
+        // lowering cannot run it, so reject rather than drop it. Optional
+        // calls have different short-circuit semantics.
+        if call.optional || member.optional || call.arguments.len() != 1 {
+            return None;
+        }
+        if !supported_then_callback(call.arguments.first()) {
+            return None;
+        }
+        steps.push((prop, call.span.start));
+        cur = &member.object;
+    }
+    let Expression::CallExpression(root) = cur else { return None };
+    if !matches!(&root.callee, Expression::Identifier(id) if id.name.as_str() == "fetch") {
+        return None;
+    }
+    steps.reverse();
+    let supported = match steps.as_slice() {
+        [(prop, _)] => matches!(*prop, "then" | "catch"),
+        [(then_prop, _), (catch_prop, _)] => *then_prop == "then" && *catch_prop == "catch",
+        _ => false,
+    };
+    supported.then(|| steps.into_iter().map(|(_, span)| span).collect())
+}
+
+fn supported_then_callback(arg: Option<&Argument<'_>>) -> bool {
+    let Some(Argument::ArrowFunctionExpression(arrow)) = arg else {
+        return false;
+    };
+    if arrow.r#async || arrow.params.rest.is_some() || arrow.params.items.len() > 1 {
+        return false;
+    }
+    arrow
+        .params
+        .items
+        .first()
+        .is_none_or(|p| matches!(p.pattern, BindingPattern::BindingIdentifier(_)))
+}
+
 /// Spread call arguments lower only where the runtime helper is variadic:
 /// `push`/`unshift`/`splice`/`concat` on arrays and `Math.min`/`Math.max`.
 /// Every other call would pass the spread array as one argument, so the
@@ -844,11 +940,13 @@ impl<'a> Visit<'a> for JsSyntaxVisitor<'_> {
         }
         if let Some(me) = e.callee.as_member_expression() {
             let prop = member_prop_label(me);
-            if matches!(prop.as_deref(), Some("then" | "catch")) {
+            if matches!(prop.as_deref(), Some("then" | "catch"))
+                && !self.allowed_then_chains.contains(&e.span.start)
+            {
                 self.out.push((
                     e.span.start,
                     "Promise `.then`/`.catch` chains",
-                    "Use `async`/`await` and `try`/`catch` instead",
+                    "Use `async`/`await` and `try`/`catch`; statement-level `fetch(...).then(...).catch(...)` inside an async function is supported",
                 ));
             }
             if let Some((root, _)) = member_root_name(member_object(me)) {
@@ -1186,11 +1284,15 @@ fn check_js_syntax(program: &Program, file_path: &str, offsets: &[usize]) -> Vec
     functions.visit_program(program);
     let mut allowed_classes = AllowedClassExpressions { starts: HashSet::new(), function_depth: 0 };
     allowed_classes.visit_program(program);
+    let mut allowed_chains =
+        AllowedThenChains { starts: HashSet::new(), function_async: Vec::new() };
+    allowed_chains.visit_program(program);
     let mut st = JsSyntaxVisitor {
         out: Vec::new(),
         function_symbols: &functions.out,
         scoping: semantic.scoping(),
         class_expression_starts: &allowed_classes.starts,
+        allowed_then_chains: &allowed_chains.starts,
     };
     st.visit_program(program);
     st.out
@@ -6653,6 +6755,55 @@ mod tests {
         let content = "import { morphState } from 'morph'\nexport default function App() {\n  async function load() { await fetch(\"http://127.0.0.1\"); }\n  return (<div onClick={load}>x</div>)\n}\n";
         let errs = check(content, "App.mx");
         assert!(!codes(&errs).contains(&"mx-js-syntax"), "{errs:?}");
+    }
+
+    #[test]
+    fn then_chain_positions() {
+        // Supported: statement-level fetch chains inside async functions.
+        let ok = "import { morphState } from 'morph'\nexport default function App() {\n  async function load() {\n    fetch(\"http://127.0.0.1/\");\n    fetch(\"http://127.0.0.1/\").then((r) => console.log(r.text()));\n    fetch(\"http://127.0.0.1/\").catch((e) => console.log(e));\n    fetch(\"http://127.0.0.1/\").then((r) => console.log(r.text())).catch((e) => console.log(e));\n    fetch(\"http://127.0.0.1/\").then(() => console.log(\"ok\"));\n  }\n  return (<div onClick={load}>x</div>)\n}\n";
+        let errs = check(ok, "App.mx");
+        assert!(
+            !errs
+                .iter()
+                .any(|e| e.code == "mx-js-syntax" && e.message.contains("`.then`/`.catch`")),
+            "{errs:?}"
+        );
+
+        // Everything outside a statement-level fetch chain in an async
+        // function keeps the Part 0 rejection.
+        for body in [
+            "const p = fetch(\"http://127.0.0.1/\").then((r) => console.log(r.text()));",
+            "return fetch(\"http://127.0.0.1/\").then((r) => console.log(r.text()));",
+            "await fetch(\"http://127.0.0.1/\").then((r) => console.log(r.text()));",
+            "getData().then((r) => console.log(r));",
+            "Promise.resolve().then((r) => console.log(r));",
+            "fetch(\"http://127.0.0.1/\").then((r) => console.log(r)).then((r) => console.log(r));",
+            "fetch(\"http://127.0.0.1/\").catch((e) => console.log(e)).then((r) => console.log(r));",
+            "fetch(\"http://127.0.0.1/\").then((r) => console.log(r), (e) => console.log(e));",
+            "fetch(\"http://127.0.0.1/\").then(async (r) => console.log(r));",
+            "fetch(\"http://127.0.0.1/\").then(function (r) { console.log(r); });",
+            "fetch(\"http://127.0.0.1/\").then((a, b) => console.log(a, b));",
+            "fetch(\"http://127.0.0.1/\").then(({ status }) => console.log(status));",
+        ] {
+            let content = format!(
+                "import {{ morphState }} from 'morph'\nexport default function App() {{\n  async function load() {{\n    {body}\n  }}\n  return (<div onClick={{load}}>x</div>)\n}}\n"
+            );
+            let errs = check(&content, "App.mx");
+            assert!(
+                errs.iter()
+                    .any(|e| e.code == "mx-js-syntax" && e.message.contains("`.then`/`.catch`")),
+                "{body}: {errs:?}"
+            );
+        }
+
+        // A nested non-async arrow is not an async context, even inside an
+        // async function.
+        let nested = "import { morphState } from 'morph'\nexport default function App() {\n  async function load() {\n    const run = () => { fetch(\"http://127.0.0.1/\").then((r) => console.log(r)); };\n    run();\n  }\n  return (<div onClick={load}>x</div>)\n}\n";
+        let errs = check(nested, "App.mx");
+        assert!(
+            errs.iter().any(|e| e.code == "mx-js-syntax" && e.message.contains("`.then`/`.catch`")),
+            "{errs:?}"
+        );
     }
 
     #[test]

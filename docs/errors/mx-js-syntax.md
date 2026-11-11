@@ -34,7 +34,10 @@ The current set is:
   fields cannot store closures)
 - `for...in` with a destructuring binding (bind the key with a plain name,
   then destructure the value inside the loop body)
-- Promise `.then` / `.catch` chains (use `async`/`await` and `try`/`catch`)
+- Promise `.then` / `.catch` chains outside the supported statement-level
+  `fetch(...).then(...).catch(...)` form inside an async function (one
+  `.then` and/or one `.catch`, non-async callback with at most one plain
+  parameter; use `async`/`await` and `try`/`catch` otherwise)
 - `JSON.parse` reviver and `JSON.stringify` replacer/space arguments
 - trailing timer arguments (`setTimeout(fn, ms, ...args)`)
 - `let`/`const` reads before the declaration line (the temporal dead zone),
@@ -60,7 +63,8 @@ component body, `var` hoisting with `undefined` initialization (including
 block, loop, and component-body declarations), class declarations / `new`, module-scope class expressions
 directly assigned to a `const`/`let`, type-only imports and exports,
 default and optional parameters, arrow/function consts, data-only
-object-literal consts, and JSX list expressions. `for...in` destructuring
+object-literal consts, statement-level `fetch(...).then(...).catch(...)`
+chains inside async functions, and JSX list expressions. `for...in` destructuring
 is rejected; bind the key with a plain name and destructure inside the
 loop body. Every JavaScript language and standard-library gap is committed
 for implementation in the
@@ -74,7 +78,8 @@ purpose: generators need resumable frames; `with` needs dynamic scope;
 labeled jumps have no C++ equivalent; `import.meta` / dynamic `import()`
 need a module loader; namespaces
 and decorators vanish in translation; enums and regex literals have no
-lowering yet. `.then`/`.catch` needs a promise-chain runtime, and JSON/timer
+lowering yet. `.then`/`.catch` outside the supported statement-level
+`fetch` chain needs a general promise-chain runtime, and JSON/timer
 extra arguments would be silently dropped. Supporting any of them
 approximately would change program meaning — so each is rejected with an
 explicit rewrite. See
@@ -117,11 +122,10 @@ export default function App() {
 ```
 
 ```tsx
-// ❌ Promise chain — mx-js-syntax (use async/await)
+// ❌ Promise chain used as a value — mx-js-syntax
 async function load() {
-  fetch("https://api.example.com/data")
-    .then((r) => r.json())
-    .catch((err) => console.log(err));
+  const pending = fetch("https://api.example.com/data").then((r) => r.text())
+  console.log(pending)
 }
 ```
 
@@ -137,7 +141,7 @@ async function load() {
 | `const C = class { … }` | a module-scope direct `const`/`let` initializer (supported), or a class declaration |
 | `{ handler: fn }` | keep `fn` as its own const and call it directly |
 | `for (const [k] in object)` | `for (const k in object) { … }` — bind the key plainly; destructure the value inside the body |
-| `fetch(...).then(...)` | `const r = await fetch(...)` inside `try`/`catch` |
+| `fetch(...).then(...)` as a value | a statement-level chain inside an async function (supported), or `const r = await fetch(...)` inside `try`/`catch` |
 | `JSON.parse(text, reviver)` | parse once, then transform the value |
 | `JSON.stringify(value, replacer, 2)` | stringify the value, then format the result |
 | `setTimeout(fn, ms, a, b)` | `setTimeout(() => fn(a, b), ms)` |

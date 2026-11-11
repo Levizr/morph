@@ -2994,6 +2994,8 @@ fn generate_morph_api_header<'w>(
         "#include \"types/js_object.h\"".to_string(),
         "#include \"reactivity/signal.h\"".to_string(),
         "#include \"reactivity/channel.h\"".to_string(),
+        "#include \"reactivity/promise.h\"".to_string(),
+        "#include \"reactivity/task.h\"".to_string(),
         "#include \"core/window_api.h\"".to_string(),
         String::new(),
     ];
@@ -3247,6 +3249,8 @@ pub fn generate_morph_api_header_dev(windows: &[IRWindow], premain_parts: &[Stri
         "#include \"types/js_object.h\"".to_string(),
         "#include \"reactivity/signal.h\"".to_string(),
         "#include \"reactivity/channel.h\"".to_string(),
+        "#include \"reactivity/promise.h\"".to_string(),
+        "#include \"reactivity/task.h\"".to_string(),
         "#include \"core/window_api.h\"".to_string(),
         String::new(),
     ];

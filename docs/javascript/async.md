@@ -181,10 +181,26 @@ co_return;
 }
 ```
 
+## `.then` / `.catch` chains
+
+For compatibility with browser-style code, a statement-level `fetch(...)` chain inside an async function lowers to the same awaited fetch plus callbacks:
+
+```tsx
+async function load() {
+  fetch("https://api.example.com/data")
+    .then((response) => console.log(response.text()))
+    .catch((error) => console.log(error.message))
+}
+```
+
+The `.then` callback receives a `Response`; the `.catch` callback receives the error as a `JsValue`. The callback runs inside a `try`/`catch`, so an exception thrown by `.then` reaches `.catch`, matching JavaScript ordering. Supported shapes are one `.then`, one `.catch`, or `.then` followed by `.catch`, with a non-async arrow callback of at most one plain parameter.
+
+Everything else is rejected by `morph check` instead of silently dropping work: assignment/return positions, `await fetch(...).then(...)`, non-`fetch` roots, duplicate steps, `.catch` before `.then`, `.then` with an onRejected second argument, async or function-expression callbacks, and destructured callback parameters. Prefer `async`/`await` with `try`/`catch` for new code.
+
 ## Not Supported Yet
 
 - `Promise.resolve` / `Promise.all` / `Promise.allSettled` / `Promise.race` / `Promise.any`
-- `.then` / `.catch` chains on `fetch` results; use `async`/`await` (`morph check` rejects them)
+- General Promise-chain runtimes and `.then`/`.catch` forms outside the supported `fetch` chain shape above
 - Trailing timer arguments (`setTimeout(fn, ms, ...args)`; `morph check` rejects them)
 
 These are tracked in the [TypeScript App-Logic Coverage](../future/javascript/coverage.md) plan.

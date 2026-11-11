@@ -72,7 +72,7 @@ Already shipped and **not** on the missing list:
 - **Operators with JS semantics:** `==`/`!=`, `===`/`!==`, relational, `in`, `**`/`**=`, `&&=`/`||=`/`??=`, truthiness, string concatenation, `ToNumber` in numeric contexts.
 - **JSX:** elements, fragments, and list `.map` in direct JSX-child position.
 
-`Response.json()` returns a `JsValue`; dot access lowers to the same bracket lookup as `["key"]` (Part 3A), while `await response.json()` lowers to the synchronous reader. `JSON.parse`/`stringify` extra arguments, `.then`/`.catch`, and timer trailing arguments are rejected by `morph check`. Class expressions are accepted only as module-scope direct `const`/`let` initializers; every other position is rejected.
+`Response.json()` returns a `JsValue`; dot access lowers to the same bracket lookup as `["key"]` (Part 3A), while `await response.json()` lowers to the synchronous reader. Statement-level `fetch(...).then(...).catch(...)` chains inside an async function lower to an awaited fetch plus callbacks in a try/catch (Part 3C); other `.then`/`.catch` shapes, JSON `parse`/`stringify` extra arguments, and timer trailing arguments are rejected by `morph check`. Class expressions are accepted only as module-scope direct `const`/`let` initializers; every other position is rejected.
 
 ## Part map
 
@@ -92,7 +92,7 @@ Parts are ordered so that a later part never changes a representation owned by a
 | **2E** | Imported module side effects | 0 + module-bindings design | module builder | ✅ Shipped: bare top-level statements and late `var` declarations run once, dependency-first, with cycle guards |
 | **3A** | JSON return typing and dot access | 0 | `JsValue` member lowering | ✅ Shipped: `JSON.parse(...).name` and `response.json().name` read fields through the bracket lookup |
 | **3B** | `await response.json()` | 3A | Response emitter | Await form compiles and returns parsed data |
-| **3C** | `.then`/`.catch` compatibility chain | 0 | Promise chain lowering | Supported `fetch`/`Response` and `Promise` chains build and match JS ordering/error behavior |
+| **3C** | `.then`/`.catch` compatibility chain | 0 | Promise chain lowering | ✅ Shipped: statement-level `fetch(...).then(cb).catch(cb)` inside an async function awaits the response and runs the callbacks in a try/catch; unsupported chain shapes are rejected |
 | **3D** | Timer extra arguments | 0 | timer emitter | `setTimeout(fn, 0, ...args)` forwards arguments |
 | **3E** | Promise statics | 0 | Promise runtime | `resolve`/`all`/`allSettled`/`race`/`any` build and match JS result order |
 | **3F** | `fetch` request/response docs | 0 | docs/tests | `fetch(url, { method, headers, body })` documented and fixture-covered |
@@ -149,7 +149,7 @@ The statuses below were probed on 2026-11-06 with `morph check`, `morph --to cpp
 | 0.2.6 | `const C = class { ... }` | ✅ Fixed in 1B: module-scope direct `const`/`let` class expressions lower to a named class declaration; function-local and component-body initializers are rejected. | 1B |
 | 0.2.7 | `constructor(public x: number)` | ✅ Fixed in 1B: parameter properties become fields. | 1B |
 | 0.2.8 | `#private` fields | ✅ Fixed in 1B: mangled to a private member with `->`/`::` access. | 1B |
-| 0.2.9 | `fetch(...).then(...)`; `r.text().then(...)` | ⛔ Rejected by `morph check` until 3C ships the supported compatibility chain. | 3C |
+| 0.2.9 | `fetch(...).then(...)`; `r.text().then(...)` | ✅ Fixed in 3C for statement-level `fetch(...).then(cb).catch(cb)` chains inside async functions (one `.then` and/or one `.catch`, non-async arrow callback with at most one plain parameter). Assignment/return positions, non-`fetch` roots, duplicate steps, `.then` with an onRejected second argument, and async/function-expression/destructured callbacks stay rejected. | 3C |
 | 0.2.10 | `setTimeout(fn, 0, 1, 2)` | ⛔ Rejected by `morph check`; forwarding is 3D. | 3D |
 | 0.2.11 | `new.target` | ✅ Fixed in 2B: constructors observe the most-derived target (including parameter defaults, initializer lists, and arrows lexically nested in the constructor); field initializers, methods, and plain functions observe `undefined`; class identifiers compare as constructor values. | 2B |
 | 0.2.12 | `for (const [k, v] of Object.entries(o))` | ✅ Fixed in 1C: declaration and assignment patterns lower through a synthetic loop item; `for...in` destructuring is rejected by `morph check`. | 1C |
@@ -332,13 +332,9 @@ Module-scope assignments use a captureless lambda because C++ forbids a capture-
 
 ### 3C — `.then`/`.catch` compatibility chain
 
-**Today:** ⛔ `morph check` rejects `.then`/`.catch` with a hint to use `async`/`await` and `try`/`catch`.
+**Shipped:** a statement-level `fetch(...)` chain inside an async function lowers inline: `co_await morph::net::fetch_response(...)` supplies the response, the `.then` callback receives it as `morph::net::Response`, and a trailing `.catch` receives a `JsValue` in a `catch` clause. Supported shapes are `fetch(...)`, `fetch(...).then(cb)`, `fetch(...).catch(cb)`, and `fetch(...).then(cb).catch(cb)`, with a non-async arrow callback of at most one plain parameter. Because the `.then` callback runs inside the `try`, a throw from it reaches `.catch`, matching JS. Unsupported forms (assignment/return position, `await fetch(...).then(...)`, non-`fetch` roots, duplicate steps, `.catch` before `.then`, async, function-expression, or destructured callbacks) keep the precise `mx-js-syntax` rejection. No general Promise-chain runtime is introduced.
 
-**Decision:** implement `.then`/`.catch` as a compatibility chain over the supported `fetch`/`Response` and `Promise` surface. A general Promise chain runtime remains a non-goal; forms outside the supported surface keep a precise rejection instead of silently dropping work. The deployment guide may continue to prefer `async`/`await`.
-
-**Depends on:** Part 0.
-
-**Exit:** supported `fetch(...).then(...).catch(...)` chains build and match JS ordering and error propagation; unsupported chain forms fail `morph check`.
+**Target:** supported `fetch(...).then(...).catch(...)` chains build and match JS ordering and error propagation; unsupported chain forms fail `morph check`.
 
 ### 3D — Timer extra arguments
 
@@ -566,7 +562,7 @@ Morph should expose native equivalents (`useWindow`, clipboard, storage) instead
 | `Response.json()` detection and full `Response` runtime | ✅ Shipped; dot access shipped in 3A |
 | `morph check` diagnostics for rejected constructs | ✅ Shipped; grows with each part |
 | App-logic contract and docs truth-up | ✅ This pass |
-| Part 0 — contract integrity | 🚧 In progress — shipped rejections for `.then`/`.catch`, JSON extra args, and timer args; remaining ⚠️/🟥 rows are owned by 1B (0.2.17) and 6F |
+| Part 0 — contract integrity | 🚧 In progress — shipped rejections for unsupported `.then`/`.catch` forms, JSON extra args, and timer args; remaining ⚠️/🟥 rows are owned by 1B (0.2.17) and 6F |
 | Part 1A — widening bindings | ✅ Shipped |
 | Part 1B — class model | ✅ Shipped; function-local class-declaration metadata follow-up tracked as 0.2.17 |
 | Part 1C — destructuring assignment and loop bindings | ✅ Shipped |
@@ -577,7 +573,9 @@ Morph should expose native equivalents (`useWindow`, clipboard, storage) instead
 | Part 2D — hoisting and TDZ | ✅ Shipped |
 | Part 2E — imported module side effects | ✅ Shipped |
 | Part 3A — JSON return typing and dot access | ✅ Shipped |
-| Parts 3B–5G — JavaScript language and standard library | 🚧 Committed — all JS-only gaps are in scope for implementation |
+| Part 3B — `await response.json()` | ✅ Shipped |
+| Part 3C — `.then`/`.catch` compatibility chain | ✅ Shipped |
+| Parts 3D–5G — JavaScript language and standard library | 🚧 Committed — all JS-only gaps are in scope for implementation |
 | Parts 6A–6G — platform APIs and JSX | 🚧 Separate product work — browser globals stay out of scope |
 | Part 7 — docs and claims | 📋 Continuous |
 

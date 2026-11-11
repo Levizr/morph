@@ -70,6 +70,10 @@ pub struct Ctx {
     /// Accessor properties per class: property -> getter/setter presence.
     pub class_accessors: HashMap<String, HashMap<String, AccessorFlags>>,
     pub var_types: HashMap<String, String>,
+    /// C++ types for unannotated parameters at positions where the call
+    /// site fixes the type (`.then((response) => ...)`). Keyed by the
+    /// parameter span start so nested callbacks never collide.
+    pub contextual_param_types: HashMap<u32, String>,
     pub shared_ptr_vars: HashSet<String>,
     pub unique_ptr_vars: HashSet<String>,
     pub fn_expr_depth: usize,
@@ -114,6 +118,7 @@ impl Default for Ctx {
             class_field_types: HashMap::new(),
             class_accessors: HashMap::new(),
             var_types: HashMap::new(),
+            contextual_param_types: HashMap::new(),
             shared_ptr_vars: HashSet::new(),
             unique_ptr_vars: HashSet::new(),
             fn_expr_depth: 0,
@@ -155,6 +160,7 @@ impl Ctx {
             class_field_types: self.class_field_types.clone(),
             class_accessors: self.class_accessors.clone(),
             var_types: self.var_types.clone(),
+            contextual_param_types: self.contextual_param_types.clone(),
             shared_ptr_vars: self.shared_ptr_vars.clone(),
             unique_ptr_vars: self.unique_ptr_vars.clone(),
             fn_expr_depth: self.fn_expr_depth,
@@ -191,6 +197,9 @@ impl Ctx {
         // var_types and shared_ptr_vars are shared via clone, but merge new entries
         for (k, v) in child.var_types {
             self.var_types.insert(k, v);
+        }
+        for (k, v) in child.contextual_param_types {
+            self.contextual_param_types.insert(k, v);
         }
         for v in child.shared_ptr_vars {
             self.shared_ptr_vars.insert(v);

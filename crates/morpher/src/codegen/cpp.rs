@@ -796,6 +796,92 @@ fn is_nested_var_scope(
     false
 }
 
+/// A supported `.then`/`.catch` callback: a non-async arrow with zero or
+/// one plain identifier parameter. Function-expression callbacks are
+/// rejected because their dynamic `this` has no inline lowering.
+#[derive(Clone, Copy)]
+enum ThenCallback<'b, 'a> {
+    Arrow(&'b ArrowFunctionExpression<'a>),
+}
+
+impl<'b, 'a> ThenCallback<'b, 'a> {
+    fn params(self) -> &'b FormalParameters<'a> {
+        match self {
+            Self::Arrow(f) => &f.params,
+        }
+    }
+
+    fn has_param(self) -> bool {
+        !self.params().items.is_empty()
+    }
+}
+
+/// Parse a statement-level `fetch(...)` chain into its root call and the
+/// supported callback steps. Supported shapes are `fetch(...)`,
+/// `fetch(...).then(cb)`, `fetch(...).catch(cb)`, and
+/// `fetch(...).then(cb).catch(cb)`; anything else returns `None`.
+fn parse_then_chain<'b, 'a>(
+    expr: &'b Expression<'a>,
+) -> Option<(&'b CallExpression<'a>, Option<ThenCallback<'b, 'a>>, Option<ThenCallback<'b, 'a>>)> {
+    let mut calls: Vec<(&'b str, &'b CallExpression<'a>)> = Vec::new();
+    let mut cur = expr;
+    loop {
+        let Expression::CallExpression(call) = cur else { break };
+        let Some(MemberExpression::StaticMemberExpression(member)) =
+            call.callee.as_member_expression()
+        else {
+            break;
+        };
+        let prop = member.property.name.as_str();
+        if prop != "then" && prop != "catch" {
+            return None;
+        }
+        // A second `.then` argument is the onRejected callback; the inline
+        // lowering cannot run it, so reject rather than drop it.
+        if call.optional || member.optional || call.arguments.len() != 1 {
+            return None;
+        }
+        calls.push((prop, call));
+        cur = &member.object;
+    }
+    let Expression::CallExpression(root) = cur else { return None };
+    if !matches!(&root.callee, Expression::Identifier(id) if id.name.as_str() == "fetch") {
+        return None;
+    }
+    calls.reverse();
+    let then_cb;
+    let catch_cb;
+    match calls.as_slice() {
+        [(p, c)] if *p == "then" => {
+            then_cb = then_callback(c.arguments.first());
+            catch_cb = None;
+        }
+        [(p, c)] if *p == "catch" => {
+            then_cb = None;
+            catch_cb = then_callback(c.arguments.first());
+        }
+        [(p1, c1), (p2, c2)] if *p1 == "then" && *p2 == "catch" => {
+            then_cb = then_callback(c1.arguments.first());
+            catch_cb = then_callback(c2.arguments.first());
+        }
+        _ => return None,
+    }
+    Some((root, then_cb, catch_cb))
+}
+
+fn then_callback<'b, 'a>(arg: Option<&'b Argument<'a>>) -> Option<ThenCallback<'b, 'a>> {
+    let Some(Argument::ArrowFunctionExpression(f)) = arg else { return None };
+    if f.r#async || f.params.rest.is_some() || f.params.items.len() > 1 {
+        return None;
+    }
+    if let Some(p) = f.params.items.first()
+        && !matches!(p.pattern, BindingPattern::BindingIdentifier(_))
+    {
+        return None;
+    }
+    Some(ThenCallback::Arrow(f))
+}
+
 impl<'a> CppTranslator<'a> {
     pub fn new(
         source: &'a str,
@@ -1268,7 +1354,11 @@ impl<'a> CppTranslator<'a> {
             Statement::TSEnumDeclaration(e) => Some(self.emit_enum(e)),
             Statement::BlockStatement(b) => Some(self.emit_block(b)),
             Statement::ExpressionStatement(e) => {
-                Some(format!("{}{};", self.indent(), self.emit_expression(&e.expression)))
+                if let Some(code) = self.emit_then_chain_statement(&e.expression) {
+                    Some(code)
+                } else {
+                    Some(format!("{}{};", self.indent(), self.emit_expression(&e.expression)))
+                }
             }
             Statement::ReturnStatement(r) => Some(self.emit_return(r)),
             Statement::IfStatement(i) => Some(self.emit_if(i)),
@@ -5143,7 +5233,9 @@ impl<'a> CppTranslator<'a> {
             if name.starts_with("/*") {
                 continue;
             }
-            // Respect explicit type annotations regardless of mode
+            // Respect explicit type annotations regardless of mode; an
+            // unannotated param can still be typed by its call site
+            // (`.then((response) => ...)` fixes `response`'s C++ type).
             let cpp_type = if let Some(ta) = &p.type_annotation {
                 resolve_type_annotation(
                     Some(ta),
@@ -5152,6 +5244,8 @@ impl<'a> CppTranslator<'a> {
                     false,
                     &self.ctx.class_names,
                 )
+            } else if let Some(ty) = self.ctx.contextual_param_types.get(&p.span.start) {
+                ty.clone()
             } else {
                 "auto".to_string()
             };
@@ -9485,6 +9579,91 @@ impl<'a> CppTranslator<'a> {
         format!("std::make_shared<{}{}>({})", callee, type_args, args.join(", "))
     }
 
+    /// Lower a statement-level `fetch(...).then(cb).catch(cb)` chain to an
+    /// awaited fetch plus immediately-invoked callbacks. Returns `None`
+    /// for any other expression so normal emission (and the linter's
+    /// rejection) applies.
+    fn emit_then_chain_statement(&mut self, expr: &Expression<'a>) -> Option<String> {
+        if self.ctx.is_async_fn == 0 {
+            return None;
+        }
+        let (fetch_call, then_cb, catch_cb) = parse_then_chain(expr)?;
+        self.ctx.needed.insert("\"../../runtime/cpp/net/net.h\"".to_string());
+        let args: Vec<String> =
+            fetch_call.arguments.iter().map(|a| self.emit_argument(a)).collect();
+        let await_expr = format!("co_await morph::net::fetch_response({})", args.join(", "));
+        let base = self.indent();
+        let inner = format!("{base}{INDENT}");
+        let mut lines = Vec::new();
+        if let Some(catch_cb) = catch_cb {
+            lines.push(format!("{base}try {{"));
+            lines.push(format!("{inner}{};", self.emit_then_step(&await_expr, then_cb)));
+            self.ctx.need("JsValue");
+            lines.push(format!("{base}}} catch (const JsValue& __morph_then_error) {{"));
+            let lambda = self.emit_then_callback_scoped(catch_cb, "JsValue");
+            let call = if catch_cb.has_param() {
+                format!("({lambda})(__morph_then_error)")
+            } else {
+                format!("({lambda})()")
+            };
+            lines.push(format!("{inner}{call};"));
+            lines.push(format!("{base}}}"));
+        } else {
+            lines.push(format!("{base}{};", self.emit_then_step(&await_expr, then_cb)));
+        }
+        Some(lines.join("\n"))
+    }
+
+    fn emit_then_step<'b>(
+        &mut self,
+        await_expr: &str,
+        then_cb: Option<ThenCallback<'b, 'a>>,
+    ) -> String {
+        let Some(cb) = then_cb else {
+            return await_expr.to_string();
+        };
+        let lambda = self.emit_then_callback_scoped(cb, "morph::net::Response");
+        if cb.has_param() {
+            format!("({lambda})({await_expr})")
+        } else {
+            // A zero-parameter callback cannot receive the response, but the
+            // fetch must still run and suspend before the callback.
+            let inner = format!("{}{}", self.indent(), INDENT);
+            format!("{await_expr};\n{inner}({lambda})()")
+        }
+    }
+
+    /// Emit the callback lambda with the enclosing async function hidden:
+    /// a `return` inside the callback must return from the lambda, not
+    /// `co_return` from the surrounding coroutine.
+    fn emit_then_callback_scoped<'b>(
+        &mut self,
+        cb: ThenCallback<'b, 'a>,
+        param_type: &str,
+    ) -> String {
+        let saved_async = self.ctx.is_async_fn;
+        let saved_drop = self.ctx.drop_return_value;
+        self.ctx.is_async_fn = 0;
+        self.ctx.drop_return_value = false;
+        let out = self.emit_then_callback(cb, param_type);
+        self.ctx.is_async_fn = saved_async;
+        self.ctx.drop_return_value = saved_drop;
+        out
+    }
+
+    fn emit_then_callback<'b>(&mut self, cb: ThenCallback<'b, 'a>, param_type: &str) -> String {
+        if let Some(p) = cb.params().items.first() {
+            self.ctx.contextual_param_types.insert(p.span.start, param_type.to_string());
+        }
+        let out = match cb {
+            ThenCallback::Arrow(f) => self.emit_arrow(f),
+        };
+        if let Some(p) = cb.params().items.first() {
+            self.ctx.contextual_param_types.remove(&p.span.start);
+        }
+        out
+    }
+
     fn emit_arrow(&mut self, f: &ArrowFunctionExpression<'a>) -> String {
         let capture = self.lambda_capture(&f.params);
         // Nested arrows capture enclosing arrow locals (e.g. an effect's
@@ -9833,6 +10012,82 @@ mod tests {
         assert!(out.contains("morph::js_math::atan2(1, 1)"), "{out}");
         assert!(out.contains("morph::js_math::hypot({3, 4, 12})"), "{out}");
         assert!(out.contains("morph::js_math::random()"), "{out}");
+    }
+
+    #[test]
+    fn then_chain_lowers_to_awaited_fetch() {
+        let out = translate_stmts(
+            "async function load() {\n\
+                 fetch(\"http://example.com\").then((response) => console.log(response.text())).catch((error) => console.log(error));\n\
+             }",
+        );
+        assert!(
+            out.contains("co_await morph::net::fetch_response"),
+            "awaited fetch response: {out}"
+        );
+        assert!(out.contains("morph::net::Response response"), "then param typed: {out}");
+        assert!(out.contains("catch (const JsValue& __morph_then_error)"), "catch clause: {out}");
+        assert!(out.contains("JsValue error"), "catch param typed: {out}");
+        assert!(!out.contains(".then("), "no then call: {out}");
+        assert!(!out.contains(".catch("), "no catch call: {out}");
+        // The awaited fetch is the IIFE argument, so it completes before the
+        // callback body runs; the catch clause wraps both.
+        assert!(
+            out.contains(")(co_await morph::net::fetch_response"),
+            "fetch resolves before the then callback: {out}"
+        );
+        let then_at = out.find("response.text()").expect("then body");
+        let catch_at = out.find("catch (const JsValue&").expect("catch clause");
+        assert!(then_at < catch_at, "catch after then: {out}");
+    }
+
+    #[test]
+    fn then_chain_callbacks_return_from_the_lambda() {
+        let out = translate_stmts(
+            "async function load() {\n\
+                 fetch(\"http://example.com\").then((r) => { console.log(r.text()); return 1; });\n\
+             }",
+        );
+        assert!(out.contains("return 1;"), "lambda return: {out}");
+        assert!(!out.contains("co_return 1;"), "not a coroutine return: {out}");
+        assert!(!out.contains("try {"), "then-only chain needs no catch: {out}");
+    }
+
+    #[test]
+    fn then_chain_zero_param_callback_still_awaits_fetch() {
+        let out = translate_stmts(
+            "async function load() {\n\
+                 fetch(\"http://example.com\").then(() => console.log(\"ok\"));\n\
+             }",
+        );
+        assert!(out.contains("co_await morph::net::fetch_response"), "awaited fetch: {out}");
+        assert!(out.contains("})()"), "zero-param callback called: {out}");
+    }
+
+    #[test]
+    fn then_chain_with_on_rejected_callback_is_not_lowered() {
+        // The second `.then` argument is the onRejected callback; the inline
+        // lowering would drop it, so it must not parse as a supported chain.
+        let out = translate_stmts(
+            "async function load() {\n\
+                 fetch(\"http://example.com\").then((r) => console.log(r.text()), (e) => console.log(e));\n\
+             }",
+        );
+        assert!(!out.contains("__morph_then_error"), "not lowered as a chain: {out}");
+        assert!(out.contains(".then("), "left for the linter rejection: {out}");
+    }
+
+    #[test]
+    fn catch_only_chain_awaits_fetch_in_try() {
+        let out = translate_stmts(
+            "async function load() {\n\
+                 fetch(\"http://example.com\").catch((error) => console.log(error));\n\
+             }",
+        );
+        assert!(out.contains("try {"), "try block: {out}");
+        assert!(out.contains("co_await morph::net::fetch_response"), "awaited fetch: {out}");
+        assert!(out.contains("catch (const JsValue& __morph_then_error)"), "catch clause: {out}");
+        assert!(!out.contains("morph::net::Response"), "no then param: {out}");
     }
 
     #[test]

@@ -66,8 +66,14 @@ import { morphState, morphEffect } from 'morph';
 
 export default function App() {
   const [title, setTitle] = morphState("");
+
+  async function load() {
+    const response = await fetch("https://example.com/config.json");
+    setTitle(response.text());
+  }
+
   morphEffect(() => {
-    fetch("https://example.com/config.json").then((r) => setTitle("loaded"));
+    load();
   }, []);
   return <div>{title}</div>;
 }

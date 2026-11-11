@@ -1,0 +1,14 @@
+export const windowConfig = { title: "fail-then-chain-value", width: 800, height: 600 }
+
+export default function App() {
+  const load = async () => {
+    const pending = fetch("http://127.0.0.1/").then((response) => response.text())
+    console.log(pending)
+  }
+  load()
+  return (
+    <body>
+      <div>Promise chains used as values are not lowered; use async/await</div>
+    </body>
+  )
+}

@@ -1,0 +1,74 @@
+import { morphState } from 'morph'
+import { morph_test_wait_ms } from "./wait.cpp"
+
+export const windowConfig = { title: "pass-then-chain", width: 800, height: 600 }
+
+// Part 3C: a statement-level `fetch(...).then(...).catch(...)` chain inside
+// an async function lowers to `co_await morph::net::fetch_response(...)`
+// plus the callbacks inside a try/catch. Ordering and error propagation
+// match JS. The runtime test rewrites PORT_OK to a local server; the
+// placeholder keeps the conformance build offline.
+const okUrl = "http://127.0.0.1:PORT_OK/ok"
+const badUrl = "http://127.0.0.1:1/bad"
+
+async function success() {
+  fetch(okUrl)
+    .then((response) => console.log("then", response.text()))
+    .catch((error) => console.log("unexpected catch", error.message))
+}
+
+async function transportError() {
+  fetch(badUrl)
+    .then((response) => console.log("unexpected then", response.text()))
+    .catch((error) => console.log("caught transport", error.message))
+}
+
+async function thrownInThen() {
+  fetch(okUrl)
+    .then((response) => {
+      throw new Error("boom")
+    })
+    .catch((error) => console.log("caught throw", error.message))
+}
+
+async function catchOnly() {
+  fetch(badUrl).catch((error) => console.log("caught only", error.message))
+}
+
+async function noParam() {
+  fetch(okUrl)
+    .then(() => console.log("then no param"))
+    .catch((error) => console.log("unexpected no-param catch", error.message))
+}
+
+async function catchOnlyNoParam() {
+  fetch(badUrl).catch(() => console.log("caught only no param"))
+}
+
+success()
+transportError()
+thrownInThen()
+catchOnly()
+noParam()
+catchOnlyNoParam()
+
+// Let the fetch worker threads resume the coroutines before the headless
+// self-test returns.
+morph_test_wait_ms(1500)
+
+export default function App() {
+  const [count, setCount] = morphState(0)
+
+  async function load() {
+    fetch(okUrl)
+      .then((response) => console.log("button then", response.text()))
+      .catch((error) => console.log("button catch", error.message))
+  }
+
+  return (
+    <body>
+      <text>{count}</text>
+      <button onClick={() => { load(); setCount(count + 1) }}>load</button>
+    </body>
+  )
+}

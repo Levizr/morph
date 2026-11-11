@@ -124,8 +124,9 @@ Binary (`+`, `-`, `*`, `/`, `**`, `===`, `!==`, `==`, `!=`, `<`, `>`, etc.), una
   (`f(...args)`, `new C(...args)`). Spread arguments are supported on
   `push`/`unshift`/`splice`/`concat` and `Math.min`/`Math.max`.
 - Promise static helpers (`Promise.resolve`, `Promise.all`, …) and
-  `.then`/`.catch` chains (rejected by `morph check`); `await` and
-  `new Promise(...)` lower to C++ coroutines
+  `.then`/`.catch` forms outside the supported statement-level
+  `fetch(...).then(...).catch(...)` chain in an async function (rejected by
+  `morph check`); `await` and `new Promise(...)` lower to C++ coroutines
 - Regular expression literals, `Date`, `Map`/`Set`, and `typeof`/`instanceof`
 - Object/Array statics such as `Object.assign`, `Object.fromEntries`,
   `Array.from`, and `Array.of`
