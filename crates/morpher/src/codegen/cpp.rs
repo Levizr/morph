@@ -3076,6 +3076,15 @@ impl<'a> CppTranslator<'a> {
     fn infer_type_from_init(&self, node: &Expression<'a>) -> Option<String> {
         match node {
             Expression::ParenthesizedExpression(p) => self.infer_type_from_init(&p.expression),
+            Expression::TSAsExpression(e) => self.infer_type_from_init(&e.expression),
+            Expression::TSSatisfiesExpression(e) => self.infer_type_from_init(&e.expression),
+            Expression::TSTypeAssertion(e) => self.infer_type_from_init(&e.expression),
+            Expression::TSNonNullExpression(e) => self.infer_type_from_init(&e.expression),
+            // `await response.json()` returns the parsed body synchronously
+            // in the native runtime; infer from the body reader itself.
+            Expression::AwaitExpression(a) if Self::is_sync_response_body_call(&a.argument) => {
+                self.infer_type_from_init(&a.argument)
+            }
             Expression::StringLiteral(_) => Some("std::string".to_string()),
             Expression::TemplateLiteral(_) => Some("std::string".to_string()),
             Expression::BooleanLiteral(_) => Some("bool".to_string()),
@@ -3201,6 +3210,23 @@ impl<'a> CppTranslator<'a> {
                 Some("JsValue".to_string())
             }
             Expression::CallExpression(c) => {
+                if let Expression::StaticMemberExpression(member) = &c.callee {
+                    // `JSON.parse(...)` / `JSON.stringify(...)` produce a
+                    // `JsValue`; dot access on the result lowers to a
+                    // bracket lookup (Part 3A).
+                    if matches!(&member.object, Expression::Identifier(id) if id.name.as_str() == "JSON")
+                        && matches!(member.property.name.as_str(), "parse" | "stringify")
+                    {
+                        return Some("JsValue".to_string());
+                    }
+                    if self.is_response_like_expr(&member.object) {
+                        match member.property.name.as_str() {
+                            "json" => return Some("JsValue".to_string()),
+                            "text" | "arrayBuffer" => return Some("std::string".to_string()),
+                            _ => {}
+                        }
+                    }
+                }
                 let Expression::Identifier(id) = &c.callee else {
                     return None;
                 };
@@ -7058,6 +7084,23 @@ impl<'a> CppTranslator<'a> {
         false
     }
 
+    /// True when `expr` evaluates to a fetch `Response`: a binding declared
+    /// from `await fetch(...)`, an inline `fetch(...)`, or an awaited one.
+    /// Used to type body readers (`.json()`, `.text()`) on call results.
+    fn is_response_like_expr(&self, expr: &Expression<'a>) -> bool {
+        match expr {
+            Expression::ParenthesizedExpression(p) => self.is_response_like_expr(&p.expression),
+            Expression::Identifier(id) => {
+                self.ctx.var_types.get(id.name.as_str()).is_some_and(|t| t.contains("Response"))
+            }
+            Expression::CallExpression(call) => {
+                matches!(&call.callee, Expression::Identifier(id) if id.name.as_str() == "fetch")
+            }
+            Expression::AwaitExpression(a) => self.is_response_like_expr(&a.argument),
+            _ => false,
+        }
+    }
+
     /// Bare class name behind a pointer/reference spelling.
     fn bare_pointer_type(cpp_type: &str) -> &str {
         let trimmed = cpp_type.trim();
@@ -9820,6 +9863,32 @@ mod tests {
         assert!(out.contains("co_await morph::net::fetch"), "{out}");
         assert!(!out.contains("co_await response.json()"), "{out}");
         assert!(out.contains("response.json()"), "{out}");
+    }
+
+    #[test]
+    fn json_parse_dot_access_lowers_to_bracket() {
+        let out = translate_stmts(
+            "const inline = JSON.parse(\"{\\\"name\\\":\\\"Ada\\\"}\").name;\n\
+             const parsed = JSON.parse(\"{\\\"name\\\":\\\"Ada\\\"}\");\n\
+             console.log(inline, parsed.name, parsed[\"name\"]);",
+        );
+        assert!(out.contains("morph::json_parse"), "{out}");
+        assert!(out.contains("[\"name\"]"), "{out}");
+        assert!(!out.contains(".name"), "{out}");
+    }
+
+    #[test]
+    fn response_json_dot_access_lowers_to_bracket() {
+        let out = translate_stmts(
+            "async function load() {\n\
+                 const response = await fetch(\"http://example.com\");\n\
+                 const data = await response.json();\n\
+                 console.log(response.json().name, data.name);\n\
+             }",
+        );
+        assert!(out.contains("response.json()[\"name\"]"), "{out}");
+        assert!(out.contains("data[\"name\"]"), "{out}");
+        assert!(!out.contains("data.name"), "{out}");
     }
 
     #[test]

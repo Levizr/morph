@@ -1,0 +1,29 @@
+import { morphState } from 'morph'
+
+export const windowConfig = { title: "pass-json-dot", width: 800, height: 600 }
+
+// Part 3A: dot access on `JsValue` producers (`JSON.parse`,
+// `JSON.stringify`, `Response.json`) lowers to the same bracket lookup as
+// `["key"]`, so inline call results and awaited readers keep JS semantics.
+const text = "{\"name\":\"Ada\",\"age\":36,\"nested\":{\"ok\":true}}"
+const data = JSON.parse(text)
+
+console.log("json fields", data.name, data["name"], data.age, data.nested.ok)
+console.log("json inline", JSON.parse(text).name, JSON.stringify(data).length > 0)
+
+export default function App() {
+  const [count, setCount] = morphState(0)
+
+  async function loadJson() {
+    const response = await fetch("http://127.0.0.1:1/")
+    const parsed = await response.json()
+    console.log("response fields", parsed.name, response.json().name)
+  }
+
+  return (
+    <body>
+      <text>{data.name} {data["age"]} {count}</text>
+      <button onClick={() => { loadJson(); setCount(count + 1) }}>load</button>
+    </body>
+  )
+}

@@ -1545,6 +1545,19 @@ impl IRBuilder {
             .map_err(|err| anyhow::anyhow!("failed to infer class metadata: {err}"))
     }
 
+    /// Copy a top-level dynamic type onto an imported var binding, so
+    /// member access through the local alias still picks bracket lookups.
+    fn seed_imported_var_type(
+        target: &morph_parser::MxSource,
+        original: &str,
+        local: &str,
+        frame: &mut InstanceFrame,
+    ) {
+        if let Some(ty) = target.global_var_types.get(original) {
+            frame.types.insert(local.to_string(), ty.clone());
+        }
+    }
+
     /// Register a class imported under `local` (which may differ from the
     /// declaration name) so snippets can lower `new local()` and member
     /// access through the class's field/accessor metadata.
@@ -1640,6 +1653,12 @@ impl IRBuilder {
             let qualified = format!("::{MODULE_NS_ROOT}::{ns}::{}", binding_ident(name));
             Self::seed_frame_name(frame, module_path, name, &qualified)?;
             seeded.insert(name.clone());
+        }
+        // Dynamic top-level values (`const data = JSON.parse(...)`) need
+        // their C++ type at every use site so member access picks the
+        // bracket lookup; the declaration itself is translated separately.
+        for (name, ty) in &module.global_var_types {
+            frame.types.insert(name.clone(), ty.clone());
         }
         // Identifier handler refs call zero-param functions as `f()`.
         for fd in module
@@ -1841,6 +1860,9 @@ impl IRBuilder {
             Self::register_module_binding(target_path, &target_ns, kind, original, ctx);
             let qualified = format!("::{MODULE_NS_ROOT}::{target_ns}::{}", binding_ident(original));
             Self::seed_frame_name(frame, module_path, local, &qualified)?;
+            if kind == "var" {
+                Self::seed_imported_var_type(target, original, local, frame);
+            }
             Self::register_import(module_path, local, &target_ns, original, &qualified, ctx);
             return Ok(());
         }
@@ -1848,6 +1870,7 @@ impl IRBuilder {
             Self::register_module_binding(target_path, &target_ns, "var", original, ctx);
             let qualified = format!("::{MODULE_NS_ROOT}::{target_ns}::{}", binding_ident(original));
             Self::seed_frame_name(frame, module_path, local, &qualified)?;
+            Self::seed_imported_var_type(target, original, local, frame);
             Self::register_import(module_path, local, &target_ns, original, &qualified, ctx);
             return Ok(());
         }
@@ -1930,6 +1953,9 @@ impl IRBuilder {
         Self::register_module_binding(target_path, &target_ns, kind, &decl, ctx);
         let qualified = format!("::{MODULE_NS_ROOT}::{target_ns}::{}", binding_ident(&decl));
         Self::seed_frame_name(frame, module_path, local, &qualified)?;
+        if kind == "var" {
+            Self::seed_imported_var_type(target, &decl, local, frame);
+        }
         Self::register_import(module_path, local, &target_ns, &decl, &qualified, ctx);
         if kind == "class" {
             Self::seed_imported_class(target, local, &decl, frame)?;
@@ -4241,8 +4267,9 @@ fn capture_raw(raw: &str, frame: &InstanceFrame) -> String {
     let renamed = rename_symbols(&sub, &frame.renames, frame);
     let renamed = rename_symbols(&renamed, &frame.prop_binds, frame);
     // Emit-time translation has no type map, so `user.name` on a JsObject
-    // const would render `.name` (JsObject has no such member). Rewrite
-    // typed field access to JS bracket access while the type is known.
+    // or `JSON.parse(...)` result would render `.name` (those types have no
+    // such member). Rewrite typed field access to JS bracket access while
+    // the type is known.
     normalize_object_members(&renamed, &frame.types)
 }
 
@@ -4268,9 +4295,10 @@ fn is_method_member(name: &str) -> bool {
 }
 
 /// `user.name` / `user?.name` → `user["name"]` / `user?.["name"]` when
-/// `user` is a known `JsObject`. Nested fields keep bracketing because the
-/// runtime `JsValue::operator[]` resolves objects and arrays. Strings,
-/// templates, and comments are copied verbatim; method names stay dotted.
+/// `user` is a known `JsObject`/`JsValue`/`JsLateValue`. Nested fields keep
+/// bracketing because the runtime `JsValue::operator[]` resolves objects and
+/// arrays. Strings, templates, and comments are copied verbatim; method
+/// names stay dotted.
 fn normalize_object_members(src: &str, types: &HashMap<String, String>) -> String {
     if types.is_empty() {
         return src.to_string();
@@ -4332,7 +4360,10 @@ fn normalize_object_members(src: &str, types: &HashMap<String, String>) -> Strin
             }
             let word = &src[start..j];
             let preceded_by_dot = start > 0 && bytes[start - 1] == b'.';
-            let is_object = !preceded_by_dot && types.get(word).is_some_and(|ty| ty == "JsObject");
+            let is_object = !preceded_by_dot
+                && types.get(word).is_some_and(|ty| {
+                    matches!(ty.as_str(), "JsObject" | "JsValue" | "JsLateValue")
+                });
             if is_object {
                 out.push_str(word);
                 i = j;
@@ -8304,6 +8335,7 @@ mod tests {
             global_vars: vec!["const API_URL = \"https://api.test\";".to_string()],
             global_var_names: vec!["API_URL".to_string()],
             module_statements: Vec::new(),
+            global_var_types: HashMap::new(),
             console_logs: vec!["module log".to_string()],
             extra_headers: Vec::new(),
             cpp_imports: Vec::new(),
@@ -8624,6 +8656,7 @@ mod tests {
             global_vars: Vec::new(),
             global_var_names: Vec::new(),
             module_statements: Vec::new(),
+            global_var_types: HashMap::new(),
             console_logs: Vec::new(),
             extra_headers: Vec::new(),
             cpp_imports: Vec::new(),

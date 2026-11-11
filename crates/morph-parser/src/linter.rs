@@ -2165,6 +2165,7 @@ pub fn check(source: &str, file_path: &str) -> Vec<LintError> {
         global_vars: walker.global_vars,
         global_var_names: walker.global_var_names,
         module_statements: walker.module_statements,
+        global_var_types: walker.global_var_types,
         console_logs: walker.console_logs,
         extra_headers: walker.extra_headers,
         cpp_imports: walker.cpp_imports,

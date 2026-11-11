@@ -149,7 +149,7 @@ for `morph build`; the two commands share the same parser, graph, lint, and
 IR pipeline.
 
 > **Known contract gaps:** some constructs still pass `morph check` and
-> fail in generated C++ — JSON dot access, JSX spread props, closures
+> fail in generated C++ — JSX spread props, closures
 > stored in JS arrays (`Array<() => T>`; use a native `std::function`
 > vector alias), function-local class metadata that escapes its declaring
 > function, and others. The

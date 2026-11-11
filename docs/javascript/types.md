@@ -136,6 +136,7 @@ Functions: `min`/`max` (variadic, and `...spread` over arrays), `abs`, `floor`, 
 - `parse` is strict JSON — no trailing garbage or comments — depth-capped at 100, and throws a catchable `SyntaxError` on bad input.
 - `stringify` follows JS: `undefined` array elements become `null`, object properties with `undefined` values are omitted, top-level `undefined` returns `undefined`. No reviver or replacer.
 - Key order is sorted (see the JsObject note), not insertion order.
+- Both return a `JsValue`; dot access reads the same field as bracket access, including on inline call results: `JSON.parse(text).name` is `JSON.parse(text)["name"]`.
 
 Everything on this page is checker-gated: unsupported globals, members, or methods stay a hard `morph check` error rather than compiling to something surprising.
 

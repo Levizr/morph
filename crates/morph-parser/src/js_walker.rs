@@ -357,6 +357,8 @@ pub struct MxWalker<'src> {
     pub global_vars: Vec<String>,
     pub global_var_names: Vec<String>,
     pub module_statements: Vec<String>,
+    /// See [`crate::MxSource::global_var_types`].
+    pub global_var_types: HashMap<String, String>,
     /// Source positions paired with pending module statements so bare
     /// statements and late `var` declarations can be emitted in source
     /// order (the declaration pass runs before the bare-statement pass).
@@ -388,6 +390,7 @@ impl<'src> MxWalker<'src> {
             global_vars: Vec::new(),
             global_var_names: Vec::new(),
             module_statements: Vec::new(),
+            global_var_types: HashMap::new(),
             module_statement_spans: Vec::new(),
             console_logs: Vec::new(),
             extra_headers: Vec::new(),
@@ -2179,6 +2182,37 @@ fn declarator_is_late(
     }
 }
 
+/// C++ type for an unannotated top-level initializer that is always a JS
+/// dynamic value. Only unambiguous shapes are seeded: a wrong global type
+/// would change member-access and operand lowering at every use site.
+fn top_level_var_type(decl: &VariableDeclarator<'_>) -> Option<&'static str> {
+    if decl.type_annotation.is_some() {
+        return None;
+    }
+    top_level_dynamic_type(decl.init.as_ref()?)
+}
+
+fn top_level_dynamic_type(expr: &Expression<'_>) -> Option<&'static str> {
+    match expr {
+        Expression::ObjectExpression(_) => Some("JsObject"),
+        Expression::CallExpression(call) => match &call.callee {
+            Expression::StaticMemberExpression(member)
+                if matches!(&member.object, Expression::Identifier(id) if id.name.as_str() == "JSON")
+                    && matches!(member.property.name.as_str(), "parse" | "stringify") =>
+            {
+                Some("JsValue")
+            }
+            _ => None,
+        },
+        Expression::ParenthesizedExpression(p) => top_level_dynamic_type(&p.expression),
+        Expression::TSAsExpression(e) => top_level_dynamic_type(&e.expression),
+        Expression::TSSatisfiesExpression(e) => top_level_dynamic_type(&e.expression),
+        Expression::TSTypeAssertion(e) => top_level_dynamic_type(&e.expression),
+        Expression::TSNonNullExpression(e) => top_level_dynamic_type(&e.expression),
+        _ => None,
+    }
+}
+
 /// Statement kinds that execute at module initialization. Declarations
 /// and imports are inventoried by their own passes; `CSS.load` is a
 /// parser-level import.
@@ -2410,6 +2444,9 @@ impl<'a> Visit<'a> for MxWalker<'_> {
                                     self.exported_vars
                                         .push(ExportedVar { name, source: String::new() });
                                 } else {
+                                    if let Some(ty) = top_level_var_type(decl) {
+                                        self.global_var_types.insert(name.clone(), ty.to_string());
+                                    }
                                     self.exported_vars.push(ExportedVar { name, source: src });
                                 }
                             }
@@ -2427,6 +2464,9 @@ impl<'a> Visit<'a> for MxWalker<'_> {
                             self.try_extract_declarator_component(decl, true, false);
                             if self.components.len() == before {
                                 if let Some(name) = binding_ident_name(&decl.id) {
+                                    if let Some(ty) = top_level_var_type(decl) {
+                                        self.global_var_types.insert(name.clone(), ty.to_string());
+                                    }
                                     self.exported_vars
                                         .push(ExportedVar { name, source: stmt_src.clone() });
                                 }
@@ -2631,12 +2671,20 @@ impl<'a> Visit<'a> for MxWalker<'_> {
                             if declarator_is_late(d, &late_module_vars) {
                                 self.module_statement_spans.push((d.span.start as usize, src));
                             } else {
+                                if let Some(name) = binding_ident_name(&d.id) {
+                                    if let Some(ty) = top_level_var_type(d) {
+                                        self.global_var_types.insert(name, ty.to_string());
+                                    }
+                                }
                                 self.global_vars.push(src);
                             }
                         }
                     } else {
                         for d in &vd.declarations {
                             if let Some(name) = binding_ident_name(&d.id) {
+                                if let Some(ty) = top_level_var_type(d) {
+                                    self.global_var_types.insert(name.clone(), ty.to_string());
+                                }
                                 self.global_var_names.push(name);
                             }
                         }
@@ -3250,5 +3298,21 @@ export default function App() { return (<div/>) }
         assert_eq!(s.module_statements.len(), 1, "{:?}", s.module_statements);
         assert!(s.module_statements[0].contains("console.log(\"x\")"));
         assert!(s.global_vars.iter().any(|g| g.contains("var x = 1")));
+    }
+
+    #[test]
+    fn global_var_types_mark_dynamic_top_level_values() {
+        let s = parse(
+            "const data = JSON.parse(\"{}\")\n\
+             const obj = { a: 1 }\n\
+             const n = 1\n\
+             const text = \"hi\"\n\
+             const typed: string = JSON.stringify({})\n",
+        );
+        assert_eq!(s.global_var_types.get("data").map(String::as_str), Some("JsValue"));
+        assert_eq!(s.global_var_types.get("obj").map(String::as_str), Some("JsObject"));
+        assert!(!s.global_var_types.contains_key("n"), "{:?}", s.global_var_types);
+        assert!(!s.global_var_types.contains_key("text"), "{:?}", s.global_var_types);
+        assert!(!s.global_var_types.contains_key("typed"), "{:?}", s.global_var_types);
     }
 }

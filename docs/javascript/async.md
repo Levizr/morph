@@ -51,14 +51,14 @@ const contentType = response.headers.get("content-type")
 | `response.arrayBuffer()` | Returns body as raw bytes (synchronous) |
 | `response.clone()` | Creates a copy for multiple reads |
 
-`response.json()` returns a `JsValue`, so read fields with bracket access today:
+`response.json()` returns a `JsValue`; dot access and bracket access are equivalent:
 
 ```tsx
 const data = response.json()
-console.log(data["name"])
+console.log(data.name, data["name"])
 ```
 
-The browser-shaped `await response.json()` works and lowers to the same synchronous reader. Dot access (`data.name`) is still tracked in the [TypeScript App-Logic Coverage](../future/javascript/coverage.md) plan.
+The browser-shaped `await response.json()` works and lowers to the same synchronous reader.
 
 ### Error Handling
 

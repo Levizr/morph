@@ -72,7 +72,7 @@ Already shipped and **not** on the missing list:
 - **Operators with JS semantics:** `==`/`!=`, `===`/`!==`, relational, `in`, `**`/`**=`, `&&=`/`||=`/`??=`, truthiness, string concatenation, `ToNumber` in numeric contexts.
 - **JSX:** elements, fragments, and list `.map` in direct JSX-child position.
 
-`Response.json()` returns a `JsValue`; dot access is Part 3A, while `await response.json()` lowers to the synchronous reader. `JSON.parse`/`stringify` extra arguments, `.then`/`.catch`, and timer trailing arguments are rejected by `morph check`. Class expressions are accepted only as module-scope direct `const`/`let` initializers; every other position is rejected.
+`Response.json()` returns a `JsValue`; dot access lowers to the same bracket lookup as `["key"]` (Part 3A), while `await response.json()` lowers to the synchronous reader. `JSON.parse`/`stringify` extra arguments, `.then`/`.catch`, and timer trailing arguments are rejected by `morph check`. Class expressions are accepted only as module-scope direct `const`/`let` initializers; every other position is rejected.
 
 ## Part map
 
@@ -90,7 +90,7 @@ Parts are ordered so that a later part never changes a representation owned by a
 | **2C** | `for...in` over arrays | 0 | statement emitter | ✅ Shipped: array receivers enumerate own index keys as strings; object `for...in` unchanged |
 | **2D** | Hoisting and TDZ | 1A | declaration analysis | `var` is `undefined`; `let`/`const` use-before-declaration errors |
 | **2E** | Imported module side effects | 0 + module-bindings design | module builder | ✅ Shipped: bare top-level statements and late `var` declarations run once, dependency-first, with cycle guards |
-| **3A** | JSON return typing and dot access | 0 | `JsValue` member lowering | `JSON.parse(...).name` and `response.json().name` work |
+| **3A** | JSON return typing and dot access | 0 | `JsValue` member lowering | ✅ Shipped: `JSON.parse(...).name` and `response.json().name` read fields through the bracket lookup |
 | **3B** | `await response.json()` | 3A | Response emitter | Await form compiles and returns parsed data |
 | **3C** | `.then`/`.catch` compatibility chain | 0 | Promise chain lowering | Supported `fetch`/`Response` and `Promise` chains build and match JS ordering/error behavior |
 | **3D** | Timer extra arguments | 0 | timer emitter | `setTimeout(fn, 0, ...args)` forwards arguments |
@@ -153,7 +153,7 @@ The statuses below were probed on 2026-11-06 with `morph check`, `morph --to cpp
 | 0.2.10 | `setTimeout(fn, 0, 1, 2)` | ⛔ Rejected by `morph check`; forwarding is 3D. | 3D |
 | 0.2.11 | `new.target` | ✅ Fixed in 2B: constructors observe the most-derived target (including parameter defaults, initializer lists, and arrows lexically nested in the constructor); field initializers, methods, and plain functions observe `undefined`; class identifiers compare as constructor values. | 2B |
 | 0.2.12 | `for (const [k, v] of Object.entries(o))` | ✅ Fixed in 1C: declaration and assignment patterns lower through a synthetic loop item; `for...in` destructuring is rejected by `morph check`. | 1C |
-| 0.2.13 | `JSON.parse(s).name`; `response.json().name` | `JsValue` has no `.name`; bracket access works. | 3A |
+| 0.2.13 | `JSON.parse(s).name`; `response.json().name` | ✅ Fixed in 3A: JSON producers infer `JsValue`, and dot access on them lowers to the same bracket lookup as `["name"]`. | 3A |
 | 0.2.14 | `await response.json()` | ✅ Fixed in 3B: awaited body readers lower to synchronous calls without `co_await`. | 3B |
 | 0.2.15 | `<Card {...props} />` with required props | `.tsx` check passes; `morph build` fails `mx-component-required`. | 6F |
 | 0.2.16 | `JSON.parse(...)` as the only JSON use | ✅ Fixed in 3A: `JSON.parse`/`stringify` pull the runtime header. | 3A |
@@ -310,7 +310,7 @@ Module-scope assignments use a captureless lambda because C++ forbids a capture-
 
 ### 3A — JSON return typing and dot access
 
-**Today:** `JSON.parse(...)` and `response.json()` return `JsValue`. Bracket access works; dot access emits `obj.name` and fails because `JsValue` has no such member. A lone `JSON.parse`/`stringify` now pulls the runtime header.
+**Shipped:** `JSON.parse(...)`/`JSON.stringify(...)` and Response body readers infer `JsValue` (including through `await`, type assertions, and inline call results). Dot access on a `JsValue` receiver lowers to the same `["key"]` lookup, so `JSON.parse(text).name`, `response.json().name`, and `data.name` build and read the field. `["name"]` remains equivalent.
 
 **Target:** lower dot access on `JsValue` to the same lookup as bracket access, or reject it with a hint to use `["key"]` until typed JSON exists. Keep the JSON runtime header dependency explicit.
 
@@ -563,10 +563,10 @@ Morph should expose native equivalents (`useWindow`, clipboard, storage) instead
 | Current baseline (above) | ✅ Shipped |
 | Late-assigned JS values (`JsLateValue`, Window handles) | ✅ Shipped in `7b9774e` |
 | General array methods, object spread, component-body destructuring | ✅ Shipped |
-| `Response.json()` detection and full `Response` runtime | ✅ Shipped; dot access is Part 3A, awaited form shipped |
+| `Response.json()` detection and full `Response` runtime | ✅ Shipped; dot access shipped in 3A |
 | `morph check` diagnostics for rejected constructs | ✅ Shipped; grows with each part |
 | App-logic contract and docs truth-up | ✅ This pass |
-| Part 0 — contract integrity | 🚧 In progress — shipped rejections for `.then`/`.catch`, JSON extra args, and timer args; remaining ⚠️/🟥 rows are owned by 1B (0.2.17), 3A, and 6F |
+| Part 0 — contract integrity | 🚧 In progress — shipped rejections for `.then`/`.catch`, JSON extra args, and timer args; remaining ⚠️/🟥 rows are owned by 1B (0.2.17) and 6F |
 | Part 1A — widening bindings | ✅ Shipped |
 | Part 1B — class model | ✅ Shipped; function-local class-declaration metadata follow-up tracked as 0.2.17 |
 | Part 1C — destructuring assignment and loop bindings | ✅ Shipped |
@@ -576,7 +576,8 @@ Morph should expose native equivalents (`useWindow`, clipboard, storage) instead
 | Part 2C — `for...in` over arrays | ✅ Shipped |
 | Part 2D — hoisting and TDZ | ✅ Shipped |
 | Part 2E — imported module side effects | ✅ Shipped |
-| Parts 3A–5G — JavaScript language and standard library | 🚧 Committed — all JS-only gaps are in scope for implementation |
+| Part 3A — JSON return typing and dot access | ✅ Shipped |
+| Parts 3B–5G — JavaScript language and standard library | 🚧 Committed — all JS-only gaps are in scope for implementation |
 | Parts 6A–6G — platform APIs and JSX | 🚧 Separate product work — browser globals stay out of scope |
 | Part 7 — docs and claims | 📋 Continuous |
 

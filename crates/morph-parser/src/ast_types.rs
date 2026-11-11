@@ -35,6 +35,11 @@ pub struct MxSource {
     /// initializer runs after a top-level read. Imported modules execute
     /// these in dependency order.
     pub module_statements: Vec<String>,
+    /// C++ types for top-level plain bindings whose initializer is always
+    /// a JS dynamic value (`JsObject`/`JsValue`). Member access on these
+    /// bindings must use bracket lookups even when the declaration lives
+    /// in another module or in the module initializer.
+    pub global_var_types: HashMap<String, String>,
     pub console_logs: Vec<String>,
     pub extra_headers: Vec<String>,
     pub cpp_imports: Vec<CppImport>,
