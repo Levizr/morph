@@ -1300,6 +1300,13 @@ pub fn generate_state_header(windows: &[IRWindow], premain: &[String]) -> String
     let mut func_decls: Vec<(String, String)> = Vec::new();
     let mut seen_decls = HashSet::new();
     for part in premain {
+        // Module initializers are internal to the generated TU: their
+        // definition starts with the done-flag variable, which the
+        // generic declaration extractor would splice into the header as
+        // a definition. Native code never calls them.
+        if part.contains("__morph_module_init") {
+            continue;
+        }
         if let Some((ns, inner)) = split_module_ns(part) {
             if let Some(decl) = extract_function_decl(&inner) {
                 if seen_decls.insert((ns.clone(), decl.clone())) {
@@ -1561,8 +1568,17 @@ fn emit_init(
     lines: &mut Vec<String>,
     windows: &[IRWindow],
     effect_decls: &[&HashMap<String, String>],
+    module_init_calls: &[String],
 ) {
     lines.push("void morph_logic_init(::NodeRegistry& nodes, ::SignalStore& store) {".to_string());
+    // Imported module side effects run once per loaded library. The
+    // per-module guards make hot-reload re-inits no-ops.
+    for call in module_init_calls {
+        lines.push(format!("    {call}();"));
+    }
+    if !module_init_calls.is_empty() {
+        lines.push(String::new());
+    }
     let mut seen_init = HashSet::new();
     for w in windows {
         for sv in &w.state_vars {
@@ -1741,6 +1757,12 @@ pub fn emit_logic(windows: &[IRWindow]) -> LogicOutput {
     }
     let native_mode = emit_includes(&mut lines, windows, &list_nodes);
     let premain_parts = collect_premain(windows);
+    let mut module_init_calls: Vec<String> = Vec::new();
+    for call in windows.iter().flat_map(|w| w.module_init_calls.iter()) {
+        if !module_init_calls.contains(call) {
+            module_init_calls.push(call.clone());
+        }
+    }
 
     // ── File-scope signal statics (persist across morph_logic_init calls) ──
     emit_signal_statics(&mut lines, windows, native_mode);
@@ -1838,7 +1860,7 @@ pub fn emit_logic(windows: &[IRWindow]) -> LogicOutput {
     lines.push(String::new());
 
     // ── morph_logic_init ──
-    emit_init(&mut lines, windows, &effect_decls);
+    emit_init(&mut lines, windows, &effect_decls, &module_init_calls);
     lines.push(LOGIC_FOOTER.to_string());
 
     // Size the effects array by emission-site count.
@@ -2117,6 +2139,21 @@ mod tests {
         assert!(!build_h.contains("app::store_deadbeef::shared_cart_count().get()"), "{build_h}");
         let dev_h = generate_state_header(&windows, &[]);
         assert!(!dev_h.contains("app::store_deadbeef::__shared_cart_count.get()"), "{dev_h}");
+    }
+
+    #[test]
+    fn state_header_skips_module_initializer_guard() {
+        // The module init definition starts with its done flag; the
+        // generic function extractor would otherwise copy that variable
+        // definition into `_morph_state.h` (redefinition error in app.cpp).
+        let init = "namespace app {\nnamespace app {\n\
+                    static bool __morph_module_init_done = false;\n\
+                    void __morph_module_init()\n{\n    \
+                    if (__morph_module_init_done) return;\n    \
+                    __morph_module_init_done = true;\n}\n}\n}";
+        let h = generate_state_header(&[], &[init.to_string()]);
+        assert!(!h.contains("__morph_module_init"), "{h}");
+        assert!(!h.contains("bool __morph_module_init_done"), "{h}");
     }
 
     #[test]

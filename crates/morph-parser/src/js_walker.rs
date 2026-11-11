@@ -356,6 +356,11 @@ pub struct MxWalker<'src> {
     pub re_exports: Vec<ReExport>,
     pub global_vars: Vec<String>,
     pub global_var_names: Vec<String>,
+    pub module_statements: Vec<String>,
+    /// Source positions paired with pending module statements so bare
+    /// statements and late `var` declarations can be emitted in source
+    /// order (the declaration pass runs before the bare-statement pass).
+    module_statement_spans: Vec<(usize, String)>,
     pub console_logs: Vec<String>,
     pub extra_headers: Vec<String>,
     pub cpp_imports: Vec<CppImport>,
@@ -382,6 +387,8 @@ impl<'src> MxWalker<'src> {
             re_exports: Vec::new(),
             global_vars: Vec::new(),
             global_var_names: Vec::new(),
+            module_statements: Vec::new(),
+            module_statement_spans: Vec::new(),
             console_logs: Vec::new(),
             extra_headers: Vec::new(),
             cpp_imports: Vec::new(),
@@ -2091,8 +2098,120 @@ impl<'a> Visit<'a> for ReferenceNames {
     }
 }
 
+/// Symbols bound by top-level `var` declarations that a top-level
+/// statement reads before the declaration line. Those declarations move
+/// into the module initializer so the early read sees `undefined` instead
+/// of a static initializer's value.
+fn late_module_var_symbols(program: &Program<'_>) -> HashSet<oxc_semantic::SymbolId> {
+    let semantic =
+        oxc_semantic::SemanticBuilder::new().with_build_nodes(true).build(program).semantic;
+    let scoping = semantic.scoping();
+    let mut late = HashSet::new();
+    for stmt in &program.body {
+        let vd = match stmt {
+            Statement::VariableDeclaration(vd) => Some(vd),
+            Statement::ExportDeclaration(d) => match &d.declaration {
+                Declaration::VariableDeclaration(vd) => Some(vd),
+                _ => None,
+            },
+            _ => None,
+        };
+        let Some(vd) = vd else { continue };
+        if vd.kind != VariableDeclarationKind::Var {
+            continue;
+        }
+        for decl in &vd.declarations {
+            let BindingPattern::BindingIdentifier(id) = &decl.id else {
+                continue;
+            };
+            let Some(symbol_id) = id.symbol_id.get() else {
+                continue;
+            };
+            let decl_scope = scoping.symbol_scope_id(symbol_id);
+            for &reference_id in scoping.get_resolved_reference_ids(symbol_id) {
+                let reference = scoping.get_reference(reference_id);
+                if !reference.is_read() {
+                    continue;
+                }
+                let span = semantic.nodes().get_node(reference.node_id()).span();
+                if span.start < id.span.start
+                    && !reference_in_nested_var_scope(scoping, reference.scope_id(), decl_scope)
+                {
+                    late.insert(symbol_id);
+                    break;
+                }
+            }
+        }
+    }
+    late
+}
+
+/// True when `ref_scope` sits inside a function/arrow scope below
+/// `decl_scope`: the reference runs later than the module body.
+fn reference_in_nested_var_scope(
+    scoping: &oxc_semantic::Scoping,
+    ref_scope: oxc_semantic::ScopeId,
+    decl_scope: oxc_semantic::ScopeId,
+) -> bool {
+    if ref_scope == decl_scope {
+        return false;
+    }
+    for scope in scoping.scope_ancestors(ref_scope) {
+        if scope == decl_scope {
+            return false;
+        }
+        if scoping.scope_flags(scope).is_var() {
+            return true;
+        }
+    }
+    false
+}
+
+fn declarator_is_late(
+    decl: &VariableDeclarator<'_>,
+    late: &HashSet<oxc_semantic::SymbolId>,
+) -> bool {
+    match &decl.id {
+        BindingPattern::BindingIdentifier(id) => {
+            id.symbol_id.get().is_some_and(|symbol| late.contains(&symbol))
+        }
+        _ => false,
+    }
+}
+
+/// Statement kinds that execute at module initialization. Declarations
+/// and imports are inventoried by their own passes; `CSS.load` is a
+/// parser-level import.
+fn is_module_execution_statement(stmt: &Statement<'_>) -> bool {
+    match stmt {
+        Statement::ExpressionStatement(es) => !matches!(
+            &es.expression,
+            Expression::CallExpression(call)
+                if is_member_expr_callee(&call.callee, "CSS", "load")
+        ),
+        Statement::BlockStatement(_)
+        | Statement::BreakStatement(_)
+        | Statement::ContinueStatement(_)
+        | Statement::DebuggerStatement(_)
+        | Statement::DoWhileStatement(_)
+        | Statement::ForInStatement(_)
+        | Statement::ForOfStatement(_)
+        | Statement::ForStatement(_)
+        | Statement::IfStatement(_)
+        | Statement::LabeledStatement(_)
+        | Statement::ReturnStatement(_)
+        | Statement::SwitchStatement(_)
+        | Statement::ThrowStatement(_)
+        | Statement::TryStatement(_)
+        | Statement::WhileStatement(_)
+        | Statement::WithStatement(_) => true,
+        _ => false,
+    }
+}
+
 impl<'a> Visit<'a> for MxWalker<'_> {
     fn visit_program(&mut self, program: &Program<'a>) {
+        let late_module_vars = late_module_var_symbols(program);
         // Phase 1: imports and windowConfig
         for stmt in &program.body {
             match stmt {
@@ -2262,6 +2381,37 @@ impl<'a> Visit<'a> for MxWalker<'_> {
                         if is_framework_call {
                             for decl in &vd.declarations {
                                 self.try_extract_declarator_component(decl, true, false);
+                            }
+                            continue;
+                        }
+                        // Late `var` declarations move into the module
+                        // initializer; the exported entry keeps an empty
+                        // source so import resolution still finds the name.
+                        let any_late = vd.kind == VariableDeclarationKind::Var
+                            && vd
+                                .declarations
+                                .iter()
+                                .any(|d| declarator_is_late(d, &late_module_vars));
+                        if any_late {
+                            for decl in &vd.declarations {
+                                let before = self.components.len();
+                                self.try_extract_declarator_component(decl, true, false);
+                                if self.components.len() != before {
+                                    continue;
+                                }
+                                let Some(name) = binding_ident_name(&decl.id) else {
+                                    continue;
+                                };
+                                let src =
+                                    format!("{} {};", vd.kind.as_str(), self.span_text(decl.span));
+                                if declarator_is_late(decl, &late_module_vars) {
+                                    self.module_statement_spans
+                                        .push((decl.span.start as usize, src));
+                                    self.exported_vars
+                                        .push(ExportedVar { name, source: String::new() });
+                                } else {
+                                    self.exported_vars.push(ExportedVar { name, source: src });
+                                }
                             }
                             continue;
                         }
@@ -2470,15 +2620,42 @@ impl<'a> Visit<'a> for MxWalker<'_> {
                     }
                 });
                 if !is_framework_call {
-                    for d in &vd.declarations {
-                        if let Some(name) = binding_ident_name(&d.id) {
-                            self.global_var_names.push(name);
+                    let any_late = vd.kind == VariableDeclarationKind::Var
+                        && vd.declarations.iter().any(|d| declarator_is_late(d, &late_module_vars));
+                    if any_late {
+                        for d in &vd.declarations {
+                            if let Some(name) = binding_ident_name(&d.id) {
+                                self.global_var_names.push(name);
+                            }
+                            let src = format!("{} {};", vd.kind.as_str(), self.span_text(d.span));
+                            if declarator_is_late(d, &late_module_vars) {
+                                self.module_statement_spans.push((d.span.start as usize, src));
+                            } else {
+                                self.global_vars.push(src);
+                            }
                         }
+                    } else {
+                        for d in &vd.declarations {
+                            if let Some(name) = binding_ident_name(&d.id) {
+                                self.global_var_names.push(name);
+                            }
+                        }
+                        self.global_vars.push(self.span_text(vd.span).to_string());
                     }
-                    self.global_vars.push(self.span_text(vd.span).to_string());
                 }
             }
         }
+
+        // Bare top-level statements run once at module initialization.
+        for stmt in &program.body {
+            if is_module_execution_statement(stmt) {
+                self.module_statement_spans
+                    .push((stmt.span().start as usize, self.span_text(stmt.span()).to_string()));
+            }
+        }
+        self.module_statement_spans.sort_by_key(|(pos, _)| *pos);
+        self.module_statements =
+            self.module_statement_spans.drain(..).map(|(_, src)| src).collect();
     }
 }
 
@@ -2957,7 +3134,11 @@ mod walker_tests {
 
 #[cfg(test)]
 mod shared_tests {
-    use crate::parse_mx_str;
+    use crate::{parse_mx_str, MxSource};
+
+    fn parse(src: &str) -> MxSource {
+        parse_mx_str(src, "test.mx").expect("parse")
+    }
 
     #[test]
     fn exported_top_level_shared_binding() {
@@ -3039,5 +3220,35 @@ export default function App() { return (<div/>) }
 "#;
         let s = parse_mx_str(src, "test.mx").unwrap();
         assert!(!s.global_vars.iter().any(|g| g.contains("morphShared")));
+    }
+
+    #[test]
+    fn module_statements_collect_bare_statements_in_order() {
+        let s =
+            parse("console.log(\"first\")\nvar x = 1\nconsole.log(x)\nfunction f() { return x }\n");
+        assert_eq!(s.module_statements.len(), 2, "{:?}", s.module_statements);
+        assert!(s.module_statements[0].contains("console.log(\"first\")"));
+        assert!(s.module_statements[1].contains("console.log(x)"));
+        assert!(s.global_vars.iter().any(|g| g.contains("var x = 1")));
+    }
+
+    #[test]
+    fn module_statements_move_var_read_before_declaration() {
+        let s = parse("console.log(x)\nvar x = 1\n");
+        assert_eq!(s.module_statements.len(), 2, "{:?}", s.module_statements);
+        assert!(s.module_statements[0].contains("console.log(x)"));
+        assert!(s.module_statements[1].contains("var x = 1"), "{:?}", s.module_statements);
+        assert!(s.global_vars.is_empty(), "{:?}", s.global_vars);
+        assert!(s.global_var_names.iter().any(|n| n == "x"));
+    }
+
+    #[test]
+    fn module_statements_skip_css_load_and_function_refs() {
+        let s = parse(
+            "CSS.load(\"./a.css\")\nvar x = 1\nfunction f() { return x }\nconsole.log(\"x\")\n",
+        );
+        assert_eq!(s.module_statements.len(), 1, "{:?}", s.module_statements);
+        assert!(s.module_statements[0].contains("console.log(\"x\")"));
+        assert!(s.global_vars.iter().any(|g| g.contains("var x = 1")));
     }
 }

@@ -30,6 +30,11 @@ pub struct MxSource {
     /// Names bound by top-level plain variable declarations (the same
     /// declarations whose statements live in [`Self::global_vars`]).
     pub global_var_names: Vec<String>,
+    /// Top-level statements that run once when the module initializes, in
+    /// source order: bare statements plus `var` declarations whose
+    /// initializer runs after a top-level read. Imported modules execute
+    /// these in dependency order.
+    pub module_statements: Vec<String>,
     pub console_logs: Vec<String>,
     pub extra_headers: Vec<String>,
     pub cpp_imports: Vec<CppImport>,

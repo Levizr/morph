@@ -299,6 +299,7 @@ impl IRBuilder {
             nodes: vec![],
             startup_logs,
             premain_functions: premain,
+            module_init_calls: Vec::new(),
             extra_headers,
             state_vars: all_state,
             reactive_consts,
@@ -346,7 +347,7 @@ impl IRBuilder {
         events: &HashMap<String, String>,
         classes: &morpher::ClassMetadata,
     ) -> Option<morpher::SnippetOutput> {
-        self.translate_logic_opts(source, ambient_vars, ambient_types, events, false, classes)
+        self.translate_logic_opts(source, ambient_vars, ambient_types, events, false, classes, true)
     }
 
     /// [`Self::translate_logic`] with control over parameter defaults.
@@ -360,6 +361,7 @@ impl IRBuilder {
         events: &HashMap<String, String>,
         omit_param_defaults: bool,
         classes: &morpher::ClassMetadata,
+        hoist_program_vars: bool,
     ) -> Option<morpher::SnippetOutput> {
         self.translate_logic_at(
             source,
@@ -369,6 +371,7 @@ impl IRBuilder {
             omit_param_defaults,
             0,
             classes,
+            hoist_program_vars,
         )
     }
 
@@ -386,6 +389,7 @@ impl IRBuilder {
         omit_param_defaults: bool,
         indent: usize,
         classes: &morpher::ClassMetadata,
+        hoist_program_vars: bool,
     ) -> Option<morpher::SnippetOutput> {
         let options = morpher::TranslateOptions {
             type_mode: self.type_mode,
@@ -394,6 +398,7 @@ impl IRBuilder {
             classes: classes.clone(),
             omit_param_defaults,
             indent,
+            hoist_program_vars,
             ..Default::default()
         };
         let rebased = rewrite_event_emits(source, events);
@@ -460,6 +465,7 @@ impl IRBuilder {
             events,
             omit_param_defaults,
             classes,
+            false,
         ) {
             fn_types.extend(out.fn_return_types.iter().map(|(k, v)| (k.clone(), v.clone())));
             extra_headers.extend(include_lines(&out.includes));
@@ -546,7 +552,7 @@ impl IRBuilder {
             &mut ctx,
         )?;
 
-        self.translate_module_globals(&entry_mod.source, &frame, &mut ctx, &mut extra_headers);
+        self.translate_module_globals(&entry_mod.source, &frame, &mut ctx, &mut extra_headers)?;
         ctx.modules_emitted.insert(entry_mod.path.clone());
 
         for sv in &root_comp.state_vars {
@@ -614,7 +620,7 @@ impl IRBuilder {
                     &neutral,
                     &mut ctx,
                     &mut extra_headers,
-                );
+                )?;
                 let mut added = std::mem::replace(&mut ctx.premain, snapshot);
                 added.retain(|p| !ctx.premain.contains(p));
                 ctx.premain.extend(added);
@@ -668,7 +674,12 @@ impl IRBuilder {
             renderer: self.app_renderer.clone().unwrap_or_else(|| "flash".into()),
             nodes: vec![root_node],
             startup_logs: ctx.logs.clone(),
-            premain_functions: ctx.premain.clone(),
+            premain_functions: {
+                let mut entries = ctx.module_init_protos.clone();
+                entries.extend(ctx.premain.clone());
+                entries
+            },
+            module_init_calls: ctx.module_init_calls.clone(),
             extra_headers,
             state_vars: ctx.states.clone(),
             reactive_consts: ctx.const_names.clone(),
@@ -732,7 +743,7 @@ impl IRBuilder {
             &mut ctx,
         )?;
 
-        self.translate_module_globals(&route_mod.source, &frame, &mut ctx, &mut extra_headers);
+        self.translate_module_globals(&route_mod.source, &frame, &mut ctx, &mut extra_headers)?;
         ctx.modules_emitted.insert(route_mod.path.clone());
 
         // Route root props bind to mount-time locals converted from the
@@ -835,7 +846,7 @@ impl IRBuilder {
                     &neutral,
                     &mut ctx,
                     &mut extra_headers,
-                );
+                )?;
                 let mut added = std::mem::replace(&mut ctx.premain, snapshot);
                 added.retain(|p| !ctx.premain.contains(p));
                 ctx.premain.extend(added);
@@ -883,7 +894,12 @@ impl IRBuilder {
             renderer: self.app_renderer.clone().unwrap_or_else(|| "flash".into()),
             nodes: vec![root_node],
             startup_logs: ctx.logs.clone(),
-            premain_functions: ctx.premain.clone(),
+            premain_functions: {
+                let mut entries = ctx.module_init_protos.clone();
+                entries.extend(ctx.premain.clone());
+                entries
+            },
+            module_init_calls: ctx.module_init_calls.clone(),
             extra_headers,
             state_vars: ctx.states.clone(),
             reactive_consts: ctx.const_names.clone(),
@@ -914,9 +930,21 @@ impl IRBuilder {
         frame: &InstanceFrame,
         ctx: &mut BuilderCtx,
         extra_headers: &mut Vec<String>,
-    ) {
+    ) -> anyhow::Result<()> {
         let ns = ns_of(ctx.graph, &frame.module).unwrap_or_default();
         let wrap = (!ns.is_empty()).then_some(ns.as_str());
+        // Top-level statements execute from one guarded initializer. Its
+        // hoisted declarations (late `var`s) come first: global
+        // initializers may read them before the init body runs.
+        let init = self.translate_module_init_parts(source, frame, extra_headers)?;
+        if !init.prelude.trim().is_empty() {
+            ctx.premain.push(wrap_in_ns(&ns, &strip_static_vars(&init.prelude)));
+        }
+        let init_name = module_init_name(&ns);
+        if !ctx.module_init_calls.contains(&init_name) {
+            ctx.module_init_calls.push(init_name);
+            ctx.module_init_protos.push(wrap_in_ns(&ns, "void __morph_module_init();"));
+        }
         // Classes and globals come first: a function snippet may use a
         // class expression (`const C = class {…}`) as a real C++ type, so
         // the class definition must precede the function. Module function
@@ -964,6 +992,53 @@ impl IRBuilder {
                 &frame.classes,
             );
         }
+        // Definition last: it sees this module's globals and functions.
+        // Dependencies initialize first; the done flag breaks cycles.
+        let mut body = String::new();
+        for call in module_dep_init_calls(ctx.graph, &frame.module) {
+            body.push_str(&format!("    {call}();\n"));
+        }
+        if !init.body.trim().is_empty() {
+            body.push_str(&indent_block(&init.body, 4));
+            body.push('\n');
+        }
+        let func = format!(
+            "static bool __morph_module_init_done = false;\nvoid __morph_module_init()\n{{\n    if (__morph_module_init_done) return;\n    __morph_module_init_done = true;\n{body}}}\n"
+        );
+        ctx.premain.push(wrap_in_ns(&ns, &func));
+        Ok(())
+    }
+
+    /// Translate a module's bare top-level statements with `var` hoisting
+    /// enabled. The prelude stays at namespace scope; the body becomes the
+    /// module initializer.
+    fn translate_module_init_parts(
+        &self,
+        source: &morph_parser::MxSource,
+        frame: &InstanceFrame,
+        extra_headers: &mut Vec<String>,
+    ) -> anyhow::Result<morpher::ProgramParts> {
+        let init_src = source.module_statements.join("\n");
+        let options = morpher::TranslateOptions {
+            type_mode: self.type_mode,
+            state_vars: frame.vars.clone(),
+            state_types: frame.types.clone(),
+            classes: frame.classes.clone(),
+            indent: 0,
+            ..Default::default()
+        };
+        let rebased = rewrite_event_emits(&init_src, &frame.events);
+        let mut parts =
+            morpher::translate_snippet_parts(&rewrite_emit_for_js(&rebased), "snippet.ts", options)
+                .map_err(|e| {
+                    anyhow::anyhow!(
+                        "mx-js-syntax: cannot translate top-level statements in {}: {e}",
+                        frame.module.display()
+                    )
+                })?;
+        parts.body = rewrite_emit_for_cpp(&parts.body);
+        extra_headers.extend(include_lines(&parts.includes));
+        Ok(parts)
     }
 
     /// Seed mangled const/helper names into `frame` under both original and
@@ -1265,6 +1340,7 @@ impl IRBuilder {
                 false,
                 1,
                 &frame.classes,
+                true,
             ) {
                 let body = out.body.trim();
                 if !body.is_empty() {
@@ -1426,6 +1502,7 @@ impl IRBuilder {
             false,
             1,
             &local_frame.classes,
+            true,
         ) else {
             anyhow::bail!(
                 "`{}.on(...)` handler could not be translated (in `{comp_name}`)",
@@ -2408,7 +2485,7 @@ impl IRBuilder {
                 let mut neutral = InstanceFrame::root(module.path.clone());
                 Self::seed_module_bindings(&module.source, &module.path, graph, &mut neutral, ctx)?;
                 let snapshot = std::mem::take(&mut ctx.premain);
-                self.translate_module_globals(&module.source, &neutral, ctx, extra_headers);
+                self.translate_module_globals(&module.source, &neutral, ctx, extra_headers)?;
                 let mut added = std::mem::replace(&mut ctx.premain, snapshot);
                 added.retain(|p| !ctx.premain.contains(p));
                 ctx.premain.extend(added);
@@ -3757,6 +3834,12 @@ struct BuilderCtx<'a> {
     /// `"ctx->"` for route mount contexts). Threaded to instance
     /// seeding so shared expansion paths stay build-agnostic.
     signal_prefix: &'static str,
+    /// Fully-qualified module initializer calls emitted by this build.
+    module_init_calls: Vec<String>,
+    /// Namespace-wrapped `void __morph_module_init();` prototypes,
+    /// prepended to premain so BFS order (entry first) can call later
+    /// dependency definitions.
+    module_init_protos: Vec<String>,
 }
 
 impl<'a> BuilderCtx<'a> {
@@ -3784,6 +3867,8 @@ impl<'a> BuilderCtx<'a> {
             mutable_locals: Vec::new(),
             body_effects: Vec::new(),
             signal_prefix: "__st_",
+            module_init_calls: Vec::new(),
+            module_init_protos: Vec::new(),
         }
     }
 }
@@ -5780,6 +5865,74 @@ fn infer_state_type(init: &str) -> Option<String> {
         return Some("double".to_string());
     }
     None
+}
+
+/// Fully-qualified module initializer symbol.
+fn module_init_name(ns: &str) -> String {
+    if ns.is_empty() {
+        "__morph_module_init".to_string()
+    } else {
+        format!("::{MODULE_NS_ROOT}::{ns}::__morph_module_init")
+    }
+}
+
+/// Dependency initializers for one module, in import order. Every graph
+/// module emits an init (even with an empty body), so calls are uniform.
+fn module_dep_init_calls(graph: &morph_parser::ModuleGraph, module: &Path) -> Vec<String> {
+    let Some(resolved) = graph.modules.get(module) else {
+        return Vec::new();
+    };
+    let mut calls = Vec::new();
+    for (_, target) in &resolved.module_imports {
+        if target == module {
+            continue;
+        }
+        let Ok(dep_ns) = ns_of(graph, target) else {
+            continue;
+        };
+        let call = module_init_name(&dep_ns);
+        if !calls.contains(&call) {
+            calls.push(call);
+        }
+    }
+    calls
+}
+
+fn wrap_in_ns(ns: &str, body: &str) -> String {
+    if ns.is_empty() {
+        body.to_string()
+    } else {
+        format!("namespace {MODULE_NS_ROOT} {{\nnamespace {ns} {{\n{body}\n}}\n}}")
+    }
+}
+
+/// Strip `static` from hoisted variable declarations so they keep the
+/// external linkage `morph_api.h`'s `extern` declarations expect. Leaves
+/// `static inline` function prototypes alone.
+fn strip_static_vars(cpp: &str) -> String {
+    cpp.lines()
+        .map(|line| {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("static ")
+                && !trimmed.starts_with("static inline ")
+                && !trimmed.starts_with("static constexpr ")
+            {
+                let indent = &line[..line.len() - trimmed.len()];
+                format!("{indent}{}", &trimmed["static ".len()..])
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn indent_block(code: &str, spaces: usize) -> String {
+    let pad = " ".repeat(spaces);
+    code.lines()
+        .map(|line| if line.trim().is_empty() { String::new() } else { format!("{pad}{line}") })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Remove `static`/`static inline` linkage from a translated top-level
@@ -8150,6 +8303,7 @@ mod tests {
             re_exports: Vec::new(),
             global_vars: vec!["const API_URL = \"https://api.test\";".to_string()],
             global_var_names: vec!["API_URL".to_string()],
+            module_statements: Vec::new(),
             console_logs: vec!["module log".to_string()],
             extra_headers: Vec::new(),
             cpp_imports: Vec::new(),
@@ -8469,6 +8623,7 @@ mod tests {
             re_exports: Vec::new(),
             global_vars: Vec::new(),
             global_var_names: Vec::new(),
+            module_statements: Vec::new(),
             console_logs: Vec::new(),
             extra_headers: Vec::new(),
             cpp_imports: Vec::new(),

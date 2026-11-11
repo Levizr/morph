@@ -74,7 +74,12 @@ static void glfw_error_cb(int code, const char* msg) {
 // ── Route mounts: per-route Context + mount/unmount + mid dispatch ──
 {{ route_mounts }}
 
+{{ module_init_code }}
+
 int main(int argc, char** argv) {
+    // Top-level module side effects run before anything else, including
+    // the headless self-test branch.
+    __morph_run_module_inits();
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--morph-self-test") == 0) {
             return morph_self_test();

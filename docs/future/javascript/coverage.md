@@ -89,7 +89,7 @@ Parts are ordered so that a later part never changes a representation owned by a
 | **2B** | `new.target` | 0 | expression emitter | ✅ Shipped: constructors see the most-derived target; field initializers, methods, and plain functions see `undefined` |
 | **2C** | `for...in` over arrays | 0 | statement emitter | ✅ Shipped: array receivers enumerate own index keys as strings; object `for...in` unchanged |
 | **2D** | Hoisting and TDZ | 1A | declaration analysis | `var` is `undefined`; `let`/`const` use-before-declaration errors |
-| **2E** | Imported module side effects | 0 + module-bindings design | module builder | Top-level statements run once in import order |
+| **2E** | Imported module side effects | 0 + module-bindings design | module builder | ✅ Shipped: bare top-level statements and late `var` declarations run once, dependency-first, with cycle guards |
 | **3A** | JSON return typing and dot access | 0 | `JsValue` member lowering | `JSON.parse(...).name` and `response.json().name` work |
 | **3B** | `await response.json()` | 3A | Response emitter | Await form compiles and returns parsed data |
 | **3C** | `.then`/`.catch` compatibility chain | 0 | Promise chain lowering | Supported `fetch`/`Response` and `Promise` chains build and match JS ordering/error behavior |
@@ -134,7 +134,7 @@ The statuses below were probed on 2026-11-06 with `morph check`, `morph --to cpp
 | 0.1.3 | `console.log(x); let x = 1` | ✅ Fixed in 2D: `morph check` rejects the read with a temporal-dead-zone error. | 2D |
 | 0.1.4 | `JSON.stringify(v, replacer, 2)` | ⛔ Rejected with a hint. | Implement `replacer`/`space` when needed. |
 | 0.1.5 | `JSON.parse(text, reviver)` | ⛔ Rejected with a hint. | Implement `reviver` when needed. |
-| 0.1.6 | Top-level statements in an imported `.ts` | 🟥 Dropped; module initialization never runs. | Execute once in import order (Part 2E). |
+| 0.1.6 | Top-level statements in an imported `.ts` | ✅ Fixed in 2E: bare statements and late `var` declarations run from a per-module guarded initializer, dependency-first and exactly once (cycles included). | 2E |
 | 0.1.7 | Codegen placeholders (`/* destructuring not supported */`, `/* spread */`, …) | 🟥 Some reach generated C++. | Every placeholder must become real lowering or a check error in the same change. |
 
 ### 0.2 Check-pass/build-fail behavior
@@ -298,7 +298,7 @@ Module-scope assignments use a captureless lambda because C++ forbids a capture-
 
 ### 2E — Imported module side effects
 
-**Today:** bare top-level statements in imported `.ts` modules are dropped.
+**Shipped:** every graph module emits one `__morph_module_init()` behind a per-module done flag. The entry initializer calls its direct imports first (source order), so dependencies run before importers and a cycle re-enters a module that is already marked done. Bare top-level statements execute from that initializer; a `var` read before its declaration moves its declaration into the initializer so the early read sees `undefined`. Module initializers run from `main` before the `--morph-self-test` branch, so headless runs execute side effects too.
 
 **Target:** execute top-level statements once, in import order, with correct cycle behavior. Keep initialization in functions as the fallback only if the module system cannot represent it.
 
@@ -566,7 +566,7 @@ Morph should expose native equivalents (`useWindow`, clipboard, storage) instead
 | `Response.json()` detection and full `Response` runtime | ✅ Shipped; dot access is Part 3A, awaited form shipped |
 | `morph check` diagnostics for rejected constructs | ✅ Shipped; grows with each part |
 | App-logic contract and docs truth-up | ✅ This pass |
-| Part 0 — contract integrity | 🚧 In progress — shipped rejections for `.then`/`.catch`, JSON extra args, and timer args; remaining ⚠️/🟥 rows are owned by 1B (0.2.17), 2E, 3A, and 6F |
+| Part 0 — contract integrity | 🚧 In progress — shipped rejections for `.then`/`.catch`, JSON extra args, and timer args; remaining ⚠️/🟥 rows are owned by 1B (0.2.17), 3A, and 6F |
 | Part 1A — widening bindings | ✅ Shipped |
 | Part 1B — class model | ✅ Shipped; function-local class-declaration metadata follow-up tracked as 0.2.17 |
 | Part 1C — destructuring assignment and loop bindings | ✅ Shipped |
@@ -575,7 +575,8 @@ Morph should expose native equivalents (`useWindow`, clipboard, storage) instead
 | Part 2B — `new.target` | ✅ Shipped |
 | Part 2C — `for...in` over arrays | ✅ Shipped |
 | Part 2D — hoisting and TDZ | ✅ Shipped |
-| Parts 2E–5G — JavaScript language and standard library | 🚧 Committed — all JS-only gaps are in scope for implementation |
+| Part 2E — imported module side effects | ✅ Shipped |
+| Parts 3A–5G — JavaScript language and standard library | 🚧 Committed — all JS-only gaps are in scope for implementation |
 | Parts 6A–6G — platform APIs and JSX | 🚧 Separate product work — browser globals stay out of scope |
 | Part 7 — docs and claims | 📋 Continuous |
 

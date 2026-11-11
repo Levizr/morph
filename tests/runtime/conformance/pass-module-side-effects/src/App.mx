@@ -1,0 +1,17 @@
+import { morphState } from 'morph'
+import { greet } from './logger.ts'
+import { getCount, bump } from './state.ts'
+import { ping } from './cycle_a.ts'
+
+export const windowConfig = { title: "pass-module-side-effects", width: 800, height: 600 }
+
+export default function App() {
+  const [count, setCount] = morphState(0)
+  console.log("app body", greet(), getCount(), ping())
+  return (
+    <body>
+      <text>{greet()} {getCount()} {ping()} {count}</text>
+      <button onClick={() => { bump(); setCount(count + 1) }}>bump</button>
+    </body>
+  )
+}

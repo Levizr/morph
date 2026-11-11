@@ -76,6 +76,7 @@ run_pass pass-control-flow
 run_pass pass-array-for-in
 run_pass pass-new-target
 run_pass pass-hoisting
+run_pass pass-module-side-effects
 run_pass pass-string-switch
 run_pass pass-widening
 run_pass pass-classes

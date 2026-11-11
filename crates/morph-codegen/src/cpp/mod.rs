@@ -632,6 +632,26 @@ impl<'a> CppEmitter<'a> {
             }
         }
         ctx.insert("route_mounts", &route_mounts);
+        // Module initializers: top-level side effects run exactly once,
+        // dependency-first, before the event loop (and before the
+        // self-test branch, so headless runs execute them too). Every
+        // module records its init in emission order; windows/routes
+        // overlap, so dedupe here (each init is also guarded).
+        let mut module_init_calls: Vec<String> = Vec::new();
+        for w in self.windows.iter().chain(self.routes_ir.iter().map(|(_, w)| w)) {
+            for call in &w.module_init_calls {
+                if !module_init_calls.contains(call) {
+                    module_init_calls.push(call.clone());
+                }
+            }
+        }
+        let mut module_init_code =
+            String::from("// ── Module initializers (top-level side effects) ──\nstatic void __morph_run_module_inits()\n{\n");
+        for call in &module_init_calls {
+            module_init_code.push_str(&format!("    {call}();\n"));
+        }
+        module_init_code.push_str("}\n");
+        ctx.insert("module_init_code", &module_init_code);
         ctx.insert("keyframe_code", &keyframe_code);
         ctx.insert("list_factory_code", &list_factory_code);
         ctx.insert("headers", &headers);
@@ -2765,8 +2785,22 @@ fn split_top_level(s: &str, delim: char) -> Vec<String> {
 /// `extern Type name;` for a namespace-scope variable definition, or
 /// `None` when the shape is not a plain declarator (const/auto/complex
 /// forms stay definition-only in premain).
+///
+/// An entry can bundle several hoisted `var` declarations (the module
+/// init prelude), so scan top-level statements and pick the one that
+/// declares `name`; function bodies and namespace blocks are skipped by
+/// the depth-0 split.
 fn extern_var_decl(inner: &str, name: &str) -> Option<String> {
-    let t = inner.trim();
+    split_top_level(inner.trim(), ';')
+        .iter()
+        .find_map(|segment| extern_var_decl_segment(segment, name))
+}
+
+fn extern_var_decl_segment(segment: &str, name: &str) -> Option<String> {
+    let t = segment.trim();
+    if t.is_empty() {
+        return None;
+    }
     for prefix in [
         "const ",
         "static ",
@@ -2814,6 +2848,9 @@ fn extern_var_decl(inner: &str, name: &str) -> Option<String> {
         Some(e) => t[..e].trim(),
         None => t.trim_end_matches(';').trim(),
     };
+    // Hoisted `var` preludes declare with value-initialization
+    // (`int x{};`); an extern declaration takes the bare declarator.
+    let lhs = lhs.strip_suffix("{}").map_or(lhs, str::trim_end);
     if lhs.is_empty() || lhs.contains('(') {
         return None;
     }
@@ -3471,6 +3508,7 @@ mod tests {
             nodes: Vec::new(),
             startup_logs: Vec::new(),
             premain_functions: vec!["auto helper()\n{\n    return 1;\n}".to_string()],
+            module_init_calls: Vec::new(),
             extra_headers: Vec::new(),
             state_vars: Vec::new(),
             reactive_consts: Vec::new(),
@@ -4065,6 +4103,17 @@ mod tests {
         let moved = move_class_entry(entry, &[binding]).expect("class expression var moves");
         assert_eq!(moved.0, "u");
         assert!(moved.1.contains("class Pair"), "{}", moved.1);
+    }
+
+    #[test]
+    fn extern_var_decl_picks_one_declaration_from_bundled_prelude() {
+        let inner = "JsLateValue n{};\nint32_t total{};\n";
+        assert_eq!(extern_var_decl(inner, "n").as_deref(), Some("extern JsLateValue n;"));
+        assert_eq!(extern_var_decl(inner, "total").as_deref(), Some("extern int32_t total;"));
+        // Function bodies are not declarations: a name used inside one
+        // must not leak into the header.
+        let init = "static bool done = false;\nvoid init()\n{\n    n = 1;\n}";
+        assert_eq!(extern_var_decl(init, "n"), None);
     }
 
     #[test]

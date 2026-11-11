@@ -4,6 +4,7 @@ pub mod linter;
 pub mod parser;
 
 pub use codegen::context::{AccessorFlags, TypeMode};
+pub use codegen::cpp::ProgramParts;
 pub use error::MorphJsError;
 pub use parser::{
     collect_class_metadata, translate_snippet_to_cpp, translate_str, translate_to_cpp,
@@ -203,6 +204,18 @@ pub fn translate_snippet(
         parser::translate_snippet_to_cpp_with_types(source, filename, &options)?;
     let (header, body) = split_output_includes(&code);
     Ok(SnippetOutput { includes: header.to_string(), body: body.to_string(), fn_return_types })
+}
+
+/// Translate a snippet into separately addressable pieces. `prelude` holds
+/// namespace-scope declarations (hoisted `var` bindings, comparison
+/// helpers, forward declarations); `body` holds the executable
+/// statements. Module initializers place the two at different scopes.
+pub fn translate_snippet_parts(
+    source: &str,
+    filename: &str,
+    options: TranslateOptions,
+) -> Result<ProgramParts, MorphJsError> {
+    parser::translate_snippet_parts_to_cpp(source, filename, &options).map(|(parts, _)| parts)
 }
 
 /// Translate one standalone expression against ambient app state.

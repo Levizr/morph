@@ -96,6 +96,11 @@ pub struct IRWindow {
     pub nodes: Vec<IRNode>,
     pub startup_logs: Vec<String>,
     pub premain_functions: Vec<String>,
+    /// Fully-qualified module initializer calls (`::app::<ns>::__morph_module_init`)
+    /// that run once before `main` enters the event loop. Entry and route
+    /// builds contribute; codegen dedupes and calls them in order.
+    #[serde(default)]
+    pub module_init_calls: Vec<String>,
     pub extra_headers: Vec<String>,
     pub state_vars: Vec<HashMap<String, String>>,
     pub reactive_consts: Vec<String>,

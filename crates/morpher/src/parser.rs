@@ -214,6 +214,22 @@ pub(crate) fn translate_snippet_to_cpp_with_types(
     filename: &str,
     options: &TranslateOptions,
 ) -> Result<(String, std::collections::HashMap<String, String>), MorphJsError> {
+    let (parts, fn_return_types) = translate_snippet_parts_to_cpp(source, filename, options)?;
+    Ok((parts.join(), fn_return_types))
+}
+
+/// Like [`translate_snippet_to_cpp_with_types`], but keeps the hoisted
+/// namespace-scope declarations separate from the executable statements.
+/// Module initializers put the prelude at namespace scope and the body
+/// inside the generated init function.
+pub(crate) fn translate_snippet_parts_to_cpp(
+    source: &str,
+    filename: &str,
+    options: &TranslateOptions,
+) -> Result<
+    (crate::codegen::cpp::ProgramParts, std::collections::HashMap<String, String>),
+    MorphJsError,
+> {
     let allocator = Allocator::default();
     let source_type = SourceType::from_path(filename).unwrap_or_default().with_typescript(true);
     let ret = Parser::new(&allocator, source, source_type).parse();
@@ -228,7 +244,7 @@ pub(crate) fn translate_snippet_to_cpp_with_types(
     let mut translator =
         CppTranslator::new(source, options.indent, options.type_mode, options.runtime_path.clone());
     apply_ambient_state(&mut translator, options);
-    let mut out = translator.translate_program(&ret.program);
+    let mut parts = translator.translate_program_parts(&ret.program);
     // A snippet that is nothing but a string literal — a const RHS like
     // `const s = "hi"`, or JSX text — parses as a directive prologue:
     // oxc lifts it out of `body`, and the translation came back empty
@@ -237,15 +253,15 @@ pub(crate) fn translate_snippet_to_cpp_with_types(
     // are real `"use strict"`-style prologues with no C++ meaning.
     if ret.program.body.is_empty() {
         for directive in &ret.program.directives {
-            if !out.is_empty() && !out.ends_with('\n') {
-                out.push('\n');
+            if !parts.body.is_empty() && !parts.body.ends_with('\n') {
+                parts.body.push('\n');
             }
-            out.push_str(&cpp_string_literal(&directive.expression.value));
-            out.push_str(";\n");
+            parts.body.push_str(&cpp_string_literal(&directive.expression.value));
+            parts.body.push_str(";\n");
         }
     }
     let fn_return_types = translator.ctx.fn_return_types.clone();
-    Ok((out, fn_return_types))
+    Ok((parts, fn_return_types))
 }
 
 fn normalize_cpp_types(source: &str) -> String {
