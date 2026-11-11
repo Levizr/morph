@@ -72,7 +72,7 @@ Already shipped and **not** on the missing list:
 - **Operators with JS semantics:** `==`/`!=`, `===`/`!==`, relational, `in`, `**`/`**=`, `&&=`/`||=`/`??=`, truthiness, string concatenation, `ToNumber` in numeric contexts.
 - **JSX:** elements, fragments, and list `.map` in direct JSX-child position.
 
-`Response.json()` returns a `JsValue`; dot access lowers to the same bracket lookup as `["key"]` (Part 3A), while `await response.json()` lowers to the synchronous reader. Statement-level `fetch(...).then(...).catch(...)` chains inside an async function lower to an awaited fetch plus callbacks in a try/catch (Part 3C); other `.then`/`.catch` shapes, JSON `parse`/`stringify` extra arguments, and timer trailing arguments are rejected by `morph check`. Class expressions are accepted only as module-scope direct `const`/`let` initializers; every other position is rejected.
+`Response.json()` returns a `JsValue`; dot access lowers to the same bracket lookup as `["key"]` (Part 3A), while `await response.json()` lowers to the synchronous reader. Statement-level `fetch(...).then(...).catch(...)` chains inside an async function lower to an awaited fetch plus callbacks in a try/catch (Part 3C); other `.then`/`.catch` shapes and JSON `parse`/`stringify` extra arguments are rejected by `morph check`. Trailing timer arguments are forwarded to inline arrow callbacks (Part 3D). Class expressions are accepted only as module-scope direct `const`/`let` initializers; every other position is rejected.
 
 ## Part map
 
@@ -93,7 +93,7 @@ Parts are ordered so that a later part never changes a representation owned by a
 | **3A** | JSON return typing and dot access | 0 | `JsValue` member lowering | ✅ Shipped: `JSON.parse(...).name` and `response.json().name` read fields through the bracket lookup |
 | **3B** | `await response.json()` | 3A | Response emitter | Await form compiles and returns parsed data |
 | **3C** | `.then`/`.catch` compatibility chain | 0 | Promise chain lowering | ✅ Shipped: statement-level `fetch(...).then(cb).catch(cb)` inside an async function awaits the response and runs the callbacks in a try/catch; unsupported chain shapes are rejected |
-| **3D** | Timer extra arguments | 0 | timer emitter | `setTimeout(fn, 0, ...args)` forwards arguments |
+| **3D** | Timer extra arguments | 0 | timer emitter | ✅ Shipped: trailing `setTimeout`/`setInterval` arguments are captured at scheduling time and forwarded to an inline arrow callback |
 | **3E** | Promise statics | 0 | Promise runtime | `resolve`/`all`/`allSettled`/`race`/`any` build and match JS result order |
 | **3F** | `fetch` request/response docs | 0 | docs/tests | `fetch(url, { method, headers, body })` documented and fixture-covered |
 | **4A** | `Date` subset | 0 | date runtime | Construction, `now`, `parse`, `getTime`, `toISOString`, getters |
@@ -150,7 +150,7 @@ The statuses below were probed on 2026-11-06 with `morph check`, `morph --to cpp
 | 0.2.7 | `constructor(public x: number)` | ✅ Fixed in 1B: parameter properties become fields. | 1B |
 | 0.2.8 | `#private` fields | ✅ Fixed in 1B: mangled to a private member with `->`/`::` access. | 1B |
 | 0.2.9 | `fetch(...).then(...)`; `r.text().then(...)` | ✅ Fixed in 3C for statement-level `fetch(...).then(cb).catch(cb)` chains inside async functions (one `.then` and/or one `.catch`, non-async arrow callback with at most one plain parameter). Assignment/return positions, non-`fetch` roots, duplicate steps, `.then` with an onRejected second argument, and async/function-expression/destructured callbacks stay rejected. | 3C |
-| 0.2.10 | `setTimeout(fn, 0, 1, 2)` | ⛔ Rejected by `morph check`; forwarding is 3D. | 3D |
+| 0.2.10 | `setTimeout(fn, 0, 1, 2)` | ✅ Fixed in 3D: trailing arguments are captured at scheduling time and forwarded to an inline arrow callback; extras beyond its parameters are evaluated and ignored. Identifier/function-expression/rest-parameter callbacks and callbacks that declare more parameters than supplied arguments (including omitted defaulted parameters) stay rejected. | 3D |
 | 0.2.11 | `new.target` | ✅ Fixed in 2B: constructors observe the most-derived target (including parameter defaults, initializer lists, and arrows lexically nested in the constructor); field initializers, methods, and plain functions observe `undefined`; class identifiers compare as constructor values. | 2B |
 | 0.2.12 | `for (const [k, v] of Object.entries(o))` | ✅ Fixed in 1C: declaration and assignment patterns lower through a synthetic loop item; `for...in` destructuring is rejected by `morph check`. | 1C |
 | 0.2.13 | `JSON.parse(s).name`; `response.json().name` | ✅ Fixed in 3A: JSON producers infer `JsValue`, and dot access on them lowers to the same bracket lookup as `["name"]`. | 3A |
@@ -338,11 +338,9 @@ Module-scope assignments use a captureless lambda because C++ forbids a capture-
 
 ### 3D — Timer extra arguments
 
-**Today:** ⛔ `morph check` rejects trailing timer arguments instead of dropping them.
+**Shipped:** `setTimeout(fn, ms, ...args)` and `setInterval(fn, ms, ...args)` evaluate the trailing arguments once at scheduling time and forward them to the callback on every fire. Supported callbacks are inline arrow functions without a rest parameter and with no more parameters than trailing arguments; extras beyond the parameter list are evaluated and ignored. Identifier/function-expression callbacks, rest-parameter callbacks, and callbacks that declare more parameters than supplied arguments (including omitted defaulted parameters) keep the precise `mx-js-syntax` rejection. `clearTimeout`/`clearInterval` are unchanged.
 
 **Target:** capture the trailing arguments in the callback for `setTimeout` and `setInterval`; keep `clearTimeout`/`clearInterval` behavior unchanged.
-
-**Depends on:** Part 0.
 
 **Exit:** `setTimeout((a, b) => console.log(a + b), 0, 1, 2)` prints `3`.
 
@@ -575,7 +573,8 @@ Morph should expose native equivalents (`useWindow`, clipboard, storage) instead
 | Part 3A — JSON return typing and dot access | ✅ Shipped |
 | Part 3B — `await response.json()` | ✅ Shipped |
 | Part 3C — `.then`/`.catch` compatibility chain | ✅ Shipped |
-| Parts 3D–5G — JavaScript language and standard library | 🚧 Committed — all JS-only gaps are in scope for implementation |
+| Part 3D — Timer extra arguments | ✅ Shipped |
+| Parts 3E–5G — JavaScript language and standard library | 🚧 Committed — all JS-only gaps are in scope for implementation |
 | Parts 6A–6G — platform APIs and JSX | 🚧 Separate product work — browser globals stay out of scope |
 | Part 7 — docs and claims | 📋 Continuous |
 

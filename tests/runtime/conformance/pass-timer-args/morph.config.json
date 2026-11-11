@@ -1,0 +1,7 @@
+{
+  "name": "pass-timer-args",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "pass-timer-args" },
+  "dependencies": {},
+  "cpp_sources": []
+}

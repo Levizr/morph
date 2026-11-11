@@ -1,0 +1,29 @@
+import { morphState } from 'morph'
+import { morph_test_run_timers_ms } from "./timers.cpp"
+
+export const windowConfig = { title: "pass-timer-args", width: 800, height: 600 }
+
+// Part 3D: trailing timer arguments are captured at scheduling time and
+// forwarded to the callback on every fire, matching JS. Extras beyond the
+// callback's parameters are evaluated and ignored. Defaulted parameters are
+// accepted only when every parameter receives a supplied argument; the
+// default is never used to fill in an omitted trailing argument.
+setTimeout((a, b) => console.log("timeout sum", a + b), 0, 1, 2)
+setTimeout(() => console.log("timeout ignored"), 0, 9, 10)
+setTimeout((a, b = 2) => console.log("defaulted supplied", a + b), 0, 1, 5)
+setTimeout((a, b) => console.log("dropped extra", a + b), 0, 1, 2, 3)
+setInterval((name, n) => console.log("interval", name, n), 5, "tick", 7)
+
+// Drive the timer queue before the headless self-test returns.
+morph_test_run_timers_ms(40)
+
+export default function App() {
+  const [count, setCount] = morphState(0)
+
+  return (
+    <body>
+      <text>{count}</text>
+      <button onClick={() => { setCount(count + 1) }}>increment</button>
+    </body>
+  )
+}

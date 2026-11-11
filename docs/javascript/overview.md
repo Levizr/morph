@@ -136,9 +136,8 @@ Binary (`+`, `-`, `*`, `/`, `**`, `===`, `!==`, `==`, `!=`, `<`, `>`, etc.), una
 - Class expressions outside a module-scope direct `const`/`let` initializer
   (module-scope initializers lower to a named class; function-local and
   every other position are rejected)
-- Destructuring in `for...in` and trailing
-  timer arguments (`setTimeout(fn, ms, ...args)`) — rejected by `morph check`
-  with a precise error
+- Destructuring in `for...in` (bind the key with a plain name and
+  destructure inside the body)
 - C++ keywords used as JS binding or class member names (`double`,
   `template`, `delete`, …)
 - A few JS methods whose receiver is provably a native type (for example

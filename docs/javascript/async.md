@@ -121,12 +121,14 @@ clearTimeout(id)   // cancels a timeout
 clearInterval(id)  // cancels an interval
 ```
 
-Timer callbacks currently take no arguments. Pass values through a closure instead of using the trailing-argument form:
+Timers forward trailing arguments to the callback, matching JS. The values are evaluated once when the timer is scheduled:
 
 ```tsx
-const label = "done"
-setTimeout(() => console.log(label), 1000)
+setTimeout((a, b) => console.log(a + b), 0, 1, 2) // 3
+setInterval((label, n) => console.log(label, n), 500, "tick", 7)
 ```
+
+Trailing arguments require an inline arrow callback with a parameter for each value. Extra arguments beyond the parameter list are evaluated and ignored. Every callback parameter needs a supplied value — a defaulted parameter is not filled in when its argument is omitted. Identifier/function-expression callbacks, rest-parameter callbacks, and callbacks that declare more parameters than supplied arguments are rejected by `morph check` — pass values through a closure instead.
 
 ## Coroutines
 
@@ -201,7 +203,6 @@ Everything else is rejected by `morph check` instead of silently dropping work: 
 
 - `Promise.resolve` / `Promise.all` / `Promise.allSettled` / `Promise.race` / `Promise.any`
 - General Promise-chain runtimes and `.then`/`.catch` forms outside the supported `fetch` chain shape above
-- Trailing timer arguments (`setTimeout(fn, ms, ...args)`; `morph check` rejects them)
 
 These are tracked in the [TypeScript App-Logic Coverage](../future/javascript/coverage.md) plan.
 

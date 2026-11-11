@@ -1,0 +1,7 @@
+{
+  "name": "fail-timer-args-short",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "fail-timer-args-short" },
+  "dependencies": {},
+  "cpp_sources": []
+}

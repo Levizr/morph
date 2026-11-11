@@ -7,6 +7,8 @@
 #include <atomic>
 #include <utility>
 #include <cstdint>
+#include <tuple>
+#include <type_traits>
 
 namespace morph {
 
@@ -100,6 +102,55 @@ struct TimerEntry {
 int set_timeout(std::function<void()> fn, int ms);
 int set_interval(std::function<void()> fn, int ms);
 void clear_timer(int id);
+
+namespace detail {
+
+// Invoke a timer callback with the captured trailing arguments. JavaScript
+// ignores arguments the callback does not declare, so drop trailing values
+// until the call fits. A callback that needs more arguments than were
+// supplied fails to compile (the linter rejects that shape first).
+template <typename Fn, typename Tuple, std::size_t... I>
+void invoke_timer_impl(Fn& fn, Tuple& args, std::index_sequence<I...>) {
+    if constexpr (std::is_invocable_v<Fn&, decltype(std::get<I>(args))...>) {
+        std::invoke(fn, std::get<I>(args)...);
+    } else if constexpr (sizeof...(I) > 0) {
+        invoke_timer_impl(fn, args, std::make_index_sequence<sizeof...(I) - 1>{});
+    } else {
+        static_assert(std::is_invocable_v<Fn&>,
+                      "timer callback cannot be called with the supplied arguments");
+        std::invoke(fn);
+    }
+}
+
+template <typename Fn, typename... Args>
+void invoke_timer(Fn& fn, std::tuple<Args...>& args) {
+    invoke_timer_impl(fn, args, std::index_sequence_for<Args...>{});
+}
+
+} // namespace detail
+
+// Trailing timer arguments are evaluated once, at scheduling time, then
+// passed to the callback on every fire — matching JS. The `requires` clause
+// keeps two-argument calls on the non-template overload above.
+template <typename Fn, typename... Args>
+    requires(sizeof...(Args) > 0)
+int set_timeout(Fn fn, int ms, Args... args) {
+    return set_timeout(
+        [fn = std::move(fn), args = std::make_tuple(std::move(args)...)]() mutable {
+            detail::invoke_timer(fn, args);
+        },
+        ms);
+}
+
+template <typename Fn, typename... Args>
+    requires(sizeof...(Args) > 0)
+int set_interval(Fn fn, int ms, Args... args) {
+    return set_interval(
+        [fn = std::move(fn), args = std::make_tuple(std::move(args)...)]() mutable {
+            detail::invoke_timer(fn, args);
+        },
+        ms);
+}
 
 } // namespace morph
 

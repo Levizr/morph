@@ -79,6 +79,7 @@ run_pass pass-hoisting
 run_pass pass-module-side-effects
 run_pass pass-json-dot
 run_pass pass-then-chain
+run_pass pass-timer-args
 run_pass pass-string-switch
 run_pass pass-widening
 run_pass pass-classes
@@ -120,7 +121,7 @@ run_fail fail-then-chain mx-js-syntax
 run_fail fail-then-chain-value mx-js-syntax
 run_fail fail-tdz mx-js-syntax
 run_fail fail-json-args mx-js-syntax
-run_fail fail-timer-args mx-js-syntax
+run_fail fail-timer-args-short mx-js-syntax
 run_fail fail-lint-severity mx-key-misuse
 
 echo "[conformance] $checks checks, $failures failures"

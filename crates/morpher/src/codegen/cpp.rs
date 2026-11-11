@@ -8640,12 +8640,27 @@ impl<'a> CppTranslator<'a> {
                         .get(1)
                         .map(|a| self.emit_argument(a))
                         .unwrap_or_else(|| "0".to_string());
+                    let extra: Vec<String> =
+                        call.arguments.iter().skip(2).map(|a| self.emit_argument(a)).collect();
                     let cpp_fn = if id.name.as_str() == "setTimeout" {
                         "morph::set_timeout"
                     } else {
                         "morph::set_interval"
                     };
-                    return format!("{}(std::function<void()>({}), {})", cpp_fn, fn_arg, delay);
+                    if extra.is_empty() {
+                        return format!("{}(std::function<void()>({}), {})", cpp_fn, fn_arg, delay);
+                    }
+                    // Trailing arguments: the variadic runtime overload
+                    // captures them at scheduling time and forwards them on
+                    // every fire, matching JS. The linter restricts this
+                    // shape to inline arrow callbacks with enough params.
+                    return format!(
+                        "{}({}, {}{})",
+                        cpp_fn,
+                        fn_arg,
+                        delay,
+                        extra.iter().map(|a| format!(", {a}")).collect::<String>()
+                    );
                 }
             }
             // JS value conversions: String(x) / Number(x) / Boolean(x) lower
@@ -10088,6 +10103,23 @@ mod tests {
         assert!(out.contains("co_await morph::net::fetch_response"), "awaited fetch: {out}");
         assert!(out.contains("catch (const JsValue& __morph_then_error)"), "catch clause: {out}");
         assert!(!out.contains("morph::net::Response"), "no then param: {out}");
+    }
+
+    #[test]
+    fn timer_extra_args_use_variadic_runtime_overload() {
+        let out = translate_stmts("setTimeout((a, b) => console.log(a + b), 0, 1, 2);");
+        assert!(out.contains("morph::set_timeout("), "timer call: {out}");
+        assert!(
+            !out.contains("std::function<void()>"),
+            "trailing args bypass the void wrapper: {out}"
+        );
+        assert!(out.contains(", 0, 1, 2)"), "trailing args forwarded: {out}");
+    }
+
+    #[test]
+    fn timer_without_extra_args_keeps_void_wrapper() {
+        let out = translate_stmts("setTimeout(() => console.log(\"tick\"), 10);");
+        assert!(out.contains("std::function<void()>"), "void wrapper: {out}");
     }
 
     #[test]

@@ -909,6 +909,21 @@ fn supported_then_callback(arg: Option<&Argument<'_>>) -> bool {
         .is_none_or(|p| matches!(p.pattern, BindingPattern::BindingIdentifier(_)))
 }
 
+/// Trailing timer arguments are captured at scheduling time and forwarded to
+/// an inline arrow callback. The callback must be able to receive them: no
+/// rest parameter (Morph passes a rest array as one value) and no more
+/// parameters than trailing arguments. Extras beyond the parameter list are
+/// evaluated and ignored, matching JS.
+fn supported_timer_args(args: &[Argument<'_>]) -> bool {
+    let Some(Argument::ArrowFunctionExpression(arrow)) = args.first() else {
+        return false;
+    };
+    if arrow.params.rest.is_some() {
+        return false;
+    }
+    args.len().saturating_sub(2) >= arrow.params.items.len()
+}
+
 /// Spread call arguments lower only where the runtime helper is variadic:
 /// `push`/`unshift`/`splice`/`concat` on arrays and `Math.min`/`Math.max`.
 /// Every other call would pass the spread array as one argument, so the
@@ -972,11 +987,14 @@ impl<'a> Visit<'a> for JsSyntaxVisitor<'_> {
             }
         }
         if let Expression::Identifier(id) = unwrap_ts_expr(&e.callee) {
-            if matches!(id.name.as_str(), "setTimeout" | "setInterval") && e.arguments.len() > 2 {
+            if matches!(id.name.as_str(), "setTimeout" | "setInterval")
+                && e.arguments.len() > 2
+                && !supported_timer_args(&e.arguments)
+            {
                 self.out.push((
                     e.span.start,
                     "timer callback arguments (`setTimeout(fn, ms, ...args)`)",
-                    "Pass values through a closure instead of trailing timer arguments",
+                    "Use an inline arrow callback with no more parameters than trailing arguments, or pass values through a closure",
                 ));
             }
         }
@@ -7165,12 +7183,47 @@ mod tests {
     }
 
     #[test]
+    fn timer_extra_args_positions() {
+        // Supported: inline arrow callbacks that can receive the trailing
+        // arguments. Extra arguments beyond the parameter list are ignored,
+        // matching JS.
+        let ok = "import { morphState } from 'morph'\nexport default function App() {\n  setTimeout((a, b) => console.log(a + b), 0, 1, 2);\n  setTimeout(() => console.log(\"ignored\"), 0, 1);\n  setTimeout((a, b = 2) => console.log(a + b), 0, 1, 5);\n  setInterval((n) => console.log(n), 10, 7);\n  setTimeout((a, b) => console.log(a + b), 0, 1, 2, 3);\n  return (<div>x</div>)\n}\n";
+        let errs = check(ok, "App.mx");
+        assert!(
+            !errs.iter().any(|e| e.code == "mx-js-syntax"
+                && e.message.contains("timer callback arguments")),
+            "{errs:?}"
+        );
+
+        // Anything the forwarding lowering cannot satisfy stays rejected.
+        for body in [
+            "const handler = () => {}; setTimeout(handler, 0, 1);",
+            "setTimeout((...args) => console.log(args), 0, 1);",
+            "setTimeout((a, b) => console.log(a + b), 0, 1);",
+            "setTimeout((a, b = 2) => console.log(a + b), 0, 1);",
+            "setInterval((a, b) => console.log(a + b), 0, 1);",
+            "setTimeout(function (a) { console.log(a); }, 0, 1);",
+        ] {
+            let content = format!(
+                "import {{ morphState }} from 'morph'\nexport default function App() {{\n  {body}\n  return (<div>x</div>)\n}}\n"
+            );
+            let errs = check(&content, "App.mx");
+            assert!(
+                errs.iter()
+                    .any(|e| e.code == "mx-js-syntax"
+                        && e.message.contains("timer callback arguments")),
+                "{body}: {errs:?}"
+            );
+        }
+    }
+
+    #[test]
     fn part0_contract_violations_error() {
         for (body, expected) in [
             ("fetch(\"http://example.com\").then((r) => r);", "Promise `.then`/`.catch` chains"),
             ("JSON.parse(\"{}\", (k, v) => v);", "`JSON.parse` reviver arguments"),
             ("JSON.stringify({}, null, 2);", "`JSON.stringify` replacer/space arguments"),
-            ("setTimeout(() => {}, 0, 1);", "timer callback arguments"),
+            ("const handler = () => {}; setTimeout(handler, 0, 1);", "timer callback arguments"),
         ] {
             let content = format!(
                 "import {{ morphState }} from 'morph'\nexport default function App() {{\n  {body}\n  return (<div>x</div>)\n}}\n"

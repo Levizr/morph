@@ -1,0 +1,13 @@
+export const windowConfig = { title: "fail-timer-args-short", width: 800, height: 600 }
+
+export default function App() {
+  // The callback declares two parameters but only one trailing argument is
+  // supplied; JS would pass undefined for the second, which the native
+  // lowering cannot represent, so `morph check` rejects it.
+  setTimeout((a, b) => console.log(a + b), 0, 1)
+  return (
+    <body>
+      <div>timer callbacks need a value for every parameter</div>
+    </body>
+  )
+}

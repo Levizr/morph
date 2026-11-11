@@ -39,7 +39,11 @@ The current set is:
   `.then` and/or one `.catch`, non-async callback with at most one plain
   parameter; use `async`/`await` and `try`/`catch` otherwise)
 - `JSON.parse` reviver and `JSON.stringify` replacer/space arguments
-- trailing timer arguments (`setTimeout(fn, ms, ...args)`)
+- trailing timer arguments on identifier, function-expression, or
+  rest-parameter callbacks, or on arrow callbacks that declare more
+  parameters than supplied arguments (use an inline arrow callback with no
+  more parameters than trailing arguments; extra arguments are then
+  evaluated and ignored)
 - `let`/`const` reads before the declaration line (the temporal dead zone),
   including self-referential initializers such as `let x = x`
 - destructured `var` declarations (`var { a } = obj`) and late `var`
@@ -64,7 +68,8 @@ block, loop, and component-body declarations), class declarations / `new`, modul
 directly assigned to a `const`/`let`, type-only imports and exports,
 default and optional parameters, arrow/function consts, data-only
 object-literal consts, statement-level `fetch(...).then(...).catch(...)`
-chains inside async functions, and JSX list expressions. `for...in` destructuring
+chains inside async functions, trailing timer arguments on inline arrow
+callbacks, and JSX list expressions. `for...in` destructuring
 is rejected; bind the key with a plain name and destructure inside the
 loop body. Every JavaScript language and standard-library gap is committed
 for implementation in the
@@ -79,8 +84,9 @@ labeled jumps have no C++ equivalent; `import.meta` / dynamic `import()`
 need a module loader; namespaces
 and decorators vanish in translation; enums and regex literals have no
 lowering yet. `.then`/`.catch` outside the supported statement-level
-`fetch` chain needs a general promise-chain runtime, and JSON/timer
-extra arguments would be silently dropped. Supporting any of them
+`fetch` chain needs a general promise-chain runtime, JSON extra arguments
+would be silently dropped, and timer arguments need an inline arrow
+callback whose parameters can receive them. Supporting any of them
 approximately would change program meaning — so each is rejected with an
 explicit rewrite. See
 [translator coverage](../future/javascript/coverage.md) for what is planned.
@@ -144,7 +150,7 @@ async function load() {
 | `fetch(...).then(...)` as a value | a statement-level chain inside an async function (supported), or `const r = await fetch(...)` inside `try`/`catch` |
 | `JSON.parse(text, reviver)` | parse once, then transform the value |
 | `JSON.stringify(value, replacer, 2)` | stringify the value, then format the result |
-| `setTimeout(fn, ms, a, b)` | `setTimeout(() => fn(a, b), ms)` |
+| `setTimeout(handler, ms, a, b)` (identifier callback) | `setTimeout((a, b) => handler(a, b), ms, a, b)` |
 | generator / `yield` | a state machine with `morphState` |
 | `with (o) { ... }` | explicit `o.` qualification |
 | labeled `break`/`continue` | a flag variable or early return |
