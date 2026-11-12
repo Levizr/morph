@@ -18,20 +18,30 @@ async function load() {
 
 ### Request options
 
-`fetch()` accepts a request object for method, headers, and body:
+`fetch()` accepts a request object for method, headers, and body. GET is the default:
 
 ```tsx
-const response = await fetch("https://api.example.com/users", {
-  method: "POST",
-  headers: { "content-type": "application/json" },
-  body: JSON.stringify({ name: "Ada" }),
-})
+async function createUser() {
+  const response = await fetch("https://api.example.com/users", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-client": "morph" },
+    body: JSON.stringify({ name: "Ada" }),
+  })
+  if (!response.ok()) {
+    console.log("request failed", response.status, response.statusText)
+    return
+  }
+  console.log("created", response.status, response.headers.get("content-type"))
+  const user = response.json()
+  console.log(user.id, user.name)
+}
 ```
 
-The runtime supports `method`, `headers`, and a string `body`. Response headers expose `.get(name)` and `.has(name)`:
+Morph reads `method`, `headers` (an object of string values), and a string `body` from the request object. Use `JSON.stringify(...)` for JSON bodies. Response headers are case-insensitive and expose `.get(name)` and `.has(name)`:
 
 ```tsx
 const contentType = response.headers.get("content-type")
+const hasClientHeader = response.headers.has("x-client")
 ```
 
 ### Response API

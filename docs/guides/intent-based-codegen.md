@@ -526,7 +526,7 @@ fetch("https://example.com/ping");
 ```
 
 **Detection**: `await` not used on a promise-returning call
-**Translation**: the call is emitted bare and its result discarded — there is no detach primitive (`morph::net::fetch` takes only a URL; an options object has no overload):
+**Translation**: the call is emitted bare and its result discarded — there is no detach primitive (`fetch(url, init)` has an overload, but the discarded coroutine still has no owner):
 
 ```cpp
 morph::net::fetch("https://example.com/ping");

@@ -81,6 +81,7 @@ run_pass pass-json-dot
 run_pass pass-then-chain
 run_pass pass-timer-args
 run_pass pass-promise-statics
+run_pass pass-fetch-request
 run_pass pass-string-switch
 run_pass pass-widening
 run_pass pass-classes

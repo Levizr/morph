@@ -544,7 +544,7 @@
         "file": "javascript/overview",
         "status": "production",
         "author": "PIYUSH",
-        "description": "How Morph turns your TypeScript and JavaScript logic into native C++: no interpreter or JIT, your component code compiles and runs as machine code at build time — including Promise statics, destructured parameters, class fields, and late-assigned values.",
+        "description": "How Morph turns your TypeScript and JavaScript logic into native C++: no interpreter or JIT, your component code compiles and runs as machine code at build time — including Promise statics, fetch request options and the Response API, destructured parameters, class fields, and late-assigned values.",
         "keywords": [
           "morph javascript to c++",
           "morph typescript compile",
@@ -563,9 +563,13 @@
           "morph promise statics",
           "morph promise all",
           "morph promise resolve",
-          "morph promise return"
+          "morph promise return",
+          "morph fetch post",
+          "morph fetch headers",
+          "morph fetch json",
+          "morph response headers"
         ],
-        "lastUpdated": "2026-11-11",
+        "lastUpdated": "2026-11-12",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -619,7 +623,7 @@
         "file": "javascript/async",
         "status": "production",
         "author": "PIYUSH",
-        "description": "How to do async work in Morph: async/await coroutines, the built-in fetch() client, timers with trailing arguments, supported Promise statics (resolve/all/allSettled/race/any), and Promise compatibility chains, compiled to native.",
+        "description": "How to do async work in Morph: async/await coroutines, the built-in fetch() client with request options and the Response API, timers with trailing arguments, supported Promise statics (resolve/all/allSettled/race/any), and Promise compatibility chains, compiled to native.",
         "keywords": [
           "morph async await",
           "morph fetch example",
@@ -633,9 +637,13 @@
           "morph promise all",
           "morph promise resolve",
           "morph promise allsettled",
-          "morph promise return"
+          "morph promise return",
+          "morph fetch post",
+          "morph fetch headers",
+          "morph fetch json",
+          "morph response headers"
         ],
-        "lastUpdated": "2026-11-11",
+        "lastUpdated": "2026-11-12",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -1016,9 +1024,10 @@
           "morph memory management",
           "morph trusted annotations",
           "morph native types",
-          "morph promise all"
+          "morph promise all",
+          "morph fetch post"
         ],
-        "lastUpdated": "2026-11-11",
+        "lastUpdated": "2026-11-12",
         "publishedAt": "2026-09-05",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -2584,7 +2593,7 @@
         "file": "future/javascript/coverage",
         "status": "development",
         "author": "PIYUSH",
-        "description": "The contract and dependency-ordered plan for making Morph's TypeScript subset cover ordinary app logic: check/build/semantics invariants, shipped widening bindings and class model, precise contract rejections, async/JSON, Promise statics, standard library, language surface, platform services, JSX, and docs truth-up.",
+        "description": "The contract and dependency-ordered plan for making Morph's TypeScript subset cover ordinary app logic: check/build/semantics invariants, shipped widening bindings and class model, precise contract rejections, async/JSON, fetch request/response coverage, Promise statics, standard library, language surface, platform services, JSX, and docs truth-up.",
         "keywords": [
           "morph typescript coverage",
           "morph javascript translator",
@@ -2615,9 +2624,12 @@
           "morph promise statics",
           "morph promise allsettled",
           "morph promise race",
-          "morph promise return"
+          "morph promise return",
+          "morph fetch post",
+          "morph fetch json",
+          "morph response headers"
         ],
-        "lastUpdated": "2026-11-11",
+        "lastUpdated": "2026-11-12",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"

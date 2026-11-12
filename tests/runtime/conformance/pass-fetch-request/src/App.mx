@@ -1,0 +1,55 @@
+import { morphState } from 'morph'
+import { morph_test_wait_ms } from "./wait.cpp"
+
+export const windowConfig = { title: "pass-fetch-request", width: 800, height: 600 }
+
+export default function App() {
+  return (
+    <body>
+      <text>pass-fetch-request</text>
+    </body>
+  )
+}
+
+// Part 3F: fetch request options and the Response API. The runtime test
+// rewrites PORT_OK to a local server; the placeholder keeps the conformance
+// build offline.
+const jsonUrl = "http://127.0.0.1:PORT_OK/json"
+const echoUrl = "http://127.0.0.1:PORT_OK/echo"
+
+async function run() {
+  // GET + Response metadata.
+  const got = await fetch(jsonUrl)
+  console.log("get", got.status, got.ok(), got.statusText, got.headers.get("content-type"))
+  console.log("get meta", got.url, got.redirected, got.type, got.bodyUsed)
+  const getData = got.json()
+  console.log("get json", getData.ok, getData.name)
+
+  // POST + request headers/body + response headers/JSON.
+  const response = await fetch(echoUrl, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-morph-test": "yes" },
+    body: JSON.stringify({ name: "Ada", count: 2 }),
+  })
+  console.log("post", response.status, response.ok())
+  console.log(
+    "post headers",
+    response.headers.get("x-echo-content-type"),
+    response.headers.has("x-echo-content-type"),
+  )
+  const data = response.json()
+  console.log("post json", data.method, data.contentType, data.header, data.body)
+  console.log("body used", response.bodyUsed)
+
+  // Response.clone() gives an independent body reader.
+  const copy = response.clone()
+  console.log("clone", copy.status, copy.bodyUsed, copy.headers.has("x-echo-content-type"))
+  const raw = copy.arrayBuffer()
+  console.log("raw", raw.length > 0)
+}
+
+run()
+
+// Let the fetch worker threads resume the coroutines before the headless
+// self-test returns.
+morph_test_wait_ms(1200)

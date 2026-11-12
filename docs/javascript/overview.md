@@ -51,6 +51,10 @@ This module is provided by `node_modules/morph/index.d.ts` — it ships with eve
 - Arrow/function expressions assigned to consts (inside components and at
   module scope)
 - `async` / `await` (C++20 coroutines; see [Async & Networking](async.md))
+- `fetch()` with `method`/`headers`/string `body` request options and the
+  full `Response` API (`status`, `ok()`, `statusText`, `headers.get/has`,
+  `text()`, `json()`, `arrayBuffer()`, `clone()`); see
+  [Async & Networking](async.md#request-options)
 - Destructured object/array parameters in function declarations, expressions,
   arrows, methods, function-prop callbacks, and `.on()` event handlers
   (lowered to one synthetic argument plus local bindings)

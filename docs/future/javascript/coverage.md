@@ -72,7 +72,7 @@ Already shipped and **not** on the missing list:
 - **Operators with JS semantics:** `==`/`!=`, `===`/`!==`, relational, `in`, `**`/`**=`, `&&=`/`||=`/`??=`, truthiness, string concatenation, `ToNumber` in numeric contexts.
 - **JSX:** elements, fragments, and list `.map` in direct JSX-child position.
 
-`Response.json()` returns a `JsValue`; dot access lowers to the same bracket lookup as `["key"]` (Part 3A), while `await response.json()` lowers to the synchronous reader. Statement-level `fetch(...).then(...).catch(...)` chains inside an async function lower to an awaited fetch plus callbacks in a try/catch (Part 3C); other `.then`/`.catch` shapes and JSON `parse`/`stringify` extra arguments are rejected by `morph check`. Trailing timer arguments are forwarded to inline arrow callbacks (Part 3D). Class expressions are accepted only as module-scope direct `const`/`let` initializers; every other position is rejected.
+`Response.json()` returns a `JsValue`; dot access lowers to the same bracket lookup as `["key"]` (Part 3A), while `await response.json()` lowers to the synchronous reader. Statement-level `fetch(...).then(...).catch(...)` chains inside an async function lower to an awaited fetch plus callbacks in a try/catch (Part 3C); other `.then`/`.catch` shapes and JSON `parse`/`stringify` extra arguments are rejected by `morph check`. Trailing timer arguments are forwarded to inline arrow callbacks (Part 3D). `fetch` request options (`method`/`headers`/string `body`) and the `Response` API are documented and fixture-covered (Part 3F). Class expressions are accepted only as module-scope direct `const`/`let` initializers; every other position is rejected.
 
 ## Part map
 
@@ -95,7 +95,7 @@ Parts are ordered so that a later part never changes a representation owned by a
 | **3C** | `.then`/`.catch` compatibility chain | 0 | Promise chain lowering | ✅ Shipped: statement-level `fetch(...).then(cb).catch(cb)` inside an async function awaits the response and runs the callbacks in a try/catch; unsupported chain shapes are rejected |
 | **3D** | Timer extra arguments | 0 | timer emitter | ✅ Shipped: trailing `setTimeout`/`setInterval` arguments are captured at scheduling time and forwarded to an inline arrow callback |
 | **3E** | Promise statics | 0 | Promise runtime | ✅ Shipped: `resolve`/`all`/`allSettled`/`race`/`any` build and match JS result order for the supported eager shapes |
-| **3F** | `fetch` request/response docs | 0 | docs/tests | `fetch(url, { method, headers, body })` documented and fixture-covered |
+| **3F** | `fetch` request/response docs | 0 | docs/tests | ✅ Shipped: `fetch(url, { method, headers, body })` and the `Response` API documented and covered by a runtime fixture |
 | **4A** | `Date` subset | 0 | date runtime | Construction, `now`, `parse`, `getTime`, `toISOString`, getters |
 | **4B** | `RegExp` literals + `.test`/`.exec` | 0 | regex runtime | Validation and search work; unsupported features documented |
 | **4C** | `Map`/`Set` | 0 | collection runtime | JS key semantics and insertion order |
@@ -360,13 +360,13 @@ Sequential evaluation is accepted — parallel execution is an optimization, not
 
 ### 3F — `fetch` request/response docs
 
-**Today:** the runtime supports `fetch(url, { method, headers, body })` and the full `Response` API, but the user docs only show the one-argument form.
+**Shipped:** `fetch(url, { method, headers, body })` and the full `Response` API are documented and covered by `tests/runtime/conformance/pass-fetch-request` plus `tests/translate/test_fetch_request.py`. The fixture exercises GET, POST, request headers/body, `status`/`ok()`/`statusText`, response `headers.get`/`has`, `json()`, `bodyUsed`, `clone()`, and `arrayBuffer()`. While verifying the codegen path, `data.ok` on a `JsValue` from `response.json()` was fixed to keep bracket access instead of colliding with `Response.ok`; `.then` callback parameters still lower `r.ok()` correctly.
 
 **Target:** verify the codegen path, add examples for POST/headers/body and `response.headers.get(...)`, and add a conformance fixture.
 
 **Depends on:** Part 0.
 
-**Exit:** docs and fixtures cover GET, POST, headers, body, status, and JSON.
+**Exit:** ✅ docs and fixtures cover GET, POST, headers, body, status, and JSON.
 
 ## Part 4 — Standard library
 
@@ -577,7 +577,8 @@ Morph should expose native equivalents (`useWindow`, clipboard, storage) instead
 | Part 3C — `.then`/`.catch` compatibility chain | ✅ Shipped |
 | Part 3D — Timer extra arguments | ✅ Shipped |
 | Part 3E — Promise statics | ✅ Shipped; supported eager shapes only |
-| Parts 3F–5G — JavaScript language and standard library | 🚧 Committed — all JS-only gaps are in scope for implementation |
+| Part 3F — `fetch` request/response docs | ✅ Shipped |
+| Parts 4A–5G — JavaScript language and standard library | 🚧 Committed — all JS-only gaps are in scope for implementation |
 | Parts 6A–6G — platform APIs and JSX | 🚧 Separate product work — browser globals stay out of scope |
 | Part 7 — docs and claims | 📋 Continuous |
 

@@ -9401,24 +9401,14 @@ impl<'a> CppTranslator<'a> {
                 _ => {}
             }
         }
-        // Response.ok is a method, not a field: r.ok -> r.ok()
-        if prop == "ok" {
-            // Heuristic: if obj is Response (from fetch), call ok()
-            let is_response = self
-                .ctx
-                .var_types
-                .get(obj.as_str())
-                .map(|t| t.contains("Response"))
-                .unwrap_or(false)
-                || obj.contains("Response")
-                || obj == "r"
-                || obj.contains("fetch")
-                || self.ctx.needed.iter().any(|h| h.contains("net.h"));
-            if is_response {
-                // Bare member: emit_call appends the argument parens, so
-                // `r.ok()` renders exactly once (not `r.ok()()`).
-                return format!("{}.ok", obj);
-            }
+        // Response.ok is a method, not a field: r.ok -> r.ok(). Only
+        // receivers known to be a fetch Response take this path; a `JsValue`
+        // from `response.json()` keeps JS dot access (`data.ok` ->
+        // `data["ok"]`).
+        if prop == "ok" && self.is_response_like_expr(&m.object) {
+            // Bare member: emit_call appends the argument parens, so
+            // `r.ok()` renders exactly once (not `r.ok()()`).
+            return format!("{obj}.ok");
         }
         if prop == "length" {
             // .size() works universally now: std::vector/std::string have size(),
@@ -9974,13 +9964,28 @@ impl<'a> CppTranslator<'a> {
     }
 
     fn emit_then_callback<'b>(&mut self, cb: ThenCallback<'b, 'a>, param_type: &str) -> String {
-        if let Some(p) = cb.params().items.first() {
+        let param = cb.params().items.first();
+        if let Some(p) = param {
             self.ctx.contextual_param_types.insert(p.span.start, param_type.to_string());
         }
+        // Type the callback parameter inside the lambda body so Response
+        // members (notably `.ok`) lower correctly without guessing from the
+        // surrounding file.
+        let typed_param = param.map(|p| {
+            let (name, _) = self.binding_to_identifier(&p.pattern);
+            let previous = self.ctx.var_types.insert(name.clone(), param_type.to_string());
+            (name, previous)
+        });
         let out = match cb {
             ThenCallback::Arrow(f) => self.emit_arrow(f),
         };
-        if let Some(p) = cb.params().items.first() {
+        if let Some((name, previous)) = typed_param {
+            match previous {
+                Some(ty) => self.ctx.var_types.insert(name, ty),
+                None => self.ctx.var_types.remove(&name),
+            };
+        }
+        if let Some(p) = param {
             self.ctx.contextual_param_types.remove(&p.span.start);
         }
         out
@@ -10633,6 +10638,33 @@ mod tests {
         assert!(out.contains("response.json()[\"name\"]"), "{out}");
         assert!(out.contains("data[\"name\"]"), "{out}");
         assert!(!out.contains("data.name"), "{out}");
+    }
+
+    #[test]
+    fn response_ok_and_js_value_ok_field_do_not_collide() {
+        let out = translate_stmts(
+            "async function load() {\n\
+                 const response = await fetch(\"http://example.com\");\n\
+                 const data = response.json();\n\
+                 console.log(response.ok(), data.ok, data.nested.ok);\n\
+             }",
+        );
+        assert!(out.contains("response.ok()"), "{out}");
+        assert!(out.contains("data[\"ok\"]"), "{out}");
+        assert!(out.contains("data[\"nested\"][\"ok\"]"), "{out}");
+        assert!(!out.contains("data.ok"), "{out}");
+        assert!(!out.contains("[\"nested\"].ok"), "{out}");
+    }
+
+    #[test]
+    fn then_callback_parameter_keeps_response_ok() {
+        let out = translate_stmts(
+            "async function load() {\n\
+                 fetch(\"http://example.com\").then((r) => console.log(r.ok()));\n\
+             }",
+        );
+        assert!(out.contains("r.ok()"), "{out}");
+        assert!(!out.contains("r[\"ok\"]"), "{out}");
     }
 
     #[test]

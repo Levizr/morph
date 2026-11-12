@@ -441,6 +441,26 @@ case(
     """,
 )
 case(
+    "fetch_request",
+    """
+    import { morphState } from 'morph'
+    export default function App() {
+      const [msg, setMsg] = morphState("")
+      async function load() {
+        const r = await fetch("http://127.0.0.1/echo", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: "Ada" }),
+        })
+        console.log(r.status, r.ok(), r.headers.get("content-type"))
+        const data = r.json()
+        setMsg(data.name)
+      }
+      return (<body><button onClick={load}>{msg}</button></body>)
+    }
+    """,
+)
+case(
     "await_arrow_const",
     """
     import { morphState } from 'morph'
