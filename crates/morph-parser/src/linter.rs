@@ -327,6 +327,10 @@ struct JsMemberVisitor {
     // the bare loop must not flag the callee itself. `new` forms are
     // never recorded, so they keep erroring.
     allowed_calls: HashSet<u32>,
+    // Supported `Promise.<static>(...)` call spans. The dedicated Promise
+    // pass owns their shape/position diagnostics; this visitor only keeps
+    // the generic `Promise.<member>` rejection quiet for them.
+    allowed_promise_calls: HashSet<u32>,
     out: Vec<(u32, String, String)>,
 }
 impl JsMemberVisitor {
@@ -401,7 +405,11 @@ impl<'a> Visit<'a> for JsMemberVisitor {
                 ),
                 MemberExpression::PrivateFieldExpression(_) => (None, None),
             };
-            self.check_root(root, (me.span().start, me.span().end), prop);
+            let promise_call_allowed = self.allowed_promise_calls.contains(&e.span.start)
+                && matches!(&root, Some((name, _)) if *name == "Promise");
+            if !promise_call_allowed {
+                self.check_root(root, (me.span().start, me.span().end), prop);
+            }
             // Recurse into the callee object: f(Math.max(1, 2)) and
             // Math.sqrt(2).toFixed(3) must see the inner roots too.
             match me {
@@ -493,15 +501,31 @@ fn check_js_members(program: &Program, file_path: &str, offsets: &[usize]) -> Ve
         }
         bare.push((atom, spans));
     }
+    let promise_bindings = collect_promise_bindings(program, scoping);
+    let promise = collect_promise_statics(program, scoping, &promise_bindings);
+    let PromiseStaticInfo { recognized: promise_calls, errors: promise_errors, .. } = promise;
     let mut visitor = JsMemberVisitor {
         unresolved,
         members: Vec::new(),
         allowed_calls: HashSet::new(),
+        allowed_promise_calls: promise_calls,
         out: Vec::new(),
     };
     visitor.visit_program(program);
     let skip = collect_skip_spans(program);
     let mut out = Vec::new();
+    for (start, message, hint) in &promise_errors {
+        let (line, col) = offset_to_line_col_fast(offsets, *start);
+        out.push(LintError {
+            severity: "error".into(),
+            code: "mx-js-syntax".into(),
+            message: message.clone(),
+            suggestion: Some(hint.clone()),
+            file_path: file_path.into(),
+            line,
+            col,
+        });
+    }
     for (start, root, label) in &visitor.out {
         let (line, col) = offset_to_line_col_fast(offsets, *start);
         let suggestion = if root == "console" {
@@ -907,6 +931,695 @@ fn supported_then_callback(arg: Option<&Argument<'_>>) -> bool {
         .items
         .first()
         .is_none_or(|p| matches!(p.pattern, BindingPattern::BindingIdentifier(_)))
+}
+
+const PROMISE_STATICS: &[&str] = &["resolve", "all", "allSettled", "race", "any"];
+
+/// The supported `Promise.<static>(...)` call behind a callee expression.
+/// Optional calls and computed members stay outside the lowering.
+fn promise_static_callee<'a>(call: &'a CallExpression<'a>) -> Option<&'a str> {
+    if call.optional {
+        return None;
+    }
+    let MemberExpression::StaticMemberExpression(member) = call.callee.as_member_expression()?
+    else {
+        return None;
+    };
+    if member.optional {
+        return None;
+    }
+    let Expression::Identifier(id) = unwrap_ts_expr(&member.object) else {
+        return None;
+    };
+    if id.name.as_str() != "Promise" {
+        return None;
+    }
+    let prop = member.property.name.as_str();
+    PROMISE_STATICS.contains(&prop).then_some(prop)
+}
+
+fn is_fetch_call(call: &CallExpression<'_>) -> bool {
+    !call.optional
+        && matches!(unwrap_ts_expr(&call.callee), Expression::Identifier(id) if id.name.as_str() == "fetch")
+}
+
+fn is_promise_constructor(new: &NewExpression<'_>) -> bool {
+    matches!(unwrap_ts_expr(&new.callee), Expression::Identifier(id) if id.name.as_str() == "Promise")
+}
+
+fn reference_symbol(scoping: &Scoping, id: &IdentifierReference<'_>) -> Option<SymbolId> {
+    let reference_id = id.reference_id.get()?;
+    scoping.get_reference(reference_id).symbol_id()
+}
+
+/// Symbols bound to async functions. A binding initialized from a call to
+/// one of these holds pending `Result` work, not a settled value.
+#[derive(Default)]
+struct AsyncFunctionSymbols {
+    out: HashSet<SymbolId>,
+}
+
+impl<'a> Visit<'a> for AsyncFunctionSymbols {
+    fn visit_function(&mut self, function: &Function<'a>, flags: ScopeFlags) {
+        if function.r#async {
+            if let Some(id) = &function.id {
+                if let Some(symbol) = id.symbol_id.get() {
+                    self.out.insert(symbol);
+                }
+            }
+        }
+        oxc_ast_visit::walk::walk_function(self, function, flags);
+    }
+
+    fn visit_variable_declarator(&mut self, d: &VariableDeclarator<'a>) {
+        if let (BindingPattern::BindingIdentifier(id), Some(init)) = (&d.id, &d.init) {
+            let async_fn = match unwrap_ts_expr(init) {
+                Expression::ArrowFunctionExpression(f) => f.r#async,
+                Expression::FunctionExpression(f) => f.r#async,
+                _ => false,
+            };
+            if async_fn {
+                if let Some(symbol) = id.symbol_id.get() {
+                    self.out.insert(symbol);
+                }
+            }
+        }
+        oxc_ast_visit::walk::walk_variable_declarator(self, d);
+    }
+}
+
+fn is_promise_type(ty: &TSType<'_>) -> bool {
+    matches!(
+        ty,
+        TSType::TSTypeReference(reference)
+            if matches!(&reference.type_name, TSTypeName::IdentifierReference(id) if id.name.as_str() == "Promise")
+    )
+}
+
+/// `void` or `Promise<void>`: the generated coroutine is a fire-and-forget
+/// `Task` and cannot hold a returned value.
+fn is_void_return_type(ty: &TSType<'_>) -> bool {
+    if matches!(ty, TSType::TSVoidKeyword(_)) {
+        return true;
+    }
+    let TSType::TSTypeReference(reference) = ty else {
+        return false;
+    };
+    if !matches!(&reference.type_name, TSTypeName::IdentifierReference(id) if id.name.as_str() == "Promise")
+    {
+        return false;
+    }
+    reference
+        .type_arguments
+        .as_ref()
+        .and_then(|args| args.params.first())
+        .is_some_and(|inner| matches!(inner, TSType::TSVoidKeyword(_)))
+}
+
+fn async_call_result(
+    call: &CallExpression<'_>,
+    scoping: &Scoping,
+    async_fns: &HashSet<SymbolId>,
+) -> bool {
+    match unwrap_ts_expr(&call.callee) {
+        Expression::Identifier(id) => {
+            reference_symbol(scoping, id).is_some_and(|symbol| async_fns.contains(&symbol))
+        }
+        Expression::ArrowFunctionExpression(f) => f.r#async,
+        Expression::FunctionExpression(f) => f.r#async,
+        _ => false,
+    }
+}
+
+#[derive(Default)]
+struct PromiseBindings {
+    /// Bindings known to hold an already-resolved promise (`Promise.resolve`,
+    /// `new Promise`). Their value can be copied by `promise_resolve`.
+    resolved: HashSet<SymbolId>,
+    /// Bindings known to hold pending work (`fetch`, combinators). Copying
+    /// their frame would lose the eventual value, so `Promise.resolve` on
+    /// them is rejected.
+    pending: HashSet<SymbolId>,
+    aliases: Vec<(SymbolId, SymbolId)>,
+}
+
+impl PromiseBindings {
+    fn resolve_aliases(&mut self) {
+        loop {
+            let mut changed = false;
+            let mut remaining = Vec::new();
+            for (dst, src) in self.aliases.drain(..) {
+                if self.resolved.contains(&src) {
+                    changed |= self.resolved.insert(dst);
+                } else if self.pending.contains(&src) {
+                    changed |= self.pending.insert(dst);
+                } else {
+                    remaining.push((dst, src));
+                }
+            }
+            self.aliases = remaining;
+            if !changed {
+                break;
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum PromiseOrigin {
+    Resolved,
+    Pending,
+    Alias(SymbolId),
+}
+
+fn promise_origin(
+    expr: &Expression<'_>,
+    scoping: &Scoping,
+    async_fns: &HashSet<SymbolId>,
+) -> Option<PromiseOrigin> {
+    match unwrap_ts_expr(expr) {
+        Expression::CallExpression(call) => {
+            if is_fetch_call(call) {
+                return Some(PromiseOrigin::Pending);
+            }
+            if let Some(prop) = promise_static_callee(call) {
+                return Some(if prop == "resolve" {
+                    PromiseOrigin::Resolved
+                } else {
+                    PromiseOrigin::Pending
+                });
+            }
+            async_call_result(call, scoping, async_fns).then_some(PromiseOrigin::Pending)
+        }
+        Expression::NewExpression(new) if is_promise_constructor(new) => {
+            Some(PromiseOrigin::Resolved)
+        }
+        Expression::Identifier(id) => reference_symbol(scoping, id).map(PromiseOrigin::Alias),
+        _ => None,
+    }
+}
+
+/// Track promise-valued bindings so `Promise.resolve(p)` can distinguish an
+/// already-resolved promise (safe to copy) from pending `fetch` work.
+struct PromiseBindingCollector<'s> {
+    scoping: &'s Scoping,
+    async_fns: &'s HashSet<SymbolId>,
+    bindings: PromiseBindings,
+}
+
+impl PromiseBindingCollector<'_> {
+    fn record(&mut self, symbol: SymbolId, origin: PromiseOrigin) {
+        match origin {
+            PromiseOrigin::Resolved => {
+                self.bindings.pending.remove(&symbol);
+                self.bindings.resolved.insert(symbol);
+            }
+            PromiseOrigin::Pending => {
+                self.bindings.resolved.remove(&symbol);
+                self.bindings.pending.insert(symbol);
+            }
+            PromiseOrigin::Alias(src) => {
+                self.bindings.resolved.remove(&symbol);
+                self.bindings.pending.remove(&symbol);
+                self.bindings.aliases.push((symbol, src));
+            }
+        }
+    }
+}
+
+impl<'a> Visit<'a> for PromiseBindingCollector<'_> {
+    fn visit_variable_declarator(&mut self, d: &VariableDeclarator<'a>) {
+        if let (BindingPattern::BindingIdentifier(id), Some(init)) = (&d.id, &d.init) {
+            if let Some(symbol) = id.symbol_id.get() {
+                if let Some(origin) = promise_origin(init, self.scoping, self.async_fns) {
+                    self.record(symbol, origin);
+                } else if d
+                    .type_annotation
+                    .as_ref()
+                    .is_some_and(|annotation| is_promise_type(&annotation.type_annotation))
+                {
+                    // A `Promise<T>` annotation without a settled initializer
+                    // may still be pending work; copying it would lose the
+                    // eventual value.
+                    self.record(symbol, PromiseOrigin::Pending);
+                }
+            }
+        }
+        oxc_ast_visit::walk::walk_variable_declarator(self, d);
+    }
+
+    fn visit_formal_parameter(&mut self, param: &FormalParameter<'a>) {
+        if let BindingPattern::BindingIdentifier(id) = &param.pattern {
+            if param
+                .type_annotation
+                .as_ref()
+                .is_some_and(|annotation| is_promise_type(&annotation.type_annotation))
+            {
+                if let Some(symbol) = id.symbol_id.get() {
+                    self.record(symbol, PromiseOrigin::Pending);
+                }
+            }
+        }
+        oxc_ast_visit::walk::walk_formal_parameter(self, param);
+    }
+
+    fn visit_assignment_expression(&mut self, a: &AssignmentExpression<'a>) {
+        if a.operator == AssignmentOperator::Assign {
+            if let AssignmentTarget::AssignmentTargetIdentifier(id) = &a.left {
+                if let Some(symbol) = reference_symbol(self.scoping, id) {
+                    if let Some(origin) = promise_origin(&a.right, self.scoping, self.async_fns) {
+                        self.record(symbol, origin);
+                    } else {
+                        self.bindings.resolved.remove(&symbol);
+                        self.bindings.pending.remove(&symbol);
+                    }
+                }
+            }
+        }
+        oxc_ast_visit::walk::walk_assignment_expression(self, a);
+    }
+}
+
+fn collect_promise_bindings(program: &Program, scoping: &Scoping) -> PromiseBindings {
+    let mut async_fns = AsyncFunctionSymbols::default();
+    async_fns.visit_program(program);
+    let mut collector = PromiseBindingCollector {
+        scoping,
+        async_fns: &async_fns.out,
+        bindings: PromiseBindings::default(),
+    };
+    collector.visit_program(program);
+    collector.bindings.resolve_aliases();
+    collector.bindings
+}
+
+fn is_promise_symbol(
+    expr: &Expression<'_>,
+    scoping: &Scoping,
+    symbols: &HashSet<SymbolId>,
+) -> bool {
+    let Expression::Identifier(id) = unwrap_ts_expr(expr) else {
+        return false;
+    };
+    reference_symbol(scoping, id).is_some_and(|symbol| symbols.contains(&symbol))
+}
+
+/// Validate the argument of `Promise.resolve(value)`. Pending promises and
+/// nested awaits cannot be represented by the eager `Result` helper.
+fn promise_resolve_arg_error(
+    expr: &Expression<'_>,
+    scoping: &Scoping,
+    bindings: &PromiseBindings,
+) -> Option<(&'static str, &'static str)> {
+    match unwrap_ts_expr(expr) {
+        Expression::AwaitExpression(_) => Some((
+            "`await` inside `Promise.resolve(...)`",
+            "Await the value first, then pass the resolved value",
+        )),
+        Expression::CallExpression(call) if is_fetch_call(call) => Some((
+            "`Promise.resolve(fetch(...))`",
+            "Await the fetch directly or put it inside `Promise.all([...])`",
+        )),
+        Expression::CallExpression(call)
+            if promise_static_callee(call).is_some_and(|prop| prop != "resolve") =>
+        {
+            Some((
+                "`Promise.resolve` of a Promise combinator",
+                "Await the combinator directly instead of wrapping it",
+            ))
+        }
+        Expression::Identifier(_) if is_promise_symbol(expr, scoping, &bindings.pending) => Some((
+            "`Promise.resolve` of pending promise work",
+            "Await the promise directly; only already-resolved promises can be copied",
+        )),
+        _ => None,
+    }
+}
+
+/// Element shapes accepted by `Promise.all` / `Promise.allSettled`.
+fn promise_all_element_error(
+    expr: &Expression<'_>,
+    scoping: &Scoping,
+    bindings: &PromiseBindings,
+    prop: &str,
+) -> Option<(&'static str, &'static str)> {
+    match unwrap_ts_expr(expr) {
+        Expression::CallExpression(call) if is_fetch_call(call) => {
+            if matches!(prop, "race" | "any") {
+                Some((
+                    "pending `fetch(...)` inside `Promise.race`/`Promise.any`",
+                    "Use only already-settled values (`Promise.resolve(value)` or plain values)",
+                ))
+            } else {
+                None
+            }
+        }
+        Expression::CallExpression(call) => {
+            let inner_prop = promise_static_callee(call)?;
+            if inner_prop == "resolve" {
+                match call.arguments.first() {
+                    None => None,
+                    Some(Argument::SpreadElement(_)) => {
+                        Some(("spread arguments in `Promise.resolve(...)`", "Pass a single value"))
+                    }
+                    Some(arg) => arg
+                        .as_expression()
+                        .and_then(|expr| promise_resolve_arg_error(expr, scoping, bindings)),
+                }
+            } else {
+                Some((
+                    "a Promise combinator nested inside another combinator",
+                    "Await each combinator separately and combine the values",
+                ))
+            }
+        }
+        Expression::NewExpression(new) if is_promise_constructor(new) => Some((
+            "`new Promise(...)` inside a Promise combinator",
+            "Use `Promise.resolve(value)` for already-settled values",
+        )),
+        Expression::AwaitExpression(_) => Some((
+            "`await` inside a Promise combinator element",
+            "Await the value before the combinator call",
+        )),
+        Expression::Identifier(_)
+            if is_promise_symbol(expr, scoping, &bindings.resolved)
+                || is_promise_symbol(expr, scoping, &bindings.pending) =>
+        {
+            Some((
+                "a promise-valued identifier inside a Promise combinator",
+                "Use `Promise.resolve(value)` or `fetch(...)` as the element",
+            ))
+        }
+        _ => None,
+    }
+}
+
+struct PromiseStaticInfo {
+    /// Supported static calls: `mx-js-member` stays quiet, and the dedicated
+    /// syntax check owns any remaining rejection.
+    recognized: HashSet<u32>,
+    /// Calls in a position the codegen lowers.
+    allowed: HashSet<u32>,
+    errors: Vec<(u32, String, String)>,
+}
+
+/// Return-type facts for the function/lambda currently being visited.
+/// `Promise.resolve(value)` in a return position needs a value slot; a
+/// fire-and-forget `Task`/`void` function has none.
+#[derive(Clone, Copy)]
+struct FunctionReturn {
+    is_async: bool,
+    is_arrow: bool,
+    has_annotation: bool,
+    void_annotation: bool,
+}
+
+impl FunctionReturn {
+    fn function(function: &Function<'_>) -> Self {
+        let annotation = function.return_type.as_ref();
+        Self {
+            is_async: function.r#async,
+            is_arrow: false,
+            has_annotation: annotation.is_some(),
+            void_annotation: annotation.is_some_and(|a| is_void_return_type(&a.type_annotation)),
+        }
+    }
+
+    fn arrow(function: &ArrowFunctionExpression<'_>) -> Self {
+        let annotation = function.return_type.as_ref();
+        Self {
+            is_async: function.r#async,
+            is_arrow: true,
+            has_annotation: annotation.is_some(),
+            void_annotation: annotation.is_some_and(|a| is_void_return_type(&a.type_annotation)),
+        }
+    }
+
+    const fn cannot_hold_value(self) -> bool {
+        self.void_annotation || (self.is_async && self.is_arrow && !self.has_annotation)
+    }
+}
+
+/// Collect supported `Promise.resolve` calls and directly-awaited
+/// combinators. `Promise.resolve` lowers anywhere an expression can; the
+/// combinators lower only as the whole `await` of a const/let declaration or
+/// an expression statement inside an async function.
+struct PromiseStaticCollector<'s> {
+    scoping: &'s Scoping,
+    bindings: &'s PromiseBindings,
+    functions: Vec<FunctionReturn>,
+    info: PromiseStaticInfo,
+    combinator_calls: Vec<(u32, String)>,
+}
+
+impl PromiseStaticCollector<'_> {
+    fn async_context(&self) -> bool {
+        self.functions.last().is_some_and(|function| function.is_async)
+    }
+
+    fn cannot_hold_value(&self) -> bool {
+        self.functions.last().is_some_and(|function| function.cannot_hold_value())
+    }
+
+    fn validate_resolve(&mut self, call: &CallExpression<'_>) {
+        if call.arguments.len() > 1 {
+            self.info.errors.push((
+                call.span.start,
+                "`Promise.resolve` with more than one argument".into(),
+                "Pass a single value".into(),
+            ));
+            return;
+        }
+        if let Some(arg) = call.arguments.first() {
+            if let Argument::SpreadElement(_) = arg {
+                self.info.errors.push((
+                    call.span.start,
+                    "spread arguments in `Promise.resolve(...)`".into(),
+                    "Pass a single value".into(),
+                ));
+                return;
+            }
+            if let Some(expr) = arg.as_expression() {
+                if let Some((what, hint)) =
+                    promise_resolve_arg_error(expr, self.scoping, self.bindings)
+                {
+                    self.info.errors.push((
+                        call.span.start,
+                        format!("{what} cannot be lowered"),
+                        hint.into(),
+                    ));
+                }
+            }
+        }
+        self.info.allowed.insert(call.span.start);
+    }
+
+    fn validate_combinator(&mut self, call: &CallExpression<'_>, prop: &str) {
+        let Some(expr) = call.arguments.first().and_then(Argument::as_expression) else {
+            self.info.errors.push((
+                call.span.start,
+                format!("`Promise.{prop}` requires exactly one array literal"),
+                "Pass an array literal, e.g. `Promise.all([fetch(url), 1])`".into(),
+            ));
+            return;
+        };
+        if call.arguments.len() != 1 {
+            self.info.errors.push((
+                call.span.start,
+                format!("`Promise.{prop}` with extra arguments"),
+                "Pass exactly one array literal".into(),
+            ));
+            return;
+        }
+        let Expression::ArrayExpression(array) = unwrap_ts_expr(expr) else {
+            self.info.errors.push((
+                call.span.start,
+                format!("`Promise.{prop}` of a non-array value"),
+                "Pass an array literal so the elements can be lowered in order".into(),
+            ));
+            return;
+        };
+        if matches!(prop, "race" | "any") && array.elements.is_empty() {
+            self.info.errors.push((
+                call.span.start,
+                format!("empty `Promise.{prop}([])`"),
+                "Provide at least one already-settled value".into(),
+            ));
+            return;
+        }
+        for element in &array.elements {
+            let Some(expr) = element.as_expression() else {
+                self.info.errors.push((
+                    call.span.start,
+                    format!("spread or elided element in `Promise.{prop}([...])`"),
+                    "List each element explicitly".into(),
+                ));
+                return;
+            };
+            if let Some((what, hint)) =
+                promise_all_element_error(expr, self.scoping, self.bindings, prop)
+            {
+                self.info.errors.push((
+                    expr.span().start,
+                    format!("{what} cannot be lowered"),
+                    hint.into(),
+                ));
+                return;
+            }
+        }
+        self.combinator_calls.push((call.span.start, prop.to_string()));
+    }
+}
+
+fn awaited_combinator<'a>(expr: &'a Expression<'a>) -> Option<&'a CallExpression<'a>> {
+    let Expression::AwaitExpression(awaited) = unwrap_ts_expr(expr) else {
+        return None;
+    };
+    let Expression::CallExpression(call) = unwrap_ts_expr(&awaited.argument) else {
+        return None;
+    };
+    promise_static_callee(call).filter(|prop| *prop != "resolve")?;
+    Some(call)
+}
+
+impl<'a> Visit<'a> for PromiseStaticCollector<'_> {
+    fn visit_function(&mut self, function: &Function<'a>, flags: ScopeFlags) {
+        self.functions.push(FunctionReturn::function(function));
+        oxc_ast_visit::walk::walk_function(self, function, flags);
+        self.functions.pop();
+    }
+
+    fn visit_arrow_function_expression(&mut self, function: &ArrowFunctionExpression<'a>) {
+        let context = FunctionReturn::arrow(function);
+        // An expression-bodied arrow must be able to return the resolved
+        // value. Fire-and-forget `Task`/`void` arrows have no value slot,
+        // and an annotated arrow has no value for a zero-argument resolve.
+        if let Some(Expression::CallExpression(call)) =
+            function.body.as_expression().map(unwrap_ts_expr)
+        {
+            if promise_static_callee(call) == Some("resolve") {
+                if context.cannot_hold_value() {
+                    self.info.errors.push((
+                        call.span.start,
+                        "`Promise.resolve(...)` as an expression body of a function that returns no value"
+                            .into(),
+                        "Annotate the arrow `async (): Promise<T> => ...` or use an async function declaration"
+                            .into(),
+                    ));
+                } else if context.has_annotation && call.arguments.is_empty() {
+                    self.info.errors.push((
+                        call.span.start,
+                        "`Promise.resolve()` as an arrow expression body".into(),
+                        "Return a value (`Promise.resolve(value)`) or use a block body".into(),
+                    ));
+                }
+            }
+        }
+        self.functions.push(context);
+        oxc_ast_visit::walk::walk_arrow_function_expression(self, function);
+        self.functions.pop();
+    }
+
+    fn visit_statement(&mut self, stmt: &Statement<'a>) {
+        if self.async_context() {
+            if let Statement::VariableDeclaration(decl) = stmt {
+                if matches!(
+                    decl.kind,
+                    VariableDeclarationKind::Const | VariableDeclarationKind::Let
+                ) {
+                    for d in &decl.declarations {
+                        if let (BindingPattern::BindingIdentifier(_), Some(init)) = (&d.id, &d.init)
+                        {
+                            if let Some(call) = awaited_combinator(init) {
+                                self.info.allowed.insert(call.span.start);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        oxc_ast_visit::walk::walk_statement(self, stmt);
+    }
+
+    fn visit_expression_statement(&mut self, stmt: &ExpressionStatement<'a>) {
+        if self.async_context() {
+            if let Some(call) = awaited_combinator(&stmt.expression) {
+                self.info.allowed.insert(call.span.start);
+            }
+        }
+        oxc_ast_visit::walk::walk_expression_statement(self, stmt);
+    }
+
+    fn visit_return_statement(&mut self, stmt: &ReturnStatement<'a>) {
+        // `return Promise.resolve()` has no value to adopt. A return from a
+        // fire-and-forget `Task`/`void` function has no value slot either.
+        if let Some(Expression::CallExpression(call)) = stmt.argument.as_ref().map(unwrap_ts_expr) {
+            if promise_static_callee(call) == Some("resolve") {
+                if call.arguments.is_empty() {
+                    self.info.errors.push((
+                        call.span.start,
+                        "`return Promise.resolve()` without a value".into(),
+                        "Return a value (`return Promise.resolve(value)`) or use a bare `return`"
+                            .into(),
+                    ));
+                } else if self.cannot_hold_value() {
+                    self.info.errors.push((
+                        call.span.start,
+                        "`return Promise.resolve(...)` from a function that returns no value"
+                            .into(),
+                        "Annotate the function `Promise<T>` or use an async function declaration"
+                            .into(),
+                    ));
+                }
+            }
+        }
+        oxc_ast_visit::walk::walk_return_statement(self, stmt);
+    }
+
+    fn visit_call_expression(&mut self, e: &CallExpression<'a>) {
+        if let Some(prop) = promise_static_callee(e) {
+            self.info.recognized.insert(e.span.start);
+            if prop == "resolve" {
+                self.validate_resolve(e);
+            } else {
+                self.validate_combinator(e, prop);
+            }
+        }
+        oxc_ast_visit::walk::walk_call_expression(self, e);
+    }
+}
+
+fn collect_promise_statics(
+    program: &Program,
+    scoping: &Scoping,
+    bindings: &PromiseBindings,
+) -> PromiseStaticInfo {
+    let mut collector = PromiseStaticCollector {
+        scoping,
+        bindings,
+        functions: Vec::new(),
+        info: PromiseStaticInfo {
+            recognized: HashSet::new(),
+            allowed: HashSet::new(),
+            errors: Vec::new(),
+        },
+        combinator_calls: Vec::new(),
+    };
+    collector.visit_program(program);
+    for (start, prop) in collector.combinator_calls {
+        if !collector.info.allowed.contains(&start) {
+            collector.info.errors.push((
+                start,
+                format!(
+                    "`Promise.{prop}(...)` outside a supported await position"
+                ),
+                "Use it as the whole `await` of a const/let declaration or an expression statement inside an async function"
+                    .to_string(),
+            ));
+        }
+    }
+    collector.info.errors.sort_by_key(|(start, _, _)| *start);
+    collector.info
 }
 
 /// Trailing timer arguments are captured at scheduling time and forwarded to
@@ -6621,14 +7334,77 @@ mod tests {
     }
 
     #[test]
-    fn promise_static_helpers_report_js_member() {
-        let content = "import { morphState } from 'morph'\nexport default function App() {\n  const p = Promise.resolve(1);\n  return (<div>x</div>)\n}\n";
+    fn promise_resolve_stays_quiet() {
+        let content = "import { morphState } from 'morph'\nexport default function App() {\n  const p = Promise.resolve(1);\n  async function load() { const v = await Promise.resolve(2); console.log(v); }\n  return (<div onClick={load}>{p}</div>)\n}\n";
+        let errs = check(content, "App.mx");
+        assert!(!codes(&errs).contains(&"mx-js-member"), "{errs:?}");
+        assert!(!codes(&errs).contains(&"mx-js-syntax"), "{errs:?}");
+    }
+
+    #[test]
+    fn promise_static_positions() {
+        let ok = "import { morphState } from 'morph'\nexport default function App() {\n  async function load() {\n    const xs = await Promise.all([1, Promise.resolve(2)]);\n    const settled = await Promise.allSettled([fetch(\"http://127.0.0.1/\"), 1]);\n    const raced = await Promise.race([Promise.resolve(\"a\"), \"b\"]);\n    const anyed = await Promise.any([1, 2]);\n    await Promise.all([]);\n    console.log(xs.length, settled.length, raced, anyed);\n  }\n  return (<div onClick={load}>x</div>)\n}\n";
+        let errs = check(ok, "App.mx");
+        assert!(!codes(&errs).contains(&"mx-js-syntax"), "{errs:?}");
+        assert!(!codes(&errs).contains(&"mx-js-member"), "{errs:?}");
+
+        for body in [
+            "const p = Promise.all([1, 2]);",
+            "const xs = await Promise.all(1);",
+            "await Promise.race([fetch(\"http://127.0.0.1/\")]);",
+            "Promise.resolve(fetch(\"http://127.0.0.1/\"));",
+            "const p = fetch(\"http://127.0.0.1/\"); Promise.resolve(p);",
+            "async function inner() { return 1; } const p = inner(); Promise.resolve(p);",
+            "async function inner() { return 1; } const p = inner(); await Promise.all([p]);",
+            "const make = (): Promise<number> => Promise.resolve(1); const p: Promise<number> = make(); Promise.resolve(p);",
+            "return Promise.resolve();",
+            "return await Promise.all([1, 2]);",
+            "console.log(await Promise.all([1, 2]));",
+        ] {
+            let content = format!(
+                "import {{ morphState }} from 'morph'\nexport default function App() {{\n  async function load() {{\n    {body}\n  }}\n  return (<div onClick={{load}}>x</div>)\n}}\n"
+            );
+            let errs = check(&content, "App.mx");
+            assert!(errs.iter().any(|e| e.code == "mx-js-syntax"), "{body}: {errs:?}");
+        }
+    }
+
+    #[test]
+    fn promise_resolve_return_positions() {
+        let ok = "import { morphState } from 'morph'\n\
+                  async function load(): Promise<number> { return Promise.resolve(1); }\n\
+                  const arrow = async (): Promise<number> => Promise.resolve(2);\n\
+                  function sync(): Promise<number> { return Promise.resolve(3); }\n\
+                  const syncArrow = (): Promise<number> => Promise.resolve(4);\n\
+                  export default function App() { return (<div>x</div>) }\n";
+        let errs = check(ok, "App.mx");
+        assert!(!codes(&errs).contains(&"mx-js-syntax"), "{errs:?}");
+        assert!(!codes(&errs).contains(&"mx-js-member"), "{errs:?}");
+
+        for body in [
+            "const f = async () => Promise.resolve(1);",
+            "const f = async () => { return Promise.resolve(1); };",
+            "const f = async (): Promise<number> => Promise.resolve();",
+            "function f(): void { return Promise.resolve(1); }",
+            "function f(): Promise<void> { return Promise.resolve(1); }",
+        ] {
+            let content = format!(
+                "import {{ morphState }} from 'morph'\nexport default function App() {{\n  {body}\n  return (<div>x</div>)\n}}\n"
+            );
+            let errs = check(&content, "App.mx");
+            assert!(errs.iter().any(|e| e.code == "mx-js-syntax"), "{body}: {errs:?}");
+        }
+    }
+
+    #[test]
+    fn unsupported_promise_static_reports_js_member() {
+        let content = "import { morphState } from 'morph'\nexport default function App() {\n  Promise.reject(1);\n  return (<div>x</div>)\n}\n";
         let errs = check(content, "App.mx");
         let err = errs
             .iter()
             .find(|e| e.code == "mx-js-member")
-            .unwrap_or_else(|| panic!("Promise.resolve fires mx-js-member, got {errs:?}"));
-        assert!(err.message.contains("Promise.resolve"), "{err:?}");
+            .unwrap_or_else(|| panic!("Promise.reject fires mx-js-member, got {errs:?}"));
+        assert!(err.message.contains("Promise.reject"), "{err:?}");
         assert!(!codes(&errs).contains(&"mx-js-syntax"), "{errs:?}");
     }
 

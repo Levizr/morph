@@ -123,10 +123,17 @@ Binary (`+`, `-`, `*`, `/`, `**`, `===`, `!==`, `==`, `!=`, `<`, `>`, etc.), una
 - Top-level rest parameters (`...args`) and general call/constructor spread
   (`f(...args)`, `new C(...args)`). Spread arguments are supported on
   `push`/`unshift`/`splice`/`concat` and `Math.min`/`Math.max`.
-- Promise static helpers (`Promise.resolve`, `Promise.all`, …) and
-  `.then`/`.catch` forms outside the supported statement-level
+- `Promise.reject` and Promise statics outside the supported eager shapes:
+  `Promise.resolve(value)` (including `return Promise.resolve(value)` in
+  async and `Promise<T>`-annotated functions), plus
+  `Promise.all`/`allSettled` awaited over an array literal of
+  `fetch(...)`, `Promise.resolve(value)`, or plain values, and
+  `Promise.race`/`any` over already-settled values. Unsupported shapes
+  are rejected by `morph check`; `await` and `new Promise(...)` lower to C++
+  coroutines. See [Async & Networking](./async.md#promise-statics).
+- `.then`/`.catch` forms outside the supported statement-level
   `fetch(...).then(...).catch(...)` chain in an async function (rejected by
-  `morph check`); `await` and `new Promise(...)` lower to C++ coroutines
+  `morph check`)
 - Regular expression literals, `Date`, `Map`/`Set`, and `typeof`/`instanceof`
 - Object/Array statics such as `Object.assign`, `Object.fromEntries`,
   `Array.from`, and `Array.of`

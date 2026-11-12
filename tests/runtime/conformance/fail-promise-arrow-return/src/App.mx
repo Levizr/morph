@@ -1,0 +1,12 @@
+export const windowConfig = { title: "fail-promise-arrow-return", width: 800, height: 600 }
+
+export default function App() {
+  // An unannotated async arrow is fire-and-forget (`Task`) and has no value
+  // slot for `Promise.resolve`; annotate it `async (): Promise<T>` instead.
+  const load = async () => Promise.resolve(1)
+  return (
+    <body>
+      <button onClick={load}>load</button>
+    </body>
+  )
+}

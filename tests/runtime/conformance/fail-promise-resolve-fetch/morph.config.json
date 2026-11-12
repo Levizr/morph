@@ -1,0 +1,7 @@
+{
+  "name": "fail-promise-resolve-fetch",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "fail-promise-resolve-fetch" },
+  "dependencies": {},
+  "cpp_sources": []
+}

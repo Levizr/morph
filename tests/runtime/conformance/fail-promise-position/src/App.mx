@@ -1,0 +1,15 @@
+export const windowConfig = { title: "fail-promise-position", width: 800, height: 600 }
+
+export default function App() {
+  // Combinators need multiple statements, so they only lower as the whole
+  // `await` of a const/let declaration or an expression statement.
+  async function load() {
+    const values = Promise.all([1, 2])
+    console.log(values)
+  }
+  return (
+    <body>
+      <button onClick={load}>load</button>
+    </body>
+  )
+}

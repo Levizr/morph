@@ -64,7 +64,6 @@ EXPECTED_REJECTIONS = {
     "namespace_import": {"mx-js-syntax"},
     "object_method": {"mx-js-method"},
     "pow_op": {"mx-js-op"},
-    "promise_static": {"mx-js-member"},
     "reduce_non_jsx": {"mx-js-method"},
     "regex_literal": {"mx-js-syntax"},
     "rest_param_helper": {"mx-js-syntax"},
@@ -457,8 +456,12 @@ case(
     """
     import { morphState } from 'morph'
     export default function App() {
-      const p = Promise.resolve(1)
-      return (<body><text>{p}</text></body>)
+      async function load() {
+        const one = await Promise.resolve(1)
+        const xs = await Promise.all([one, Promise.resolve(2)])
+        console.log(xs.join(","))
+      }
+      return (<body><button onClick={load}>load</button></body>)
     }
     """,
 )

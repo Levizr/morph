@@ -1,0 +1,15 @@
+export const windowConfig = { title: "fail-promise-non-array", width: 800, height: 600 }
+
+export default function App() {
+  // The eager lowering needs an array literal so element order and shapes
+  // are visible at check time.
+  async function load() {
+    const values = await Promise.all(1)
+    console.log(values)
+  }
+  return (
+    <body>
+      <button onClick={load}>load</button>
+    </body>
+  )
+}

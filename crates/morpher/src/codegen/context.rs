@@ -103,6 +103,10 @@ pub struct Ctx {
     pub async_fns: HashSet<String>,
     pub fn_return_types: HashMap<String, String>,
     pub current_fn: Option<String>,
+    /// C++ return type of the function/lambda whose body is being emitted.
+    /// `return Promise.resolve(value)` uses it to pick the matching
+    /// `Result<T>::resolved(...)` form in sync functions.
+    pub current_return_type: Option<String>,
 }
 
 impl Default for Ctx {
@@ -139,6 +143,7 @@ impl Default for Ctx {
             async_fns: HashSet::new(),
             fn_return_types: HashMap::new(),
             current_fn: None,
+            current_return_type: None,
         }
     }
 }
@@ -180,6 +185,7 @@ impl Ctx {
             async_fns: self.async_fns.clone(),
             fn_return_types: self.fn_return_types.clone(),
             current_fn: self.current_fn.clone(),
+            current_return_type: self.current_return_type.clone(),
             ..Default::default()
         };
         // Preserve indent_level correctly: sub indent = parent+1

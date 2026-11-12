@@ -3,6 +3,7 @@
 // For JS async functions / promises. `co_await result` yields the stored value.
 #include <coroutine>
 #include <optional>
+#include <string>
 #include <utility>
 #include <type_traits>
 #include <exception>
@@ -110,6 +111,71 @@ public:
     }
 };
 
+template <typename T>
+struct is_result : std::false_type {};
+
+template <typename T>
+struct is_result<Result<T>> : std::true_type {};
+
+// Promise.resolve(value): an already-fulfilled Result carrying the value.
+// The overloads keep existing Result values intact instead of wrapping a
+// Result inside another Result. Pending Results (fetch/async work) are not
+// safe to copy: codegen rejects them at `morph check` time.
+template <typename T>
+    requires(!is_result<std::decay_t<T>>::value)
+Result<std::decay_t<T>> promise_resolve(T&& value) {
+    return Result<std::decay_t<T>>::resolved(std::forward<T>(value));
+}
+
+// Promise.resolve(existingPromise) for an already-resolved promise binding.
+// Copy the stored value so both bindings stay usable, matching JS promise
+// identity semantics for the observable value.
+template <typename T>
+Result<T> promise_resolve(Result<T>& other) {
+    if (!other.handle) {
+        return Result<T>::pending();
+    }
+    auto& promise = other.handle.promise();
+    if (promise.eptr) {
+        auto eptr = promise.eptr;
+        return [eptr]() -> Result<T> {
+            std::rethrow_exception(eptr);
+            co_return T{};
+        }();
+    }
+    if (!promise.value) {
+        return Result<T>::pending();
+    }
+    return Result<T>::resolved(*promise.value);
+}
+
+// Promise.resolve(existingPromise) with a temporary promise: transfer the
+// frame instead of copying it.
+template <typename T>
+Result<T> promise_resolve(Result<T>&& other) {
+    return std::move(other);
+}
+
+template <typename T>
+Result<T> promise_resolve(const Result<T>&) = delete;
+
+// JSX text and other `morph::str` conversions render a promise like the JS
+// inspector instead of failing to find `std::to_string(Result)`.
+template <typename T>
+std::string str(const Result<T>& promise) {
+    if (!promise.handle) {
+        return "Promise { <pending> }";
+    }
+    auto& state = promise.handle.promise();
+    if (state.eptr) {
+        return "Promise { <rejected> }";
+    }
+    if (!state.value) {
+        return "Promise { <pending> }";
+    }
+    return "Promise { " + str(*state.value) + " }";
+}
+
 } // namespace morph
 
 #include <format>
@@ -120,17 +186,13 @@ struct std::formatter<morph::Result<T>> {
         if (!r.handle) {
             return std::format_to(ctx.out(), "Promise {{ <pending> }}");
         }
-        try {
-            auto& prom = r.handle.promise();
-            if (prom.eptr) {
-                return std::format_to(ctx.out(), "Promise {{ <rejected> }}");
-            }
-            if (!prom.value) {
-                return std::format_to(ctx.out(), "Promise {{ <pending> }}");
-            }
-            return std::format_to(ctx.out(), "Promise {{ {} }}", *prom.value);
-        } catch (...) {
+        auto& prom = r.handle.promise();
+        if (prom.eptr) {
+            return std::format_to(ctx.out(), "Promise {{ <rejected> }}");
+        }
+        if (!prom.value) {
             return std::format_to(ctx.out(), "Promise {{ <pending> }}");
         }
+        return std::format_to(ctx.out(), "Promise {{ {} }}", *prom.value);
     }
 };

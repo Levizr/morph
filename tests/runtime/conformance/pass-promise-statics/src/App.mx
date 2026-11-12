@@ -1,0 +1,97 @@
+import { morphState } from 'morph'
+import { morph_test_wait_ms } from "./wait.cpp"
+
+export const windowConfig = { title: "pass-promise-statics", width: 800, height: 600 }
+
+// Part 3E: Promise statics lower to eager runtime helpers. `fetch` elements
+// await the response and contribute its body text (Morph's fetch promise
+// value); everything else contributes its JS value in input order. The
+// runtime test rewrites PORT_OK to a local server; the placeholder keeps
+// the conformance build offline.
+const okUrl = "http://127.0.0.1:PORT_OK/ok"
+const badUrl = "http://127.0.0.1:1/bad"
+
+function mark(label: string) {
+  console.log("race later", label)
+  return label
+}
+
+// `return Promise.resolve(value)` adopts the settled value in async
+// functions and in sync functions/arrows annotated `Promise<T>`.
+async function returnedAsync(): Promise<number> {
+  return Promise.resolve(9)
+}
+
+function returnedSync(): Promise<number> {
+  return Promise.resolve(10)
+}
+
+const arrowAsync = async (): Promise<number> => Promise.resolve(11)
+const arrowSync = (): Promise<number> => Promise.resolve(12)
+
+async function run() {
+  const one = await Promise.resolve(1)
+  console.log("resolve", one)
+
+  console.log(
+    "returns",
+    await returnedAsync(),
+    await returnedSync(),
+    await arrowAsync(),
+    await arrowSync(),
+  )
+
+  const bodies = await Promise.all([fetch(okUrl), Promise.resolve("middle"), "last"])
+  console.log("all", bodies.join(","))
+
+  const settled = await Promise.allSettled([Promise.resolve("ok"), fetch(badUrl)])
+  console.log("settled", settled.length, settled[0].status, settled[0].value, settled[1].status)
+
+  try {
+    await Promise.all([Promise.resolve("fine"), fetch(badUrl)])
+    console.log("all rejection unexpected")
+  } catch (error) {
+    console.log("all caught", error.message)
+  }
+
+  // `race`/`any` take the first already-settled element; later elements are
+  // still evaluated for their side effects, matching array construction.
+  const raced = await Promise.race([Promise.resolve("first"), mark("second")])
+  console.log("race", raced)
+
+  const anyed = await Promise.any(["alpha", "beta"])
+  console.log("any", anyed)
+
+  const empty = await Promise.all([])
+  console.log("empty", empty.length)
+
+  // Copying an already-resolved promise binding leaves both bindings usable.
+  const bound = Promise.resolve("bound")
+  const copy = Promise.resolve(bound)
+  const copied = await copy
+  const original = await bound
+  console.log("copy", copied, original)
+}
+
+run()
+
+// Let the fetch worker threads resume the coroutines before the headless
+// self-test returns.
+morph_test_wait_ms(1500)
+
+export default function App() {
+  const [count, setCount] = morphState(0)
+
+  async function load() {
+    const values = await Promise.all([fetch(okUrl), Promise.resolve("button")])
+    console.log("button", values.join(","))
+    setCount(count + 1)
+  }
+
+  return (
+    <body>
+      <text>{count}</text>
+      <button onClick={load}>load</button>
+    </body>
+  )
+}

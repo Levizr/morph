@@ -1,0 +1,7 @@
+{
+  "name": "fail-promise-arrow-return",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "fail-promise-arrow-return" },
+  "dependencies": {},
+  "cpp_sources": []
+}

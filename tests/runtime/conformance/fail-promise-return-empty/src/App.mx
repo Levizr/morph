@@ -1,0 +1,14 @@
+export const windowConfig = { title: "fail-promise-return-empty", width: 800, height: 600 }
+
+export default function App() {
+  // `return Promise.resolve()` has no value to adopt into the coroutine's
+  // `Result<T>` slot.
+  async function load(): Promise<number> {
+    return Promise.resolve()
+  }
+  return (
+    <body>
+      <button onClick={load}>load</button>
+    </body>
+  )
+}

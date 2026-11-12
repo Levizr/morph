@@ -38,6 +38,15 @@ The current set is:
   `fetch(...).then(...).catch(...)` form inside an async function (one
   `.then` and/or one `.catch`, non-async callback with at most one plain
   parameter; use `async`/`await` and `try`/`catch` otherwise)
+- Promise static shapes the eager lowering cannot represent:
+  `Promise.resolve(fetch(...))`, nested `await`, promise-valued identifiers
+  inside combinators, nested combinators, `new Promise(...)` inside
+  combinators, `fetch` inside `Promise.race`/`Promise.any`, empty
+  `race`/`any` arrays, spread/elided elements, `return Promise.resolve()`
+  without a value, `Promise.resolve(...)` as the expression body of a
+  fire-and-forget (`Task`/`void`) function, and `Promise.all` /
+  `allSettled` / `race` / `any` outside the whole `await` of a `const`/`let`
+  declaration or an expression statement inside an async function
 - `JSON.parse` reviver and `JSON.stringify` replacer/space arguments
 - trailing timer arguments on identifier, function-expression, or
   rest-parameter callbacks, or on arrow callbacks that declare more
@@ -69,7 +78,10 @@ directly assigned to a `const`/`let`, type-only imports and exports,
 default and optional parameters, arrow/function consts, data-only
 object-literal consts, statement-level `fetch(...).then(...).catch(...)`
 chains inside async functions, trailing timer arguments on inline arrow
-callbacks, and JSX list expressions. `for...in` destructuring
+callbacks, the supported Promise static shapes (`Promise.resolve(value)`,
+awaited `Promise.all`/`allSettled` over array literals, and
+`Promise.race`/`any` over already-settled values), and JSX list
+expressions. `for...in` destructuring
 is rejected; bind the key with a plain name and destructure inside the
 loop body. Every JavaScript language and standard-library gap is committed
 for implementation in the
@@ -135,6 +147,19 @@ async function load() {
 }
 ```
 
+```tsx
+// ❌ Promise combinator outside a supported await position — mx-js-syntax
+async function load() {
+  const pending = Promise.all([1, 2])
+  console.log(pending)
+}
+```
+
+```tsx
+// ❌ Fire-and-forget arrow returning a promise value — mx-js-syntax
+const load = async () => Promise.resolve(1)
+```
+
 ## How to fix
 
 | Instead of | Write |
@@ -148,6 +173,8 @@ async function load() {
 | `{ handler: fn }` | keep `fn` as its own const and call it directly |
 | `for (const [k] in object)` | `for (const k in object) { … }` — bind the key plainly; destructure the value inside the body |
 | `fetch(...).then(...)` as a value | a statement-level chain inside an async function (supported), or `const r = await fetch(...)` inside `try`/`catch` |
+| `Promise.all([...])` as a value | `const xs = await Promise.all([...])` inside an async function (supported), with `fetch(...)`, `Promise.resolve(value)`, or plain elements |
+| `async () => Promise.resolve(value)` | `async (): Promise<T> => Promise.resolve(value)`, or `async function f(): Promise<T> { return Promise.resolve(value) }` |
 | `JSON.parse(text, reviver)` | parse once, then transform the value |
 | `JSON.stringify(value, replacer, 2)` | stringify the value, then format the result |
 | `setTimeout(handler, ms, a, b)` (identifier callback) | `setTimeout((a, b) => handler(a, b), ms, a, b)` |

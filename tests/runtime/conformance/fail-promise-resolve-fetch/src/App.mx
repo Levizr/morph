@@ -1,0 +1,17 @@
+export const windowConfig = { title: "fail-promise-resolve-fetch", width: 800, height: 600 }
+
+export default function App() {
+  // Wrapping pending fetch work in `Promise.resolve` cannot copy the frame
+  // without losing the eventual value; await the fetch directly instead.
+  async function load() {
+    const pending = fetch("http://127.0.0.1/")
+    const wrapped = Promise.resolve(pending)
+    const value = await wrapped
+    console.log(value)
+  }
+  return (
+    <body>
+      <button onClick={load}>load</button>
+    </body>
+  )
+}

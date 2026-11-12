@@ -136,6 +136,8 @@ pub struct CppTranslator<'a> {
     narrow_index: HashMap<(String, u32), (String, String)>,
     active_narrows: HashMap<String, String>,
     destructure_count: usize,
+    /// Unique temporaries for statement-level Promise combinators.
+    promise_temp_count: usize,
     /// Locals/parameters that call one of the lowered Array.prototype
     /// methods. Their declarations are forced to `JsArray` so callbacks
     /// and mutating methods share JS reference semantics; `std::vector`
@@ -882,6 +884,78 @@ fn then_callback<'b, 'a>(arg: Option<&'b Argument<'a>>) -> Option<ThenCallback<'
     Some(ThenCallback::Arrow(f))
 }
 
+/// Unwrap parentheses and TypeScript-only wrappers around an expression.
+fn unwrap_syntax_expr<'a, 'b>(expr: &'b Expression<'a>) -> &'b Expression<'a> {
+    match expr {
+        Expression::ParenthesizedExpression(p) => unwrap_syntax_expr(&p.expression),
+        Expression::TSAsExpression(a) => unwrap_syntax_expr(&a.expression),
+        Expression::TSSatisfiesExpression(s) => unwrap_syntax_expr(&s.expression),
+        Expression::TSNonNullExpression(n) => unwrap_syntax_expr(&n.expression),
+        Expression::TSTypeAssertion(t) => unwrap_syntax_expr(&t.expression),
+        _ => expr,
+    }
+}
+
+/// A supported `Promise.<static>(...)` call.
+fn promise_static_call<'b, 'a>(
+    expr: &'b Expression<'a>,
+) -> Option<(&'b str, &'b CallExpression<'a>)> {
+    let Expression::CallExpression(call) = unwrap_syntax_expr(expr) else {
+        return None;
+    };
+    if call.optional {
+        return None;
+    }
+    let MemberExpression::StaticMemberExpression(member) = call.callee.as_member_expression()?
+    else {
+        return None;
+    };
+    if member.optional {
+        return None;
+    }
+    let Expression::Identifier(id) = unwrap_syntax_expr(&member.object) else {
+        return None;
+    };
+    if id.name.as_str() != "Promise" {
+        return None;
+    }
+    let prop = member.property.name.as_str();
+    matches!(prop, "resolve" | "all" | "allSettled" | "race" | "any").then_some((prop, call))
+}
+
+/// The settled value of a `Promise.resolve(...)` chain. Nested resolves
+/// unwrap to the same value; a zero-argument resolve has no value to adopt.
+fn promise_resolved_value<'b, 'a>(expr: &'b Expression<'a>) -> Option<&'b Expression<'a>> {
+    let (prop, call) = promise_static_call(expr)?;
+    if prop != "resolve" {
+        return None;
+    }
+    let inner = call.arguments.first().and_then(|a| a.as_expression())?;
+    Some(promise_resolved_value(inner).unwrap_or(inner))
+}
+
+fn is_fetch_call_expr<'a, 'b>(expr: &'b Expression<'a>) -> Option<&'b CallExpression<'a>> {
+    let Expression::CallExpression(call) = unwrap_syntax_expr(expr) else {
+        return None;
+    };
+    if call.optional {
+        return None;
+    }
+    matches!(unwrap_syntax_expr(&call.callee), Expression::Identifier(id) if id.name.as_str() == "fetch")
+        .then_some(call)
+}
+
+/// The whole statement expression is `await Promise.<combinator>(...)`.
+fn awaited_promise_combinator<'b, 'a>(
+    expr: &'b Expression<'a>,
+) -> Option<(&'b str, &'b CallExpression<'a>)> {
+    let Expression::AwaitExpression(awaited) = unwrap_syntax_expr(expr) else {
+        return None;
+    };
+    let (prop, call) = promise_static_call(&awaited.argument)?;
+    (prop != "resolve").then_some((prop, call))
+}
+
 impl<'a> CppTranslator<'a> {
     pub fn new(
         source: &'a str,
@@ -906,6 +980,7 @@ impl<'a> CppTranslator<'a> {
             narrow_index: HashMap::new(),
             active_narrows: HashMap::new(),
             destructure_count: 0,
+            promise_temp_count: 0,
             js_array_receiver_vars: HashSet::new(),
             late_window_vars: HashSet::new(),
             late_value_vars: HashSet::new(),
@@ -1354,7 +1429,9 @@ impl<'a> CppTranslator<'a> {
             Statement::TSEnumDeclaration(e) => Some(self.emit_enum(e)),
             Statement::BlockStatement(b) => Some(self.emit_block(b)),
             Statement::ExpressionStatement(e) => {
-                if let Some(code) = self.emit_then_chain_statement(&e.expression) {
+                if let Some((prop, call)) = awaited_promise_combinator(&e.expression) {
+                    Some(self.emit_promise_combinator_statement(prop, call))
+                } else if let Some(code) = self.emit_then_chain_statement(&e.expression) {
                     Some(code)
                 } else {
                     Some(format!("{}{};", self.indent(), self.emit_expression(&e.expression)))
@@ -1512,6 +1589,24 @@ impl<'a> CppTranslator<'a> {
             };
             let init_code = self.hoisted_init_code(d, &name, late)?;
             return Some(format!("{}{} = {};", self.indent(), name, init_code));
+        }
+        // Statement-level Promise combinators need multiple statements
+        // (sequential awaits and per-element try/catch), so they lower here
+        // rather than through the normal expression path.
+        if kind != "var"
+            && let Some(init) = &d.init
+        {
+            if let Some((prop, call)) = awaited_promise_combinator(init) {
+                return Some(self.emit_promise_combinator_declaration(&name, prop, call));
+            }
+            // `const p = Promise.resolve(x)` keeps `auto` so the helper's
+            // deduced Result<T> never fights a user Promise<T> annotation.
+            if let Some((prop, call)) = promise_static_call(init)
+                && prop == "resolve"
+            {
+                self.ctx.var_types.insert(name.clone(), "auto".to_string());
+                return Some(format!("{}auto {} = {};", self.indent(), name, self.emit_call(call)));
+            }
         }
         // `const C = class { ... }` lowers to a named class declaration;
         // class expressions elsewhere stay rejected by `morph check`.
@@ -3372,6 +3467,51 @@ impl<'a> CppTranslator<'a> {
         }
         let kw = if self.ctx.is_async_fn > 0 { "co_return" } else { "return" };
         if let Some(arg) = &r.argument {
+            // `return Promise.resolve(value)` adopts the settled value:
+            // returning the `Result` itself would try to store a promise
+            // inside the coroutine's value slot. Sync functions annotated
+            // `Promise<T>` build the matching `Result<T>` explicitly.
+            if let Some(inner) = promise_resolved_value(arg) {
+                if self.ctx.is_async_fn > 0 {
+                    self.ctx.need("morph::Result");
+                    return format!(
+                        "{}co_return co_await morph::promise_resolve({});",
+                        self.indent(),
+                        self.emit_expression(inner)
+                    );
+                }
+                if let Some(target) = self.ctx.current_return_type.clone()
+                    && target.starts_with("morph::Result<")
+                {
+                    self.ctx.need("morph::Result");
+                    return format!(
+                        "{}return {}::resolved({});",
+                        self.indent(),
+                        target,
+                        self.emit_expression(inner)
+                    );
+                }
+            }
+            // A sync `Promise<T>` function may mix plain returns with
+            // `Promise.resolve(...)` returns. Wrap the plain value so both
+            // branches produce the declared `Result<T>`.
+            if self.ctx.is_async_fn == 0
+                && let Some(target) = self.ctx.current_return_type.clone()
+                && target.starts_with("morph::Result<")
+                && let Some(inferred) = self.infer_type_from_init(arg)
+            {
+                let already_result =
+                    inferred.starts_with("morph::Result<") || inferred.starts_with("morph::Task");
+                if inferred != "auto" && !already_result {
+                    self.ctx.need("morph::Result");
+                    return format!(
+                        "{}return {}::resolved({});",
+                        self.indent(),
+                        target,
+                        self.emit_expression(arg)
+                    );
+                }
+            }
             if let Expression::Identifier(id) = arg {
                 let already_moved = self
                     .ctx
@@ -4899,8 +5039,10 @@ impl<'a> CppTranslator<'a> {
         // discards them (the old Python transpiler dropped nested ones too).
         let old_drop = self.ctx.drop_return_value;
         self.ctx.drop_return_value = false;
+        let old_ret_type = self.ctx.current_return_type.replace(final_ret.clone());
         let mut body =
             self.emit_function_body_with_params(f.body.as_ref().unwrap(), Some(&f.params));
+        self.ctx.current_return_type = old_ret_type;
         self.ctx.drop_return_value = old_drop;
         if is_async {
             self.ctx.is_async_fn -= 1;
@@ -6290,8 +6432,11 @@ impl<'a> CppTranslator<'a> {
                             // arrows capture `this` via `[&]`, and nested
                             // declarations lower to lambdas.
                             self.ctx.fn_body_depth += 1;
+                            let saved_ret_type =
+                                self.ctx.current_return_type.replace(final_ret.clone());
                             let body =
                                 self.emit_function_body_with_params(b, Some(&m.value.params));
+                            self.ctx.current_return_type = saved_ret_type;
                             self.ctx.fn_body_depth -= 1;
                             self.ctx.in_static_method = saved_static;
                             self.ctx.drop_return_value = saved_drop;
@@ -8598,6 +8743,26 @@ impl<'a> CppTranslator<'a> {
         } else {
             String::new()
         };
+        // `Promise.resolve(value)` is an already-fulfilled promise. The
+        // runtime helper keeps an existing Result intact and wraps plain
+        // values; pending fetch results are rejected by `morph check`.
+        if let Some(MemberExpression::StaticMemberExpression(member)) =
+            call.callee.as_member_expression()
+            && !call.optional
+            && !member.optional
+            && matches!(
+                unwrap_syntax_expr(&member.object),
+                Expression::Identifier(id) if id.name.as_str() == "Promise"
+            )
+            && member.property.name.as_str() == "resolve"
+        {
+            self.ctx.need("morph::Result");
+            if let Some(arg) = call.arguments.first().and_then(|a| a.as_expression()) {
+                return format!("morph::promise_resolve({})", self.emit_expression(arg));
+            }
+            self.ctx.need("JsValue");
+            return "morph::promise_resolve(JsValue{})".to_string();
+        }
         if let Expression::Identifier(id) = &call.callee {
             // `useWindow()` — current window (codegen fills the WID per
             // emission site); `useWindow(id-or-route)` — registry lookup
@@ -9594,6 +9759,148 @@ impl<'a> CppTranslator<'a> {
         format!("std::make_shared<{}{}>({})", callee, type_args, args.join(", "))
     }
 
+    /// One element of a statement-level Promise combinator. `fetch` elements
+    /// await the response and contribute its body text (Morph's `fetch`
+    /// promise value); `Promise.resolve(x)` contributes `x`; every other
+    /// expression contributes its JS value.
+    fn emit_promise_element(&mut self, expr: &Expression<'a>) -> String {
+        // `Promise.resolve(x)` contributes `x`; nested resolves unwrap to the
+        // same settled value instead of trying to store a `Result` in a
+        // `JsValue` (which has no constructor for it).
+        if let Some((prop, call)) = promise_static_call(expr)
+            && prop == "resolve"
+        {
+            if let Some(arg) = call.arguments.first().and_then(|a| a.as_expression()) {
+                return self.emit_promise_element(arg);
+            }
+            self.ctx.need("JsValue");
+            return "JsValue{}".to_string();
+        }
+        if let Some(fetch) = is_fetch_call_expr(expr) {
+            self.ctx.need("JsValue");
+            self.ctx.need("std::string");
+            self.ctx.needed.insert("\"../../runtime/cpp/net/net.h\"".to_string());
+            let args: Vec<String> = fetch.arguments.iter().map(|a| self.emit_argument(a)).collect();
+            return format!(
+                "JsValue(std::string(co_await morph::net::fetch_response({})))",
+                args.join(", ")
+            );
+        }
+        self.ctx.need("JsValue");
+        format!("JsValue({})", self.emit_expression(expr))
+    }
+
+    fn promise_array<'b>(call: &'b CallExpression<'a>) -> Option<&'b ArrayExpression<'a>> {
+        let expr = call.arguments.first().and_then(|a| a.as_expression())?;
+        match unwrap_syntax_expr(expr) {
+            Expression::ArrayExpression(array) => Some(array),
+            _ => None,
+        }
+    }
+
+    /// `Promise.all` / `Promise.allSettled`: an array built in input order.
+    /// `allSettled` wraps each element in its own try/catch and records the
+    /// fulfilled value or rejected reason, matching JS.
+    fn emit_promise_all_block(
+        &mut self,
+        name: &str,
+        prop: &str,
+        call: &CallExpression<'a>,
+    ) -> String {
+        self.ctx.need("JsArray");
+        let base = self.indent();
+        let inner = format!("{base}{INDENT}");
+        let mut lines = vec![format!("{base}JsArray {name}{{}};")];
+        let Some(array) = Self::promise_array(call) else {
+            return lines.join("\n");
+        };
+        if prop == "allSettled" {
+            self.ctx.need("JsObject");
+            self.ctx.need("JsString");
+            self.ctx.need("JsValue");
+        }
+        for (i, element) in array.elements.iter().enumerate() {
+            let Some(expr) = element.as_expression() else { continue };
+            let elem = self.emit_promise_element(expr);
+            if prop == "allSettled" {
+                lines.push(format!("{base}try {{"));
+                lines.push(format!(
+                    "{inner}{name}.push(JsObject{{{{\"status\", JsString(\"fulfilled\")}}, {{\"value\", {elem}}}}});"
+                ));
+                lines.push(format!("{base}}} catch (const JsValue& __morph_promise_error_{i}) {{"));
+                lines.push(format!(
+                    "{inner}{name}.push(JsObject{{{{\"status\", JsString(\"rejected\")}}, {{\"reason\", __morph_promise_error_{i}}}}});"
+                ));
+                lines.push(format!("{base}}}"));
+            } else {
+                lines.push(format!("{inner}{name}.push({elem});"));
+            }
+        }
+        lines.join("\n")
+    }
+
+    /// `Promise.race` / `Promise.any` with already-settled elements: the
+    /// first element wins. Later elements are still evaluated for their
+    /// side effects, matching array construction in JS.
+    fn emit_promise_race_block(&mut self, name: Option<&str>, call: &CallExpression<'a>) -> String {
+        self.ctx.need("JsValue");
+        let base = self.indent();
+        let mut lines = Vec::new();
+        let Some(array) = Self::promise_array(call) else {
+            if let Some(name) = name {
+                lines.push(format!("{base}JsValue {name}{{}};"));
+            }
+            return lines.join("\n");
+        };
+        for (i, element) in array.elements.iter().enumerate() {
+            let Some(expr) = element.as_expression() else { continue };
+            let elem = self.emit_promise_element(expr);
+            if i == 0 {
+                if let Some(name) = name {
+                    lines.push(format!("{base}JsValue {name} = {elem};"));
+                } else {
+                    lines.push(format!("{base}(void)({elem});"));
+                }
+            } else {
+                lines.push(format!("{base}(void)({elem});"));
+            }
+        }
+        if lines.is_empty()
+            && let Some(name) = name
+        {
+            lines.push(format!("{base}JsValue {name}{{}};"));
+        }
+        lines.join("\n")
+    }
+
+    fn emit_promise_combinator_declaration(
+        &mut self,
+        name: &str,
+        prop: &str,
+        call: &CallExpression<'a>,
+    ) -> String {
+        if matches!(prop, "race" | "any") {
+            self.ctx.var_types.insert(name.to_string(), "JsValue".to_string());
+            self.emit_promise_race_block(Some(name), call)
+        } else {
+            self.ctx.var_types.insert(name.to_string(), "JsArray".to_string());
+            self.emit_promise_all_block(name, prop, call)
+        }
+    }
+
+    fn emit_promise_combinator_statement(
+        &mut self,
+        prop: &str,
+        call: &CallExpression<'a>,
+    ) -> String {
+        if matches!(prop, "race" | "any") {
+            return self.emit_promise_race_block(None, call);
+        }
+        let name = format!("__morph_promise_{}", self.promise_temp_count);
+        self.promise_temp_count += 1;
+        self.emit_promise_all_block(&name, prop, call)
+    }
+
     /// Lower a statement-level `fetch(...).then(cb).catch(cb)` chain to an
     /// awaited fetch plus immediately-invoked callbacks. Returns `None`
     /// for any other expression so normal emission (and the linter's
@@ -9766,20 +10073,53 @@ impl<'a> CppTranslator<'a> {
                     }
                     return format!("{capture}({params}) -> void {{ {e}; }}");
                 }
-                let kw = if is_async { "co_return" } else { "return" };
+                // Unannotated async arrows are fire-and-forget `Task`s and
+                // cannot carry a value. Evaluate the expression for its side
+                // effects, then complete the coroutine.
+                if is_async && ret == "morph::Task" {
+                    if let Some(prelude) = prelude {
+                        let inner = format!("{}{}", self.indent(), INDENT);
+                        return format!(
+                            "{capture}({params}) -> {ret} {{\n{prelude}\n{inner}{e};\n{inner}co_return;\n{}}}",
+                            self.indent()
+                        );
+                    }
+                    return format!("{capture}({params}) -> {ret} {{ {e}; co_return; }}");
+                }
+                // `Promise.resolve(value)` contributes its settled value;
+                // a `Promise<T>`-annotated arrow must return the matching
+                // `Result<T>` instead of the helper's deduced `Result<U>`.
+                let statement = if let Some(value) = promise_resolved_value(expr) {
+                    if is_async {
+                        self.ctx.need("morph::Result");
+                        format!(
+                            "co_return co_await morph::promise_resolve({});",
+                            self.emit_expression(value)
+                        )
+                    } else if ret.starts_with("morph::Result<") {
+                        self.ctx.need("morph::Result");
+                        format!("return {}::resolved({});", ret, self.emit_expression(value))
+                    } else {
+                        format!("return morph::promise_resolve({});", self.emit_expression(value))
+                    }
+                } else {
+                    let kw = if is_async { "co_return" } else { "return" };
+                    format!("{kw} {e};")
+                };
                 if let Some(prelude) = prelude {
                     let inner = format!("{}{}", self.indent(), INDENT);
                     return format!(
-                        "{capture}({params}) -> {ret} {{\n{prelude}\n{inner}{kw} {e};\n{}}}",
+                        "{capture}({params}) -> {ret} {{\n{prelude}\n{inner}{statement}\n{}}}",
                         self.indent()
                     );
                 }
-                return format!("{}({}) -> {} {{ {} {}; }}", capture, params, ret, kw, e);
+                return format!("{capture}({params}) -> {ret} {{ {statement} }}");
             }
             return format!("{}({}) -> {} {{}}", capture, params, ret);
         } else {
             let saved_drop = self.ctx.drop_return_value;
             self.ctx.drop_return_value = false;
+            let saved_ret_type = self.ctx.current_return_type.replace(ret.clone());
             let body = if is_async {
                 self.ctx.is_async_fn += 1;
                 let b = self.emit_function_body_with_params(
@@ -9794,6 +10134,7 @@ impl<'a> CppTranslator<'a> {
                     Some(&f.params),
                 )
             };
+            self.ctx.current_return_type = saved_ret_type;
             self.ctx.drop_return_value = saved_drop;
             return format!("{}({}) -> {} {}", capture, params, ret, body);
         }
@@ -9879,6 +10220,7 @@ impl<'a> CppTranslator<'a> {
         self.ctx.need(&ret);
         let saved_drop = self.ctx.drop_return_value;
         self.ctx.drop_return_value = false;
+        let saved_ret_type = self.ctx.current_return_type.replace(ret.clone());
         let body = if let Some(b) = &f.body {
             if is_async {
                 self.ctx.is_async_fn += 1;
@@ -9891,6 +10233,7 @@ impl<'a> CppTranslator<'a> {
         } else {
             "{}".to_string()
         };
+        self.ctx.current_return_type = saved_ret_type;
         self.ctx.drop_return_value = saved_drop;
         self.ctx.fn_expr_depth -= 1;
         self.ctx.in_constructor = old_in_constructor;
@@ -10103,6 +10446,120 @@ mod tests {
         assert!(out.contains("co_await morph::net::fetch_response"), "awaited fetch: {out}");
         assert!(out.contains("catch (const JsValue& __morph_then_error)"), "catch clause: {out}");
         assert!(!out.contains("morph::net::Response"), "no then param: {out}");
+    }
+
+    #[test]
+    fn promise_resolve_lowers_to_runtime_helper() {
+        let out = translate_stmts(
+            "async function load() {\n\
+                 const p = Promise.resolve(1);\n\
+                 const v = await Promise.resolve(\"x\");\n\
+                 console.log(v);\n\
+             }",
+        );
+        assert!(out.contains("auto p = morph::promise_resolve(1)"), "{out}");
+        assert!(out.contains("co_await morph::promise_resolve(\"x\")"), "{out}");
+    }
+
+    #[test]
+    fn promise_resolve_return_adopts_the_value() {
+        let out = translate_stmts(
+            "async function load(): Promise<number> {\n\
+                 return Promise.resolve(1);\n\
+             }",
+        );
+        assert!(out.contains("co_return co_await morph::promise_resolve(1);"), "{out}");
+    }
+
+    #[test]
+    fn promise_resolve_return_builds_result_for_sync_function() {
+        let out = translate_stmts(
+            "function load(): Promise<number> {\n\
+                 return Promise.resolve(1);\n\
+             }",
+        );
+        assert!(out.contains("return morph::Result<JsNumber>::resolved(1);"), "{out}");
+    }
+
+    #[test]
+    fn sync_promise_function_wraps_mixed_plain_returns() {
+        let out = translate_stmts(
+            "function load(flag: boolean): Promise<number> {\n\
+                 if (flag) return Promise.resolve(1);\n\
+                 return 2;\n\
+             }",
+        );
+        assert!(out.contains("return morph::Result<JsNumber>::resolved(2);"), "{out}");
+    }
+
+    #[test]
+    fn promise_resolve_arrow_expression_body_adopts_value() {
+        let sync = translate_stmts("const load = (): Promise<number> => Promise.resolve(1);");
+        assert!(sync.contains("return morph::Result<JsNumber>::resolved(1);"), "{sync}");
+        let asynchronous =
+            translate_stmts("const load = async (): Promise<number> => Promise.resolve(1);");
+        assert!(
+            asynchronous.contains("co_return co_await morph::promise_resolve(1);"),
+            "{asynchronous}"
+        );
+    }
+
+    #[test]
+    fn unannotated_async_arrow_expression_body_is_fire_and_forget() {
+        let out = translate_stmts("const f = async () => 1;");
+        assert!(out.contains("-> morph::Task { 1; co_return; }"), "{out}");
+    }
+
+    #[test]
+    fn promise_all_lowers_elements_in_order() {
+        let out = translate_stmts(
+            "async function load() {\n\
+                 const xs = await Promise.all([fetch(\"http://a\"), Promise.resolve(2), 3]);\n\
+                 console.log(xs.join(\",\"));\n\
+             }",
+        );
+        assert!(out.contains("JsArray xs{};"), "{out}");
+        let fetch_at = out.find("co_await morph::net::fetch_response").expect("fetch element");
+        let two_at = out.find("xs.push(JsValue(2))").expect("resolve element");
+        let three_at = out.find("xs.push(JsValue(3))").expect("plain element");
+        assert!(fetch_at < two_at && two_at < three_at, "input order: {out}");
+    }
+
+    #[test]
+    fn promise_all_unwraps_nested_resolve_elements() {
+        let out = translate_stmts(
+            "async function load() {\n\
+                 const xs = await Promise.all([Promise.resolve(Promise.resolve(\"nested\"))]);\n\
+                 console.log(xs.length);\n\
+             }",
+        );
+        assert!(out.contains("xs.push(JsValue(\"nested\"))"), "{out}");
+        assert!(!out.contains("JsValue(morph::promise_resolve"), "{out}");
+    }
+
+    #[test]
+    fn promise_all_settled_wraps_each_element() {
+        let out = translate_stmts(
+            "async function load() {\n\
+                 const xs = await Promise.allSettled([1, fetch(\"http://a\")]);\n\
+                 console.log(xs.length);\n\
+             }",
+        );
+        assert!(out.contains("JsObject{{\"status\", JsString(\"fulfilled\")}"), "{out}");
+        assert!(out.contains("catch (const JsValue& __morph_promise_error_"), "{out}");
+        assert!(out.contains("JsString(\"rejected\")"), "{out}");
+    }
+
+    #[test]
+    fn promise_race_uses_first_settled_value_and_evaluates_rest() {
+        let out = translate_stmts(
+            "async function load() {\n\
+                 const r = await Promise.race([Promise.resolve(\"a\"), \"b\"]);\n\
+                 console.log(r);\n\
+             }",
+        );
+        assert!(out.contains("JsValue r = JsValue(\"a\");"), "{out}");
+        assert!(out.contains("(void)(JsValue(\"b\"));"), "{out}");
     }
 
     #[test]

@@ -94,7 +94,7 @@ Parts are ordered so that a later part never changes a representation owned by a
 | **3B** | `await response.json()` | 3A | Response emitter | Await form compiles and returns parsed data |
 | **3C** | `.then`/`.catch` compatibility chain | 0 | Promise chain lowering | ✅ Shipped: statement-level `fetch(...).then(cb).catch(cb)` inside an async function awaits the response and runs the callbacks in a try/catch; unsupported chain shapes are rejected |
 | **3D** | Timer extra arguments | 0 | timer emitter | ✅ Shipped: trailing `setTimeout`/`setInterval` arguments are captured at scheduling time and forwarded to an inline arrow callback |
-| **3E** | Promise statics | 0 | Promise runtime | `resolve`/`all`/`allSettled`/`race`/`any` build and match JS result order |
+| **3E** | Promise statics | 0 | Promise runtime | ✅ Shipped: `resolve`/`all`/`allSettled`/`race`/`any` build and match JS result order for the supported eager shapes |
 | **3F** | `fetch` request/response docs | 0 | docs/tests | `fetch(url, { method, headers, body })` documented and fixture-covered |
 | **4A** | `Date` subset | 0 | date runtime | Construction, `now`, `parse`, `getTime`, `toISOString`, getters |
 | **4B** | `RegExp` literals + `.test`/`.exec` | 0 | regex runtime | Validation and search work; unsupported features documented |
@@ -346,7 +346,9 @@ Module-scope assignments use a captureless lambda because C++ forbids a capture-
 
 ### 3E — Promise statics
 
-**Today:** `Promise.resolve`/`all`/`allSettled`/`race`/`any` are rejected by `mx-js-member`.
+**Shipped:** `Promise.resolve(value)` lowers to an eager runtime helper for plain values, `Promise.resolve(...)`, `new Promise(...)`, and already-resolved promise bindings. `return Promise.resolve(value)` adopts the settled value in async functions, sync `Promise<T>` functions, and annotated arrows. `Promise.all` and `Promise.allSettled` lower only as the whole `await` of a `const`/`let` declaration or an expression statement inside an async function, with an array literal whose elements are `fetch(...)`, `Promise.resolve(value)`, or plain expressions. `fetch` elements contribute the response body text (Morph's `fetch` promise value), and input order is preserved. `Promise.allSettled` produces `{ status: "fulfilled", value }` / `{ status: "rejected", reason }` objects. `Promise.race` and `Promise.any` accept only already-settled plain values or `Promise.resolve(value)`; the first element wins while later elements are still evaluated for side effects.
+
+Sequential evaluation is accepted — parallel execution is an optimization, not a requirement for the first version. Pending work and shapes the eager lowering cannot represent stay rejected by `morph check`: `Promise.resolve(fetch(...))`, nested `await`, promise-valued identifiers inside combinators, nested combinators, `new Promise(...)` inside combinators, `fetch` inside `race`/`any`, empty `race`/`any` arrays, spread/elided elements, `return Promise.resolve()` without a value, `Promise.resolve(...)` as the expression body of a fire-and-forget (`Task`/`void`) function, and every combinator position other than the supported `await` forms. `Promise.reject` and other statics remain `mx-js-member`.
 
 **Target:** correct result ordering and rejection behavior; parallel execution is an optimization, not a requirement for the first version.
 
@@ -574,7 +576,8 @@ Morph should expose native equivalents (`useWindow`, clipboard, storage) instead
 | Part 3B — `await response.json()` | ✅ Shipped |
 | Part 3C — `.then`/`.catch` compatibility chain | ✅ Shipped |
 | Part 3D — Timer extra arguments | ✅ Shipped |
-| Parts 3E–5G — JavaScript language and standard library | 🚧 Committed — all JS-only gaps are in scope for implementation |
+| Part 3E — Promise statics | ✅ Shipped; supported eager shapes only |
+| Parts 3F–5G — JavaScript language and standard library | 🚧 Committed — all JS-only gaps are in scope for implementation |
 | Parts 6A–6G — platform APIs and JSX | 🚧 Separate product work — browser globals stay out of scope |
 | Part 7 — docs and claims | 📋 Continuous |
 

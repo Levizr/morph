@@ -544,7 +544,7 @@
         "file": "javascript/overview",
         "status": "production",
         "author": "PIYUSH",
-        "description": "How Morph turns your TypeScript and JavaScript logic into native C++: no interpreter or JIT, your component code compiles and runs as machine code at build time.",
+        "description": "How Morph turns your TypeScript and JavaScript logic into native C++: no interpreter or JIT, your component code compiles and runs as machine code at build time — including Promise statics, destructured parameters, class fields, and late-assigned values.",
         "keywords": [
           "morph javascript to c++",
           "morph typescript compile",
@@ -559,7 +559,11 @@
           "morph late-assigned window handles",
           "morph late-assigned variables",
           "morph uninitialized let",
-          "morph timer arguments"
+          "morph timer arguments",
+          "morph promise statics",
+          "morph promise all",
+          "morph promise resolve",
+          "morph promise return"
         ],
         "lastUpdated": "2026-11-11",
         "publishedAt": "2026-08-18",
@@ -615,7 +619,7 @@
         "file": "javascript/async",
         "status": "production",
         "author": "PIYUSH",
-        "description": "How to do async work in Morph: async/await coroutines, the built-in fetch() client, timers with trailing arguments, and supported Promise compatibility chains, compiled to native.",
+        "description": "How to do async work in Morph: async/await coroutines, the built-in fetch() client, timers with trailing arguments, supported Promise statics (resolve/all/allSettled/race/any), and Promise compatibility chains, compiled to native.",
         "keywords": [
           "morph async await",
           "morph fetch example",
@@ -624,7 +628,12 @@
           "morph http request",
           "morph timer arguments",
           "morph promise then catch",
-          "morph fetch response"
+          "morph fetch response",
+          "morph promise statics",
+          "morph promise all",
+          "morph promise resolve",
+          "morph promise allsettled",
+          "morph promise return"
         ],
         "lastUpdated": "2026-11-11",
         "publishedAt": "2026-08-18",
@@ -1006,9 +1015,10 @@
           "morph escape analysis",
           "morph memory management",
           "morph trusted annotations",
-          "morph native types"
+          "morph native types",
+          "morph promise all"
         ],
-        "lastUpdated": "2026-09-10",
+        "lastUpdated": "2026-11-11",
         "publishedAt": "2026-09-05",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -2034,7 +2044,7 @@
         "file": "errors/mx-js-syntax",
         "status": "production",
         "author": "PIYUSH",
-        "description": "Fix mx-js-syntax: rewrite rejected enums, regex literals, namespace imports, generators, call spread, and C++ keyword bindings.",
+        "description": "Fix mx-js-syntax: rewrite rejected enums, regex literals, namespace imports, generators, call spread, Promise static shapes, and C++ keyword bindings.",
         "keywords": [
           "mx-js-syntax",
           "morph enum error",
@@ -2042,7 +2052,9 @@
           "morph regex literal",
           "morph call spread",
           "morph timer arguments",
-          "morph promise then"
+          "morph promise then",
+          "morph promise statics",
+          "morph promise all"
         ],
         "lastUpdated": "2026-11-11",
         "publishedAt": "2026-09-21",
@@ -2572,7 +2584,7 @@
         "file": "future/javascript/coverage",
         "status": "development",
         "author": "PIYUSH",
-        "description": "The contract and dependency-ordered plan for making Morph's TypeScript subset cover ordinary app logic: check/build/semantics invariants, shipped widening bindings and class model, precise contract rejections, async/JSON, standard library, language surface, platform services, JSX, and docs truth-up.",
+        "description": "The contract and dependency-ordered plan for making Morph's TypeScript subset cover ordinary app logic: check/build/semantics invariants, shipped widening bindings and class model, precise contract rejections, async/JSON, Promise statics, standard library, language surface, platform services, JSX, and docs truth-up.",
         "keywords": [
           "morph typescript coverage",
           "morph javascript translator",
@@ -2599,7 +2611,11 @@
           "morph object spread",
           "morph math",
           "morph timer arguments",
-          "morph promise then catch"
+          "morph promise then catch",
+          "morph promise statics",
+          "morph promise allsettled",
+          "morph promise race",
+          "morph promise return"
         ],
         "lastUpdated": "2026-11-11",
         "publishedAt": "2026-08-20",

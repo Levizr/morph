@@ -199,9 +199,68 @@ The `.then` callback receives a `Response`; the `.catch` callback receives the e
 
 Everything else is rejected by `morph check` instead of silently dropping work: assignment/return positions, `await fetch(...).then(...)`, non-`fetch` roots, duplicate steps, `.catch` before `.then`, `.then` with an onRejected second argument, async or function-expression callbacks, and destructured callback parameters. Prefer `async`/`await` with `try`/`catch` for new code.
 
+## Promise statics
+
+`Promise.resolve(value)` returns an already-fulfilled promise. It accepts plain values, another `Promise.resolve(...)`, `new Promise(...)`, and already-resolved promise bindings:
+
+```tsx
+const one = await Promise.resolve(1)
+const same = await Promise.resolve(one)
+
+const bound = Promise.resolve("hello")
+const copy = Promise.resolve(bound)
+console.log(await copy, await bound) // hello hello
+```
+
+`Promise.all` and `Promise.allSettled` must be the whole `await` of a `const`/`let` declaration or an expression statement inside an async function. The argument must be an array literal; elements can be `fetch(...)`, `Promise.resolve(value)`, or plain expressions. Results stay in input order, and `fetch` elements contribute the response body text:
+
+```tsx
+const bodies = await Promise.all([
+  fetch("https://api.example.com/a"),
+  Promise.resolve("local"),
+  "plain",
+])
+console.log(bodies.join(","))
+
+const settled = await Promise.allSettled([
+  Promise.resolve("ok"),
+  fetch("https://api.example.com/maybe-down"),
+])
+console.log(settled[0].status, settled[0].value) // fulfilled ok
+console.log(settled[1].status)                   // rejected
+```
+
+A rejecting element rejects `Promise.all`, so wrap it in `try`/`catch` when a failure is expected. `Promise.allSettled` never rejects for an element failure; it records `{ status: "fulfilled", value }` or `{ status: "rejected", reason }`.
+
+`Promise.race` and `Promise.any` accept only already-settled values — plain expressions or `Promise.resolve(value)`. The first element wins, while later elements are still evaluated for their side effects:
+
+```tsx
+const first = await Promise.race([Promise.resolve("a"), "b"])
+console.log(first) // a
+```
+
+`return Promise.resolve(value)` adopts the settled value. Async functions return it directly; sync functions and arrows annotated `Promise<T>` build the matching `Result<T>`:
+
+```tsx
+async function load(): Promise<number> {
+  return Promise.resolve(1)
+}
+
+function wrap(): Promise<number> {
+  return Promise.resolve(2)
+}
+
+const arrow = async (): Promise<number> => Promise.resolve(3)
+console.log(await load(), await wrap(), await arrow()) // 1 2 3
+```
+
+An unannotated async arrow is fire-and-forget (`Task`) and has no value slot, so `async () => Promise.resolve(1)` and `return Promise.resolve(...)` from a `void`/`Promise<void>` function are rejected. Annotate the arrow `async (): Promise<T> => ...` or use an async function declaration.
+
+Evaluation is sequential; parallel execution is an optimization, not a requirement. `morph check` rejects the shapes the eager lowering cannot represent: `Promise.resolve(fetch(...))`, nested `await`, promise-valued identifiers inside combinators, nested combinators, `new Promise(...)` inside combinators, `fetch` inside `race`/`any`, empty `race`/`any` arrays, spread/elided elements, `return Promise.resolve()` without a value, and combinators outside the supported `await` positions. `Promise.reject` remains unsupported.
+
 ## Not Supported Yet
 
-- `Promise.resolve` / `Promise.all` / `Promise.allSettled` / `Promise.race` / `Promise.any`
+- `Promise.reject` and Promise statics outside the supported shapes above
 - General Promise-chain runtimes and `.then`/`.catch` forms outside the supported `fetch` chain shape above
 
 These are tracked in the [TypeScript App-Logic Coverage](../future/javascript/coverage.md) plan.

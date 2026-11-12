@@ -340,7 +340,7 @@ std::println("{}", morph::js_cmp::loose_eq(label, count));
 | `fetch()` without await | Discarded call (no detach primitive) | `morph::net::fetch(url, data);` — the network thread reclaims the frame |
 | `class C { method() {} }` | Object with methods | `class C { void method(); }` + `shared_ptr<C>` at `new` sites (methods are never `virtual`) |
 | `interface I { x: number }` | Abstract contract | `class I { virtual int getX() = 0; }` |
-| `Promise.all([...])` | Parallel wait | Not implemented — passed through as `Promise.all(...)` and rejected by the C++ compiler |
+| `Promise.all([...])` | Wait for all values | Eager lowering to an ordered `JsArray`; supported only as the whole `await` of a declaration or expression statement inside an async function |
 | Top-level `await` | Program entry | `int main()` running the `main` coroutine to completion via a `process_tasks()` pump |
 
 ## Edge Cases Handled

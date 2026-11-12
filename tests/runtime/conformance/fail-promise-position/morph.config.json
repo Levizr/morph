@@ -1,0 +1,7 @@
+{
+  "name": "fail-promise-position",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "fail-promise-position" },
+  "dependencies": {},
+  "cpp_sources": []
+}
