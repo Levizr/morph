@@ -15,6 +15,7 @@ use morph_ir::{IRNode, IRWindow};
 use super::node_emitter::{
     css_field_reset, css_to_style_field, css_val_to_cpp, emit_node_with_state,
     normalize_value_access, translate_condition, translate_js, translate_list_key,
+    translate_snippet,
 };
 
 /// Generated interop header name (mirrors Python `_STATE_HEADER_NAME`).
@@ -283,7 +284,7 @@ fn translate_expr(js: &str, maps: &AmbientMaps) -> String {
     let mut options = morpher::TranslateOptions::default();
     options.state_vars.clone_from(&maps.vars);
     options.state_types.clone_from(&maps.types);
-    if let Ok(out) = morpher::translate_snippet(js, "snippet.ts", options) {
+    if let Some(out) = translate_snippet(js, "snippet.ts", options) {
         let body = out.body.trim().trim_end_matches(';').trim().to_string();
         if !body.is_empty() {
             // Same `e.value` → `e["value"]` normalization the build TU
@@ -1634,6 +1635,20 @@ fn emit_init(
     lines.push("}".to_string());
 }
 
+/// Rewrite a runtime-relative include for the dev TU's include path
+/// (`-I<runtime>/cpp` makes `"types/js_date.h"` resolve).
+fn clean_header(header: &str) -> String {
+    let mut cleaned = header.to_string();
+    for prefix in ["\"../../runtime/cpp/", "\"../../runtime/cpp/types/", "\"../../runtime/cpp/dev/"]
+    {
+        if let Some(rest) = cleaned.strip_prefix(prefix) {
+            cleaned = format!("\"{rest}");
+            break;
+        }
+    }
+    cleaned
+}
+
 /// Generate the dev logic translation unit (plus native-mode state header).
 /// Widget + extra includes for the logic TU. Returns whether any window
 /// uses native mode (user `.cpp` imports needing the state header).
@@ -1653,15 +1668,7 @@ fn emit_includes(lines: &mut Vec<String>, windows: &[IRWindow], list_nodes: &[&I
             if BUILTIN_HEADERS.contains(&header.as_str()) {
                 continue;
             }
-            let mut cleaned = header.clone();
-            for prefix in
-                ["\"../../runtime/cpp/", "\"../../runtime/cpp/types/", "\"../../runtime/cpp/dev/"]
-            {
-                if let Some(rest) = cleaned.strip_prefix(prefix) {
-                    cleaned = format!("\"{rest}");
-                    break;
-                }
-            }
+            let cleaned = clean_header(header);
             if !extra_headers.contains(&cleaned) {
                 extra_headers.push(cleaned);
             }
@@ -1718,6 +1725,7 @@ fn emit_native_block(
 }
 
 pub fn emit_logic(windows: &[IRWindow]) -> LogicOutput {
+    super::node_emitter::reset_snippet_includes();
     let mut lines = vec![LOGIC_PREHEADER.to_string()];
     let maps = ambient_maps(windows);
     // Bare getter names for effect-dep guarding (`count`, not `__st_count`).
@@ -1872,6 +1880,22 @@ pub fn emit_logic(windows: &[IRWindow]) -> LogicOutput {
     // Snippet bodies splice into lambdas, where the namespace-scope
     // `morph::js_cmp` helpers some translations glue in are illegal:
     // hoist them to file scope (single union header).
+    // Snippets translated during node/handler emission may need runtime
+    // headers the IR builder never saw (`types/js_date.h` from a Date
+    // expression in JSX, for example). Insert them after the preheader.
+    let mut late_headers: Vec<String> = Vec::new();
+    for header in super::node_emitter::take_snippet_includes() {
+        if BUILTIN_HEADERS.contains(&header.as_str()) {
+            continue;
+        }
+        let line = format!("#include {}", clean_header(&header));
+        if !late_headers.contains(&line) && !lines.iter().any(|existing| existing == &line) {
+            late_headers.push(line);
+        }
+    }
+    if !late_headers.is_empty() {
+        lines.splice(1..1, late_headers);
+    }
     let source = morpher::codegen::js_comparison::hoist_js_cmp_preludes(&lines.join("\n"));
     LogicOutput { source, state_header }
 }
@@ -2032,6 +2056,21 @@ mod tests {
         let window = IRWindow { nodes: vec![node], state_vars: vec![sv], ..Default::default() };
         let output = emit_logic(&[window]);
         assert!(output.source.contains("n->setText(morph::str(__st_acc.get()));"));
+    }
+
+    #[test]
+    fn date_expression_include_reaches_dev_logic() {
+        use morph_ir::IRNode;
+        let node = IRNode {
+            node_id: "node_0009".to_string(),
+            node_type: "__expr__".to_string(),
+            reactive_text: "Date.now() > 0 ? \"yes\" : \"no\"".to_string(),
+            ..Default::default()
+        };
+        let window = IRWindow { nodes: vec![node], ..Default::default() };
+        let output = emit_logic(&[window]);
+        assert!(output.source.contains("morph::Date::now()"), "{}", output.source);
+        assert!(output.source.contains("#include \"types/js_date.h\""), "{}", output.source);
     }
 
     #[test]

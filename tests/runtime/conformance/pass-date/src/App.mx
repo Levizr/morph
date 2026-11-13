@@ -1,0 +1,71 @@
+export const windowConfig = { title: "pass-date", width: 800, height: 600 }
+
+// A Date-typed class field exercises the generated `morph_api.h`, which
+// owns module class definitions (the header must include js_date.h).
+class DateHolder {
+  when: Date = new Date(0)
+}
+
+export default function App() {
+  return (
+    <body>
+      <text>pass-date</text>
+    </body>
+  )
+}
+
+// Part 4A: Date construction, ISO parsing, and local/UTC getters. The
+// runtime test runs with TZ=UTC, so local and UTC values agree.
+function run() {
+  const epoch = new Date(0)
+  console.log("epoch", epoch.getTime(), epoch.toISOString())
+
+  const parsed = new Date("2020-01-02T03:04:05.006Z")
+  console.log(
+    "utc",
+    parsed.getUTCFullYear(),
+    parsed.getUTCMonth(),
+    parsed.getUTCDate(),
+    parsed.getUTCDay(),
+    parsed.getUTCHours(),
+    parsed.getUTCMinutes(),
+    parsed.getUTCSeconds(),
+    parsed.getUTCMilliseconds(),
+  )
+  console.log(
+    "local",
+    parsed.getFullYear(),
+    parsed.getMonth(),
+    parsed.getDate(),
+    parsed.getDay(),
+    parsed.getHours(),
+    parsed.getMinutes(),
+    parsed.getSeconds(),
+    parsed.getMilliseconds(),
+  )
+
+  const parts = new Date(2021, 5, 15, 10, 20, 30, 400)
+  console.log("parts", parts.toISOString(), parts.getFullYear())
+
+  const rollover = new Date(2021, 12, 1)
+  console.log("rollover", rollover.toISOString())
+
+  console.log("parse", Date.parse("2020-01-02"), Date.parse("2020-01-02T03:04:05.006+02:30"))
+  console.log("parse bad", Number.isNaN(Date.parse("nope")))
+  console.log("now", Date.now() > 0)
+  console.log("copy", new Date(epoch).toISOString(), epoch.valueOf())
+
+  const invalid = new Date("nope")
+  console.log("invalid", Number.isNaN(invalid.getTime()), Number.isNaN(invalid.getFullYear()))
+  try {
+    invalid.toISOString()
+    console.log("invalid iso", "no throw")
+  } catch (e) {
+    console.log("invalid iso", e.name)
+  }
+
+  const holder = new DateHolder()
+  console.log("class", holder.when.getTime())
+}
+
+run()

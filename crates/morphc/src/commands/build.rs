@@ -674,6 +674,7 @@ fn generated_needs_exceptions(app_cpp: &std::path::Path, extra: &[std::path::Pat
             || s.contains("toFixed(")
             || s.contains("toPrecision(")
             || s.contains("toExponential(")
+            || s.contains("toISOString(")
     })
 }
 

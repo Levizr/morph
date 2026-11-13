@@ -1,0 +1,7 @@
+{
+  "name": "fail-date-assign",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "fail-date-assign" },
+  "dependencies": {},
+  "cpp_sources": []
+}

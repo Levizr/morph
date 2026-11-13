@@ -6,6 +6,7 @@
 // docs/future/shipped/kill-runtime-strings.md) and non-number receivers
 // of the number formatters (defensive "NaN" instead of TypeError).
 #include "../../types/js_types.h"
+#include "../../types/js_date.h"
 
 #include <cmath>
 #include <cstdio>
@@ -564,6 +565,132 @@ static void testMath()
     std::shared_ptr<JsArray> sp = std::make_shared<JsArray>(JsArray{4, 1, 7});
     CHECK(sv(max(sp)) == "7", "max spread over shared_ptr array");
     CHECK(sv(min(sp)) == "1", "min spread over shared_ptr array");
+}
+
+static void testDate()
+{
+    // Construction and TimeClip. The test script runs with TZ=UTC so local
+    // getters and multi-argument construction are deterministic.
+    CHECK(morph::Date().getTime().as_double() > 0.0, "Date() is now");
+    CHECK(morph::Date(JsValue(0)).getTime().as_double() == 0.0, "epoch milliseconds");
+    CHECK(morph::Date(JsValue(1.9)).getTime().as_double() == 1.0, "positive ms truncates");
+    CHECK(morph::Date(JsValue(-1.9)).getTime().as_double() == -1.0, "negative ms truncates");
+    CHECK(
+        morph::Date(JsValue(-1)).toISOString().value == "1969-12-31T23:59:59.999Z",
+        "negative time ISO");
+    CHECK(
+        morph::Date(JsValue(86400000)).toISOString().value == "1970-01-02T00:00:00.000Z",
+        "one day ISO");
+    CHECK(
+        morph::Date(JsValue(8.64e15)).toISOString().value == "+275760-09-13T00:00:00.000Z",
+        "expanded positive year ISO");
+    CHECK(
+        morph::Date(JsValue(-8.64e15)).toISOString().value == "-271821-04-20T00:00:00.000Z",
+        "expanded negative year ISO");
+    CHECK(std::isnan(morph::Date(JsValue(8.64e15 + 1.0)).getTime().as_double()), "time clip max");
+    CHECK(
+        std::isnan(morph::Date(JsValue(JsUndefined{})).getTime().as_double()),
+        "undefined invalid");
+    CHECK(morph::Date(JsValue(JsNull{})).getTime().as_double() == 0.0, "null is epoch");
+    CHECK(morph::Date(JsValue(true)).getTime().as_double() == 1.0, "true is 1ms");
+
+    // ISO parsing: date-only is UTC; datetime without an offset is local.
+    CHECK(
+        morph::Date::parse(JsValue("2020-01-02")).as_double() == 1577923200000.0,
+        "parse date-only UTC");
+    CHECK(
+        morph::Date::parse(JsValue("2020-01-02T03:04:05.006Z")).as_double() == 1577934245006.0,
+        "parse zoned datetime");
+    CHECK(
+        morph::Date::parse(JsValue("2020-01-02T03:04:05.006+02:30")).as_double() ==
+            1577925245006.0,
+        "parse offset datetime");
+    CHECK(
+        morph::Date::parse(JsValue("2020-01-02T03:04:05.006")).as_double() == 1577934245006.0,
+        "parse local datetime");
+    CHECK(
+        morph::Date::parse(JsValue("2019-02-29")).as_double() == 1551398400000.0,
+        "day overflow normalizes");
+    CHECK(
+        morph::Date::parse(JsValue("2020-04-31")).as_double() == 1588291200000.0,
+        "month-end overflow normalizes");
+    CHECK(std::isnan(morph::Date::parse(JsValue("2020-13-01")).as_double()), "bad month");
+    CHECK(std::isnan(morph::Date::parse(JsValue("2020-01-32")).as_double()), "bad day");
+    CHECK(std::isnan(morph::Date::parse(JsValue("nope")).as_double()), "bad text");
+
+    const morph::Date parsed = morph::Date(JsValue("2020-01-02T03:04:05.006Z"));
+    CHECK(parsed.getTime().as_double() == 1577934245006.0, "getTime");
+    CHECK(parsed.valueOf().as_double() == 1577934245006.0, "valueOf");
+    CHECK(parsed.getUTCFullYear().as_double() == 2020.0, "getUTCFullYear");
+    CHECK(parsed.getUTCMonth().as_double() == 0.0, "getUTCMonth");
+    CHECK(parsed.getUTCDate().as_double() == 2.0, "getUTCDate");
+    CHECK(parsed.getUTCDay().as_double() == 4.0, "getUTCDay");
+    CHECK(parsed.getUTCHours().as_double() == 3.0, "getUTCHours");
+    CHECK(parsed.getUTCMinutes().as_double() == 4.0, "getUTCMinutes");
+    CHECK(parsed.getUTCSeconds().as_double() == 5.0, "getUTCSeconds");
+    CHECK(parsed.getUTCMilliseconds().as_double() == 6.0, "getUTCMilliseconds");
+    CHECK(parsed.getFullYear().as_double() == 2020.0, "getFullYear");
+    CHECK(parsed.getMonth().as_double() == 0.0, "getMonth");
+    CHECK(parsed.getDate().as_double() == 2.0, "getDate");
+    CHECK(parsed.getDay().as_double() == 4.0, "getDay");
+    CHECK(parsed.getHours().as_double() == 3.0, "getHours");
+    CHECK(parsed.getMinutes().as_double() == 4.0, "getMinutes");
+    CHECK(parsed.getSeconds().as_double() == 5.0, "getSeconds");
+    CHECK(parsed.getMilliseconds().as_double() == 6.0, "getMilliseconds");
+
+    const morph::Date invalid = morph::Date(JsValue("nope"));
+    CHECK(std::isnan(invalid.getTime().as_double()), "invalid getTime NaN");
+    CHECK(std::isnan(invalid.getFullYear().as_double()), "invalid local getter NaN");
+    CHECK(std::isnan(invalid.getUTCDay().as_double()), "invalid UTC getter NaN");
+
+    // Multi-argument construction is local time; 0-99 maps to 1900-1999.
+    CHECK(
+        morph::Date({JsValue(2021), JsValue(5), JsValue(15), JsValue(10), JsValue(20),
+                     JsValue(30), JsValue(400)})
+                .toISOString()
+                .value == "2021-06-15T10:20:30.400Z",
+        "multi-argument local construction");
+    CHECK(
+        morph::Date({JsValue(99), JsValue(0), JsValue(1)}).getUTCFullYear().as_double() == 1999.0,
+        "two-digit year maps to 1900s");
+    CHECK(
+        morph::Date({JsValue(2021), JsValue(12), JsValue(1)}).toISOString().value ==
+            "2022-01-01T00:00:00.000Z",
+        "month rollover");
+    CHECK(
+        morph::Date({JsValue(2021), JsValue(-1), JsValue(1)}).toISOString().value ==
+            "2020-12-01T00:00:00.000Z",
+        "negative month rollover");
+    CHECK(
+        morph::Date({JsValue(2021), JsValue(0), JsValue(32)}).toISOString().value ==
+            "2021-02-01T00:00:00.000Z",
+        "day rollover");
+    CHECK(
+        morph::Date({JsValue(2021), JsValue(0), JsValue(1), JsValue(25)}).toISOString().value ==
+            "2021-01-02T01:00:00.000Z",
+        "hour rollover");
+    CHECK(
+        std::isnan(morph::Date({JsValue(2021), JsValue(0), JsValue(1),
+                                JsValue(std::numeric_limits<double>::quiet_NaN())})
+                       .getTime()
+                       .as_double()),
+        "NaN part invalid");
+
+    const double now = morph::Date::now().as_double();
+    CHECK(now > 0.0, "Date.now positive");
+    CHECK(now == std::trunc(now), "Date.now integral");
+
+#if defined(__cpp_exceptions)
+    try
+    {
+        (void)invalid.toISOString();
+        CHECK(false, "invalid toISOString throws");
+    }
+    catch (const JsValue& e)
+    {
+        CHECK(sv(e["name"]) == "RangeError", "invalid toISOString RangeError");
+    }
+#endif
 }
 
 static void testLateValueOperators()

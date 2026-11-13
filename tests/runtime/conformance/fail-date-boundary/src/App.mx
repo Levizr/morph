@@ -1,0 +1,14 @@
+export const windowConfig = { title: "fail-date-boundary", width: 800, height: 600 }
+
+function show(value) {
+  console.log(String(value))
+}
+
+export default function App() {
+  show(new Date(0))
+  return (
+    <body>
+      <div>x</div>
+    </body>
+  )
+}

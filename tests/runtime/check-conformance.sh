@@ -70,6 +70,7 @@ run_pass pass-per-iteration-closures
 run_pass pass-array-methods
 run_pass pass-operators
 run_pass pass-math
+run_pass pass-date
 run_pass pass-window
 run_pass pass-late-values
 run_pass pass-control-flow
@@ -123,6 +124,20 @@ run_fail fail-then-chain mx-js-syntax
 run_fail fail-then-chain-value mx-js-syntax
 run_fail fail-tdz mx-js-syntax
 run_fail fail-json-args mx-js-syntax
+run_fail fail-date-call mx-js-syntax
+run_fail fail-date-member mx-js-member
+run_fail fail-date-spread mx-js-syntax
+run_fail fail-date-arity mx-js-syntax
+run_fail fail-date-method mx-js-method
+run_fail fail-date-value mx-js-syntax
+run_fail fail-date-op mx-js-op
+run_fail fail-date-value-member mx-js-member
+run_fail fail-date-boundary mx-js-syntax
+run_fail fail-date-export mx-js-syntax
+run_fail fail-date-return mx-js-syntax
+run_fail fail-date-destructure mx-js-syntax
+run_fail fail-date-assign mx-js-syntax
+run_fail fail-date-field mx-js-syntax
 run_fail fail-timer-args-short mx-js-syntax
 run_fail fail-promise-race-fetch mx-js-syntax
 run_fail fail-promise-position mx-js-syntax

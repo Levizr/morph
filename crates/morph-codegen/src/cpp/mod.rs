@@ -97,6 +97,9 @@ impl<'a> CppEmitter<'a> {
 
     pub fn emit(&self, output_dir: &Path) -> Result<()> {
         std::fs::create_dir_all(output_dir)?;
+        // JSX expressions and handlers translate during emission; collect
+        // the runtime headers their snippets need for the include block.
+        node_emitter::reset_snippet_includes();
 
         let mut fs = FeatureSet::new();
         fs.scan(self.windows);
@@ -681,6 +684,13 @@ impl<'a> CppEmitter<'a> {
             "int morph_self_test() {\n    printf(\"[morph-self-test] not compiled in (rebuild with --self-test)\\n\");\n    return 0;\n}".to_string()
         };
         ctx.insert("self_test_code", &self_test_code);
+
+        // Snippet includes surface only when JSX expressions/handlers are
+        // translated, so merge them after every emitter has run.
+        extra_headers.extend(node_emitter::take_snippet_includes());
+        extra_headers.sort();
+        extra_headers.dedup();
+        ctx.insert("extra_headers", &extra_headers);
 
         let rendered = tera::Tera::one_off(TEMPLATE, &ctx, false)
             .unwrap_or_else(|e| format!("// Tera error: {e}\n{TEMPLATE}"));
@@ -2992,6 +3002,7 @@ fn generate_morph_api_header<'w>(
         "#include <print>".to_string(),
         "#include \"types/js_value.h\"".to_string(),
         "#include \"types/js_object.h\"".to_string(),
+        "#include \"types/js_date.h\"".to_string(),
         "#include \"reactivity/signal.h\"".to_string(),
         "#include \"reactivity/channel.h\"".to_string(),
         "#include \"reactivity/promise.h\"".to_string(),
@@ -3247,6 +3258,7 @@ pub fn generate_morph_api_header_dev(windows: &[IRWindow], premain_parts: &[Stri
         "#include <print>".to_string(),
         "#include \"types/js_value.h\"".to_string(),
         "#include \"types/js_object.h\"".to_string(),
+        "#include \"types/js_date.h\"".to_string(),
         "#include \"reactivity/signal.h\"".to_string(),
         "#include \"reactivity/channel.h\"".to_string(),
         "#include \"reactivity/promise.h\"".to_string(),

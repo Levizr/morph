@@ -140,6 +140,29 @@ Functions: `min`/`max` (variadic, and `...spread` over arrays), `abs`, `floor`, 
 
 Everything on this page is checker-gated: unsupported globals, members, or methods stay a hard `morph check` error rather than compiling to something surprising.
 
+## Date
+
+`new Date(...)` lowers to the native `morph::Date` value type (`runtime/cpp/types/js_date.h`). Construction:
+
+- `new Date()` — current time.
+- `new Date(ms)` — milliseconds since the epoch. Values outside ±8.64e15 are an Invalid Date; fractional milliseconds truncate toward zero.
+- `new Date(text)` — the ISO subset below; anything else is an Invalid Date.
+- `new Date(year, month, day?, hours?, minutes?, seconds?, ms?)` — local calendar fields. Years `0`–`99` map to `1900`–`1999`; out-of-range month/day/hour values roll over like JS. At most seven arguments.
+
+`Date.now()` returns the current epoch milliseconds and `Date.parse(text)` returns the parsed timestamp (`NaN` when invalid). Both produce a `JsNumber`.
+
+Accepted `Date.parse` / `new Date(text)` inputs:
+
+- `YYYY-MM-DD` — date-only parses as UTC, matching the spec.
+- `YYYY-MM-DDTHH:MM[:SS[.sss]][Z|±HH:MM|±HHMM]` — a datetime without an offset is local time; offsets accept `+HHMM` and `+HH:MM`.
+- `24:00` rolls to the next day; fractional seconds accept more than three digits and truncate to milliseconds.
+
+Instance methods: `getTime`, `valueOf`, `toISOString`, plus local and UTC getters — `getFullYear`/`getUTCFullYear`, `getMonth`/`getUTCMonth`, `getDate`/`getUTCDate`, `getDay`/`getUTCDay`, `getHours`/`getUTCHours`, `getMinutes`/`getUTCMinutes`, `getSeconds`/`getUTCSeconds`, `getMilliseconds`/`getUTCMilliseconds`.
+
+Invalid dates return `NaN` from `getTime`/`valueOf`/getters; `toISOString()` throws a catchable `RangeError`. Timezone-aware formatting (`toString`, `toLocaleString`, `toLocaleDateString`, …), `getTimezoneOffset`, and setters are not implemented — `morph check` rejects them with `mx-js-method`. Unsupported statics (`Date.UTC`, `Date.prototype`, …) are `mx-js-member`; `Date()` without `new`, spreads, and over-arity calls are `mx-js-syntax`. Runtime tests run with `TZ=UTC`, so local and UTC getters agree there.
+
+Date values are native value types, not `JsValue`s. They can be constructed, stored in Date-typed locals and fields, passed to functions that take `Date`, returned, logged with `console.log`, and used with the methods above. Every boundary must be explicit: a parameter, return type, class field, or variable that holds a Date needs an exact `: Date` annotation. Unannotated boundaries (generic parameters, untyped fields and locals, unannotated returns, constructor parameters, and callbacks), destructuring a Date, assigning a Date to an untyped target, and exporting a Date or a Date-producing function/class across modules are rejected by `morph check`. Generic JS value positions have no lowering and are rejected too: `String(date)`, `Number(date)`, `Boolean(date)`, `parseInt`/`parseFloat(date)`, `Math.*`/`Number.is*` with a Date argument, `JSON.stringify(date)`, `Date.parse(date)`, template interpolation, string concatenation/arithmetic/comparisons, conditions, `switch`, array/object literals, JSX text, `for...of`/`for...in`, and unsupported members. Convert explicitly with `.getTime()` or `.toISOString()` first.
+
 ## JsBoolean
 
 Wrapper around `bool` with truthiness semantics.

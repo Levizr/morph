@@ -3365,6 +3365,9 @@ impl<'a> CppTranslator<'a> {
             }
             Expression::NewExpression(n) => {
                 if let Expression::Identifier(id) = &n.callee {
+                    if id.name.as_str() == "Date" && self.date_is_builtin() {
+                        return Some("morph::Date".to_string());
+                    }
                     if id.name.as_str() == "Promise" {
                         let inner = n
                             .type_arguments
@@ -3403,6 +3406,13 @@ impl<'a> CppTranslator<'a> {
                         && matches!(member.property.name.as_str(), "parse" | "stringify")
                     {
                         return Some("JsValue".to_string());
+                    }
+                    // `Date.now()` / `Date.parse(...)` produce JS numbers.
+                    if matches!(&member.object, Expression::Identifier(id) if id.name.as_str() == "Date")
+                        && matches!(member.property.name.as_str(), "now" | "parse")
+                        && self.date_is_builtin()
+                    {
+                        return Some("JsNumber".to_string());
                     }
                     if self.is_response_like_expr(&member.object) {
                         match member.property.name.as_str() {
@@ -7134,6 +7144,7 @@ impl<'a> CppTranslator<'a> {
                 | "JsLateValue"
                 | "JsNull"
                 | "JsUndefined"
+                | "morph::Date"
                 | "WID"
         ) || inner_type.starts_with("int")
             || inner_type.starts_with("uint")
@@ -7336,6 +7347,31 @@ impl<'a> CppTranslator<'a> {
                 matches!(&call.callee, Expression::Identifier(id) if id.name.as_str() == "fetch")
             }
             Expression::AwaitExpression(a) => self.is_response_like_expr(&a.argument),
+            _ => false,
+        }
+    }
+
+    /// `Date` resolves to the builtin unless the program shadows it with a
+    /// class or a binding.
+    fn date_is_builtin(&self) -> bool {
+        !self.ctx.class_names.contains("Date") && !self.ctx.var_types.contains_key("Date")
+    }
+
+    /// True for expressions with the native `morph::Date` value type:
+    /// `new Date(...)` and bindings typed/initialized as a Date.
+    fn is_date_like_expr(&self, expr: &Expression<'a>) -> bool {
+        match expr {
+            Expression::ParenthesizedExpression(p) => self.is_date_like_expr(&p.expression),
+            Expression::TSAsExpression(a) => self.is_date_like_expr(&a.expression),
+            Expression::TSSatisfiesExpression(s) => self.is_date_like_expr(&s.expression),
+            Expression::TSNonNullExpression(n) => self.is_date_like_expr(&n.expression),
+            Expression::Identifier(id) => {
+                self.ctx.var_types.get(id.name.as_str()).is_some_and(|t| t == "morph::Date")
+            }
+            Expression::NewExpression(n) => {
+                self.date_is_builtin()
+                    && matches!(&n.callee, Expression::Identifier(id) if id.name.as_str() == "Date")
+            }
             _ => false,
         }
     }
@@ -8463,6 +8499,22 @@ impl<'a> CppTranslator<'a> {
                 self.ctx.need("JsValue");
                 Some("morph::js_math::random()".to_string())
             }
+            ("Date", "now") => {
+                if !self.date_is_builtin() {
+                    return None;
+                }
+                self.ctx.need("morph::Date");
+                Some("morph::Date::now()".to_string())
+            }
+            ("Date", "parse") => {
+                if !self.date_is_builtin() {
+                    return None;
+                }
+                self.ctx.need("morph::Date");
+                self.ctx.need("JsValue");
+                let arg = fixed.first().cloned().unwrap_or_else(|| "JsUndefined{}".to_string());
+                Some(format!("morph::Date::parse(JsValue({arg}))"))
+            }
             ("JSON", "parse") => {
                 // js_types.h (pulled by need("JsValue")) includes js_json.h.
                 // A lone JSON.parse previously emitted `morph::json_parse`
@@ -9457,7 +9509,11 @@ impl<'a> CppTranslator<'a> {
             }
         }
         // `new C()` yields a shared_ptr, so members go through `->`.
+        // `new Date()` is a value type, so it keeps `.`.
         if matches!(&m.object, Expression::NewExpression(_)) {
+            if self.is_date_like_expr(&m.object) {
+                return format!("{}.{}", obj, prop);
+            }
             return format!("{}->{}", obj, prop);
         }
         format!("{}.{}", obj, prop)
@@ -9644,6 +9700,33 @@ impl<'a> CppTranslator<'a> {
             self.ctx.need("JsObject");
             let pairs = format!("{{\"name\", JsString(\"Error\")}}, {{\"message\", {}}}", msg);
             return format!("JsObject{{{}}}", pairs);
+        }
+        // `new Date(...)` lowers to the native morph::Date value type.
+        // Multi-argument construction uses local calendar fields; Date
+        // parts coerce through their time value, matching JS.
+        if callee == "Date" && self.date_is_builtin() {
+            self.ctx.need("morph::Date");
+            if n.arguments.is_empty() {
+                return "morph::Date()".to_string();
+            }
+            if n.arguments.len() == 1 {
+                return format!("morph::Date({})", args[0]);
+            }
+            let parts: Vec<String> = n
+                .arguments
+                .iter()
+                .enumerate()
+                .map(|(index, arg)| {
+                    let date_part =
+                        arg.as_expression().is_some_and(|expr| self.is_date_like_expr(expr));
+                    if date_part {
+                        format!("{}.getTime()", args[index])
+                    } else {
+                        args[index].clone()
+                    }
+                })
+                .collect();
+            return format!("morph::Date({{{}}})", parts.join(", "));
         }
         // Handle Promise constructor specially
         if callee == "Promise" {
@@ -11489,5 +11572,49 @@ mod tests {
             "{out}"
         );
         assert!(out.contains("auto read = [&, value]() -> auto { return (*value); };"), "{out}");
+    }
+
+    #[test]
+    fn date_subset_lowers_to_native_type() {
+        let out = translate_stmts(
+            "const epoch = new Date(0);\n\
+             const copy = new Date(epoch);\n\
+             const parts = new Date(2021, 5, 15, 10, 20, 30, 400);\n\
+             const shifted = new Date(2021, epoch);\n\
+             const iso = new Date(0).toISOString();\n\
+             const ms = epoch.getTime();\n\
+             const stamp = Date.now();\n\
+             const parsed = Date.parse(\"2020-01-02\");\n\
+             console.log(iso, ms, stamp, parsed);",
+        );
+        assert!(out.contains("morph::Date epoch = morph::Date(0)"), "{out}");
+        assert!(out.contains("morph::Date copy = morph::Date(epoch)"), "{out}");
+        assert!(
+            out.contains("morph::Date parts = morph::Date({2021, 5, 15, 10, 20, 30, 400})"),
+            "{out}"
+        );
+        assert!(
+            out.contains("morph::Date shifted = morph::Date({2021, epoch.getTime()})"),
+            "{out}"
+        );
+        assert!(out.contains("morph::Date(0).toISOString()"), "{out}");
+        assert!(out.contains("epoch.getTime()"), "{out}");
+        assert!(out.contains("JsNumber stamp = morph::Date::now()"), "{out}");
+        assert!(
+            out.contains("JsNumber parsed = morph::Date::parse(JsValue(\"2020-01-02\"))"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn shadowed_date_class_keeps_user_construction() {
+        let out = translate_stmts(
+            "class Date { value: number = 1 }\n\
+             const d = new Date();\n\
+             console.log(d.value);",
+        );
+        assert!(!out.contains("morph::Date"), "{out}");
+        assert!(out.contains("morph::js_new<Date>(\"Date\")"), "{out}");
+        assert!(out.contains("d->value"), "{out}");
     }
 }

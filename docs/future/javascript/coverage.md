@@ -65,14 +65,14 @@ Already shipped and **not** on the missing list:
 - **Component-body flow:** branches, loops, and calls between declarations lower into the setup effect; reassigned `let` becomes a signal; the functional state updater (`setCount(c => c + 1)`) works.
 - **Late-assigned and widened values:** `let x; x = 5; x = "hi"` works through `JsLateValue` in module and component scope, and initialized bindings widen when a later assignment changes value class (`let x = 0; x = "hi"`, `let x: number | string`, `let x: any`). Mixed numeric classes widen to `JsNumber`; Window handles lower through `window_wid`.
 - **Builtins:** `fetch` (request options plus `Response.text`/`json`/`arrayBuffer`/`clone`, `ok`, `status`, headers), `console.*` (`log`/`warn`/`error`/`info`), timers, `Promise` constructor + `await`, `Error`, `morphState`/`morphEffect`/`morphShared`/`morphEvent`.
-- **Builtin namespaces:** `Math` constants plus `min`/`max`, rounding, logs, exponentials, trig, `hypot`, `fround`, and `random`; `JSON.parse`/`stringify` (single-argument forms), `Number.isFinite`/`isNaN`/`isInteger`, `Object.keys`/`values`/`entries`, `Array.isArray`, `String`/`Number`/`Boolean` conversions, `parseInt`/`parseFloat`.
+- **Builtin namespaces:** `Math` constants plus `min`/`max`, rounding, logs, exponentials, trig, `hypot`, `fround`, and `random`; `JSON.parse`/`stringify` (single-argument forms), `Number.isFinite`/`isNaN`/`isInteger`, `Object.keys`/`values`/`entries`, `Array.isArray`, `String`/`Number`/`Boolean` conversions, `parseInt`/`parseFloat`; `Date` construction, `Date.now`/`Date.parse`, `getTime`/`valueOf`, `toISOString`, and local/UTC getters (Part 4A).
 - **Strings:** broad method coverage including `toUpperCase`, `toLowerCase`, `trim*`, `indexOf`, `substring`, `slice`, `replace*`, `split`, `includes`, `startsWith`, `endsWith`, `pad*`, `repeat`, `match*`, `search`, `normalize`.
 - **Arrays:** `push`/`pop`, `join`, `slice`, `concat`, `includes`, `indexOf`, `lastIndexOf`, `at`, `reverse`, `toString`, plus `map`, `filter`, `forEach`, `reduce`, `find`, `findIndex`, `some`, `every`, `sort`, `splice`, `shift`, `unshift`, `fill`, `flat`, `flatMap` (multi-argument `push` and spread arguments on supported methods included). Receivers that call these lower to `JsArray`; `std::vector` stays the fast path for loops and indexing. A JSX-producing `.map` is still only valid as a direct JSX child.
 - **Objects:** `has`, `keys`, `get`, `values`, `entries`.
 - **Operators with JS semantics:** `==`/`!=`, `===`/`!==`, relational, `in`, `**`/`**=`, `&&=`/`||=`/`??=`, truthiness, string concatenation, `ToNumber` in numeric contexts.
 - **JSX:** elements, fragments, and list `.map` in direct JSX-child position.
 
-`Response.json()` returns a `JsValue`; dot access lowers to the same bracket lookup as `["key"]` (Part 3A), while `await response.json()` lowers to the synchronous reader. Statement-level `fetch(...).then(...).catch(...)` chains inside an async function lower to an awaited fetch plus callbacks in a try/catch (Part 3C); other `.then`/`.catch` shapes and JSON `parse`/`stringify` extra arguments are rejected by `morph check`. Trailing timer arguments are forwarded to inline arrow callbacks (Part 3D). `fetch` request options (`method`/`headers`/string `body`) and the `Response` API are documented and fixture-covered (Part 3F). Class expressions are accepted only as module-scope direct `const`/`let` initializers; every other position is rejected.
+`Response.json()` returns a `JsValue`; dot access lowers to the same bracket lookup as `["key"]` (Part 3A), while `await response.json()` lowers to the synchronous reader. Statement-level `fetch(...).then(...).catch(...)` chains inside an async function lower to an awaited fetch plus callbacks in a try/catch (Part 3C); other `.then`/`.catch` shapes and JSON `parse`/`stringify` extra arguments are rejected by `morph check`. Trailing timer arguments are forwarded to inline arrow callbacks (Part 3D). `fetch` request options (`method`/`headers`/string `body`) and the `Response` API are documented and fixture-covered (Part 3F). The `Date` subset (Part 4A) covers construction, `Date.now`/`Date.parse`, `toISOString`, and local/UTC getters; timezone-aware formatting and setters are rejected. Class expressions are accepted only as module-scope direct `const`/`let` initializers; every other position is rejected.
 
 ## Part map
 
@@ -96,7 +96,7 @@ Parts are ordered so that a later part never changes a representation owned by a
 | **3D** | Timer extra arguments | 0 | timer emitter | ✅ Shipped: trailing `setTimeout`/`setInterval` arguments are captured at scheduling time and forwarded to an inline arrow callback |
 | **3E** | Promise statics | 0 | Promise runtime | ✅ Shipped: `resolve`/`all`/`allSettled`/`race`/`any` build and match JS result order for the supported eager shapes |
 | **3F** | `fetch` request/response docs | 0 | docs/tests | ✅ Shipped: `fetch(url, { method, headers, body })` and the `Response` API documented and covered by a runtime fixture |
-| **4A** | `Date` subset | 0 | date runtime | Construction, `now`, `parse`, `getTime`, `toISOString`, getters |
+| **4A** | `Date` subset | 0 | date runtime | ✅ Shipped: construction, `now`, `parse`, `getTime`, `toISOString`, local/UTC getters; timezone-aware formatting/setters rejected |
 | **4B** | `RegExp` literals + `.test`/`.exec` | 0 | regex runtime | Validation and search work; unsupported features documented |
 | **4C** | `Map`/`Set` | 0 | collection runtime | JS key semantics and insertion order |
 | **4D** | `Object`/`Array` statics | 0 | collection runtime | `Object.assign`/`fromEntries`/`hasOwn`, `Array.from`/`of` |
@@ -374,7 +374,15 @@ Each subpart is additive and owns its runtime header. Do not change `JsArray`/`J
 
 ### 4A — `Date`
 
-Construction, `Date.now`, `Date.parse`, `getTime`, `toISOString`, and calendar/time getters. Timezone-aware formatting is out of scope; document the supported subset.
+**Shipped:** `new Date()` / `new Date(ms)` / `new Date(text)` / `new Date(year, month, day?, hours?, minutes?, seconds?, ms?)` lower to the native `morph::Date` value type (`runtime/cpp/types/js_date.h`). `Date.now()` and `Date.parse(text)` produce `JsNumber`; `getTime`/`valueOf`, `toISOString`, and the local/UTC calendar getters lower to runtime methods. Invalid dates report `NaN`; `toISOString()` throws a catchable `RangeError`, and the build scan enables exceptions for generated `toISOString(` calls. ISO parsing covers `YYYY-MM-DD` (UTC) and `YYYY-MM-DDTHH:MM[:SS[.sss]][Z|±HH:MM|±HHMM]` (no offset = local), including 24:00 rollover and day overflow within 1–31. Timezone-aware formatting (`toString`, `toLocaleString`), `getTimezoneOffset`, and setters are out of scope and rejected with `mx-js-method`; unsupported statics are `mx-js-member`; `Date()` without `new`, spreads, and over-arity calls are `mx-js-syntax`. Date values also need exact `: Date` annotations at boundaries (parameters, returns, class fields, and locals); unannotated boundaries, destructuring, assignments to untyped targets, and module exports of Dates or Date-producing functions/classes are rejected. Generic JS value positions — `String`/`Number`/`Boolean`/`parseInt`/`parseFloat`, `Math`/`Number.is*`, `JSON.stringify`/`Date.parse`, template interpolation, operators, conditions, `switch`, array/object literals, JSX text, iteration, and unsupported members — are rejected too, so a Date value never reaches C++ that cannot compile.
+
+**Target:** construction, `Date.now`, `Date.parse`, `getTime`, `toISOString`, and calendar/time getters. Timezone-aware formatting is out of scope; document the supported subset.
+
+**Depends on:** Part 0.
+
+**Owns:** date runtime.
+
+**Exit:** ✅ `tests/runtime/conformance/pass-date` plus `tests/translate/test_date.py` cover construction, parsing, getters, invalid dates, and the catchable `RangeError`; fail fixtures cover `Date()` without `new`, unsupported statics, spread, over-arity, unsupported instance methods, and Date values in generic JS positions (conversions, operators, and members).
 
 ### 4B — `RegExp`
 
@@ -578,7 +586,8 @@ Morph should expose native equivalents (`useWindow`, clipboard, storage) instead
 | Part 3D — Timer extra arguments | ✅ Shipped |
 | Part 3E — Promise statics | ✅ Shipped; supported eager shapes only |
 | Part 3F — `fetch` request/response docs | ✅ Shipped |
-| Parts 4A–5G — JavaScript language and standard library | 🚧 Committed — all JS-only gaps are in scope for implementation |
+| Part 4A — `Date` subset | ✅ Shipped |
+| Parts 4B–5G — JavaScript language and standard library | 🚧 Committed — all JS-only gaps are in scope for implementation |
 | Parts 6A–6G — platform APIs and JSX | 🚧 Separate product work — browser globals stay out of scope |
 | Part 7 — docs and claims | 📋 Continuous |
 

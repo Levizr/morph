@@ -24,7 +24,7 @@ SRC="$R/core/tests/js_types_test.cpp"
     tail -n 20 "$WORK/build.log"
     exit 1
 }
-"$WORK/js-types-test"
+TZ=UTC "$WORK/js-types-test"
 
 # -fno-exceptions (the app default): the headers must still compile and
 # every non-throwing path must pass.
@@ -37,6 +37,6 @@ SRC="$R/core/tests/js_types_test.cpp"
     tail -n 20 "$WORK/build-noexc.log"
     exit 1
 }
-"$WORK/js-types-test-noexc"
+TZ=UTC "$WORK/js-types-test-noexc"
 
 echo "✓ js-types: OK"

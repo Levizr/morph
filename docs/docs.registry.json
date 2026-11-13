@@ -544,7 +544,7 @@
         "file": "javascript/overview",
         "status": "production",
         "author": "PIYUSH",
-        "description": "How Morph turns your TypeScript and JavaScript logic into native C++: no interpreter or JIT, your component code compiles and runs as machine code at build time — including Promise statics, fetch request options and the Response API, destructured parameters, class fields, and late-assigned values.",
+        "description": "How Morph turns your TypeScript and JavaScript logic into native C++: no interpreter or JIT, your component code compiles and runs as machine code at build time — including Promise statics, fetch request options and the Response API, the native Date subset, destructured parameters, class fields, and late-assigned values.",
         "keywords": [
           "morph javascript to c++",
           "morph typescript compile",
@@ -567,7 +567,10 @@
           "morph fetch post",
           "morph fetch headers",
           "morph fetch json",
-          "morph response headers"
+          "morph response headers",
+          "morph date support",
+          "morph date parse",
+          "morph toisostring"
         ],
         "lastUpdated": "2026-11-12",
         "publishedAt": "2026-08-18",
@@ -655,16 +658,22 @@
         "file": "javascript/types",
         "status": "production",
         "author": "PIYUSH",
-        "description": "How JavaScript runtime types work in Morph: JsNumber, JsString, JsArray, and JsObject and how JS values behave when executed natively in C++.",
+        "description": "How JavaScript runtime types work in Morph: JsNumber, JsString, JsArray, JsObject, and the native Date subset with its typed-boundary and value-position gates, and how JS values behave when executed natively in C++.",
         "keywords": [
           "morph runtime types",
           "JsNumber",
           "JsString",
           "JsArray",
           "JsObject value",
-          "morph math functions"
+          "morph math functions",
+          "morph date type",
+          "Date.parse",
+          "toISOString",
+          "morph date conversion",
+          "morph date operators",
+          "morph date annotations"
         ],
-        "lastUpdated": "2026-11-01",
+        "lastUpdated": "2026-11-13",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -2593,7 +2602,7 @@
         "file": "future/javascript/coverage",
         "status": "development",
         "author": "PIYUSH",
-        "description": "The contract and dependency-ordered plan for making Morph's TypeScript subset cover ordinary app logic: check/build/semantics invariants, shipped widening bindings and class model, precise contract rejections, async/JSON, fetch request/response coverage, Promise statics, standard library, language surface, platform services, JSX, and docs truth-up.",
+        "description": "The contract and dependency-ordered plan for making Morph's TypeScript subset cover ordinary app logic: check/build/semantics invariants, shipped widening bindings and class model, precise contract rejections, async/JSON, fetch request/response coverage, Promise statics, the native Date subset and its value-position gates, standard library, language surface, platform services, JSX, and docs truth-up.",
         "keywords": [
           "morph typescript coverage",
           "morph javascript translator",
@@ -2615,6 +2624,11 @@
           "morph getters setters",
           "morph promise all",
           "morph date regex map set",
+          "morph date subset",
+          "morph date parse",
+          "morph toisostring",
+          "morph date conversion",
+          "morph date operators",
           "morph jsx spread props",
           "morph array methods",
           "morph object spread",

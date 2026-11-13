@@ -43,6 +43,7 @@ const NATIVE_GLOBALS: &[&str] = &[
     "clearInterval",
     "parseInt",
     "parseFloat",
+    "Date",
 ];
 
 /// Morph APIs that must be imported from 'morph' (bare use is an error).
@@ -355,6 +356,20 @@ impl JsMemberVisitor {
             if let Some(p) = prop {
                 self.members.push(span);
                 self.out.push((span.0, "Promise".into(), format!("Promise.{p}")));
+            }
+            return;
+        }
+        // `Date` is a native global, but only `Date.now` / `Date.parse`
+        // have runtime lowering. Everything else (`Date.prototype`,
+        // `Date.UTC`, ...) is rejected here.
+        if name == "Date" {
+            if let Some(p) = prop {
+                if supported_builtin_member("Date", &p) {
+                    self.members.push(span);
+                    return;
+                }
+                self.members.push(span);
+                self.out.push((span.0, "Date".into(), format!("Date.{p}")));
             }
             return;
         }
@@ -2042,6 +2057,161 @@ fn check_js_syntax(program: &Program, file_path: &str, offsets: &[usize]) -> Vec
         })
         .collect()
 }
+
+/// Collector for `Date` reference spans used in unsupported positions.
+/// Supported positions (`new Date(...)`, direct `Date.now()` /
+/// `Date.parse(...)` calls, and statics owned by `mx-js-member`) mark
+/// their reference consumed so the bare-reference pass stays quiet.
+struct DateUsageVisitor<'s> {
+    date_spans: &'s HashSet<u32>,
+    consumed: HashSet<u32>,
+    out: Vec<(u32, String, &'static str, &'static str)>,
+}
+
+impl<'a> Visit<'a> for DateUsageVisitor<'_> {
+    fn visit_new_expression(&mut self, e: &NewExpression<'a>) {
+        if let Expression::Identifier(id) = &e.callee {
+            if id.name.as_str() == "Date" && self.date_spans.contains(&id.span.start) {
+                self.consumed.insert(id.span.start);
+                if e.arguments.len() > 7 {
+                    self.out.push((
+                        e.span.start,
+                        "`new Date(...)` with more than seven arguments".to_string(),
+                        "Pass at most year, month, day, hours, minutes, seconds, and milliseconds",
+                        "mx-js-syntax",
+                    ));
+                }
+            }
+        }
+        oxc_ast_visit::walk::walk_new_expression(self, e);
+    }
+
+    fn visit_call_expression(&mut self, e: &CallExpression<'a>) {
+        if let Expression::Identifier(id) = &e.callee {
+            if id.name.as_str() == "Date" && self.date_spans.contains(&id.span.start) {
+                self.consumed.insert(id.span.start);
+                self.out.push((
+                    e.span.start,
+                    "`Date()` without `new` returns a string".to_string(),
+                    "Use `new Date(...)` for a Date value, or `Date.now()` for a timestamp",
+                    "mx-js-syntax",
+                ));
+            }
+        }
+        if let Expression::StaticMemberExpression(m) = &e.callee {
+            if let Expression::Identifier(id) = &m.object {
+                if id.name.as_str() == "Date" && self.date_spans.contains(&id.span.start) {
+                    let prop = m.property.name.as_str();
+                    if matches!(prop, "now" | "parse") {
+                        self.consumed.insert(id.span.start);
+                        let max = usize::from(prop != "now");
+                        if e.arguments.len() > max {
+                            let message = if prop == "now" {
+                                "`Date.now(...)` takes no arguments".to_string()
+                            } else {
+                                "`Date.parse(...)` takes a single string argument".to_string()
+                            };
+                            self.out.push((
+                                e.span.start,
+                                message,
+                                "Remove the extra arguments",
+                                "mx-js-syntax",
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        oxc_ast_visit::walk::walk_call_expression(self, e);
+    }
+
+    fn visit_static_member_expression(&mut self, e: &StaticMemberExpression<'a>) {
+        if let Expression::Identifier(id) = &e.object {
+            if id.name.as_str() == "Date" && self.date_spans.contains(&id.span.start) {
+                let prop = e.property.name.as_str();
+                if matches!(prop, "now" | "parse") {
+                    // Call callees were consumed by the parent call;
+                    // a remaining reference is the function value.
+                    if !self.consumed.contains(&id.span.start) {
+                        self.out.push((
+                            e.span.start,
+                            format!("`Date.{prop}` used as a value"),
+                            "Call it directly: `Date.now()` or `Date.parse(text)`",
+                            "mx-js-member",
+                        ));
+                    }
+                }
+                // Either way the member visitor owns unsupported statics;
+                // the Date reference itself is explained.
+                self.consumed.insert(id.span.start);
+            }
+        }
+        oxc_ast_visit::walk::walk_static_member_expression(self, e);
+    }
+}
+
+/// `Date` subset gates: only `new Date(...)` (up to seven calendar parts)
+/// and direct `Date.now()` / `Date.parse(text)` calls lower. `Date()`
+/// without `new`, over-arity constructors, static call arity, and bare
+/// `Date` / `Date.now` / `Date.parse` values are rejected here. Instance
+/// methods are owned by `mx-js-method`; unsupported statics by
+/// `mx-js-member`.
+fn check_date_usage(program: &Program, file_path: &str, offsets: &[usize]) -> Vec<LintError> {
+    let semantic = SemanticBuilder::new().with_build_nodes(true).build(program).semantic;
+    let scoping = semantic.scoping();
+    // A user binding named `Date` shadows the builtin for the whole file
+    // (the translator disables its Date lowering in that case too).
+    if scoping.symbol_names().any(|name| name == "Date") {
+        return Vec::new();
+    }
+    let mut date_spans = HashSet::new();
+    for (atom, refs) in scoping.root_unresolved_references() {
+        if atom != "Date" {
+            continue;
+        }
+        for ref_id in refs {
+            let node_id = scoping.get_reference(*ref_id).node_id();
+            date_spans.insert(semantic.nodes().get_node(node_id).span().start);
+        }
+    }
+    if date_spans.is_empty() {
+        return Vec::new();
+    }
+    let skip = collect_skip_spans(program);
+    let mut visitor =
+        DateUsageVisitor { date_spans: &date_spans, consumed: HashSet::new(), out: Vec::new() };
+    visitor.visit_program(program);
+    for start in date_spans.difference(&visitor.consumed) {
+        if skip.type_ranges.iter().any(|(s, e)| *start >= *s && *start < *e) {
+            continue;
+        }
+        if skip.tags.contains(start) || skip.intrinsics.contains(start) {
+            continue;
+        }
+        visitor.out.push((
+            *start,
+            "`Date` used as a value".to_string(),
+            "Use `new Date(...)`, `Date.now()`, or `Date.parse(text)`",
+            "mx-js-member",
+        ));
+    }
+    visitor.out.sort_by_key(|(start, ..)| *start);
+    let mut out = Vec::new();
+    for (start, message, hint, code) in visitor.out {
+        let (line, col) = offset_to_line_col_fast(offsets, start);
+        out.push(LintError {
+            severity: "error".into(),
+            code: code.into(),
+            message,
+            suggestion: Some(hint.into()),
+            file_path: file_path.into(),
+            line,
+            col,
+        });
+    }
+    out
+}
+
 /// Collect every identifier bound by a binding pattern.
 fn collect_pattern_identifiers<'b, 'a>(
     pattern: &'b BindingPattern<'a>,
@@ -2240,6 +2410,7 @@ enum RecvKind {
     Obj,
     Num,
     Bool,
+    Date,
 }
 
 /// Builtin namespace members with native lowering (mirrors the
@@ -2291,6 +2462,7 @@ fn supported_builtin_member(root: &str, member: &str) -> bool {
             | ("Number", "isFinite" | "isNaN" | "isInteger")
             | ("Object", "keys" | "values" | "entries")
             | ("Array", "isArray")
+            | ("Date", "now" | "parse")
     )
 }
 
@@ -2301,6 +2473,30 @@ const CONVERSION_CALLS: &[&str] = &["String", "Number", "Boolean", "parseInt", "
 /// Supported methods per receiver kind, mirroring the translator:
 /// string helpers (`StringMethod`), `JsArray::{push,pop}`,
 /// `JsObject::{has,keys,get}`, numbers/booleans (`toString`).
+/// Mirrors `morph::Date` in runtime/cpp/types/js_date.h. Timezone-aware
+/// formatting (toString/toLocaleString) is intentionally absent.
+const DATE_METHODS: &[&str] = &[
+    "getTime",
+    "valueOf",
+    "toISOString",
+    "getFullYear",
+    "getMonth",
+    "getDate",
+    "getDay",
+    "getHours",
+    "getMinutes",
+    "getSeconds",
+    "getMilliseconds",
+    "getUTCFullYear",
+    "getUTCMonth",
+    "getUTCDate",
+    "getUTCDay",
+    "getUTCHours",
+    "getUTCMinutes",
+    "getUTCSeconds",
+    "getUTCMilliseconds",
+];
+
 const fn supported_methods(kind: RecvKind) -> &'static [&'static str] {
     match kind {
         RecvKind::Str => &[
@@ -2364,6 +2560,7 @@ const fn supported_methods(kind: RecvKind) -> &'static [&'static str] {
         RecvKind::Obj => &["has", "keys", "get", "values", "entries"],
         RecvKind::Num => &["toString", "toFixed", "toPrecision", "toExponential"],
         RecvKind::Bool => &["toString"],
+        RecvKind::Date => DATE_METHODS,
     }
 }
 
@@ -2374,6 +2571,7 @@ const fn recv_kind_name(kind: RecvKind) -> &'static str {
         RecvKind::Obj => "objects",
         RecvKind::Num => "numbers",
         RecvKind::Bool => "booleans",
+        RecvKind::Date => "dates",
     }
 }
 
@@ -2383,6 +2581,7 @@ fn sniff_state_kind(type_arg: Option<&str>, init: &str) -> Option<RecvKind> {
             "string" | "String" => return Some(RecvKind::Str),
             "number" | "Number" => return Some(RecvKind::Num),
             "boolean" | "Boolean" => return Some(RecvKind::Bool),
+            "Date" => return Some(RecvKind::Date),
             _ => {}
         }
         if t.starts_with("Array") || t.ends_with("[]") {
@@ -2404,9 +2603,2024 @@ fn sniff_state_kind(type_arg: Option<&str>, init: &str) -> Option<RecvKind> {
         Some(RecvKind::Bool)
     } else if init.parse::<f64>().is_ok() {
         Some(RecvKind::Num)
+    } else if init.starts_with("new Date(") || init.starts_with("new Date (") {
+        Some(RecvKind::Date)
     } else {
         None
     }
+}
+
+/// Date values are native value types, not `JsValue`s. Contexts that would
+/// require JS object coercion (string/number conversion, template
+/// interpolation, operators, conditions, switch, unsupported members) have
+/// no lowering; reject them instead of emitting C++ that cannot compile.
+fn check_date_values(
+    program: &Program,
+    content: &str,
+    file_path: &str,
+    offsets: &[usize],
+) -> Vec<LintError> {
+    // ---- shared helpers -------------------------------------------------
+    fn span_text<'s>(content: &'s str, start: u32, end: u32) -> &'s str {
+        content.get(start as usize..end as usize).unwrap_or("").trim()
+    }
+    fn annotation_text<'s>(content: &'s str, ann: &TSTypeAnnotation<'_>) -> &'s str {
+        span_text(content, ann.span().start, ann.span().end).trim_start_matches(':').trim()
+    }
+    fn strip<'a, 'b>(expr: &'b Expression<'a>) -> &'b Expression<'a> {
+        match expr {
+            Expression::ParenthesizedExpression(p) => strip(&p.expression),
+            Expression::TSAsExpression(a) => strip(&a.expression),
+            Expression::TSSatisfiesExpression(s) => strip(&s.expression),
+            Expression::TSNonNullExpression(n) => strip(&n.expression),
+            Expression::TSTypeAssertion(t) => strip(&t.expression),
+            Expression::TSInstantiationExpression(i) => strip(&i.expression),
+            _ => expr,
+        }
+    }
+    fn symbol_of(scoping: &Scoping, id: &IdentifierReference<'_>) -> Option<SymbolId> {
+        id.reference_id.get().and_then(|reference| scoping.get_reference(reference).symbol_id())
+    }
+    fn target_symbol(scoping: &Scoping, id: &IdentifierReference<'_>) -> Option<SymbolId> {
+        id.reference_id.get().and_then(|reference| scoping.get_reference(reference).symbol_id())
+    }
+    fn binding_name<'a>(pat: &'a BindingPattern<'_>) -> Option<&'a str> {
+        match pat {
+            BindingPattern::BindingIdentifier(id) => Some(id.name.as_str()),
+            BindingPattern::AssignmentPattern(a) => binding_name(&a.left),
+            _ => None,
+        }
+    }
+    fn property_name(key: &PropertyKey<'_>) -> Option<String> {
+        match key {
+            PropertyKey::StaticIdentifier(id) => Some(id.name.to_string()),
+            PropertyKey::StringLiteral(s) => Some(s.value.to_string()),
+            PropertyKey::NumericLiteral(n) => Some(
+                n.raw.as_ref().map(|raw| raw.to_string()).unwrap_or_else(|| n.value.to_string()),
+            ),
+            PropertyKey::PrivateIdentifier(p) => Some(format!("#{}", p.name)),
+            _ => None,
+        }
+    }
+
+    // ---- facts ----------------------------------------------------------
+    #[derive(Clone, PartialEq, Eq)]
+    enum ParamKind {
+        Date,
+        Other,
+        Unknown,
+        Callback(FnFact),
+    }
+
+    #[derive(Clone, PartialEq, Eq)]
+    struct ParamFact {
+        kind: ParamKind,
+        defaulted: bool,
+        optional: bool,
+    }
+
+    #[derive(Clone, PartialEq, Eq)]
+    struct FnFact {
+        params: Vec<ParamFact>,
+        /// `Some(true)` for an exact `: Date` return, `Some(false)` for any
+        /// other annotation, `None` when unannotated.
+        return_annotation: Option<bool>,
+    }
+
+    impl FnFact {
+        fn returns_date(&self) -> bool {
+            self.return_annotation == Some(true)
+        }
+    }
+
+    #[derive(Default)]
+    struct Facts {
+        date_global: bool,
+        dates: HashSet<SymbolId>,
+        functions: HashMap<SymbolId, FnFact>,
+        methods: HashMap<(String, String), FnFact>,
+        constructors: HashMap<String, FnFact>,
+        class_date_fields: HashMap<String, HashSet<String>>,
+        class_private_date_fields: HashMap<String, HashSet<String>>,
+        class_instance_fields: HashMap<String, HashMap<String, String>>,
+        instance_classes: HashMap<SymbolId, String>,
+        function_aliases: HashMap<SymbolId, SymbolId>,
+        class_aliases: HashMap<String, String>,
+        class_names: HashSet<String>,
+        class_by_span: HashMap<u32, String>,
+    }
+
+    fn resolve_class<'f>(facts: &'f Facts, name: &str) -> Option<&'f str> {
+        let mut current: &'f str = match facts.class_aliases.get(name) {
+            Some(next) => next.as_str(),
+            None => return facts.class_names.get(name).map(String::as_str),
+        };
+        for _ in 0..8 {
+            match facts.class_aliases.get(current) {
+                Some(next) => current = next.as_str(),
+                None => break,
+            }
+        }
+        facts.class_names.get(current).map(String::as_str)
+    }
+
+    fn resolve_fn_alias(facts: &Facts, symbol: SymbolId) -> SymbolId {
+        let mut current = symbol;
+        for _ in 0..8 {
+            match facts.function_aliases.get(&current) {
+                Some(next) => current = *next,
+                None => break,
+            }
+        }
+        current
+    }
+
+    fn return_annotation(ann: Option<&TSTypeAnnotation<'_>>, content: &str) -> Option<bool> {
+        ann.map(|ann| annotation_text(content, ann) == "Date")
+    }
+
+    fn params_facts(params: &FormalParameters<'_>, content: &str) -> Vec<ParamFact> {
+        let mut out = Vec::new();
+        for param in &params.items {
+            let kind = match param.type_annotation.as_deref() {
+                Some(ann) => {
+                    let text = annotation_text(content, ann);
+                    if text == "Date" {
+                        ParamKind::Date
+                    } else if let TSType::TSFunctionType(f) = &ann.type_annotation {
+                        ParamKind::Callback(FnFact {
+                            params: params_facts(&f.params, content),
+                            return_annotation: return_annotation(Some(&f.return_type), content),
+                        })
+                    } else {
+                        ParamKind::Other
+                    }
+                }
+                None => ParamKind::Unknown,
+            };
+            out.push(ParamFact {
+                kind,
+                defaulted: param.initializer.is_some(),
+                optional: param.optional,
+            });
+        }
+        if let Some(rest) = &params.rest {
+            let kind = match rest.type_annotation.as_deref() {
+                Some(ann) => {
+                    if annotation_text(content, ann) == "Date" {
+                        ParamKind::Date
+                    } else {
+                        ParamKind::Other
+                    }
+                }
+                None => ParamKind::Unknown,
+            };
+            out.push(ParamFact { kind, defaulted: false, optional: true });
+        }
+        out
+    }
+
+    fn function_fact_from_expr(expr: &Expression<'_>, content: &str) -> Option<FnFact> {
+        match strip(expr) {
+            Expression::FunctionExpression(f) => Some(FnFact {
+                params: params_facts(&f.params, content),
+                return_annotation: return_annotation(f.return_type.as_deref(), content),
+            }),
+            Expression::ArrowFunctionExpression(a) => Some(FnFact {
+                params: params_facts(&a.params, content),
+                return_annotation: return_annotation(a.return_type.as_deref(), content),
+            }),
+            _ => None,
+        }
+    }
+
+    fn is_new_date(facts: &Facts, scoping: &Scoping, n: &NewExpression<'_>) -> bool {
+        if !facts.date_global {
+            return false;
+        }
+        match strip(&n.callee) {
+            Expression::Identifier(id) => {
+                id.name.as_str() == "Date" && symbol_of(scoping, id).is_none()
+            }
+            _ => false,
+        }
+    }
+
+    fn class_of_expr<'f>(
+        facts: &'f Facts,
+        scoping: &Scoping,
+        expr: &Expression<'_>,
+        current_class: Option<&'f str>,
+    ) -> Option<&'f str> {
+        match strip(expr) {
+            Expression::ThisExpression(_) => current_class,
+            Expression::Identifier(id) => {
+                let symbol = symbol_of(scoping, id)?;
+                facts.instance_classes.get(&symbol).map(String::as_str)
+            }
+            Expression::NewExpression(n) => match strip(&n.callee) {
+                Expression::Identifier(id) => {
+                    if id.name.as_str() == "Date"
+                        && facts.date_global
+                        && symbol_of(scoping, id).is_none()
+                    {
+                        return None;
+                    }
+                    resolve_class(facts, id.name.as_str())
+                }
+                _ => None,
+            },
+            Expression::StaticMemberExpression(m) => {
+                let class = class_of_expr(facts, scoping, &m.object, current_class)?;
+                facts
+                    .class_instance_fields
+                    .get(class)?
+                    .get(m.property.name.as_str())
+                    .map(String::as_str)
+            }
+            Expression::PrivateFieldExpression(p) => {
+                let class = class_of_expr(facts, scoping, &p.object, current_class)?;
+                let key = format!("#{}", p.field.name);
+                facts.class_instance_fields.get(class)?.get(&key).map(String::as_str)
+            }
+            _ => None,
+        }
+    }
+
+    fn member_is_date_field(
+        facts: &Facts,
+        scoping: &Scoping,
+        member: &StaticMemberExpression<'_>,
+        current_class: Option<&str>,
+    ) -> bool {
+        let Some(class) = class_of_expr(facts, scoping, &member.object, current_class) else {
+            return false;
+        };
+        facts
+            .class_date_fields
+            .get(class)
+            .is_some_and(|fields| fields.contains(member.property.name.as_str()))
+    }
+
+    fn private_member_is_date(
+        facts: &Facts,
+        scoping: &Scoping,
+        member: &PrivateFieldExpression<'_>,
+        current_class: Option<&str>,
+    ) -> bool {
+        let Some(class) = class_of_expr(facts, scoping, &member.object, current_class) else {
+            return false;
+        };
+        let key = format!("#{}", member.field.name);
+        facts.class_private_date_fields.get(class).is_some_and(|fields| fields.contains(&key))
+    }
+
+    fn call_returns_date(
+        facts: &Facts,
+        scoping: &Scoping,
+        call: &CallExpression<'_>,
+        current_class: Option<&str>,
+    ) -> bool {
+        match strip(&call.callee) {
+            Expression::Identifier(id) => {
+                let Some(symbol) = symbol_of(scoping, id) else { return false };
+                let symbol = resolve_fn_alias(facts, symbol);
+                facts.functions.get(&symbol).is_some_and(FnFact::returns_date)
+            }
+            Expression::StaticMemberExpression(m) => {
+                let prop = m.property.name.as_str();
+                if let Expression::ThisExpression(_) = strip(&m.object) {
+                    if let Some(class) = current_class {
+                        return facts
+                            .methods
+                            .get(&(class.to_string(), prop.to_string()))
+                            .is_some_and(FnFact::returns_date);
+                    }
+                }
+                let Some(class) = class_of_expr(facts, scoping, &m.object, current_class) else {
+                    return false;
+                };
+                facts
+                    .methods
+                    .get(&(class.to_string(), prop.to_string()))
+                    .is_some_and(FnFact::returns_date)
+            }
+            _ => false,
+        }
+    }
+
+    fn is_date_expr(
+        facts: &Facts,
+        scoping: &Scoping,
+        expr: &Expression<'_>,
+        current_class: Option<&str>,
+    ) -> bool {
+        match strip(expr) {
+            Expression::NewExpression(n) => is_new_date(facts, scoping, n),
+            Expression::Identifier(id) => {
+                symbol_of(scoping, id).is_some_and(|symbol| facts.dates.contains(&symbol))
+            }
+            Expression::CallExpression(c) => call_returns_date(facts, scoping, c, current_class),
+            Expression::StaticMemberExpression(m) => {
+                member_is_date_field(facts, scoping, m, current_class)
+            }
+            Expression::PrivateFieldExpression(p) => {
+                private_member_is_date(facts, scoping, p, current_class)
+            }
+            Expression::SequenceExpression(s) => s
+                .expressions
+                .last()
+                .is_some_and(|last| is_date_expr(facts, scoping, last, current_class)),
+            Expression::ConditionalExpression(c) => {
+                is_date_expr(facts, scoping, &c.consequent, current_class)
+                    && is_date_expr(facts, scoping, &c.alternate, current_class)
+            }
+            _ => false,
+        }
+    }
+
+    // ---- collection -----------------------------------------------------
+    struct ClassCollector {
+        class_names: HashSet<String>,
+        class_by_span: HashMap<u32, String>,
+    }
+
+    impl<'a> Visit<'a> for ClassCollector {
+        fn visit_variable_declarator(&mut self, d: &VariableDeclarator<'a>) {
+            if let BindingPattern::BindingIdentifier(id) = &d.id {
+                if let Some(init) = &d.init {
+                    if let Some(class) = unwrap_class_expression(init) {
+                        self.class_by_span.insert(class.span.start, id.name.to_string());
+                        self.class_names.insert(id.name.to_string());
+                    }
+                }
+            }
+            oxc_ast_visit::walk::walk_variable_declarator(self, d);
+        }
+
+        fn visit_class(&mut self, c: &Class<'a>) {
+            let name = self
+                .class_by_span
+                .get(&c.span.start)
+                .cloned()
+                .or_else(|| c.id.as_ref().map(|id| id.name.to_string()));
+            if let Some(name) = name {
+                self.class_by_span.insert(c.span.start, name.clone());
+                self.class_names.insert(name);
+            }
+            oxc_ast_visit::walk::walk_class(self, c);
+        }
+    }
+
+    struct ClassAliasCollector<'s> {
+        class_names: &'s HashSet<String>,
+        aliases: HashMap<String, String>,
+    }
+
+    impl<'a> Visit<'a> for ClassAliasCollector<'_> {
+        fn visit_variable_declarator(&mut self, d: &VariableDeclarator<'a>) {
+            if let BindingPattern::BindingIdentifier(id) = &d.id {
+                if let Some(Expression::Identifier(src)) = d.init.as_ref() {
+                    if self.class_names.contains(src.name.as_str())
+                        && !self.class_names.contains(id.name.as_str())
+                    {
+                        self.aliases.insert(id.name.to_string(), src.name.to_string());
+                    }
+                }
+            }
+            oxc_ast_visit::walk::walk_variable_declarator(self, d);
+        }
+    }
+
+    struct FactCollector<'s> {
+        content: &'s str,
+        scoping: &'s Scoping,
+        facts: Facts,
+        class_stack: Vec<String>,
+    }
+
+    impl<'s> FactCollector<'s> {
+        fn collect_class(&mut self, class: &Class<'_>, name: &str) {
+            for element in &class.body.body {
+                match element {
+                    ClassElement::PropertyDefinition(p) => {
+                        let Some(field) = property_name(&p.key) else { continue };
+                        let private = matches!(&p.key, PropertyKey::PrivateIdentifier(_));
+                        let annotation = p
+                            .type_annotation
+                            .as_deref()
+                            .map(|ann| annotation_text(self.content, ann));
+                        let annotated_date =
+                            annotation.is_some_and(|text| text == "Date" && self.facts.date_global);
+                        let annotated_class = annotation
+                            .and_then(|text| resolve_class(&self.facts, text))
+                            .map(str::to_string);
+                        let init_class = p
+                            .value
+                            .as_ref()
+                            .and_then(|value| {
+                                class_of_expr(&self.facts, self.scoping, value, Some(name))
+                            })
+                            .map(str::to_string);
+                        if annotated_date {
+                            if private {
+                                self.facts
+                                    .class_private_date_fields
+                                    .entry(name.to_string())
+                                    .or_default()
+                                    .insert(field.clone());
+                            } else {
+                                self.facts
+                                    .class_date_fields
+                                    .entry(name.to_string())
+                                    .or_default()
+                                    .insert(field.clone());
+                            }
+                        }
+                        if let Some(class) = annotated_class.or(init_class) {
+                            let key = if private { format!("#{field}") } else { field };
+                            self.facts
+                                .class_instance_fields
+                                .entry(name.to_string())
+                                .or_default()
+                                .insert(key, class);
+                        }
+                    }
+                    ClassElement::MethodDefinition(m) => {
+                        let Some(method) = property_name(&m.key) else { continue };
+                        let fact = FnFact {
+                            params: params_facts(&m.value.params, self.content),
+                            return_annotation: return_annotation(
+                                m.value.return_type.as_deref(),
+                                self.content,
+                            ),
+                        };
+                        match m.kind {
+                            MethodDefinitionKind::Constructor => {
+                                self.facts.constructors.insert(name.to_string(), fact);
+                                for param in &m.value.params.items {
+                                    if param.accessibility.is_none() {
+                                        continue;
+                                    }
+                                    let Some(field) = binding_name(&param.pattern) else {
+                                        continue;
+                                    };
+                                    let annotation = param
+                                        .type_annotation
+                                        .as_deref()
+                                        .map(|ann| annotation_text(self.content, ann));
+                                    if annotation.is_some_and(|text| {
+                                        text == "Date" && self.facts.date_global
+                                    }) {
+                                        self.facts
+                                            .class_date_fields
+                                            .entry(name.to_string())
+                                            .or_default()
+                                            .insert(field.to_string());
+                                    } else if let Some(class) = annotation.and_then(|text| {
+                                        resolve_class(&self.facts, text).map(str::to_string)
+                                    }) {
+                                        self.facts
+                                            .class_instance_fields
+                                            .entry(name.to_string())
+                                            .or_default()
+                                            .insert(field.to_string(), class);
+                                    }
+                                }
+                            }
+                            MethodDefinitionKind::Get => {
+                                if fact.returns_date() {
+                                    self.facts
+                                        .class_date_fields
+                                        .entry(name.to_string())
+                                        .or_default()
+                                        .insert(method.clone());
+                                }
+                                self.facts.methods.insert((name.to_string(), method), fact);
+                            }
+                            _ => {
+                                self.facts.methods.insert((name.to_string(), method), fact);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    impl<'a> Visit<'a> for FactCollector<'_> {
+        fn visit_variable_declarator(&mut self, d: &VariableDeclarator<'a>) {
+            if let BindingPattern::BindingIdentifier(id) = &d.id {
+                if let Some(symbol) = id.symbol_id.get() {
+                    if let Some(ann) = d.type_annotation.as_deref() {
+                        let text = annotation_text(self.content, ann);
+                        if text == "Date" && self.facts.date_global {
+                            self.facts.dates.insert(symbol);
+                        } else if let Some(class) =
+                            resolve_class(&self.facts, text).map(str::to_string)
+                        {
+                            self.facts.instance_classes.insert(symbol, class);
+                        }
+                        if let TSType::TSFunctionType(f) = &ann.type_annotation {
+                            self.facts.functions.insert(
+                                symbol,
+                                FnFact {
+                                    params: params_facts(&f.params, self.content),
+                                    return_annotation: return_annotation(
+                                        Some(&f.return_type),
+                                        self.content,
+                                    ),
+                                },
+                            );
+                        }
+                    }
+                    if let Some(fact) =
+                        d.init.as_ref().and_then(|init| function_fact_from_expr(init, self.content))
+                    {
+                        self.facts.functions.entry(symbol).or_insert(fact);
+                    }
+                }
+            }
+            oxc_ast_visit::walk::walk_variable_declarator(self, d);
+        }
+
+        fn visit_formal_parameter(&mut self, p: &FormalParameter<'a>) {
+            if let BindingPattern::BindingIdentifier(id) = &p.pattern {
+                if let Some(symbol) = id.symbol_id.get() {
+                    if let Some(ann) = p.type_annotation.as_deref() {
+                        let text = annotation_text(self.content, ann);
+                        if text == "Date" && self.facts.date_global {
+                            self.facts.dates.insert(symbol);
+                        } else if let Some(class) =
+                            resolve_class(&self.facts, text).map(str::to_string)
+                        {
+                            self.facts.instance_classes.insert(symbol, class);
+                        }
+                        if let TSType::TSFunctionType(f) = &ann.type_annotation {
+                            self.facts.functions.entry(symbol).or_insert(FnFact {
+                                params: params_facts(&f.params, self.content),
+                                return_annotation: return_annotation(
+                                    Some(&f.return_type),
+                                    self.content,
+                                ),
+                            });
+                        }
+                    }
+                }
+            }
+            oxc_ast_visit::walk::walk_formal_parameter(self, p);
+        }
+
+        fn visit_function(&mut self, f: &Function<'a>, flags: ScopeFlags) {
+            if let Some(id) = &f.id {
+                if let Some(symbol) = id.symbol_id.get() {
+                    self.facts.functions.entry(symbol).or_insert(FnFact {
+                        params: params_facts(&f.params, self.content),
+                        return_annotation: return_annotation(
+                            f.return_type.as_deref(),
+                            self.content,
+                        ),
+                    });
+                }
+            }
+            oxc_ast_visit::walk::walk_function(self, f, flags);
+        }
+
+        fn visit_class(&mut self, c: &Class<'a>) {
+            let name = self.facts.class_by_span.get(&c.span.start).cloned();
+            if let Some(name) = &name {
+                self.class_stack.push(name.clone());
+                self.collect_class(c, name);
+            }
+            oxc_ast_visit::walk::walk_class(self, c);
+            if name.is_some() {
+                self.class_stack.pop();
+            }
+        }
+    }
+
+    struct Propagator<'s> {
+        facts: &'s mut Facts,
+        scoping: &'s Scoping,
+        class_stack: Vec<String>,
+        changed: bool,
+    }
+
+    impl<'a> Visit<'a> for Propagator<'_> {
+        fn visit_variable_declarator(&mut self, d: &VariableDeclarator<'a>) {
+            if let BindingPattern::BindingIdentifier(id) = &d.id {
+                if let Some(symbol) = id.symbol_id.get() {
+                    if let Some(init) = &d.init {
+                        let current = self.class_stack.last().map(String::as_str);
+                        let is_date = is_date_expr(self.facts, self.scoping, init, current);
+                        if is_date && self.facts.dates.insert(symbol) {
+                            self.changed = true;
+                        }
+                        let class = class_of_expr(self.facts, self.scoping, init, current)
+                            .map(str::to_string);
+                        if let Some(class) = class {
+                            if self.facts.instance_classes.get(&symbol) != Some(&class) {
+                                self.facts.instance_classes.insert(symbol, class);
+                                self.changed = true;
+                            }
+                        }
+                        if let Expression::Identifier(src) = strip(init) {
+                            if let Some(src_symbol) = symbol_of(self.scoping, src) {
+                                let src_symbol = resolve_fn_alias(self.facts, src_symbol);
+                                if let Some(fact) = self.facts.functions.get(&src_symbol).cloned() {
+                                    if !self.facts.functions.contains_key(&symbol) {
+                                        self.facts.functions.insert(symbol, fact);
+                                        self.changed = true;
+                                    }
+                                    if src_symbol != symbol
+                                        && self.facts.function_aliases.get(&symbol)
+                                            != Some(&src_symbol)
+                                    {
+                                        self.facts.function_aliases.insert(symbol, src_symbol);
+                                        self.changed = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            oxc_ast_visit::walk::walk_variable_declarator(self, d);
+        }
+
+        fn visit_class(&mut self, c: &Class<'a>) {
+            let name = self.facts.class_by_span.get(&c.span.start).cloned();
+            if let Some(name) = &name {
+                self.class_stack.push(name.clone());
+                for element in &c.body.body {
+                    if let ClassElement::PropertyDefinition(p) = element {
+                        if let (Some(field), Some(value)) =
+                            (property_name(&p.key), p.value.as_ref())
+                        {
+                            let current = Some(name.as_str());
+                            let class = class_of_expr(self.facts, self.scoping, value, current)
+                                .map(str::to_string);
+                            if let Some(class) = class {
+                                let key = if matches!(&p.key, PropertyKey::PrivateIdentifier(_)) {
+                                    format!("#{field}")
+                                } else {
+                                    field
+                                };
+                                let fields = self
+                                    .facts
+                                    .class_instance_fields
+                                    .entry(name.clone())
+                                    .or_default();
+                                if fields.get(&key) != Some(&class) {
+                                    fields.insert(key, class);
+                                    self.changed = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            oxc_ast_visit::walk::walk_class(self, c);
+            if name.is_some() {
+                self.class_stack.pop();
+            }
+        }
+    }
+
+    // ---- fact assembly --------------------------------------------------
+    let semantic = SemanticBuilder::new().with_build_nodes(true).build(program).semantic;
+    let scoping = semantic.scoping();
+    let has_date_binding = scoping.symbol_names().any(|name| name == "Date");
+    let has_date_reference = scoping.root_unresolved_references().keys().any(|atom| atom == "Date");
+    let date_global = !has_date_binding && has_date_reference;
+
+    let mut classes = ClassCollector { class_names: HashSet::new(), class_by_span: HashMap::new() };
+    classes.visit_program(program);
+    let mut aliases =
+        ClassAliasCollector { class_names: &classes.class_names, aliases: HashMap::new() };
+    aliases.visit_program(program);
+
+    let mut facts = Facts {
+        date_global,
+        class_names: classes.class_names.clone(),
+        class_by_span: classes.class_by_span,
+        class_aliases: aliases.aliases,
+        ..Facts::default()
+    };
+    let mut collector =
+        FactCollector { content, scoping, facts: Facts::default(), class_stack: Vec::new() };
+    collector.facts = std::mem::take(&mut facts);
+    collector.visit_program(program);
+    let mut facts = collector.facts;
+
+    for _ in 0..16 {
+        let mut propagator =
+            Propagator { facts: &mut facts, scoping, class_stack: Vec::new(), changed: false };
+        propagator.visit_program(program);
+        if !propagator.changed {
+            break;
+        }
+    }
+
+    // ---- value-position visitor ----------------------------------------
+    // Member expressions used as call callees are owned by
+    // `check_js_method_calls`; the member-value gate must not duplicate them.
+    struct Callees {
+        spans: HashSet<u32>,
+    }
+
+    impl<'a> Visit<'a> for Callees {
+        fn visit_call_expression(&mut self, e: &CallExpression<'a>) {
+            if let Some(member) = e.callee.as_member_expression() {
+                self.spans.insert(member.span().start);
+            }
+            oxc_ast_visit::walk::walk_call_expression(self, e);
+        }
+        fn visit_chain_expression(&mut self, e: &ChainExpression<'a>) {
+            if let ChainElement::CallExpression(call) = &e.expression {
+                if let Some(member) = call.callee.as_member_expression() {
+                    self.spans.insert(member.span().start);
+                }
+            }
+            oxc_ast_visit::walk::walk_chain_expression(self, e);
+        }
+    }
+
+    let mut callees = Callees { spans: HashSet::new() };
+    callees.visit_program(program);
+    let state_kinds = collect_state_kinds(program, content);
+
+    #[derive(Clone, Copy)]
+    struct FnCtx {
+        return_date: bool,
+    }
+
+    struct Visitor<'s> {
+        facts: &'s Facts,
+        scoping: &'s Scoping,
+        content: &'s str,
+        callees: &'s HashSet<u32>,
+        state_kinds: &'s HashMap<String, RecvKind>,
+        class_stack: Vec<String>,
+        fn_stack: Vec<FnCtx>,
+        out: Vec<(u32, String, String, &'static str)>,
+    }
+
+    impl<'s> Visitor<'s> {
+        fn current_class(&self) -> Option<&str> {
+            self.class_stack.iter().rev().find(|class| !class.is_empty()).map(String::as_str)
+        }
+        fn is_date(&self, expr: &Expression<'_>) -> bool {
+            is_date_expr(self.facts, self.scoping, expr, self.current_class())
+        }
+        fn gate(
+            &mut self,
+            start: u32,
+            message: impl Into<String>,
+            hint: impl Into<String>,
+            code: &'static str,
+        ) {
+            self.out.push((start, message.into(), hint.into(), code));
+        }
+        fn gate_condition(&mut self, expr: &Expression<'_>) {
+            if self.is_date(expr) {
+                self.gate(
+                    expr.span().start,
+                    "Date values cannot be used as conditions",
+                    "Date values are always truthy; compare `.getTime()` explicitly",
+                    "mx-js-syntax",
+                );
+            }
+        }
+        fn method_checker_covers(&self, object: &Expression<'_>) -> bool {
+            match strip(object) {
+                Expression::NewExpression(n) => is_new_date(self.facts, self.scoping, n),
+                Expression::Identifier(id) => {
+                    self.state_kinds.get(id.name.as_str()) == Some(&RecvKind::Date)
+                }
+                _ => false,
+            }
+        }
+        fn is_date_returning_callback(&self, expr: &Expression<'_>) -> bool {
+            match strip(expr) {
+                Expression::ArrowFunctionExpression(a) => {
+                    return_annotation(a.return_type.as_deref(), self.content) == Some(true)
+                }
+                Expression::FunctionExpression(f) => {
+                    return_annotation(f.return_type.as_deref(), self.content) == Some(true)
+                }
+                Expression::Identifier(id) => symbol_of(self.scoping, id).is_some_and(|symbol| {
+                    let symbol = resolve_fn_alias(self.facts, symbol);
+                    self.facts.functions.get(&symbol).is_some_and(FnFact::returns_date)
+                }),
+                _ => false,
+            }
+        }
+        fn check_args_against(
+            &mut self,
+            args: &[&Expression<'_>],
+            params: &[ParamFact],
+            fallback_span: u32,
+            callee: &str,
+        ) {
+            for (index, arg) in args.iter().enumerate() {
+                let is_date = self.is_date(arg);
+                match params.get(index) {
+                    Some(param) if param.kind == ParamKind::Date => {
+                        if !is_date {
+                            self.gate(
+                                arg.span().start,
+                                format!("`{callee}` expects a Date at argument {}", index + 1),
+                                "Pass a Date value or call `.getTime()`",
+                                "mx-js-syntax",
+                            );
+                        }
+                    }
+                    Some(_) | None => {
+                        if is_date {
+                            self.gate(
+                                arg.span().start,
+                                format!(
+                                    "Date values cannot be passed to `{callee}` without a `: Date` parameter"
+                                ),
+                                "Annotate the parameter with `: Date` or pass `.getTime()`",
+                                "mx-js-syntax",
+                            );
+                        }
+                    }
+                }
+            }
+            for (index, param) in params.iter().enumerate() {
+                if param.kind == ParamKind::Date
+                    && index >= args.len()
+                    && !param.defaulted
+                    && !param.optional
+                {
+                    self.gate(
+                        fallback_span,
+                        format!("`{callee}` is missing its Date argument"),
+                        "Pass a Date value",
+                        "mx-js-syntax",
+                    );
+                }
+            }
+        }
+        fn check_date_receiver_call(&mut self, call: &CallExpression<'_>) -> bool {
+            let Expression::StaticMemberExpression(member) = strip(&call.callee) else {
+                return false;
+            };
+            if !self.is_date(&member.object) {
+                return false;
+            }
+            let prop = member.property.name.as_str();
+            if DATE_METHODS.contains(&prop) {
+                if !call.arguments.is_empty() {
+                    self.gate(
+                        call.span.start,
+                        format!("Date method `.{prop}()` takes no arguments"),
+                        "Remove the extra arguments",
+                        "mx-js-syntax",
+                    );
+                }
+            } else if !self.method_checker_covers(&member.object) {
+                self.gate(
+                    member.span.start,
+                    format!("Method `.{prop}()` is not implemented for dates"),
+                    "Use a supported Date method or a `.cpp` helper",
+                    "mx-js-method",
+                );
+            }
+            true
+        }
+        fn check_call(&mut self, call: &CallExpression<'_>) {
+            let args: Vec<&Expression<'_>> =
+                call.arguments.iter().filter_map(|arg| arg.as_expression()).collect();
+            if self.check_date_receiver_call(call) {
+                return;
+            }
+            let callee = strip(&call.callee);
+            if let Expression::StaticMemberExpression(member) = callee {
+                if let Expression::Identifier(object) = strip(&member.object) {
+                    if object.name.as_str() == "console" {
+                        return;
+                    }
+                }
+                let prop = member.property.name.as_str();
+                let date_arg = args.first().is_some_and(|arg| self.is_date(arg));
+                let any_date_arg = args.iter().any(|arg| self.is_date(arg));
+                let specific = match (
+                    match strip(&member.object) {
+                        Expression::Identifier(object) => Some(object.name.as_str()),
+                        _ => None,
+                    },
+                    prop,
+                ) {
+                    (Some("Math"), _) if any_date_arg => Some((
+                        "`Math` functions cannot take Date values",
+                        "Call `.getTime()` first",
+                    )),
+                    (Some("JSON"), "stringify") if date_arg => Some((
+                        "`JSON.stringify(Date)` is not supported",
+                        "Serialize `.toISOString()` explicitly",
+                    )),
+                    (Some("JSON"), "parse") if date_arg => {
+                        Some(("`JSON.parse(Date)` is not supported", "Pass a string explicitly"))
+                    }
+                    (Some("Number"), "isNaN" | "isFinite" | "isInteger") if date_arg => {
+                        Some(("`Number` checks cannot take Date values", "Call `.getTime()` first"))
+                    }
+                    (Some("Array"), "isArray") if date_arg => Some((
+                        "`Array.isArray(Date)` is not supported",
+                        "Date values are not arrays",
+                    )),
+                    (Some("Object"), "keys" | "values" | "entries") if date_arg => Some((
+                        "`Object` enumeration cannot take Date values",
+                        "Date values have no supported enumerable members",
+                    )),
+                    (Some("Date"), "parse") if self.facts.date_global && date_arg => {
+                        Some(("`Date.parse(Date)` is not supported", "Call `.toISOString()` first"))
+                    }
+                    _ => None,
+                };
+                if let Some((message, hint)) = specific {
+                    self.gate(call.span.start, message, hint, "mx-js-syntax");
+                    return;
+                }
+                if any_date_arg {
+                    let params = class_of_expr(
+                        self.facts,
+                        self.scoping,
+                        &member.object,
+                        self.current_class(),
+                    )
+                    .and_then(|class| {
+                        self.facts.methods.get(&(class.to_string(), prop.to_string()))
+                    })
+                    .cloned();
+                    if let Some(fact) = params {
+                        let label = format!(".{prop}()");
+                        self.check_args_against(&args, &fact.params, call.span.start, &label);
+                    } else {
+                        for arg in &args {
+                            if self.is_date(arg) {
+                                self.gate(
+                                    arg.span().start,
+                                    format!(
+                                        "Date values cannot be passed to `.{prop}()` without a `: Date` parameter"
+                                    ),
+                                    "Pass `.getTime()` or annotate the parameter",
+                                    "mx-js-syntax",
+                                );
+                            }
+                        }
+                    }
+                }
+                if !matches!(prop, "setTimeout" | "setInterval") {
+                    for arg in &args {
+                        if self.is_date_returning_callback(arg) {
+                            self.gate(
+                                arg.span().start,
+                                "Date-returning callbacks are not supported here",
+                                "Return `.getTime()` or annotate the callback as returning a supported value",
+                                "mx-js-syntax",
+                            );
+                        }
+                    }
+                }
+                return;
+            }
+            if let Expression::Identifier(id) = callee {
+                let name = id.name.as_str();
+                if matches!(name, "String" | "Number" | "Boolean" | "parseInt" | "parseFloat") {
+                    if args.first().is_some_and(|arg| self.is_date(arg)) {
+                        let (message, hint) = match name {
+                            "String" => (
+                                "`String(Date)` is not supported".to_string(),
+                                "Call `.toISOString()` or `.getTime()` explicitly".to_string(),
+                            ),
+                            "Number" => (
+                                "`Number(Date)` is not supported".to_string(),
+                                "Call `.getTime()` for the timestamp".to_string(),
+                            ),
+                            "Boolean" => (
+                                "`Boolean(Date)` is not supported".to_string(),
+                                "Date values are always truthy; compare explicitly".to_string(),
+                            ),
+                            _ => (
+                                format!("`{name}(Date)` is not supported"),
+                                "Call `.toISOString()` first".to_string(),
+                            ),
+                        };
+                        self.gate(call.span.start, message, hint, "mx-js-syntax");
+                    }
+                    return;
+                }
+                if matches!(name, "setTimeout" | "setInterval") {
+                    for arg in &args {
+                        if self.is_date(arg) {
+                            self.gate(
+                                arg.span().start,
+                                "Date values cannot be used as timer callbacks or delays",
+                                "Pass `.getTime()` for a delay",
+                                "mx-js-syntax",
+                            );
+                        }
+                    }
+                    return;
+                }
+                if matches!(name, "clearTimeout" | "clearInterval") {
+                    for arg in &args {
+                        if self.is_date(arg) {
+                            self.gate(
+                                arg.span().start,
+                                "Date values cannot be used as timer handles",
+                                "Pass the handle returned by `setTimeout`/`setInterval`",
+                                "mx-js-syntax",
+                            );
+                        }
+                    }
+                    return;
+                }
+                let symbol = symbol_of(self.scoping, id);
+                if let Some(symbol) = symbol {
+                    let symbol = resolve_fn_alias(self.facts, symbol);
+                    if let Some(fact) = self.facts.functions.get(&symbol).cloned() {
+                        self.check_args_against(&args, &fact.params, call.span.start, name);
+                        return;
+                    }
+                }
+                for arg in &args {
+                    if self.is_date(arg) {
+                        self.gate(
+                            arg.span().start,
+                            format!(
+                                "Date values cannot be passed to `{name}` without a known `: Date` parameter"
+                            ),
+                            "Annotate the callee parameter with `: Date` or pass `.getTime()`",
+                            "mx-js-syntax",
+                        );
+                    }
+                }
+                for arg in &args {
+                    if self.is_date_returning_callback(arg) {
+                        self.gate(
+                            arg.span().start,
+                            "Date-returning callbacks are not supported here",
+                            "Return `.getTime()` or annotate the callback as returning a supported value",
+                            "mx-js-syntax",
+                        );
+                    }
+                }
+                return;
+            }
+            // Unknown callee shape: no parameter facts, so Date arguments
+            // cannot cross this boundary safely.
+            for arg in &args {
+                if self.is_date(arg) {
+                    self.gate(
+                        arg.span().start,
+                        "Date values cannot be passed through this call",
+                        "Pass `.getTime()` or annotate a supported parameter",
+                        "mx-js-syntax",
+                    );
+                }
+            }
+            for arg in &args {
+                if self.is_date_returning_callback(arg) {
+                    self.gate(
+                        arg.span().start,
+                        "Date-returning callbacks are not supported here",
+                        "Return `.getTime()` or annotate the callback as returning a supported value",
+                        "mx-js-syntax",
+                    );
+                }
+            }
+        }
+        fn target_is_date(&self, target: &AssignmentTarget<'_>) -> bool {
+            match target {
+                AssignmentTarget::AssignmentTargetIdentifier(id) => target_symbol(self.scoping, id)
+                    .is_some_and(|symbol| self.facts.dates.contains(&symbol)),
+                AssignmentTarget::StaticMemberExpression(member) => {
+                    member_is_date_field(self.facts, self.scoping, member, self.current_class())
+                }
+                AssignmentTarget::PrivateFieldExpression(private) => {
+                    private_member_is_date(self.facts, self.scoping, private, self.current_class())
+                }
+                _ => false,
+            }
+        }
+        fn check_return_expr(&mut self, expr: &Expression<'_>) {
+            let Some(ctx) = self.fn_stack.last().copied() else { return };
+            let is_date = self.is_date(expr);
+            if is_date && !ctx.return_date {
+                self.gate(
+                    expr.span().start,
+                    "Date values cannot be returned without an explicit `: Date` return type",
+                    "Annotate the function with `: Date` or return `.getTime()`",
+                    "mx-js-syntax",
+                );
+            } else if !is_date && ctx.return_date {
+                self.gate(
+                    expr.span().start,
+                    "A `: Date` function must return a Date value",
+                    "Return a Date or change the return annotation",
+                    "mx-js-syntax",
+                );
+            }
+        }
+        fn class_carries_date(&self, name: &str) -> bool {
+            self.facts.class_date_fields.get(name).is_some_and(|fields| !fields.is_empty())
+                || self
+                    .facts
+                    .class_private_date_fields
+                    .get(name)
+                    .is_some_and(|fields| !fields.is_empty())
+                || self
+                    .facts
+                    .methods
+                    .iter()
+                    .any(|((class, _), fact)| class == name && fact.returns_date())
+        }
+
+        fn class_body_carries_date(&self, class: &Class<'_>) -> bool {
+            for element in &class.body.body {
+                match element {
+                    ClassElement::PropertyDefinition(property) => {
+                        let annotated = property.type_annotation.as_deref().is_some_and(|ann| {
+                            annotation_text(self.content, ann) == "Date" && self.facts.date_global
+                        });
+                        let initialized =
+                            property.value.as_ref().is_some_and(|value| self.is_date(value));
+                        if annotated || initialized {
+                            return true;
+                        }
+                    }
+                    ClassElement::MethodDefinition(method) => {
+                        if self.facts.date_global
+                            && return_annotation(method.value.return_type.as_deref(), self.content)
+                                == Some(true)
+                        {
+                            return true;
+                        }
+                        if method.kind == MethodDefinitionKind::Constructor {
+                            for param in &method.value.params.items {
+                                if param.accessibility.is_none() {
+                                    continue;
+                                }
+                                let annotated =
+                                    param.type_annotation.as_deref().is_some_and(|ann| {
+                                        annotation_text(self.content, ann) == "Date"
+                                            && self.facts.date_global
+                                    });
+                                let initialized = param
+                                    .initializer
+                                    .as_ref()
+                                    .is_some_and(|init| self.is_date(init));
+                                if annotated || initialized {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            false
+        }
+
+        fn gate_date_export(&mut self, span: u32) {
+            self.gate(
+                span,
+                "Date values cannot be exported across modules",
+                "Convert to `.getTime()` or `.toISOString()` before exporting",
+                "mx-js-syntax",
+            );
+        }
+
+        fn check_export_declaration(&mut self, declaration: &Declaration<'_>, span: u32) {
+            match declaration {
+                Declaration::VariableDeclaration(vars) => {
+                    for declarator in &vars.declarations {
+                        let annotated = declarator.type_annotation.as_deref().is_some_and(|ann| {
+                            annotation_text(self.content, ann) == "Date" && self.facts.date_global
+                        });
+                        let init_date =
+                            declarator.init.as_ref().is_some_and(|init| self.is_date(init));
+                        let class_date = declarator
+                            .init
+                            .as_ref()
+                            .and_then(|init| unwrap_class_expression(init))
+                            .is_some_and(|class| self.class_body_carries_date(class));
+                        if annotated || init_date || class_date {
+                            self.gate_date_export(span);
+                            return;
+                        }
+                    }
+                }
+                Declaration::FunctionDeclaration(function) => {
+                    if self.facts.date_global
+                        && return_annotation(function.return_type.as_deref(), self.content)
+                            == Some(true)
+                    {
+                        self.gate_date_export(span);
+                    }
+                }
+                Declaration::ClassDeclaration(class) => {
+                    if self.class_body_carries_date(class) {
+                        self.gate_date_export(span);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    impl<'a> Visit<'a> for Visitor<'_> {
+        fn visit_export_declaration(&mut self, e: &ExportDeclaration<'a>) {
+            self.check_export_declaration(&e.declaration, e.span.start);
+            oxc_ast_visit::walk::walk_export_declaration(self, e);
+        }
+
+        fn visit_export_default_declaration(&mut self, e: &ExportDefaultDeclaration<'a>) {
+            match &e.declaration {
+                ExportDefaultDeclarationKind::FunctionDeclaration(function) => {
+                    if self.facts.date_global
+                        && return_annotation(function.return_type.as_deref(), self.content)
+                            == Some(true)
+                    {
+                        self.gate_date_export(e.span.start);
+                    }
+                }
+                ExportDefaultDeclarationKind::ClassDeclaration(class) => {
+                    if self.class_body_carries_date(class) {
+                        self.gate_date_export(e.span.start);
+                    }
+                }
+                other => {
+                    if let Some(expr) = other.as_expression() {
+                        if self.is_date(expr) {
+                            self.gate_date_export(e.span.start);
+                        }
+                    }
+                }
+            }
+            oxc_ast_visit::walk::walk_export_default_declaration(self, e);
+        }
+
+        fn visit_export_named_declaration(&mut self, e: &ExportNamedDeclaration<'a>) {
+            for specifier in &e.specifiers {
+                let ModuleExportName::IdentifierReference(id) = &specifier.local else {
+                    continue;
+                };
+                let symbol = symbol_of(self.scoping, id);
+                let is_date = symbol.is_some_and(|symbol| self.facts.dates.contains(&symbol));
+                let returns_date = symbol
+                    .map(|symbol| resolve_fn_alias(self.facts, symbol))
+                    .and_then(|symbol| self.facts.functions.get(&symbol))
+                    .is_some_and(FnFact::returns_date);
+                if is_date || returns_date || self.class_carries_date(id.name.as_str()) {
+                    self.gate_date_export(specifier.span.start);
+                }
+            }
+            oxc_ast_visit::walk::walk_export_named_declaration(self, e);
+        }
+
+        fn visit_class(&mut self, c: &Class<'a>) {
+            let name = self.facts.class_by_span.get(&c.span.start).cloned();
+            self.class_stack.push(name.unwrap_or_default());
+            oxc_ast_visit::walk::walk_class(self, c);
+            self.class_stack.pop();
+        }
+
+        fn visit_function(&mut self, f: &Function<'a>, flags: ScopeFlags) {
+            let return_date = return_annotation(f.return_type.as_deref(), self.content)
+                == Some(true)
+                && self.facts.date_global;
+            self.fn_stack.push(FnCtx { return_date });
+            oxc_ast_visit::walk::walk_function(self, f, flags);
+            self.fn_stack.pop();
+        }
+
+        fn visit_arrow_function_expression(&mut self, a: &ArrowFunctionExpression<'a>) {
+            let return_date = return_annotation(a.return_type.as_deref(), self.content)
+                == Some(true)
+                && self.facts.date_global;
+            self.fn_stack.push(FnCtx { return_date });
+            if let Some(body) = a.body.as_expression() {
+                self.check_return_expr(body);
+            }
+            oxc_ast_visit::walk::walk_arrow_function_expression(self, a);
+            self.fn_stack.pop();
+        }
+
+        fn visit_return_statement(&mut self, r: &ReturnStatement<'a>) {
+            if let Some(argument) = &r.argument {
+                self.check_return_expr(argument);
+            } else if self.fn_stack.last().is_some_and(|ctx| ctx.return_date) {
+                self.gate(
+                    r.span.start,
+                    "A `: Date` function must return a Date value",
+                    "Return a Date or change the return annotation",
+                    "mx-js-syntax",
+                );
+            }
+            oxc_ast_visit::walk::walk_return_statement(self, r);
+        }
+
+        fn visit_formal_parameter(&mut self, p: &FormalParameter<'a>) {
+            if p.accessibility.is_none() {
+                let annotation =
+                    p.type_annotation.as_deref().map(|ann| annotation_text(self.content, ann));
+                let annotated_date =
+                    annotation.is_some_and(|text| text == "Date" && self.facts.date_global);
+                let init_date = p.initializer.as_deref().is_some_and(|init| self.is_date(init));
+                if annotated_date {
+                    if !matches!(p.pattern, BindingPattern::BindingIdentifier(_)) {
+                        self.gate(
+                            p.span.start,
+                            "Date parameters cannot be destructured",
+                            "Take a single `: Date` binding instead",
+                            "mx-js-syntax",
+                        );
+                    }
+                    if let Some(init) = &p.initializer {
+                        if !init_date {
+                            self.gate(
+                                init.span().start,
+                                "A `: Date` parameter default must be a Date value",
+                                "Use `new Date(...)` or change the annotation",
+                                "mx-js-syntax",
+                            );
+                        }
+                    }
+                } else if init_date {
+                    self.gate(
+                        p.span.start,
+                        "A parameter holding a Date needs a `: Date` annotation",
+                        "Annotate the parameter with `: Date`",
+                        "mx-js-syntax",
+                    );
+                }
+            }
+            oxc_ast_visit::walk::walk_formal_parameter(self, p);
+        }
+
+        fn visit_variable_declarator(&mut self, d: &VariableDeclarator<'a>) {
+            if let BindingPattern::BindingIdentifier(_) = &d.id {
+                let annotation =
+                    d.type_annotation.as_deref().map(|ann| annotation_text(self.content, ann));
+                let annotated_date =
+                    annotation.is_some_and(|text| text == "Date" && self.facts.date_global);
+                let annotated_class = annotation.and_then(|text| resolve_class(self.facts, text));
+                let init_date = d.init.as_ref().is_some_and(|init| self.is_date(init));
+                if annotated_date {
+                    match &d.init {
+                        None => self.gate(
+                            d.span.start,
+                            "A `: Date` variable needs an initializer",
+                            "Initialize with `new Date(...)` or a Date value",
+                            "mx-js-syntax",
+                        ),
+                        Some(init) if !init_date => self.gate(
+                            init.span().start,
+                            "A `: Date` variable must be initialized with a Date value",
+                            "Use `new Date(...)` or a Date-typed value",
+                            "mx-js-syntax",
+                        ),
+                        _ => {}
+                    }
+                } else if annotated_class.is_some() {
+                    if let Some(init) = &d.init {
+                        if init_date {
+                            self.gate(
+                                init.span().start,
+                                "A class-typed variable cannot be initialized with a Date",
+                                "Use the class constructor or change the annotation",
+                                "mx-js-syntax",
+                            );
+                        }
+                    }
+                }
+            } else if let Some(init) = &d.init {
+                if self.is_date(init) {
+                    self.gate(
+                        d.span.start,
+                        "Destructuring a Date value is not supported",
+                        "Read `.getTime()` or `.toISOString()` first",
+                        "mx-js-syntax",
+                    );
+                }
+            }
+            oxc_ast_visit::walk::walk_variable_declarator(self, d);
+        }
+
+        fn visit_assignment_pattern(&mut self, p: &AssignmentPattern<'a>) {
+            if self.is_date(&p.right) {
+                self.gate(
+                    p.right.span().start,
+                    "Date values cannot be used as destructuring defaults",
+                    "Use `.getTime()` or a plain value",
+                    "mx-js-syntax",
+                );
+            }
+            oxc_ast_visit::walk::walk_assignment_pattern(self, p);
+        }
+
+        fn visit_assignment_expression(&mut self, a: &AssignmentExpression<'a>) {
+            let right_date = self.is_date(&a.right);
+            let target_date = self.target_is_date(&a.left);
+            if a.operator != AssignmentOperator::Assign {
+                if right_date || target_date {
+                    self.gate(
+                        a.span.start,
+                        format!(
+                            "Operator `{}` cannot be applied to Date values",
+                            a.operator.as_str()
+                        ),
+                        "Use `.getTime()` for arithmetic",
+                        "mx-js-op",
+                    );
+                }
+            } else if right_date && !target_date {
+                match &a.left {
+                    AssignmentTarget::AssignmentTargetIdentifier(_) => self.gate(
+                        a.span.start,
+                        "Date values cannot be assigned to an untyped target",
+                        "Declare the target with `: Date`",
+                        "mx-js-syntax",
+                    ),
+                    AssignmentTarget::StaticMemberExpression(member) => self.gate(
+                        a.span.start,
+                        format!(
+                            "Date values cannot be assigned to field `{}` without a `: Date` annotation",
+                            member.property.name
+                        ),
+                        "Declare the field with `: Date`",
+                        "mx-js-syntax",
+                    ),
+                    AssignmentTarget::PrivateFieldExpression(_) => self.gate(
+                        a.span.start,
+                        "Date values cannot be assigned to an untyped private field",
+                        "Declare the field with `: Date`",
+                        "mx-js-syntax",
+                    ),
+                    _ => self.gate(
+                        a.span.start,
+                        "Destructuring assignment from a Date value is not supported",
+                        "Read `.getTime()` or `.toISOString()` first",
+                        "mx-js-syntax",
+                    ),
+                }
+            } else if !right_date && target_date {
+                self.gate(
+                    a.span.start,
+                    "A Date target cannot be assigned a non-Date value",
+                    "Assign a Date value or change the target type",
+                    "mx-js-syntax",
+                );
+            }
+            if let Some(object) = assignment_target_object(&a.left) {
+                if self.is_date(object) {
+                    self.gate(
+                        a.left.span().start,
+                        "Date values have no supported writable members",
+                        "Use a supported Date method",
+                        "mx-js-member",
+                    );
+                }
+            }
+            oxc_ast_visit::walk::walk_assignment_expression(self, a);
+        }
+
+        fn visit_new_expression(&mut self, n: &NewExpression<'a>) {
+            let args: Vec<&Expression<'a>> =
+                n.arguments.iter().filter_map(|arg| arg.as_expression()).collect();
+            if is_new_date(self.facts, self.scoping, n) {
+                if args.len() > 1 {
+                    for arg in &args {
+                        if self.is_date(arg)
+                            && !matches!(
+                                strip(arg),
+                                Expression::Identifier(_) | Expression::NewExpression(_)
+                            )
+                        {
+                            self.gate(
+                                arg.span().start,
+                                "Date parts in `new Date(...)` must be Date bindings or `new Date(...)`",
+                                "Call `.getTime()` on other Date expressions",
+                                "mx-js-syntax",
+                            );
+                        }
+                    }
+                }
+                oxc_ast_visit::walk::walk_new_expression(self, n);
+                return;
+            }
+            if let Expression::Identifier(id) = strip(&n.callee) {
+                if let Some(class) = resolve_class(self.facts, id.name.as_str()) {
+                    if let Some(fact) = self.facts.constructors.get(class).cloned() {
+                        let label = id.name.to_string();
+                        self.check_args_against(&args, &fact.params, n.span.start, &label);
+                    } else {
+                        for arg in &args {
+                            if self.is_date(arg) {
+                                self.gate(
+                                    arg.span().start,
+                                    format!("`{}` has no constructor that accepts a Date", id.name),
+                                    "Pass `.getTime()` or add a `: Date` constructor parameter",
+                                    "mx-js-syntax",
+                                );
+                            }
+                        }
+                    }
+                    oxc_ast_visit::walk::walk_new_expression(self, n);
+                    return;
+                }
+            }
+            for arg in &args {
+                if self.is_date(arg) {
+                    self.gate(
+                        arg.span().start,
+                        "Date values cannot be passed to this constructor",
+                        "Pass `.getTime()` or a supported value",
+                        "mx-js-syntax",
+                    );
+                }
+            }
+            for arg in &args {
+                if self.is_date_returning_callback(arg) {
+                    self.gate(
+                        arg.span().start,
+                        "Date-returning callbacks are not supported in constructors",
+                        "Return `.getTime()` or annotate the constructor parameter",
+                        "mx-js-syntax",
+                    );
+                }
+            }
+            oxc_ast_visit::walk::walk_new_expression(self, n);
+        }
+
+        fn visit_call_expression(&mut self, e: &CallExpression<'a>) {
+            self.check_call(e);
+            oxc_ast_visit::walk::walk_call_expression(self, e);
+        }
+
+        fn visit_template_literal(&mut self, e: &TemplateLiteral<'a>) {
+            if e.expressions.iter().any(|expr| self.is_date(expr)) {
+                self.gate(
+                    e.span.start,
+                    "Date values cannot be interpolated into template literals",
+                    "Call `.toISOString()` or `.getTime()` first",
+                    "mx-js-syntax",
+                );
+            }
+            oxc_ast_visit::walk::walk_template_literal(self, e);
+        }
+
+        fn visit_binary_expression(&mut self, e: &BinaryExpression<'a>) {
+            if e.operator != BinaryOperator::Instanceof
+                && (self.is_date(&e.left) || self.is_date(&e.right))
+            {
+                let hint = if e.operator.is_equality() {
+                    "Date identity comparisons are not supported; compare `.getTime()` values for time equality"
+                } else if e.operator.is_compare() {
+                    "Compare `.getTime()` values"
+                } else {
+                    "Call `.getTime()` or `.toISOString()` first"
+                };
+                self.gate(
+                    e.span.start,
+                    format!("Operator `{}` cannot be applied to Date values", e.operator.as_str()),
+                    hint,
+                    "mx-js-op",
+                );
+            }
+            oxc_ast_visit::walk::walk_binary_expression(self, e);
+        }
+
+        fn visit_logical_expression(&mut self, e: &LogicalExpression<'a>) {
+            if self.is_date(&e.left) || self.is_date(&e.right) {
+                self.gate(
+                    e.span.start,
+                    format!("Operator `{}` cannot be applied to Date values", e.operator.as_str()),
+                    "Date values are always truthy; use an explicit comparison",
+                    "mx-js-op",
+                );
+            }
+            oxc_ast_visit::walk::walk_logical_expression(self, e);
+        }
+
+        fn visit_unary_expression(&mut self, e: &UnaryExpression<'a>) {
+            if !matches!(
+                e.operator,
+                UnaryOperator::Typeof | UnaryOperator::Void | UnaryOperator::Delete
+            ) && self.is_date(&e.argument)
+            {
+                self.gate(
+                    e.span.start,
+                    format!("Operator `{}` cannot be applied to Date values", e.operator.as_str()),
+                    "Call `.getTime()` first",
+                    "mx-js-op",
+                );
+            }
+            oxc_ast_visit::walk::walk_unary_expression(self, e);
+        }
+
+        fn visit_if_statement(&mut self, s: &IfStatement<'a>) {
+            self.gate_condition(&s.test);
+            oxc_ast_visit::walk::walk_if_statement(self, s);
+        }
+        fn visit_while_statement(&mut self, s: &WhileStatement<'a>) {
+            self.gate_condition(&s.test);
+            oxc_ast_visit::walk::walk_while_statement(self, s);
+        }
+        fn visit_do_while_statement(&mut self, s: &DoWhileStatement<'a>) {
+            self.gate_condition(&s.test);
+            oxc_ast_visit::walk::walk_do_while_statement(self, s);
+        }
+        fn visit_for_statement(&mut self, s: &ForStatement<'a>) {
+            if let Some(test) = &s.test {
+                self.gate_condition(test);
+            }
+            oxc_ast_visit::walk::walk_for_statement(self, s);
+        }
+        fn visit_conditional_expression(&mut self, e: &ConditionalExpression<'a>) {
+            self.gate_condition(&e.test);
+            let consequent = self.is_date(&e.consequent);
+            let alternate = self.is_date(&e.alternate);
+            if consequent != alternate {
+                self.gate(
+                    e.span.start,
+                    "Conditional branches cannot mix Date and non-Date values",
+                    "Convert both branches to `.getTime()` or make both Dates",
+                    "mx-js-syntax",
+                );
+            }
+            oxc_ast_visit::walk::walk_conditional_expression(self, e);
+        }
+        fn visit_switch_statement(&mut self, s: &SwitchStatement<'a>) {
+            self.gate_condition(&s.discriminant);
+            oxc_ast_visit::walk::walk_switch_statement(self, s);
+        }
+        fn visit_switch_case(&mut self, c: &SwitchCase<'a>) {
+            if let Some(test) = &c.test {
+                if self.is_date(test) {
+                    self.gate(
+                        test.span().start,
+                        "Date values cannot be used as switch cases",
+                        "Switch on `.getTime()` or `.toISOString()`",
+                        "mx-js-syntax",
+                    );
+                }
+            }
+            oxc_ast_visit::walk::walk_switch_case(self, c);
+        }
+
+        fn visit_static_member_expression(&mut self, e: &StaticMemberExpression<'a>) {
+            if !self.callees.contains(&e.span.start) && self.is_date(&e.object) {
+                let prop = e.property.name.as_str();
+                if DATE_METHODS.contains(&prop) {
+                    self.gate(
+                        e.span.start,
+                        format!("Date method `{prop}` used as a value"),
+                        "Call the method directly",
+                        "mx-js-member",
+                    );
+                } else {
+                    self.gate(
+                        e.span.start,
+                        format!("Unsupported Date member `{prop}`"),
+                        "Use a supported Date method or a `.cpp` helper",
+                        "mx-js-member",
+                    );
+                }
+            }
+            oxc_ast_visit::walk::walk_static_member_expression(self, e);
+        }
+
+        fn visit_computed_member_expression(&mut self, e: &ComputedMemberExpression<'a>) {
+            if self.is_date(&e.object) {
+                self.gate(
+                    e.span.start,
+                    "Computed member access on Date values is not supported",
+                    "Use a supported Date method directly",
+                    "mx-js-member",
+                );
+            }
+            if self.is_date(&e.expression) {
+                self.gate(
+                    e.expression.span().start,
+                    "Date values cannot be used as property keys",
+                    "Convert to `.getTime()` or a string first",
+                    "mx-js-syntax",
+                );
+            }
+            oxc_ast_visit::walk::walk_computed_member_expression(self, e);
+        }
+
+        fn visit_private_field_expression(&mut self, e: &PrivateFieldExpression<'a>) {
+            if self.is_date(&e.object) {
+                self.gate(
+                    e.span.start,
+                    "Private fields on Date values are not supported",
+                    "Use a supported Date method",
+                    "mx-js-member",
+                );
+            }
+            oxc_ast_visit::walk::walk_private_field_expression(self, e);
+        }
+
+        fn visit_array_expression(&mut self, e: &ArrayExpression<'a>) {
+            for element in &e.elements {
+                if let Some(expr) = element.as_expression() {
+                    if self.is_date(expr) {
+                        self.gate(
+                            expr.span().start,
+                            "Date values cannot be stored in array literals",
+                            "Store `.getTime()` timestamps instead",
+                            "mx-js-syntax",
+                        );
+                    }
+                }
+            }
+            oxc_ast_visit::walk::walk_array_expression(self, e);
+        }
+
+        fn visit_object_expression(&mut self, e: &ObjectExpression<'a>) {
+            for property in &e.properties {
+                if let ObjectPropertyKind::ObjectProperty(p) = property {
+                    if p.computed {
+                        if let Some(key) = p.key.as_expression() {
+                            if self.is_date(key) {
+                                self.gate(
+                                    key.span().start,
+                                    "Date values cannot be used as property keys",
+                                    "Convert to `.getTime()` or a string first",
+                                    "mx-js-syntax",
+                                );
+                            }
+                        }
+                    }
+                    if self.is_date(&p.value) {
+                        self.gate(
+                            p.value.span().start,
+                            "Date values cannot be stored in object literals",
+                            "Store `.getTime()` or `.toISOString()` values instead",
+                            "mx-js-syntax",
+                        );
+                    }
+                }
+            }
+            oxc_ast_visit::walk::walk_object_expression(self, e);
+        }
+
+        fn visit_spread_element(&mut self, e: &SpreadElement<'a>) {
+            if self.is_date(&e.argument) {
+                self.gate(
+                    e.span.start,
+                    "Date values cannot be spread",
+                    "Pass `.getTime()` values instead",
+                    "mx-js-syntax",
+                );
+            }
+            oxc_ast_visit::walk::walk_spread_element(self, e);
+        }
+
+        fn visit_jsx_expression_container(&mut self, e: &JSXExpressionContainer<'a>) {
+            if let Some(expr) = e.expression.as_expression() {
+                if self.is_date(expr) {
+                    self.gate(
+                        e.span.start,
+                        "Date values cannot be used directly in JSX",
+                        "Call `.toISOString()` or `.getTime()` first",
+                        "mx-js-syntax",
+                    );
+                }
+            }
+            oxc_ast_visit::walk::walk_jsx_expression_container(self, e);
+        }
+
+        fn visit_jsx_spread_attribute(&mut self, a: &JSXSpreadAttribute<'a>) {
+            if self.is_date(&a.argument) {
+                self.gate(
+                    a.argument.span().start,
+                    "Date values cannot be spread into JSX attributes",
+                    "Pass `.getTime()` or an object of supported values",
+                    "mx-js-syntax",
+                );
+            }
+            oxc_ast_visit::walk::walk_jsx_spread_attribute(self, a);
+        }
+
+        fn visit_for_of_statement(&mut self, s: &ForOfStatement<'a>) {
+            if self.is_date(&s.right) {
+                self.gate(
+                    s.right.span().start,
+                    "Date values are not iterable",
+                    "Iterate over an array of timestamps instead",
+                    "mx-js-syntax",
+                );
+            }
+            oxc_ast_visit::walk::walk_for_of_statement(self, s);
+        }
+
+        fn visit_for_in_statement(&mut self, s: &ForInStatement<'a>) {
+            if self.is_date(&s.right) {
+                self.gate(
+                    s.right.span().start,
+                    "Date values have no supported enumerable properties",
+                    "Enumerate an object of timestamps instead",
+                    "mx-js-syntax",
+                );
+            }
+            oxc_ast_visit::walk::walk_for_in_statement(self, s);
+        }
+
+        fn visit_throw_statement(&mut self, s: &ThrowStatement<'a>) {
+            if self.is_date(&s.argument) {
+                self.gate(
+                    s.argument.span().start,
+                    "Date values cannot be thrown directly",
+                    "Throw a string or Error object instead",
+                    "mx-js-syntax",
+                );
+            }
+            oxc_ast_visit::walk::walk_throw_statement(self, s);
+        }
+
+        fn visit_await_expression(&mut self, e: &AwaitExpression<'a>) {
+            if self.is_date(&e.argument) {
+                self.gate(
+                    e.argument.span().start,
+                    "Date values cannot be awaited",
+                    "Await a Promise or use `.getTime()` directly",
+                    "mx-js-syntax",
+                );
+            }
+            oxc_ast_visit::walk::walk_await_expression(self, e);
+        }
+
+        fn visit_yield_expression(&mut self, e: &YieldExpression<'a>) {
+            if let Some(argument) = &e.argument {
+                if self.is_date(argument) {
+                    self.gate(
+                        argument.span().start,
+                        "Date values cannot be yielded",
+                        "Yield `.getTime()` or a supported value",
+                        "mx-js-syntax",
+                    );
+                }
+            }
+            oxc_ast_visit::walk::walk_yield_expression(self, e);
+        }
+
+        fn visit_property_definition(&mut self, p: &PropertyDefinition<'a>) {
+            if p.declare {
+                oxc_ast_visit::walk::walk_property_definition(self, p);
+                return;
+            }
+            if p.computed {
+                if let Some(key) = p.key.as_expression() {
+                    if self.is_date(key) {
+                        self.gate(
+                            key.span().start,
+                            "Date values cannot be used as property keys",
+                            "Convert to `.getTime()` or a string first",
+                            "mx-js-syntax",
+                        );
+                    }
+                }
+            }
+            let annotation =
+                p.type_annotation.as_deref().map(|ann| annotation_text(self.content, ann));
+            let annotated_date =
+                annotation.is_some_and(|text| text == "Date" && self.facts.date_global);
+            let init_date = p.value.as_ref().is_some_and(|value| self.is_date(value));
+            if p.r#static && (annotated_date || init_date) {
+                self.gate(
+                    p.span.start,
+                    "Static Date fields are not supported",
+                    "Use an instance field or a `.cpp` helper",
+                    "mx-js-syntax",
+                );
+            } else if annotated_date {
+                match &p.value {
+                    None => self.gate(
+                        p.span.start,
+                        "A `: Date` field needs an initializer",
+                        "Initialize with `new Date(...)`",
+                        "mx-js-syntax",
+                    ),
+                    Some(value) if !init_date => self.gate(
+                        value.span().start,
+                        "A `: Date` field must be initialized with a Date value",
+                        "Use `new Date(...)` or change the annotation",
+                        "mx-js-syntax",
+                    ),
+                    _ => {}
+                }
+            } else if let Some(value) = &p.value {
+                if init_date {
+                    self.gate(
+                        value.span().start,
+                        "A class field holding a Date needs a `: Date` annotation",
+                        "Annotate the field with `: Date`",
+                        "mx-js-syntax",
+                    );
+                }
+            }
+            oxc_ast_visit::walk::walk_property_definition(self, p);
+        }
+
+        fn visit_method_definition(&mut self, m: &MethodDefinition<'a>) {
+            if m.computed {
+                if let Some(key) = m.key.as_expression() {
+                    if self.is_date(key) {
+                        self.gate(
+                            key.span().start,
+                            "Date values cannot be used as property keys",
+                            "Convert to `.getTime()` or a string first",
+                            "mx-js-syntax",
+                        );
+                    }
+                }
+            }
+            if m.kind == MethodDefinitionKind::Constructor {
+                for param in &m.value.params.items {
+                    if param.accessibility.is_none() {
+                        continue;
+                    }
+                    let annotation = param
+                        .type_annotation
+                        .as_deref()
+                        .map(|ann| annotation_text(self.content, ann));
+                    let annotated_date =
+                        annotation.is_some_and(|text| text == "Date" && self.facts.date_global);
+                    let init_date =
+                        param.initializer.as_deref().is_some_and(|init| self.is_date(init));
+                    if annotated_date {
+                        if let Some(init) = &param.initializer {
+                            if !init_date {
+                                self.gate(
+                                    init.span().start,
+                                    "A `: Date` parameter property default must be a Date value",
+                                    "Use `new Date(...)` or change the annotation",
+                                    "mx-js-syntax",
+                                );
+                            }
+                        }
+                    } else if init_date {
+                        self.gate(
+                            param.span.start,
+                            "A constructor parameter property holding a Date needs a `: Date` annotation",
+                            "Annotate the parameter with `: Date`",
+                            "mx-js-syntax",
+                        );
+                    }
+                }
+            }
+            oxc_ast_visit::walk::walk_method_definition(self, m);
+        }
+    }
+
+    fn assignment_target_object<'a, 'b>(
+        target: &'b AssignmentTarget<'a>,
+    ) -> Option<&'b Expression<'a>> {
+        match target {
+            AssignmentTarget::StaticMemberExpression(member) => Some(&member.object),
+            AssignmentTarget::ComputedMemberExpression(member) => Some(&member.object),
+            AssignmentTarget::PrivateFieldExpression(private) => Some(&private.object),
+            _ => None,
+        }
+    }
+
+    let mut visitor = Visitor {
+        facts: &facts,
+        scoping,
+        content,
+        callees: &callees.spans,
+        state_kinds: &state_kinds,
+        class_stack: Vec::new(),
+        fn_stack: Vec::new(),
+        out: Vec::new(),
+    };
+    visitor.visit_program(program);
+    visitor.out.sort_by_key(|(start, ..)| *start);
+    let mut out = Vec::new();
+    for (start, message, hint, code) in visitor.out {
+        let (line, col) = offset_to_line_col_fast(offsets, start);
+        out.push(LintError {
+            severity: "error".into(),
+            code: code.into(),
+            message,
+            suggestion: Some(hint),
+            file_path: file_path.into(),
+            line,
+            col,
+        });
+    }
+    out
 }
 
 /// `mx-js-method`: method calls on provably-typed receivers where the
@@ -2428,6 +4642,9 @@ fn check_js_method_calls(
             Expression::ObjectExpression(_) => Some(RecvKind::Obj),
             Expression::NumericLiteral(_) | Expression::BigIntLiteral(_) => Some(RecvKind::Num),
             Expression::BooleanLiteral(_) => Some(RecvKind::Bool),
+            Expression::NewExpression(n) if matches!(&n.callee, Expression::Identifier(id) if id.name.as_str() == "Date") => {
+                Some(RecvKind::Date)
+            }
             Expression::Identifier(id) => states.get(id.name.as_str()).copied(),
             Expression::TSAsExpression(a) => recv_of(&a.expression, states),
             Expression::TSNonNullExpression(n) => recv_of(&n.expression, states),
@@ -2804,8 +5021,26 @@ fn collect_state_kinds(program: &Program, content: &str) -> HashMap<String, Recv
     struct Collector<'s> {
         content: &'s str,
         out: HashMap<String, RecvKind>,
+        /// `const alias = dateBinding` pairs, resolved after the walk so
+        /// declaration order does not matter.
+        aliases: Vec<(String, String)>,
     }
     impl<'a> Visit<'a> for Collector<'_> {
+        fn visit_formal_parameter(&mut self, p: &FormalParameter<'a>) {
+            if let (BindingPattern::BindingIdentifier(id), Some(ann)) =
+                (&p.pattern, &p.type_annotation)
+            {
+                if span_text(self.content, ann.span().start, ann.span().end)
+                    .trim()
+                    .trim_start_matches(':')
+                    .trim()
+                    == "Date"
+                {
+                    self.out.insert(id.name.to_string(), RecvKind::Date);
+                }
+            }
+            oxc_ast_visit::walk::walk_formal_parameter(self, p);
+        }
         fn visit_variable_declarator(&mut self, d: &VariableDeclarator<'a>) {
             if let Some(Expression::CallExpression(call)) = &d.init {
                 if let Expression::Identifier(id) = &call.callee {
@@ -2835,15 +5070,44 @@ fn collect_state_kinds(program: &Program, content: &str) -> HashMap<String, Recv
             // morphState-derived kind when both apply.
             if let (BindingPattern::BindingIdentifier(id), Some(init)) = (&d.id, &d.init) {
                 let text = span_text(self.content, init.span().start, init.span().end);
-                if let Some(kind) = sniff_state_kind(None, text) {
+                let annotated = d.type_annotation.as_ref().is_some_and(|a| {
+                    span_text(self.content, a.span().start, a.span().end)
+                        .trim()
+                        .trim_start_matches(':')
+                        .trim()
+                        == "Date"
+                });
+                let kind =
+                    if annotated { Some(RecvKind::Date) } else { sniff_state_kind(None, text) };
+                if let Some(kind) = kind {
                     self.out.entry(id.name.to_string()).or_insert(kind);
+                }
+                if let Expression::Identifier(src) = init {
+                    self.aliases.push((id.name.to_string(), src.name.to_string()));
                 }
             }
             oxc_ast_visit::walk::walk_variable_declarator(self, d);
         }
     }
-    let mut collector = Collector { content, out: HashMap::new() };
+    let mut collector = Collector { content, out: HashMap::new(), aliases: Vec::new() };
     collector.visit_program(program);
+    // `const copy = stamp` where `stamp` is provably a Date keeps the
+    // native receiver kind, so unsupported methods still report
+    // `mx-js-method` instead of slipping through to the C++ compiler.
+    loop {
+        let mut changed = false;
+        for (dst, src) in &collector.aliases {
+            if collector.out.get(src) == Some(&RecvKind::Date)
+                && collector.out.get(dst) != Some(&RecvKind::Date)
+            {
+                collector.out.insert(dst.clone(), RecvKind::Date);
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
     collector.out
 }
 
@@ -2966,6 +5230,11 @@ pub fn check(source: &str, file_path: &str) -> Vec<LintError> {
         errors.extend(check_js_operators(&ret.program, file_path, &offsets));
         // Unhandleable syntax (generators, `with`, call spread, ...).
         errors.extend(check_js_syntax(&ret.program, file_path, &offsets));
+        // `Date` construction/static subset gates.
+        errors.extend(check_date_usage(&ret.program, file_path, &offsets));
+        // Date values in generic JS value positions (conversions,
+        // operators, conditions, template literals, members).
+        errors.extend(check_date_values(&ret.program, source, file_path, &offsets));
         // Hoisting and temporal-dead-zone rules for `var`/`let`/`const`.
         errors.extend(check_js_declarations(&ret.program, file_path, &offsets));
         // Unimplemented methods on provably-typed receivers.
@@ -3130,7 +5399,6 @@ static UNSUPPORTED_GLOBALS: &[&str] = &[
 static UNSUPPORTED_JS_ROOTS: &[&str] = &[
     "Math",
     "JSON",
-    "Date",
     "RegExp",
     "Object",
     "Array",
@@ -7323,6 +9591,184 @@ mod tests {
         assert!(!codes(&errs).contains(&"mx-undefined"), "{errs:?}");
         let math = errs.iter().find(|e| e.message.contains("Math.imul")).unwrap();
         assert!(math.message.contains("no native counterpart"), "{math:?}");
+    }
+
+    #[test]
+    fn date_subset_is_supported_and_gated() {
+        let ok = "import { morphState } from 'morph'\nexport default function App() {\n  const d = new Date(2020, 1, 2, 3, 4, 5, 6)\n  const typed: Date = new Date(0)\n  const t = Date.now()\n  const p = Date.parse(\"2020-01-02\")\n  console.log(d.toISOString(), d.getUTCFullYear(), typed.getTime(), t, p)\n  return (<div>{d.getFullYear()}</div>)\n}\n";
+        let errs = check(ok, "App.mx");
+        assert!(!codes(&errs).contains(&"mx-js-member"), "{errs:?}");
+        assert!(!codes(&errs).contains(&"mx-js-method"), "{errs:?}");
+        assert!(!codes(&errs).contains(&"mx-js-syntax"), "{errs:?}");
+        assert!(!codes(&errs).contains(&"mx-undefined"), "{errs:?}");
+
+        for (body, code) in [
+            ("const v = Date(0)", "mx-js-syntax"),
+            ("const v = new Date(...parts)", "mx-js-syntax"),
+            ("const v = new Date(1, 2, 3, 4, 5, 6, 7, 8)", "mx-js-syntax"),
+            ("const v = Date.now(1)", "mx-js-syntax"),
+            ("const v = Date.parse(\"x\", \"y\")", "mx-js-syntax"),
+            ("const v = Date.UTC(2020, 0)", "mx-js-member"),
+            ("const v = Date.prototype", "mx-js-member"),
+            ("const v = Date.now", "mx-js-member"),
+            ("const v = Date", "mx-js-member"),
+            ("const v = new Date().toLocaleString()", "mx-js-method"),
+        ] {
+            let content = format!(
+                "import {{ morphState }} from 'morph'\nexport default function App() {{\n  {body}\n  return (<div>x</div>)\n}}\n"
+            );
+            let found = check(&content, "App.mx");
+            assert!(
+                found.iter().any(|e| e.code == code),
+                "{body:?} should report {code}, got {found:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn date_values_in_generic_positions_are_gated() {
+        let ok = "import { morphState } from 'morph'\nexport default function App() {\n  const d = new Date(0)\n  const e: Date = d\n  function stamp(when: Date) { return when.getTime() }\n  const copy = new Date(d)\n  const parts = new Date(2020, d)\n  const iso = d.toISOString()\n  const ts = d.getTime()\n  const cmp = d.getTime() < e.getTime()\n  console.log(d, iso, ts, cmp, stamp(d), copy, parts)\n  return (<div>{iso}{ts}</div>)\n}\n";
+        let errs = check(ok, "App.mx");
+        assert!(!errs.iter().any(|e| e.severity == "error"), "{errs:?}");
+
+        for (body, code) in [
+            ("const v = String(d)", "mx-js-syntax"),
+            ("const v = Number(d)", "mx-js-syntax"),
+            ("const v = Boolean(d)", "mx-js-syntax"),
+            ("const v = parseInt(d)", "mx-js-syntax"),
+            ("const v = Math.max(d, 1)", "mx-js-syntax"),
+            ("const v = Number.isNaN(d)", "mx-js-syntax"),
+            ("const v = Array.isArray(d)", "mx-js-syntax"),
+            ("const v = Object.keys(d)", "mx-js-syntax"),
+            ("const v = JSON.stringify(d)", "mx-js-syntax"),
+            ("const v = Date.parse(d)", "mx-js-syntax"),
+            ("const v = `${d}`", "mx-js-syntax"),
+            ("const v = d + \"\"", "mx-js-op"),
+            ("const v = d < e", "mx-js-op"),
+            ("const v = d === e", "mx-js-op"),
+            ("const v = !d", "mx-js-op"),
+            ("const v = d && 1", "mx-js-op"),
+            ("if (d) { console.log(1) }", "mx-js-syntax"),
+            ("const v = d ? 1 : 2", "mx-js-syntax"),
+            ("switch (d) { case e: break }", "mx-js-syntax"),
+            ("const v = d.foo", "mx-js-member"),
+            ("const v = d.getTime", "mx-js-member"),
+            ("const v = d[\"foo\"]", "mx-js-member"),
+            ("const v = d[\"getTime\"]()", "mx-js-member"),
+            ("const v = [d]", "mx-js-syntax"),
+            ("const v = { d }", "mx-js-syntax"),
+            ("const v = <span>{d}</span>", "mx-js-syntax"),
+            ("throw d", "mx-js-syntax"),
+            ("for (const x of d) { console.log(x) }", "mx-js-syntax"),
+            ("for (const x in d) { console.log(x) }", "mx-js-syntax"),
+        ] {
+            let content = format!(
+                "import {{ morphState }} from 'morph'\nexport default function App() {{\n  const d = new Date(0)\n  const e = new Date(1)\n  {body}\n  return (<div>x</div>)\n}}\n"
+            );
+            let found = check(&content, "App.mx");
+            assert!(
+                found.iter().any(|e| e.code == code),
+                "{body:?} should report {code}, got {found:?}"
+            );
+        }
+
+        // Scope resolution: an inner string binding named `d` is not the
+        // Date value from the outer scope.
+        let shadowed = "import { morphState } from 'morph'\nexport default function App() {\n  const d = new Date(0)\n  function inner() { const d = \"x\"; console.log(String(d)) }\n  console.log(d.getTime())\n  return (<div onClick={inner}>x</div>)\n}\n";
+        let errs = check(shadowed, "App.mx");
+        assert!(!codes(&errs).contains(&"mx-js-syntax"), "{errs:?}");
+
+        // Type annotations mark Date values even without a Date initializer,
+        // for locals and function parameters alike.
+        for content in [
+            "import { morphState } from 'morph'\nexport default function App() {\n  function make(): Date { return new Date(0) }\n  const typed: Date = make()\n  const v = String(typed)\n  return (<div>{v}</div>)\n}\n",
+            "import { morphState } from 'morph'\nexport default function App() {\n  function show(when: Date) { const v = String(when); console.log(v) }\n  return (<div onClick={() => show(new Date(0))}>x</div>)\n}\n",
+        ] {
+            let found = check(content, "App.mx");
+            assert!(
+                found.iter().any(|e| e.code == "mx-js-syntax"),
+                "{content}: {found:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn date_boundaries_require_explicit_types() {
+        // Date values may only cross typed boundaries: exact `: Date`
+        // annotations on parameters, returns, fields, and variables.
+        for (body, code) in [
+            ("const { getTime } = d\n  console.log(getTime())", "mx-js-syntax"),
+            ("const { ...rest } = d\n  console.log(rest)", "mx-js-syntax"),
+            ("const [x] = d\n  console.log(x)", "mx-js-syntax"),
+            ("function show(x) { console.log(String(x)) }\n  show(d)", "mx-js-syntax"),
+            ("function show(x: number) { console.log(x) }\n  show(d)", "mx-js-syntax"),
+            ("const v = [1].includes(d)", "mx-js-syntax"),
+            ("function make() { return d }\n  const x = make()", "mx-js-syntax"),
+            ("const make = () => d\n  const x = make()", "mx-js-syntax"),
+            ("class H { when = d }\n  console.log(new H().when)", "mx-js-syntax"),
+            ("class H { make() { return d } }\n  console.log(new H().make())", "mx-js-syntax"),
+            ("let e\n  e = d\n  console.log(e)", "mx-js-syntax"),
+            ("class H { static when = d }\n  console.log(H.when)", "mx-js-syntax"),
+            ("class H { static when: Date = d }\n  console.log(H.when)", "mx-js-syntax"),
+            ("let e: Date\n  e = d\n  console.log(e)", "mx-js-syntax"),
+            ("class H { when: Date }\n  console.log(new H().when)", "mx-js-syntax"),
+            ("function f(when: Date) { console.log(when.getTime()) }\n  f(1)", "mx-js-syntax"),
+            ("function f(): Date { return 1 }\n  console.log(f())", "mx-js-syntax"),
+            ("const e: Date = 1\n  console.log(e)", "mx-js-syntax"),
+            ("const e: Date = d\n  e = 1\n  console.log(e)", "mx-js-syntax"),
+            ("class H { when: Date = d }\n  const h = new H()\n  h.when = 1", "mx-js-syntax"),
+            ("class H {}\n  console.log(new H(d))", "mx-js-syntax"),
+            ("const a = [1].map(() => d)\n  console.log(a)", "mx-js-syntax"),
+            ("const a = [1].map((): Date => d)\n  console.log(a)", "mx-js-syntax"),
+            ("function f(): void { return d }\n  f()", "mx-js-syntax"),
+            ("const c = true\n  const x = c ? d : 1\n  console.log(x)", "mx-js-syntax"),
+            ("console.log(d.getTime(1))", "mx-js-syntax"),
+        ] {
+            let content = format!(
+                "import {{ morphState }} from 'morph'\nexport default function App() {{\n  const d = new Date(0)\n  {body}\n  return (<div>x</div>)\n}}\n"
+            );
+            let found = check(&content, "App.mx");
+            assert!(
+                found.iter().any(|e| e.code == code),
+                "{body:?} should report {code}, got {found:?}"
+            );
+        }
+
+        // The same boundaries stay quiet once they are explicitly typed.
+        let ok = "import { morphState } from 'morph'\nexport default function App() {\n  class H {\n    when: Date = new Date(0)\n    constructor(public other: Date) {}\n    make(): Date { return this.when }\n    get later(): Date { return this.other }\n  }\n  function f(when: Date = new Date(0)) { return when.getTime() }\n  const make = (): Date => new Date(1)\n  const c = true\n  const d = c ? new Date(0) : make()\n  const alias = d\n  const shifted = new Date(2020, alias)\n  const h = new H(new Date(2))\n  console.log(d.getTime(), alias.toISOString(), shifted.getTime(), f(), h.when.getTime(), h.make().getTime(), h.later.getTime())\n  return (<div>{d.getTime()}</div>)\n}\n";
+        let errs = check(ok, "App.mx");
+        assert!(!errs.iter().any(|e| e.severity == "error"), "{errs:?}");
+    }
+
+    #[test]
+    fn date_values_cannot_cross_module_boundaries() {
+        // Importers have no Date type facts, so exporting a Date (or a
+        // Date-producing function/class) would let `morph check` pass and
+        // the native build fail later. Reject the export instead.
+        for content in [
+            "export const stamp = new Date(0)\nexport default function App() { return (<div>x</div>) }\n",
+            "export function make(): Date { return new Date(0) }\nexport default function App() { return (<div>x</div>) }\n",
+            "export class Holder { when: Date = new Date(0) }\nexport default function App() { return (<div>x</div>) }\n",
+            "const stamp = new Date(0)\nexport { stamp }\nexport default function App() { return (<div>x</div>) }\n",
+            "const make = (): Date => new Date(0)\nexport { make }\nexport default function App() { return (<div>x</div>) }\n",
+            "export default new Date(0)\n",
+            "export default class { when: Date = new Date(0) }\n",
+            "export const Holder = class { when: Date = new Date(0) }\nexport default function App() { return (<div>x</div>) }\n",
+        ] {
+            let found = check(content, "stamp.ts");
+            assert!(
+                found.iter().any(|e| {
+                    e.code == "mx-js-syntax" && e.message.contains("exported across modules")
+                }),
+                "{content}: {found:?}"
+            );
+        }
+
+        // Plain exports and functions that only use Date internally stay
+        // importable.
+        let ok = "export const answer = 42\nexport function stamp(): number { return Date.now() }\nexport class Plain { value = 1 }\nexport default function App() { return (<div>{answer}</div>) }\n";
+        let errs = check(ok, "stamp.ts");
+        assert!(!errs.iter().any(|e| e.severity == "error"), "{errs:?}");
     }
 
     #[test]

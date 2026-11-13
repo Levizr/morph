@@ -1,0 +1,12 @@
+export const windowConfig = { title: "fail-date-op", width: 800, height: 600 }
+
+export default function App() {
+  const a = new Date(0)
+  const b = new Date(1)
+  const earlier = a < b
+  return (
+    <body>
+      <div>{earlier}</div>
+    </body>
+  )
+}

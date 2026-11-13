@@ -1,0 +1,7 @@
+{
+  "name": "fail-date-value-member",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "fail-date-value-member" },
+  "dependencies": {},
+  "cpp_sources": []
+}

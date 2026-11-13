@@ -1,0 +1,11 @@
+export const windowConfig = { title: "fail-date-arity", width: 800, height: 600 }
+
+export default function App() {
+  const stamp = new Date(2020, 0, 2, 3, 4, 5, 6, 7)
+  const tick = stamp.getTime(1)
+  return (
+    <body>
+      <div>{stamp.getTime()}</div>
+    </body>
+  )
+}

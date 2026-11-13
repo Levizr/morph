@@ -1,0 +1,14 @@
+export const windowConfig = { title: "fail-date-return", width: 800, height: 600 }
+
+function make() {
+  return new Date(0)
+}
+
+export default function App() {
+  const stamp = make()
+  return (
+    <body>
+      <div>{stamp.getTime()}</div>
+    </body>
+  )
+}

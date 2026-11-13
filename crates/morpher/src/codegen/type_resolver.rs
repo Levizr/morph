@@ -44,6 +44,7 @@ const CONTEXTUAL_TYPES: &[(&str, &str)] = &[
     ("KeyboardEvent", "MorphEvent*"),
     ("FocusEvent", "MorphEvent*"),
     ("Promise", "auto"),
+    ("Date", "morph::Date"),
     // Window handles are WID ints (see docs/api/windows.md); the type
     // annotation keeps helpers and typed locals on the same lowering path
     // as `const w = useWindow()`.
@@ -371,6 +372,7 @@ pub fn headers_for(cpp_type: &str) -> Vec<&'static str> {
         ("JsLateValue", "\"../../runtime/cpp/types/js_types.h\""),
         ("JsUndefined", "\"../../runtime/cpp/types/js_types.h\""),
         ("JsNull", "\"../../runtime/cpp/types/js_types.h\""),
+        ("morph::Date", "\"../../runtime/cpp/types/js_date.h\""),
         ("morph::Result", "\"../../runtime/cpp/reactivity/promise.h\""),
         ("morph::Task", "\"../../runtime/cpp/reactivity/task.h\""),
         ("morph::net", "\"../../runtime/cpp/net/net.h\""),

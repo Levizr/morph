@@ -52,7 +52,6 @@ EXPECTED_REJECTIONS = {
     "class_expr_const": {"mx-js-syntax"},
     "cpp_keyword_fn": {"mx-js-syntax"},
     "cpp_keyword_name": {"mx-js-syntax"},
-    "date_now": {"mx-js-member"},
     "delete_op": {"mx-js-op"},
     "enum_decl": {"mx-js-syntax"},
     "filter_non_jsx": {"mx-js-method"},
@@ -820,6 +819,22 @@ case(
     """
     export default function App() {
       return (<body><text>{Date.now() > 0 ? "yes" : "no"}</text></body>)
+    }
+    """,
+)
+case(
+    "date_subset",
+    """
+    export default function App() {
+      const epoch = new Date(0)
+      const parsed = new Date("2020-01-02T03:04:05.006Z")
+      const parts = new Date(2021, 5, 15, 10, 20, 30, 400)
+      const stamp = Date.parse("2020-01-02")
+      return (
+        <body>
+          <text>{epoch.toISOString()} {parsed.getUTCFullYear()} {parts.getFullYear()} {stamp}</text>
+        </body>
+      )
     }
     """,
 )

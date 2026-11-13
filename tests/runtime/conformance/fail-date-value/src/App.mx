@@ -1,0 +1,11 @@
+export const windowConfig = { title: "fail-date-value", width: 800, height: 600 }
+
+export default function App() {
+  const stamp = new Date(0)
+  const text = String(stamp)
+  return (
+    <body>
+      <div>{text}</div>
+    </body>
+  )
+}

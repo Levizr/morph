@@ -114,6 +114,7 @@ Binary (`+`, `-`, `*`, `/`, `**`, `===`, `!==`, `==`, `!=`, `<`, `>`, etc.), una
 - String methods on both `JsString` and native `std::string`: `trim`, `toUpperCase`, `toLowerCase`, `indexOf`, `substring`, `slice`, `replace`, `charAt`, plus `split`, `startsWith`, `endsWith`, `includes`, `repeat`, `padStart`, `padEnd` — natives lower to `morph::str::*` helpers, chains nest (see [Native C++ Types](./native-types.md#js-methods-on-natives))
 - Number `.toString()` on native `int`/`double` (lowers to `morph::str::to_string`)
 - `Math` constants (`PI`, `E`, `LN2`, `LN10`, `LOG2E`, `LOG10E`, `SQRT1_2`, `SQRT2`) and functions (`min`, `max`, `abs`, `floor`, `ceil`, `round`, `trunc`, `sign`, `pow`, `sqrt`, `cbrt`, `exp`, `expm1`, `log`, `log2`, `log10`, `log1p`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `sinh`, `cosh`, `tanh`, `hypot`, `fround`, `random`); arguments coerce through `Number()` (see [Runtime Types](./types.md#math))
+- `Date`: `new Date(...)` (epoch milliseconds, ISO text, or local calendar parts), `Date.now()`, `Date.parse(text)`, `getTime`/`valueOf`, `toISOString`, and local/UTC getters. Invalid dates report `NaN` and `toISOString()` throws a catchable `RangeError`; timezone-aware formatting and setters are rejected (see [Runtime Types](./types.md#date))
 - `Array.push` on both `JsArray` (`.push`) and `std::vector` (`.push_back`); multi-argument `push`, `unshift`, and `splice` accept spread elements. `.length` on vectors, arrays, and strings alike (`.size()` where native)
 - Console output: `console.log` / `console.warn` / `console.error` / `console.info` print natively (visible in the DevTools **Logs** tab)
 - Destructuring declarations (including at the top of a component body) and callable/event payloads, including defaults (`{ a = 1 }`), rest elements (`{ ...rest }`, `[head, ...tail]`), and computed keys (`{ [key]: value }`). Defaults are lazy and apply only when the value is `undefined`; computed keys evaluate once.
@@ -138,7 +139,10 @@ Binary (`+`, `-`, `*`, `/`, `**`, `===`, `!==`, `==`, `!=`, `<`, `>`, etc.), una
 - `.then`/`.catch` forms outside the supported statement-level
   `fetch(...).then(...).catch(...)` chain in an async function (rejected by
   `morph check`)
-- Regular expression literals, `Date`, `Map`/`Set`, and `typeof`/`instanceof`
+- Regular expression literals, `Map`/`Set`, and `typeof`/`instanceof`
+- `Date` timezone-aware formatting (`toString`, `toLocaleString`), setters,
+  `getTimezoneOffset`, non-ISO parsing, and statics other than
+  `Date.now`/`Date.parse` (rejected by `morph check`)
 - Object/Array statics such as `Object.assign`, `Object.fromEntries`,
   `Array.from`, and `Array.of`
 - TypeScript `enum` declarations

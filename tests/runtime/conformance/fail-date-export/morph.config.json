@@ -1,0 +1,7 @@
+{
+  "name": "fail-date-export",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "fail-date-export" },
+  "dependencies": {},
+  "cpp_sources": []
+}

@@ -1,5 +1,63 @@
 use morph_ir::{IRNode, IRStyle, Length};
+use std::cell::RefCell;
 use std::fmt::Write as _;
+
+thread_local! {
+    /// Runtime `#include` lines discovered while translating JS snippets.
+    ///
+    /// JSX expressions and event handlers are translated at codegen time,
+    /// after the IR builder has already gathered headers from module-level
+    /// snippets. A runtime type that appears only in a JSX expression (for
+    /// example `morph::Date` from `Date.now()`) therefore needs its header
+    /// merged into the generated translation unit's include block.
+    ///
+    /// The collector is thread-local: one emitter runs per thread and each
+    /// resets the set before emitting its unit.
+    static SNIPPET_INCLUDES: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Start a fresh snippet-include collection for one emitted translation unit.
+pub(crate) fn reset_snippet_includes() {
+    SNIPPET_INCLUDES.with(|includes| includes.borrow_mut().clear());
+}
+
+/// Record the leading `#include` lines of a translated snippet.
+fn record_snippet_includes(includes: &str) {
+    if includes.trim().is_empty() {
+        return;
+    }
+    SNIPPET_INCLUDES.with(|collected| {
+        let mut collected = collected.borrow_mut();
+        for line in includes.lines() {
+            let Some(header) = line.trim().strip_prefix("#include") else {
+                continue;
+            };
+            let header = header.trim();
+            if header.is_empty() {
+                continue;
+            }
+            if !collected.iter().any(|existing| existing == header) {
+                collected.push(header.to_string());
+            }
+        }
+    });
+}
+
+/// Take the snippet includes collected since the last reset.
+pub(crate) fn take_snippet_includes() -> Vec<String> {
+    SNIPPET_INCLUDES.with(|includes| std::mem::take(&mut *includes.borrow_mut()))
+}
+
+/// Translate a snippet, recording the runtime headers its C++ needs.
+pub(crate) fn translate_snippet(
+    source: &str,
+    filename: &str,
+    options: morpher::TranslateOptions,
+) -> Option<morpher::SnippetOutput> {
+    let out = morpher::translate_snippet(source, filename, options).ok()?;
+    record_snippet_includes(&out.includes);
+    Some(out)
+}
 
 /// Translate an event handler target to a C++ handler body.
 ///
@@ -40,8 +98,7 @@ fn translate_handler_target(
             .collect(),
         ..Default::default()
     };
-    morpher::translate_snippet(body, "snippet.ts", options)
-        .ok()
+    translate_snippet(body, "snippet.ts", options)
         .map(|out| out.body.trim().to_string())
         .filter(|b| !b.is_empty())
 }
@@ -62,7 +119,7 @@ fn translate_text_expr<S: std::hash::BuildHasher, T: std::hash::BuildHasher>(
         state_types: state_types.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
         ..Default::default()
     };
-    if let Ok(out) = morpher::translate_snippet(js, "snippet.ts", options) {
+    if let Some(out) = translate_snippet(js, "snippet.ts", options) {
         let body = out.body.trim().trim_end_matches(';').trim().to_string();
         if !body.is_empty() {
             // Same conventions the textual path applies: list-item aliases
@@ -3711,6 +3768,19 @@ mod tests {
         assert!(out.contains("outlineOffset"), "{out}");
         assert!(out.contains("outlineColorCurrent = false"), "{out}");
         assert!(out.contains("outlineColor[0] = 1.0000f"), "{out}");
+    }
+
+    #[test]
+    fn snippet_translation_collects_runtime_includes() {
+        reset_snippet_includes();
+        let empty = HashMap::new();
+        let out = translate_text_expr("Date.now() > 0 ? \"yes\" : \"no\"", &empty, &empty);
+        assert!(out.contains("morph::Date::now()"), "{out}");
+        let includes = take_snippet_includes();
+        assert!(
+            includes.iter().any(|header| header.contains("types/js_date.h")),
+            "missing js_date.h in {includes:?}"
+        );
     }
 
     #[test]

@@ -1,0 +1,14 @@
+export const windowConfig = { title: "fail-date-field", width: 800, height: 600 }
+
+class Holder {
+  when = new Date(0)
+}
+
+export default function App() {
+  const holder = new Holder()
+  return (
+    <body>
+      <div>{holder.when.getTime()}</div>
+    </body>
+  )
+}

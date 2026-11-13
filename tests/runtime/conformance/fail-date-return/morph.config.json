@@ -1,0 +1,7 @@
+{
+  "name": "fail-date-return",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "fail-date-return" },
+  "dependencies": {},
+  "cpp_sources": []
+}
