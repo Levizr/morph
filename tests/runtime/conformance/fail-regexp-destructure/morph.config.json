@@ -1,0 +1,7 @@
+{
+  "name": "fail-regexp-destructure",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "fail-regexp-destructure" },
+  "dependencies": {},
+  "cpp_sources": []
+}

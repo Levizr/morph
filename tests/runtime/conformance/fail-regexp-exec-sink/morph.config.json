@@ -1,0 +1,7 @@
+{
+  "name": "fail-regexp-exec-sink",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "fail-regexp-exec-sink" },
+  "dependencies": {},
+  "cpp_sources": []
+}

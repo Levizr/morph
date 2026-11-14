@@ -1,0 +1,7 @@
+{
+  "name": "fail-regexp-new",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "fail-regexp-new" },
+  "dependencies": {},
+  "cpp_sources": []
+}

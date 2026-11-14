@@ -1,0 +1,15 @@
+export const windowConfig = { title: "fail-regexp-jsx", width: 800, height: 600 }
+
+export default function App() {
+  const re = /a/
+  return (
+    <body>
+      <text>{re}</text>
+    </body>
+  )
+  return (
+    <body>
+      <text>fail-regexp</text>
+    </body>
+  )
+}

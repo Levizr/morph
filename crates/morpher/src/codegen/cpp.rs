@@ -3272,6 +3272,7 @@ impl<'a> CppTranslator<'a> {
             }
             Expression::StringLiteral(_) => Some("std::string".to_string()),
             Expression::TemplateLiteral(_) => Some("std::string".to_string()),
+            Expression::RegExpLiteral(_) => Some("morph::RegExp".to_string()),
             Expression::BooleanLiteral(_) => Some("bool".to_string()),
             Expression::NumericLiteral(n) => {
                 if n.value.fract() == 0.0 && n.value.abs() <= i64::MAX as f64 {
@@ -3418,6 +3419,13 @@ impl<'a> CppTranslator<'a> {
                         match member.property.name.as_str() {
                             "json" => return Some("JsValue".to_string()),
                             "text" | "arrayBuffer" => return Some("std::string".to_string()),
+                            _ => {}
+                        }
+                    }
+                    if self.is_regexp_like_expr(&member.object) {
+                        match member.property.name.as_str() {
+                            "test" => return Some("bool".to_string()),
+                            "exec" => return Some("JsValue".to_string()),
                             _ => {}
                         }
                     }
@@ -6828,7 +6836,21 @@ impl<'a> CppTranslator<'a> {
                 }
             }
             Expression::ImportMeta(_) => "/* import.meta */".to_string(),
-            Expression::RegExpLiteral(r) => self.span_text(r.span).to_string(),
+            Expression::RegExpLiteral(r) => {
+                self.ctx.need("morph::RegExp");
+                let flags = r.regex.flags.to_string();
+                match morph_parser::regexp::translate(r.regex.pattern.text.as_str(), &flags) {
+                    Ok(translated) => format!(
+                        "morph::RegExp({}, {})",
+                        cpp_string_literal(&translated.pattern),
+                        if translated.ignore_case { "true" } else { "false" }
+                    ),
+                    // The linter rejects every pattern this cannot lower; the
+                    // fallback keeps a check-pass/build-fail regression loud
+                    // instead of emitting JavaScript syntax into C++.
+                    Err(_) => "morph::RegExp(\"(?!)\", false)".to_string(),
+                }
+            }
             Expression::BigIntLiteral(b) => {
                 if let Some(raw) = &b.raw {
                     let s = raw.as_str();
@@ -7145,6 +7167,7 @@ impl<'a> CppTranslator<'a> {
                 | "JsNull"
                 | "JsUndefined"
                 | "morph::Date"
+                | "morph::RegExp"
                 | "WID"
         ) || inner_type.starts_with("int")
             || inner_type.starts_with("uint")
@@ -7376,6 +7399,21 @@ impl<'a> CppTranslator<'a> {
         }
     }
 
+    /// True for expressions holding a native `morph::RegExp`: regex literals
+    /// and bindings inferred as `morph::RegExp` (including closure-captured
+    /// `shared_ptr` boxes).
+    fn is_regexp_like_expr(&self, expr: &Expression<'a>) -> bool {
+        match Self::unwrap_expr(expr) {
+            Expression::RegExpLiteral(_) => true,
+            Expression::Identifier(id) => {
+                self.ctx.var_types.get(id.name.as_str()).is_some_and(|t| {
+                    matches!(t.as_str(), "morph::RegExp" | "std::shared_ptr<morph::RegExp>")
+                })
+            }
+            _ => false,
+        }
+    }
+
     /// Bare class name behind a pointer/reference spelling.
     fn bare_pointer_type(cpp_type: &str) -> &str {
         let trimmed = cpp_type.trim();
@@ -7459,6 +7497,12 @@ impl<'a> CppTranslator<'a> {
                     | "reverse" => OperandClass::JsArray,
                     "findIndex" | "push" | "unshift" => OperandClass::Integer,
                     "some" | "every" => OperandClass::Boolean,
+                    _ => OperandClass::JsValue,
+                };
+            }
+            if self.is_regexp_like_expr(&member.object) {
+                return match method_name {
+                    "test" => OperandClass::Boolean,
                     _ => OperandClass::JsValue,
                 };
             }
@@ -10418,6 +10462,31 @@ mod tests {
         assert!(out.contains("morph::js_object_assign(__o, base)"), "{out}");
         assert!(out.contains("__o.set(\"z\", 3)"), "{out}");
         assert!(out.contains("morph::js_to_string(key).to_std_string()"), "{out}");
+    }
+
+    #[test]
+    fn regexp_literals_lower_to_native_values() {
+        let out = translate_stmts(
+            "const re = /ab+c/i;\n\
+             const ok = re.test(\"xABBC\");\n\
+             const m = re.exec(\"xABBC\");\n\
+             const first = m ? m[0] : \"\";\n\
+             const idx = m ? m.index : -1;\n\
+             const len = m ? m.length : 0;",
+        );
+        assert!(out.contains("morph::RegExp(\"ab+c\", true)"), "{out}");
+        assert!(out.contains(".test(\"xABBC\")"), "{out}");
+        assert!(out.contains(".exec(\"xABBC\")"), "{out}");
+        assert!(out.contains("[\"index\"]"), "{out}");
+        assert!(out.contains("m.size()"), "{out}");
+        assert!(out.contains("morph::RegExp"), "{out}");
+
+        // Non-ASCII patterns survive translation verbatim; UTF-16 code-unit
+        // matching happens in the runtime.
+        let unicode = translate_stmts("const re = /é/;\nconst ok = re.test(\"é\");");
+        assert!(unicode.contains("morph::RegExp(\"é\", false)"), "{unicode}");
+        let astral = translate_stmts("const re = /😀/;\nconst ok = re.test(\"😀\");");
+        assert!(astral.contains("morph::RegExp(\"😀\", false)"), "{astral}");
     }
 
     #[test]

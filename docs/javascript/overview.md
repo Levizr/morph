@@ -115,6 +115,7 @@ Binary (`+`, `-`, `*`, `/`, `**`, `===`, `!==`, `==`, `!=`, `<`, `>`, etc.), una
 - Number `.toString()` on native `int`/`double` (lowers to `morph::str::to_string`)
 - `Math` constants (`PI`, `E`, `LN2`, `LN10`, `LOG2E`, `LOG10E`, `SQRT1_2`, `SQRT2`) and functions (`min`, `max`, `abs`, `floor`, `ceil`, `round`, `trunc`, `sign`, `pow`, `sqrt`, `cbrt`, `exp`, `expm1`, `log`, `log2`, `log10`, `log1p`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `sinh`, `cosh`, `tanh`, `hypot`, `fround`, `random`); arguments coerce through `Number()` (see [Runtime Types](./types.md#math))
 - `Date`: `new Date(...)` (epoch milliseconds, ISO text, or local calendar parts), `Date.now()`, `Date.parse(text)`, `getTime`/`valueOf`, `toISOString`, and local/UTC getters. Invalid dates report `NaN` and `toISOString()` throws a catchable `RangeError`; timezone-aware formatting and setters are rejected (see [Runtime Types](./types.md#date))
+- `RegExp`: literals with no flags or `i`, bound to a local and used directly or through an alias; `.test(text)` and `.exec(text)`, with array-like exec results (`m[0]`, `m.index`, `m.input`, `m.length`). Patterns match UTF-16 code units, `.` excludes all JS line terminators, and `\s` covers JS whitespace. Lookbehind, named groups, backreferences, property escapes, other flags, and generic value positions are rejected (see [Runtime Types](./types.md#regexp))
 - `Array.push` on both `JsArray` (`.push`) and `std::vector` (`.push_back`); multi-argument `push`, `unshift`, and `splice` accept spread elements. `.length` on vectors, arrays, and strings alike (`.size()` where native)
 - Console output: `console.log` / `console.warn` / `console.error` / `console.info` print natively (visible in the DevTools **Logs** tab)
 - Destructuring declarations (including at the top of a component body) and callable/event payloads, including defaults (`{ a = 1 }`), rest elements (`{ ...rest }`, `[head, ...tail]`), and computed keys (`{ [key]: value }`). Defaults are lazy and apply only when the value is `undefined`; computed keys evaluate once.
@@ -139,10 +140,13 @@ Binary (`+`, `-`, `*`, `/`, `**`, `===`, `!==`, `==`, `!=`, `<`, `>`, etc.), una
 - `.then`/`.catch` forms outside the supported statement-level
   `fetch(...).then(...).catch(...)` chain in an async function (rejected by
   `morph check`)
-- Regular expression literals, `Map`/`Set`, and `typeof`/`instanceof`
+- `Map`/`Set` and `typeof`/`instanceof`
 - `Date` timezone-aware formatting (`toString`, `toLocaleString`), setters,
   `getTimezoneOffset`, non-ISO parsing, and statics other than
   `Date.now`/`Date.parse` (rejected by `morph check`)
+- `RegExp` flags other than `i`, Unicode case folding, `lastIndex`/global
+  matching, lookbehind, named groups, backreferences, property escapes,
+  `new RegExp(...)`, and `: RegExp` annotations (rejected by `morph check`)
 - Object/Array statics such as `Object.assign`, `Object.fromEntries`,
   `Array.from`, and `Array.of`
 - TypeScript `enum` declarations

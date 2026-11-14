@@ -8,6 +8,7 @@ mod css_parser;
 pub mod css_registry;
 pub(crate) mod js_walker;
 pub mod linter;
+pub mod regexp;
 pub mod resolve;
 pub mod routes;
 

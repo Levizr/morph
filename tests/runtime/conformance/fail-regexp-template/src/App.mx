@@ -1,0 +1,12 @@
+export const windowConfig = { title: "fail-regexp-template", width: 800, height: 600 }
+
+export default function App() {
+  const re = /a/
+  const text = `pattern ${re}`
+  console.log(text)
+  return (
+    <body>
+      <text>fail-regexp</text>
+    </body>
+  )
+}

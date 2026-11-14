@@ -65,6 +65,13 @@ EXPECTED_REJECTIONS = {
     "pow_op": {"mx-js-op"},
     "reduce_non_jsx": {"mx-js-method"},
     "regex_literal": {"mx-js-syntax"},
+    "regexp_annotation": {"mx-js-syntax"},
+    "regexp_exec_sink": {"mx-js-syntax"},
+    "regexp_flags": {"mx-js-syntax"},
+    "regexp_generic": {"mx-js-syntax"},
+    "regexp_lookbehind": {"mx-js-syntax"},
+    "regexp_member": {"mx-js-member"},
+    "regexp_new": {"mx-js-member"},
     "rest_param_helper": {"mx-js-syntax"},
     "some_every": {"mx-js-method"},
     "typeof_op": {"mx-js-op"},
@@ -811,6 +818,89 @@ case(
     export default function App() {
       const re = /ab+c/
       return (<body><text>{"abc".match(re) ? "yes" : "no"}</text></body>)
+    }
+    """,
+)
+case(
+    "regexp_subset",
+    """
+    export default function App() {
+      const re = /ab+c/i
+      const alias = re
+      const ok = alias.test("xABBC")
+      const m = re.exec("xABBC")
+      return (
+        <body>
+          <text>{ok ? m[0] : ""} {m ? m.index : -1} {m ? m.length : 0}</text>
+        </body>
+      )
+    }
+    """,
+)
+case(
+    "regexp_flags",
+    """
+    export default function App() {
+      const re = /ab+c/g
+      return (<body><text>{re.test("abc") ? "yes" : "no"}</text></body>)
+    }
+    """,
+)
+case(
+    "regexp_lookbehind",
+    """
+    export default function App() {
+      const re = /(?<=a)b/
+      return (<body><text>{re.test("ab") ? "yes" : "no"}</text></body>)
+    }
+    """,
+)
+case(
+    "regexp_generic",
+    """
+    export default function App() {
+      const re = /a/
+      console.log(re)
+      return (<body><text>x</text></body>)
+    }
+    """,
+)
+case(
+    "regexp_member",
+    """
+    export default function App() {
+      const re = /a/
+      console.log(re.source)
+      return (<body><text>x</text></body>)
+    }
+    """,
+)
+case(
+    "regexp_new",
+    """
+    export default function App() {
+      const re = new RegExp("a")
+      return (<body><text>{re.test("a") ? "yes" : "no"}</text></body>)
+    }
+    """,
+)
+case(
+    "regexp_annotation",
+    """
+    export default function App() {
+      const re: RegExp = /a/
+      return (<body><text>{re.test("a") ? "yes" : "no"}</text></body>)
+    }
+    """,
+)
+case(
+    "regexp_exec_sink",
+    """
+    export default function App() {
+      const re = /a/
+      const m = re.exec("a")
+      console.log(m)
+      return (<body><text>x</text></body>)
     }
     """,
 )

@@ -218,6 +218,7 @@ struct JsValue {
 
     JsValue get(int64_t idx) const {
         if (is_array()) return std::get<JsArray>(inner)[idx];
+        if (is_object()) return std::get<JsObject>(inner).get(std::to_string(idx));
         return JsValue(JsUndefined{});
     }
 
@@ -259,6 +260,7 @@ struct JsValue {
 
     JsValue& operator[](int64_t idx) {
         if (is_array()) return std::get<JsArray>(inner)[idx];
+        if (is_object()) return std::get<JsObject>(inner)[std::to_string(idx)];
         return get_mutable_dummy();
     }
 
@@ -274,6 +276,15 @@ struct JsValue {
     size_t length() const {
         if (is_string()) return std::get<JsString>(inner).value.size();
         if (is_array()) return std::get<JsArray>(inner).length();
+        if (is_object()) {
+            // Array-like objects (RegExp.exec results) expose `length` as a
+            // numeric property; absent or non-numeric values read as 0.
+            JsValue value = std::get<JsObject>(inner).get("length");
+            if (value.is_number()) {
+                int64_t length = value.as_int();
+                return length > 0 ? static_cast<size_t>(length) : 0;
+            }
+        }
         return 0;
     }
     size_t size() const { return length(); }

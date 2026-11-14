@@ -1,0 +1,7 @@
+{
+  "name": "fail-regexp-jsx",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "fail-regexp-jsx" },
+  "dependencies": {},
+  "cpp_sources": []
+}

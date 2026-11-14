@@ -71,6 +71,7 @@ run_pass pass-array-methods
 run_pass pass-operators
 run_pass pass-math
 run_pass pass-date
+run_pass pass-regexp
 run_pass pass-window
 run_pass pass-late-values
 run_pass pass-control-flow
@@ -138,6 +139,26 @@ run_fail fail-date-return mx-js-syntax
 run_fail fail-date-destructure mx-js-syntax
 run_fail fail-date-assign mx-js-syntax
 run_fail fail-date-field mx-js-syntax
+run_fail fail-regexp-flags mx-js-syntax
+run_fail fail-regexp-pattern mx-js-syntax
+run_fail fail-regexp-new mx-js-member
+run_fail fail-regexp-value mx-js-syntax
+run_fail fail-regexp-member mx-js-member
+run_fail fail-regexp-op mx-js-op
+run_fail fail-regexp-condition mx-js-syntax
+run_fail fail-regexp-export mx-js-syntax
+run_fail fail-regexp-return mx-js-syntax
+run_fail fail-regexp-destructure mx-js-syntax
+run_fail fail-regexp-assign mx-js-syntax
+run_fail fail-regexp-field mx-js-syntax
+run_fail fail-regexp-annotation mx-js-syntax
+run_fail fail-regexp-arity mx-js-syntax
+run_fail fail-regexp-spread mx-js-syntax
+run_fail fail-regexp-exec-sink mx-js-syntax
+run_fail fail-regexp-call mx-js-syntax
+run_fail fail-regexp-default mx-js-syntax
+run_fail fail-regexp-template mx-js-syntax
+run_fail fail-regexp-jsx mx-js-syntax
 run_fail fail-timer-args-short mx-js-syntax
 run_fail fail-promise-race-fetch mx-js-syntax
 run_fail fail-promise-position mx-js-syntax

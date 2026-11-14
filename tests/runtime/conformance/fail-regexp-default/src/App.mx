@@ -1,0 +1,13 @@
+export const windowConfig = { title: "fail-regexp-default", width: 800, height: 600 }
+
+export default function App() {
+  function helper(re = /a/) {
+    return re.test("a")
+  }
+  console.log(helper())
+  return (
+    <body>
+      <text>fail-regexp</text>
+    </body>
+  )
+}

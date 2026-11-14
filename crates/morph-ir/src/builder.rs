@@ -200,8 +200,8 @@ impl IRBuilder {
                         continue;
                     }
                     extra_headers.extend(include_lines(&includes));
-                    let ty =
-                        ty.filter(|ty| ty != "JsValue").or_else(|| class_instance_type(&cst.rhs));
+                    let ty = reactive_const_type(&cst.rhs, ty.as_deref(), &ambient_types)
+                        .or_else(|| class_instance_type(&cst.rhs));
                     if let Some(ty) = ty {
                         const_types.insert(cst.name.clone(), ty.clone());
                         ambient_types.insert(cst.name.clone(), ty);
@@ -1208,11 +1208,7 @@ impl IRBuilder {
             // Seed the wrapper's C++ type so member access at use sites
             // picks brackets for JsObject/JsValue (`user["name"]`), dot
             // for native vectors/strings, and `?.` keeps the same shape.
-            let ty = out
-                .ty
-                .as_deref()
-                .filter(|ty| *ty != "JsValue")
-                .map(str::to_string)
+            let ty = reactive_const_type(&cst.rhs, out.ty.as_deref(), &local_frame.types)
                 .or_else(|| class_instance_type(&cst.rhs));
             if let Some(ty) = ty {
                 frame.types.insert(cst.name.clone(), ty.clone());
@@ -4028,7 +4024,7 @@ fn subst_props_refs(src: &str, frame: &InstanceFrame) -> String {
     let mut out = String::with_capacity(src.len());
     let mut i = 0usize;
     while i < bytes.len() {
-        let c = bytes[i] as char;
+        let Some(c) = src[i..].chars().next() else { break };
         if c == '"' || c == '\'' {
             let end = str_lit_end(src, i);
             out.push_str(&src[i..end]);
@@ -4076,7 +4072,7 @@ fn rename_symbols(src: &str, renames: &HashMap<String, String>, frame: &Instance
     let mut out = String::with_capacity(src.len());
     let mut i = 0usize;
     while i < bytes.len() {
-        let c = bytes[i] as char;
+        let Some(c) = src[i..].chars().next() else { break };
         if c == '"' || c == '\'' {
             let end = str_lit_end(src, i);
             out.push_str(&src[i..end]);
@@ -4307,7 +4303,7 @@ fn normalize_object_members(src: &str, types: &HashMap<String, String>) -> Strin
     let mut out = String::with_capacity(src.len());
     let mut i = 0usize;
     while i < bytes.len() {
-        let c = bytes[i] as char;
+        let Some(c) = src[i..].chars().next() else { break };
         if c == '"' || c == '\'' {
             let end = str_lit_end(src, i);
             out.push_str(&src[i..end]);
@@ -4373,7 +4369,11 @@ fn normalize_object_members(src: &str, types: &HashMap<String, String>) -> Strin
                         break;
                     }
                     let prop_start = i + if optional { 2 } else { 1 };
-                    if prop_start >= bytes.len() || !is_ident_start(bytes[prop_start] as char) {
+                    let prop_start_ok = src[prop_start.min(bytes.len())..]
+                        .chars()
+                        .next()
+                        .is_some_and(is_ident_start);
+                    if prop_start >= bytes.len() || !prop_start_ok {
                         break;
                     }
                     let mut k = prop_start + 1;
@@ -4402,6 +4402,28 @@ fn normalize_object_members(src: &str, types: &HashMap<String, String>) -> Strin
         i += c.len_utf8();
     }
     out
+}
+
+/// Reactive-const ambient type. `JsValue` is normally dropped because most
+/// reads infer their own shape, but RegExp exec results are array-like
+/// `JsValue`s whose properties must lower to bracket access
+/// (`m()["index"]`). Keep the type for `.exec(...)` results and aliases of
+/// one; everything else keeps the previous behavior.
+fn reactive_const_type(
+    rhs: &str,
+    ty: Option<&str>,
+    ambient_types: &HashMap<String, String>,
+) -> Option<String> {
+    let ty = ty?;
+    if ty == "JsValue" {
+        let rhs = rhs.trim();
+        let exec_result = rhs.contains(".exec(")
+            || ambient_types.get(rhs).is_some_and(|known| known == "JsValue");
+        if !exec_result {
+            return None;
+        }
+    }
+    Some(ty.to_string())
 }
 
 /// C++ type for a `new Class(...)` const initializer. The snippet
@@ -4885,7 +4907,7 @@ fn find_emit_callee(src: &str, callee: &str, from: usize) -> Option<usize> {
     let bytes = src.as_bytes();
     let mut i = from;
     while i < bytes.len() {
-        let c = bytes[i] as char;
+        let Some(c) = src[i..].chars().next() else { break };
         if c == '"' || c == '\'' || c == '`' {
             i = str_lit_end(src, i);
             continue;
@@ -4962,7 +4984,7 @@ fn rewrite_event_emits(src: &str, events: &HashMap<String, String>) -> String {
     let mut out = String::with_capacity(src.len());
     let mut i = 0usize;
     while i < bytes.len() {
-        let c = bytes[i] as char;
+        let Some(c) = src[i..].chars().next() else { break };
         if c == '"' || c == '\'' || c == '`' {
             let end = str_lit_end(src, i);
             out.push_str(&src[i..end]);
@@ -4981,7 +5003,10 @@ fn rewrite_event_emits(src: &str, events: &HashMap<String, String>) -> String {
             }
             continue;
         }
-        if is_ident_start(c) {
+        // Event names become C++ identifiers, so only ASCII names can match;
+        // skipping other chars also keeps the scan advancing past Unicode
+        // source (`ident_end` stops at non-ASCII bytes).
+        if c.is_ascii() && is_ident_start(c) {
             let j = ident_end(src, i);
             if let Some(id) = events.get(&src[i..j]) {
                 let before_ok = i == 0
@@ -5160,7 +5185,7 @@ fn rewrite_channel_access(src: &str, param: &str) -> String {
     let mut out = String::with_capacity(src.len());
     let mut i = 0usize;
     while i < bytes.len() {
-        let c = bytes[i] as char;
+        let Some(c) = src[i..].chars().next() else { break };
         if c == '"' || c == '\'' || c == '`' {
             let end = str_lit_end(src, i);
             out.push_str(&src[i..end]);
@@ -8090,6 +8115,21 @@ mod tests {
         assert!(!match_sel(".btn.ghost", &["btn"]), ".btn.ghost should NOT match btn only");
         assert!(match_sel(".btn", &["btn", "ghost"]), ".btn should match btn ghost");
         assert!(match_sel(".btn.ghost:hover", &["btn", "ghost"]), "hover compound should match");
+    }
+
+    #[test]
+    fn event_rewrite_handles_non_ascii_source() {
+        // The scanner must advance over UTF-8 source; regex literals and
+        // strings may contain non-ASCII text (`/é/`, astral characters).
+        let source = "const re = /é/;\nconst text = \"😀\";\nconsole.log(re.test(text));";
+        assert_eq!(rewrite_event_emits(source, &HashMap::new()), source);
+
+        let events = HashMap::from([("bus".to_string(), "evt_bus".to_string())]);
+        let with_event = "const re = /é/;\nbus.emit(\"x\");";
+        assert_eq!(
+            rewrite_event_emits(with_event, &events),
+            "const re = /é/;\nmorphEmit(\"evt_bus\", \"x\");"
+        );
     }
 
     #[test]

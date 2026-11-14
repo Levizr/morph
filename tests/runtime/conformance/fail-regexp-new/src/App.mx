@@ -1,0 +1,11 @@
+export const windowConfig = { title: "fail-regexp-new", width: 800, height: 600 }
+
+export default function App() {
+  const re = new RegExp("a")
+  console.log(re.test("a"))
+  return (
+    <body>
+      <text>fail-regexp</text>
+    </body>
+  )
+}

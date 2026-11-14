@@ -1,0 +1,7 @@
+{
+  "name": "fail-regexp-flags",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "fail-regexp-flags" },
+  "dependencies": {},
+  "cpp_sources": []
+}

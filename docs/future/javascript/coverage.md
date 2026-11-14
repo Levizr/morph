@@ -66,13 +66,14 @@ Already shipped and **not** on the missing list:
 - **Late-assigned and widened values:** `let x; x = 5; x = "hi"` works through `JsLateValue` in module and component scope, and initialized bindings widen when a later assignment changes value class (`let x = 0; x = "hi"`, `let x: number | string`, `let x: any`). Mixed numeric classes widen to `JsNumber`; Window handles lower through `window_wid`.
 - **Builtins:** `fetch` (request options plus `Response.text`/`json`/`arrayBuffer`/`clone`, `ok`, `status`, headers), `console.*` (`log`/`warn`/`error`/`info`), timers, `Promise` constructor + `await`, `Error`, `morphState`/`morphEffect`/`morphShared`/`morphEvent`.
 - **Builtin namespaces:** `Math` constants plus `min`/`max`, rounding, logs, exponentials, trig, `hypot`, `fround`, and `random`; `JSON.parse`/`stringify` (single-argument forms), `Number.isFinite`/`isNaN`/`isInteger`, `Object.keys`/`values`/`entries`, `Array.isArray`, `String`/`Number`/`Boolean` conversions, `parseInt`/`parseFloat`; `Date` construction, `Date.now`/`Date.parse`, `getTime`/`valueOf`, `toISOString`, and local/UTC getters (Part 4A).
+- **RegExp:** literals with no flags or `i`, bound to a local and used directly or through an alias; `.test(text)` returns `bool` and `.exec(text)` returns `null` or an array-like `JsValue` (`m[0]`, captures, `length`, `index`, `input`). Patterns match UTF-16 code units, `.` excludes every JS line terminator, and `\s` covers the JS whitespace set (Part 4B).
 - **Strings:** broad method coverage including `toUpperCase`, `toLowerCase`, `trim*`, `indexOf`, `substring`, `slice`, `replace*`, `split`, `includes`, `startsWith`, `endsWith`, `pad*`, `repeat`, `match*`, `search`, `normalize`.
 - **Arrays:** `push`/`pop`, `join`, `slice`, `concat`, `includes`, `indexOf`, `lastIndexOf`, `at`, `reverse`, `toString`, plus `map`, `filter`, `forEach`, `reduce`, `find`, `findIndex`, `some`, `every`, `sort`, `splice`, `shift`, `unshift`, `fill`, `flat`, `flatMap` (multi-argument `push` and spread arguments on supported methods included). Receivers that call these lower to `JsArray`; `std::vector` stays the fast path for loops and indexing. A JSX-producing `.map` is still only valid as a direct JSX child.
 - **Objects:** `has`, `keys`, `get`, `values`, `entries`.
 - **Operators with JS semantics:** `==`/`!=`, `===`/`!==`, relational, `in`, `**`/`**=`, `&&=`/`||=`/`??=`, truthiness, string concatenation, `ToNumber` in numeric contexts.
 - **JSX:** elements, fragments, and list `.map` in direct JSX-child position.
 
-`Response.json()` returns a `JsValue`; dot access lowers to the same bracket lookup as `["key"]` (Part 3A), while `await response.json()` lowers to the synchronous reader. Statement-level `fetch(...).then(...).catch(...)` chains inside an async function lower to an awaited fetch plus callbacks in a try/catch (Part 3C); other `.then`/`.catch` shapes and JSON `parse`/`stringify` extra arguments are rejected by `morph check`. Trailing timer arguments are forwarded to inline arrow callbacks (Part 3D). `fetch` request options (`method`/`headers`/string `body`) and the `Response` API are documented and fixture-covered (Part 3F). The `Date` subset (Part 4A) covers construction, `Date.now`/`Date.parse`, `toISOString`, and local/UTC getters; timezone-aware formatting and setters are rejected. Class expressions are accepted only as module-scope direct `const`/`let` initializers; every other position is rejected.
+`Response.json()` returns a `JsValue`; dot access lowers to the same bracket lookup as `["key"]` (Part 3A), while `await response.json()` lowers to the synchronous reader. Statement-level `fetch(...).then(...).catch(...)` chains inside an async function lower to an awaited fetch plus callbacks in a try/catch (Part 3C); other `.then`/`.catch` shapes and JSON `parse`/`stringify` extra arguments are rejected by `morph check`. Trailing timer arguments are forwarded to inline arrow callbacks (Part 3D). `fetch` request options (`method`/`headers`/string `body`) and the `Response` API are documented and fixture-covered (Part 3F). The `Date` subset (Part 4A) covers construction, `Date.now`/`Date.parse`, `toISOString`, and local/UTC getters; timezone-aware formatting and setters are rejected. The `RegExp` subset (Part 4B) covers literals with no flags or `i`, `.test`/`.exec`, and array-like exec results; flags beyond `i`, lookbehind, named groups, backreferences, property escapes, and generic value positions are rejected. Class expressions are accepted only as module-scope direct `const`/`let` initializers; every other position is rejected.
 
 ## Part map
 
@@ -97,7 +98,7 @@ Parts are ordered so that a later part never changes a representation owned by a
 | **3E** | Promise statics | 0 | Promise runtime | ✅ Shipped: `resolve`/`all`/`allSettled`/`race`/`any` build and match JS result order for the supported eager shapes |
 | **3F** | `fetch` request/response docs | 0 | docs/tests | ✅ Shipped: `fetch(url, { method, headers, body })` and the `Response` API documented and covered by a runtime fixture |
 | **4A** | `Date` subset | 0 | date runtime | ✅ Shipped: construction, `now`, `parse`, `getTime`, `toISOString`, local/UTC getters; timezone-aware formatting/setters rejected |
-| **4B** | `RegExp` literals + `.test`/`.exec` | 0 | regex runtime | Validation and search work; unsupported features documented |
+| **4B** | `RegExp` literals + `.test`/`.exec` | 0 | regex runtime | ✅ Shipped: no flags or `i`, `.test`/`.exec`, array-like exec results; unsupported patterns/flags rejected |
 | **4C** | `Map`/`Set` | 0 | collection runtime | JS key semantics and insertion order |
 | **4D** | `Object`/`Array` statics | 0 | collection runtime | `Object.assign`/`fromEntries`/`hasOwn`, `Array.from`/`of` |
 | **4E** | String/Number/URL/object methods | 0 | runtime helpers | The listed helpers work on native and `JsValue` receivers |
@@ -386,7 +387,17 @@ Each subpart is additive and owns its runtime header. Do not change `JsArray`/`J
 
 ### 4B — `RegExp`
 
-Regex literals plus `.test` and `.exec`; document unsupported flags/features. Validation and text search are the target, not full regex parity.
+**Shipped:** regex literals lower to the native `morph::RegExp` value type (`runtime/cpp/types/js_regexp.h`), a `std::wregex` wrapper that matches UTF-16 code units — the same units JavaScript uses without the `u` flag. Literals accept no flags or `i` (ASCII-only case folding); every other flag is `mx-js-syntax`. Patterns are validated and translated before codegen (`crates/morph-parser/src/regexp.rs`): `.` becomes `[^\n\r\u2028\u2029]`, `\s`/`\S` expand to the JS whitespace set, `\uXXXX`/`\xHH`/`\cX` and identity escapes are normalized, and bare `}`/`]` are escaped. Lookbehind, named groups, backreferences, Unicode property escapes, `\u{...}`, surrogate and octal escapes, `\S` inside classes, class ranges built from escape classes, malformed/out-of-order quantifiers, quantifiers on lookaheads, and repeated quantifiers are rejected with `mx-js-syntax`.
+
+`.test(text)` returns a `bool`; `.exec(text)` returns `null` or an array-like `JsValue` with numeric keys (`m[0]` full match, `m[1]`… captures), `length`, `index`, `input`, and `groups`/`indices` as `undefined`. Exec results are restricted to indexing, those properties, `null` comparisons, truthiness, aliases, and assignment to another exec-result local; every generic sink (call arguments, returns, templates, operators, arrays/objects, JSX, exports) is rejected rather than emitting a value that cannot compile. Regex values support only direct `.test`/`.exec` calls — no member reads, computed access, operators, conditions, reassignment, class fields, parameter defaults, or exports. `new RegExp(...)` and bare `RegExp` are `mx-js-member`; `: RegExp` annotations are `mx-js-syntax`. Module-scope `const` regexes lift to reactive lambdas; `morph_api.h` includes the regex runtime only when a RegExp binding exists.
+
+**Target:** regex literals plus `.test` and `.exec`; document unsupported flags/features. Validation and text search are the target, not full regex parity.
+
+**Depends on:** Part 0.
+
+**Owns:** regex runtime.
+
+**Exit:** ✅ `tests/runtime/conformance/pass-regexp` plus `tests/translate/test_regexp.py` cover literals, flags, aliases, captures, misses, UTF-16 dot/astral/class behavior, whitespace escapes, lazy quantifiers, lookaheads, exec-result properties, and reassignment; 20 `fail-regexp-*` fixtures cover flags, unsupported patterns, `new`/bare `RegExp`, value/member/operator/condition/export/return sinks, destructuring, assignment, class fields, annotations, arity, spread, exec sinks, calls, parameter defaults, templates, and JSX.
 
 ### 4C — `Map` / `Set`
 
@@ -587,7 +598,8 @@ Morph should expose native equivalents (`useWindow`, clipboard, storage) instead
 | Part 3E — Promise statics | ✅ Shipped; supported eager shapes only |
 | Part 3F — `fetch` request/response docs | ✅ Shipped |
 | Part 4A — `Date` subset | ✅ Shipped |
-| Parts 4B–5G — JavaScript language and standard library | 🚧 Committed — all JS-only gaps are in scope for implementation |
+| Part 4B — `RegExp` literals + `.test`/`.exec` | ✅ Shipped; no flags or `i`, array-like exec results |
+| Parts 4C–5G — JavaScript language and standard library | 🚧 Committed — all JS-only gaps are in scope for implementation |
 | Parts 6A–6G — platform APIs and JSX | 🚧 Separate product work — browser globals stay out of scope |
 | Part 7 — docs and claims | 📋 Continuous |
 

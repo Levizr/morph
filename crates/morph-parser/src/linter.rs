@@ -1777,13 +1777,6 @@ impl<'a> Visit<'a> for JsSyntaxVisitor<'_> {
                     "Pass build-time values in through imports or constants",
                 ));
             }
-            Expression::RegExpLiteral(r) => {
-                self.out.push((
-                    r.span.start,
-                    "regular expression literal",
-                    "Use a `.cpp` helper or plain string checks instead",
-                ));
-            }
             Expression::ClassExpression(c)
                 if !self.class_expression_starts.contains(&c.span.start) =>
             {
@@ -4623,6 +4616,892 @@ fn check_date_values(
     out
 }
 
+/// Regex literals lower to the native `morph::RegExp` value type, which
+/// matches UTF-16 code units through `std::wregex`. Only the shapes the
+/// runtime implements are accepted: literals bound to a local, aliases of
+/// those bindings, and direct `.test`/`.exec` calls. An `.exec` result is an
+/// array-like `JsValue`, so it may be indexed, read through its standard
+/// properties, compared with `null`, used as a truthiness condition, aliased,
+/// or reassigned to another exec-result local. Every other position is a
+/// check error, never a silent C++ compile failure.
+fn check_regexp_usage(
+    program: &Program,
+    content: &str,
+    file_path: &str,
+    offsets: &[usize],
+) -> Vec<LintError> {
+    // ---- shared helpers -------------------------------------------------
+    fn span_text<'s>(content: &'s str, start: u32, end: u32) -> &'s str {
+        content.get(start as usize..end as usize).unwrap_or("").trim()
+    }
+    fn annotation_text<'s>(content: &'s str, ann: &TSTypeAnnotation<'_>) -> &'s str {
+        span_text(content, ann.span().start, ann.span().end).trim_start_matches(':').trim()
+    }
+    fn mentions_regexp(text: &str) -> bool {
+        text.split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_' || ch == '$'))
+            .any(|part| part == "RegExp")
+    }
+    fn strip<'a, 'b>(expr: &'b Expression<'a>) -> &'b Expression<'a> {
+        match expr {
+            Expression::ParenthesizedExpression(p) => strip(&p.expression),
+            Expression::TSAsExpression(a) => strip(&a.expression),
+            Expression::TSSatisfiesExpression(s) => strip(&s.expression),
+            Expression::TSNonNullExpression(n) => strip(&n.expression),
+            Expression::TSTypeAssertion(t) => strip(&t.expression),
+            Expression::TSInstantiationExpression(i) => strip(&i.expression),
+            _ => expr,
+        }
+    }
+    fn symbol_of(scoping: &Scoping, id: &IdentifierReference<'_>) -> Option<SymbolId> {
+        id.reference_id.get().and_then(|reference| scoping.get_reference(reference).symbol_id())
+    }
+    fn binding_symbol(id: &BindingIdentifier<'_>) -> Option<SymbolId> {
+        id.symbol_id.get()
+    }
+    fn null_literal(expr: &Expression<'_>) -> bool {
+        matches!(strip(expr), Expression::NullLiteral(_))
+    }
+    fn assignment_target_object<'a, 'b>(
+        target: &'b AssignmentTarget<'a>,
+    ) -> Option<&'b Expression<'a>> {
+        match target {
+            AssignmentTarget::StaticMemberExpression(member) => Some(&member.object),
+            AssignmentTarget::ComputedMemberExpression(member) => Some(&member.object),
+            AssignmentTarget::PrivateFieldExpression(private) => Some(&private.object),
+            _ => None,
+        }
+    }
+
+    // ---- facts ----------------------------------------------------------
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum RegexKind {
+        Regex,
+        ExecResult,
+    }
+
+    #[derive(Default)]
+    struct Facts {
+        kinds: HashMap<SymbolId, RegexKind>,
+    }
+
+    impl Facts {
+        fn kind_of(&self, scoping: &Scoping, expr: &Expression<'_>) -> Option<RegexKind> {
+            match strip(expr) {
+                Expression::RegExpLiteral(_) => Some(RegexKind::Regex),
+                Expression::Identifier(id) => {
+                    symbol_of(scoping, id).and_then(|symbol| self.kinds.get(&symbol).copied())
+                }
+                Expression::CallExpression(call) => {
+                    let Expression::StaticMemberExpression(member) = &call.callee else {
+                        return None;
+                    };
+                    if member.property.name.as_str() == "exec"
+                        && self.kind_of(scoping, &member.object) == Some(RegexKind::Regex)
+                    {
+                        Some(RegexKind::ExecResult)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            }
+        }
+    }
+
+    // ---- collection -----------------------------------------------------
+    struct FactCollector<'s> {
+        scoping: &'s Scoping,
+        facts: &'s mut Facts,
+        changed: bool,
+    }
+
+    impl<'a> Visit<'a> for FactCollector<'_> {
+        fn visit_variable_declarator(&mut self, d: &VariableDeclarator<'a>) {
+            if let BindingPattern::BindingIdentifier(id) = &d.id {
+                if let Some(symbol) = binding_symbol(id) {
+                    if !self.facts.kinds.contains_key(&symbol) {
+                        if let Some(init) = &d.init {
+                            if let Some(kind) = self.facts.kind_of(self.scoping, init) {
+                                self.facts.kinds.insert(symbol, kind);
+                                self.changed = true;
+                            }
+                        }
+                    }
+                }
+            }
+            oxc_ast_visit::walk::walk_variable_declarator(self, d);
+        }
+    }
+
+    struct RegexLiteralCollector<'b> {
+        out: &'b mut Vec<u32>,
+    }
+
+    impl<'a> Visit<'a> for RegexLiteralCollector<'_> {
+        fn visit_reg_exp_literal(&mut self, literal: &RegExpLiteral<'a>) {
+            self.out.push(literal.span.start);
+        }
+    }
+
+    let semantic = SemanticBuilder::new().with_build_nodes(true).build(program).semantic;
+    let scoping = semantic.scoping();
+
+    let mut facts = Facts::default();
+    loop {
+        let mut collector = FactCollector { scoping, facts: &mut facts, changed: false };
+        collector.visit_program(program);
+        if !collector.changed {
+            break;
+        }
+    }
+
+    // ---- value-position visitor ----------------------------------------
+    struct Visitor<'s> {
+        facts: &'s Facts,
+        scoping: &'s Scoping,
+        content: &'s str,
+        /// Regex literals accepted as initializers or direct call receivers.
+        allowed_literals: HashSet<u32>,
+        /// Literal spans whose pattern/flags were already validated.
+        validated_literals: HashSet<u32>,
+        /// Member-expression spans used as the callee of `.test`/`.exec`.
+        allowed_callees: HashSet<u32>,
+        out: Vec<(u32, String, String, &'static str)>,
+    }
+
+    impl<'s> Visitor<'s> {
+        fn gate(
+            &mut self,
+            start: u32,
+            message: impl Into<String>,
+            hint: impl Into<String>,
+            code: &'static str,
+        ) {
+            self.out.push((start, message.into(), hint.into(), code));
+        }
+        fn is_regex(&self, expr: &Expression<'_>) -> bool {
+            self.facts.kind_of(self.scoping, expr) == Some(RegexKind::Regex)
+        }
+        fn is_exec_result(&self, expr: &Expression<'_>) -> bool {
+            self.facts.kind_of(self.scoping, expr) == Some(RegexKind::ExecResult)
+        }
+        fn is_regex_or_exec(&self, expr: &Expression<'_>) -> bool {
+            self.facts.kind_of(self.scoping, expr).is_some()
+        }
+        fn validate_literal(&mut self, literal: &RegExpLiteral<'_>) {
+            if !self.validated_literals.insert(literal.span.start) {
+                return;
+            }
+            let flags = literal.regex.flags.to_string();
+            if let Err(error) =
+                crate::regexp::translate(literal.regex.pattern.text.as_str(), &flags)
+            {
+                self.gate(
+                    literal.span.start,
+                    error.message,
+                    "Rewrite the pattern using the supported ECMAScript subset",
+                    "mx-js-syntax",
+                );
+            }
+        }
+        fn gate_annotation(&mut self, annotation: Option<&TSTypeAnnotation<'_>>, span: u32) {
+            if let Some(annotation) = annotation {
+                let text = annotation_text(self.content, annotation);
+                if mentions_regexp(text) {
+                    self.gate(
+                        span,
+                        "`RegExp` type annotations are not supported",
+                        "Bind a regex literal to a local and let Morph infer its type",
+                        "mx-js-syntax",
+                    );
+                }
+            }
+        }
+        fn gate_type_text(&mut self, text: &str, span: u32) {
+            if mentions_regexp(text) {
+                self.gate(
+                    span,
+                    "`RegExp` type annotations are not supported",
+                    "Bind a regex literal to a local and let Morph infer its type",
+                    "mx-js-syntax",
+                );
+            }
+        }
+        fn gate_condition(&mut self, expr: &Expression<'_>) {
+            if self.is_regex(expr) {
+                self.gate(
+                    expr.span().start,
+                    "RegExp values cannot be used as conditions",
+                    "Call `.test(...)` or `.exec(...)` explicitly",
+                    "mx-js-syntax",
+                );
+            }
+        }
+        fn gate_value(&mut self, expr: &Expression<'_>, context: &str) {
+            if self.is_regex(expr) {
+                self.gate(
+                    expr.span().start,
+                    format!("RegExp values cannot be used {context}"),
+                    "Bind the literal to a local and call `.test(...)` or `.exec(...)` directly",
+                    "mx-js-syntax",
+                );
+            } else if self.is_exec_result(expr) {
+                self.gate(
+                    expr.span().start,
+                    format!("RegExp exec results cannot be used {context}"),
+                    "Read `[0]`, `.index`, `.input`, or compare against `null`",
+                    "mx-js-syntax",
+                );
+            }
+        }
+        fn gate_export(&mut self, span: u32) {
+            self.gate(
+                span,
+                "RegExp values cannot be exported across modules",
+                "Export strings or numbers instead",
+                "mx-js-syntax",
+            );
+        }
+        fn check_export_declaration(&mut self, declaration: &Declaration<'_>, span: u32) {
+            match declaration {
+                Declaration::VariableDeclaration(vars) => {
+                    for declarator in &vars.declarations {
+                        let annotated = declarator
+                            .type_annotation
+                            .as_deref()
+                            .is_some_and(|ann| mentions_regexp(annotation_text(self.content, ann)));
+                        let value = declarator.init.as_ref().is_some_and(|init| {
+                            self.is_regex_or_exec(init)
+                                || matches!(strip(init), Expression::RegExpLiteral(_))
+                        });
+                        if annotated || value {
+                            self.gate_export(span);
+                            return;
+                        }
+                    }
+                }
+                Declaration::FunctionDeclaration(function) => {
+                    if function
+                        .return_type
+                        .as_deref()
+                        .is_some_and(|ann| mentions_regexp(annotation_text(self.content, ann)))
+                    {
+                        self.gate_export(span);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    impl<'a> Visit<'a> for Visitor<'_> {
+        fn visit_export_declaration(&mut self, e: &ExportDeclaration<'a>) {
+            self.check_export_declaration(&e.declaration, e.span.start);
+            oxc_ast_visit::walk::walk_export_declaration(self, e);
+        }
+
+        fn visit_export_default_declaration(&mut self, e: &ExportDefaultDeclaration<'a>) {
+            match &e.declaration {
+                ExportDefaultDeclarationKind::FunctionDeclaration(function) => {
+                    if function
+                        .return_type
+                        .as_deref()
+                        .is_some_and(|ann| mentions_regexp(annotation_text(self.content, ann)))
+                    {
+                        self.gate_export(e.span.start);
+                    }
+                }
+                other => {
+                    if let Some(expr) = other.as_expression() {
+                        if self.is_regex_or_exec(expr)
+                            || matches!(strip(expr), Expression::RegExpLiteral(_))
+                        {
+                            self.gate_export(e.span.start);
+                        }
+                    }
+                }
+            }
+            oxc_ast_visit::walk::walk_export_default_declaration(self, e);
+        }
+
+        fn visit_export_named_declaration(&mut self, e: &ExportNamedDeclaration<'a>) {
+            for specifier in &e.specifiers {
+                let ModuleExportName::IdentifierReference(id) = &specifier.local else {
+                    continue;
+                };
+                if symbol_of(self.scoping, id)
+                    .is_some_and(|symbol| self.facts.kinds.contains_key(&symbol))
+                {
+                    self.gate_export(specifier.span.start);
+                }
+            }
+            oxc_ast_visit::walk::walk_export_named_declaration(self, e);
+        }
+
+        fn visit_variable_declarator(&mut self, d: &VariableDeclarator<'a>) {
+            self.gate_annotation(d.type_annotation.as_deref(), d.span.start);
+            if let BindingPattern::BindingIdentifier(_) = &d.id {
+                if let Some(init) = &d.init {
+                    if let Expression::RegExpLiteral(literal) = strip(init) {
+                        self.allowed_literals.insert(literal.span.start);
+                        self.validate_literal(literal);
+                    }
+                }
+            } else if let Some(init) = &d.init {
+                if self.is_regex_or_exec(init) {
+                    self.gate(
+                        d.span.start,
+                        "Destructuring a RegExp value is not supported",
+                        "Bind the whole value to a local first",
+                        "mx-js-syntax",
+                    );
+                }
+            }
+            oxc_ast_visit::walk::walk_variable_declarator(self, d);
+        }
+
+        fn visit_formal_parameter(&mut self, p: &FormalParameter<'a>) {
+            self.gate_annotation(p.type_annotation.as_deref(), p.span.start);
+            if let Some(init) = &p.initializer {
+                self.gate_value(init, "as parameter defaults");
+            }
+            oxc_ast_visit::walk::walk_formal_parameter(self, p);
+        }
+
+        fn visit_function(&mut self, f: &Function<'a>, flags: ScopeFlags) {
+            self.gate_annotation(f.return_type.as_deref(), f.span.start);
+            oxc_ast_visit::walk::walk_function(self, f, flags);
+        }
+
+        fn visit_arrow_function_expression(&mut self, a: &ArrowFunctionExpression<'a>) {
+            self.gate_annotation(a.return_type.as_deref(), a.span.start);
+            if let Some(body) = a.body.as_expression() {
+                self.gate_value(body, "as return values");
+            }
+            oxc_ast_visit::walk::walk_arrow_function_expression(self, a);
+        }
+
+        fn visit_return_statement(&mut self, r: &ReturnStatement<'a>) {
+            if let Some(argument) = &r.argument {
+                self.gate_value(argument, "as return values");
+            }
+            oxc_ast_visit::walk::walk_return_statement(self, r);
+        }
+
+        fn visit_expression_statement(&mut self, s: &ExpressionStatement<'a>) {
+            self.gate_value(&s.expression, "as statements");
+            oxc_ast_visit::walk::walk_expression_statement(self, s);
+        }
+
+        fn visit_call_expression(&mut self, e: &CallExpression<'a>) {
+            let mut regexp_call = false;
+            if let Expression::StaticMemberExpression(member) = &e.callee {
+                let prop = member.property.name.as_str();
+                if matches!(prop, "test" | "exec") && self.is_regex(&member.object) {
+                    regexp_call = true;
+                    self.allowed_callees.insert(member.span.start);
+                    if let Expression::RegExpLiteral(literal) = strip(&member.object) {
+                        self.allowed_literals.insert(literal.span.start);
+                        self.validate_literal(literal);
+                    }
+                    if e.optional || member.optional {
+                        self.gate(
+                            e.span.start,
+                            "Optional calls on RegExp values are not supported",
+                            "Call `.test(...)` or `.exec(...)` directly",
+                            "mx-js-syntax",
+                        );
+                    }
+                    let mut count = 0usize;
+                    let mut spread = false;
+                    for argument in &e.arguments {
+                        match argument {
+                            Argument::SpreadElement(_) => spread = true,
+                            _ => count += 1,
+                        }
+                    }
+                    if spread || count != 1 {
+                        self.gate(
+                            e.span.start,
+                            format!("`RegExp.{prop}()` takes exactly one argument"),
+                            "Pass a single string or JS value",
+                            "mx-js-syntax",
+                        );
+                    }
+                    for argument in &e.arguments {
+                        if let Some(expr) = argument.as_expression() {
+                            if self.is_regex_or_exec(expr) {
+                                self.gate(
+                                    expr.span().start,
+                                    "RegExp values cannot be passed to `.test`/`.exec`",
+                                    "Pass a string or JS value instead",
+                                    "mx-js-syntax",
+                                );
+                            }
+                        }
+                    }
+                }
+            } else if self.is_regex_or_exec(&e.callee) {
+                self.gate(
+                    e.callee.span().start,
+                    "RegExp values are not callable",
+                    "Call `.test(...)` or `.exec(...)` on the value",
+                    "mx-js-syntax",
+                );
+            }
+            if !regexp_call {
+                for argument in &e.arguments {
+                    if let Some(expr) = argument.as_expression() {
+                        self.gate_value(expr, "as call arguments");
+                    }
+                }
+            }
+            oxc_ast_visit::walk::walk_call_expression(self, e);
+        }
+
+        fn visit_new_expression(&mut self, n: &NewExpression<'a>) {
+            for argument in &n.arguments {
+                if let Some(expr) = argument.as_expression() {
+                    self.gate_value(expr, "as constructor arguments");
+                }
+            }
+            oxc_ast_visit::walk::walk_new_expression(self, n);
+        }
+
+        fn visit_static_member_expression(&mut self, e: &StaticMemberExpression<'a>) {
+            let prop = e.property.name.as_str();
+            if self.is_regex(&e.object) {
+                if !self.allowed_callees.contains(&e.span.start) {
+                    if matches!(prop, "test" | "exec") {
+                        self.gate(
+                            e.span.start,
+                            format!("RegExp method `{prop}` used as a value"),
+                            "Call the method directly",
+                            "mx-js-member",
+                        );
+                    } else {
+                        self.gate(
+                            e.span.start,
+                            format!("Unsupported RegExp member `{prop}`"),
+                            "Use `.test(...)` or `.exec(...)`",
+                            "mx-js-member",
+                        );
+                    }
+                }
+            } else if self.is_exec_result(&e.object)
+                && !matches!(prop, "length" | "index" | "input" | "groups" | "indices")
+            {
+                self.gate(
+                    e.span.start,
+                    format!("Unsupported RegExp exec result member `{prop}`"),
+                    "Read `[0]`, `.index`, `.input`, `.groups`, `.indices`, or `.length`",
+                    "mx-js-member",
+                );
+            }
+            oxc_ast_visit::walk::walk_static_member_expression(self, e);
+        }
+
+        fn visit_computed_member_expression(&mut self, e: &ComputedMemberExpression<'a>) {
+            if self.is_regex(&e.object) {
+                self.gate(
+                    e.span.start,
+                    "Computed member access on RegExp values is not supported",
+                    "Call `.test(...)` or `.exec(...)` directly",
+                    "mx-js-member",
+                );
+            } else if self.is_exec_result(&e.object) && self.is_regex_or_exec(&e.expression) {
+                self.gate(
+                    e.expression.span().start,
+                    "RegExp values cannot be used as property keys",
+                    "Use a number or string index",
+                    "mx-js-syntax",
+                );
+            } else if self.is_regex_or_exec(&e.expression) {
+                self.gate(
+                    e.expression.span().start,
+                    "RegExp values cannot be used as property keys",
+                    "Use a number or string index",
+                    "mx-js-syntax",
+                );
+            }
+            oxc_ast_visit::walk::walk_computed_member_expression(self, e);
+        }
+
+        fn visit_private_field_expression(&mut self, e: &PrivateFieldExpression<'a>) {
+            if self.is_regex_or_exec(&e.object) {
+                self.gate(
+                    e.span.start,
+                    "RegExp values have no supported private fields",
+                    "Use `.test(...)`, `.exec(...)`, or the exec result properties",
+                    "mx-js-member",
+                );
+            }
+            oxc_ast_visit::walk::walk_private_field_expression(self, e);
+        }
+
+        fn visit_binary_expression(&mut self, e: &BinaryExpression<'a>) {
+            let left_exec = self.is_exec_result(&e.left);
+            let right_exec = self.is_exec_result(&e.right);
+            if left_exec || right_exec {
+                let null_check = e.operator.is_equality()
+                    && ((left_exec && null_literal(&e.right))
+                        || (right_exec && null_literal(&e.left)));
+                if !null_check {
+                    self.gate(
+                        e.span.start,
+                        format!(
+                            "Operator `{}` cannot be applied to RegExp exec results",
+                            e.operator.as_str()
+                        ),
+                        "Read `[0]`, `.index`, or `.input`, or compare against `null`",
+                        "mx-js-op",
+                    );
+                }
+            }
+            if self.is_regex(&e.left) || self.is_regex(&e.right) {
+                self.gate(
+                    e.span.start,
+                    format!(
+                        "Operator `{}` cannot be applied to RegExp values",
+                        e.operator.as_str()
+                    ),
+                    "Call `.test(...)` or `.exec(...)` instead",
+                    "mx-js-op",
+                );
+            }
+            oxc_ast_visit::walk::walk_binary_expression(self, e);
+        }
+
+        fn visit_logical_expression(&mut self, e: &LogicalExpression<'a>) {
+            let left_exec = self.is_exec_result(&e.left);
+            let right_exec = self.is_exec_result(&e.right);
+            if self.is_regex(&e.left) || self.is_regex(&e.right) {
+                self.gate(
+                    e.span.start,
+                    format!(
+                        "Operator `{}` cannot be applied to RegExp values",
+                        e.operator.as_str()
+                    ),
+                    "Call `.test(...)` or `.exec(...)` instead",
+                    "mx-js-op",
+                );
+            } else if e.operator == LogicalOperator::Or && (left_exec || right_exec) {
+                self.gate(
+                    e.span.start,
+                    "RegExp exec results cannot be returned through `||`",
+                    "Use the result in a condition instead",
+                    "mx-js-op",
+                );
+            } else if right_exec {
+                self.gate(
+                    e.span.start,
+                    "RegExp exec results cannot be returned through `&&`",
+                    "Use the result in a condition instead",
+                    "mx-js-op",
+                );
+            }
+            oxc_ast_visit::walk::walk_logical_expression(self, e);
+        }
+
+        fn visit_unary_expression(&mut self, e: &UnaryExpression<'a>) {
+            let exec = self.is_exec_result(&e.argument);
+            let regex = self.is_regex(&e.argument);
+            if regex {
+                self.gate(
+                    e.span.start,
+                    format!(
+                        "Operator `{}` cannot be applied to RegExp values",
+                        e.operator.as_str()
+                    ),
+                    "Call `.test(...)` or `.exec(...)` instead",
+                    "mx-js-op",
+                );
+            } else if exec && e.operator != UnaryOperator::LogicalNot {
+                self.gate(
+                    e.span.start,
+                    format!(
+                        "Operator `{}` cannot be applied to RegExp exec results",
+                        e.operator.as_str()
+                    ),
+                    "Only truthiness (`!`) and null checks are supported",
+                    "mx-js-op",
+                );
+            }
+            oxc_ast_visit::walk::walk_unary_expression(self, e);
+        }
+
+        fn visit_conditional_expression(&mut self, e: &ConditionalExpression<'a>) {
+            self.gate_condition(&e.test);
+            if self.is_regex_or_exec(&e.consequent) || self.is_regex_or_exec(&e.alternate) {
+                self.gate(
+                    e.span.start,
+                    "RegExp values cannot be used as conditional branches",
+                    "Convert both branches to strings or booleans first",
+                    "mx-js-syntax",
+                );
+            }
+            oxc_ast_visit::walk::walk_conditional_expression(self, e);
+        }
+
+        fn visit_if_statement(&mut self, s: &IfStatement<'a>) {
+            self.gate_condition(&s.test);
+            oxc_ast_visit::walk::walk_if_statement(self, s);
+        }
+        fn visit_while_statement(&mut self, s: &WhileStatement<'a>) {
+            self.gate_condition(&s.test);
+            oxc_ast_visit::walk::walk_while_statement(self, s);
+        }
+        fn visit_do_while_statement(&mut self, s: &DoWhileStatement<'a>) {
+            self.gate_condition(&s.test);
+            oxc_ast_visit::walk::walk_do_while_statement(self, s);
+        }
+        fn visit_for_statement(&mut self, s: &ForStatement<'a>) {
+            if let Some(test) = &s.test {
+                self.gate_condition(test);
+            }
+            if let Some(expr) = s.init.as_ref().and_then(ForStatementInit::as_expression) {
+                self.gate_value(expr, "in a for-loop initializer");
+            }
+            if let Some(update) = &s.update {
+                self.gate_value(update, "in a for-loop update");
+            }
+            oxc_ast_visit::walk::walk_for_statement(self, s);
+        }
+        fn visit_switch_statement(&mut self, s: &SwitchStatement<'a>) {
+            self.gate_value(&s.discriminant, "as switch discriminants");
+            oxc_ast_visit::walk::walk_switch_statement(self, s);
+        }
+        fn visit_switch_case(&mut self, c: &SwitchCase<'a>) {
+            if let Some(test) = &c.test {
+                self.gate_value(test, "as switch cases");
+            }
+            oxc_ast_visit::walk::walk_switch_case(self, c);
+        }
+        fn visit_template_literal(&mut self, e: &TemplateLiteral<'a>) {
+            for expr in &e.expressions {
+                self.gate_value(expr, "in template literals");
+            }
+            oxc_ast_visit::walk::walk_template_literal(self, e);
+        }
+        fn visit_array_expression(&mut self, e: &ArrayExpression<'a>) {
+            for element in &e.elements {
+                if let Some(expr) = element.as_expression() {
+                    self.gate_value(expr, "in array literals");
+                }
+            }
+            oxc_ast_visit::walk::walk_array_expression(self, e);
+        }
+        fn visit_object_expression(&mut self, e: &ObjectExpression<'a>) {
+            for property in &e.properties {
+                if let ObjectPropertyKind::ObjectProperty(p) = property {
+                    if p.computed {
+                        if let Some(key) = p.key.as_expression() {
+                            self.gate_value(key, "as property keys");
+                        }
+                    }
+                    self.gate_value(&p.value, "in object literals");
+                }
+            }
+            oxc_ast_visit::walk::walk_object_expression(self, e);
+        }
+        fn visit_spread_element(&mut self, e: &SpreadElement<'a>) {
+            self.gate_value(&e.argument, "in spread positions");
+            oxc_ast_visit::walk::walk_spread_element(self, e);
+        }
+        fn visit_sequence_expression(&mut self, e: &SequenceExpression<'a>) {
+            for expr in &e.expressions {
+                self.gate_value(expr, "in sequence expressions");
+            }
+            oxc_ast_visit::walk::walk_sequence_expression(self, e);
+        }
+        fn visit_tagged_template_expression(&mut self, e: &TaggedTemplateExpression<'a>) {
+            self.gate_value(&e.tag, "as template tags");
+            oxc_ast_visit::walk::walk_tagged_template_expression(self, e);
+        }
+        fn visit_jsx_expression_container(&mut self, e: &JSXExpressionContainer<'a>) {
+            if let Some(expr) = e.expression.as_expression() {
+                self.gate_value(expr, "directly in JSX");
+            }
+            oxc_ast_visit::walk::walk_jsx_expression_container(self, e);
+        }
+        fn visit_jsx_spread_attribute(&mut self, a: &JSXSpreadAttribute<'a>) {
+            self.gate_value(&a.argument, "in JSX spread attributes");
+            oxc_ast_visit::walk::walk_jsx_spread_attribute(self, a);
+        }
+        fn visit_for_of_statement(&mut self, s: &ForOfStatement<'a>) {
+            self.gate_value(&s.right, "as iterables");
+            oxc_ast_visit::walk::walk_for_of_statement(self, s);
+        }
+        fn visit_for_in_statement(&mut self, s: &ForInStatement<'a>) {
+            self.gate_value(&s.right, "as enumerables");
+            oxc_ast_visit::walk::walk_for_in_statement(self, s);
+        }
+        fn visit_throw_statement(&mut self, s: &ThrowStatement<'a>) {
+            self.gate_value(&s.argument, "as thrown values");
+            oxc_ast_visit::walk::walk_throw_statement(self, s);
+        }
+        fn visit_await_expression(&mut self, e: &AwaitExpression<'a>) {
+            self.gate_value(&e.argument, "as awaited values");
+            oxc_ast_visit::walk::walk_await_expression(self, e);
+        }
+        fn visit_yield_expression(&mut self, e: &YieldExpression<'a>) {
+            if let Some(argument) = &e.argument {
+                self.gate_value(argument, "as yielded values");
+            }
+            oxc_ast_visit::walk::walk_yield_expression(self, e);
+        }
+        fn visit_assignment_expression(&mut self, a: &AssignmentExpression<'a>) {
+            let right_regex = self.is_regex(&a.right);
+            let right_exec = self.is_exec_result(&a.right);
+            let target_kind = match &a.left {
+                AssignmentTarget::AssignmentTargetIdentifier(id) => symbol_of(self.scoping, id)
+                    .and_then(|symbol| self.facts.kinds.get(&symbol).copied()),
+                _ => None,
+            };
+            if a.operator != AssignmentOperator::Assign {
+                if right_regex || right_exec || target_kind.is_some() {
+                    self.gate(
+                        a.span.start,
+                        format!(
+                            "Operator `{}` cannot be applied to RegExp values",
+                            a.operator.as_str()
+                        ),
+                        "RegExp values only support direct assignment to a local",
+                        "mx-js-op",
+                    );
+                }
+            } else if right_regex {
+                self.gate(
+                    a.span.start,
+                    "RegExp values cannot be reassigned",
+                    "Bind each literal to its own local",
+                    "mx-js-syntax",
+                );
+            } else if right_exec && target_kind != Some(RegexKind::ExecResult) {
+                self.gate(
+                    a.span.start,
+                    "RegExp exec results can only be assigned to another exec-result binding",
+                    "Declare the target from `.exec(...)` first",
+                    "mx-js-syntax",
+                );
+            } else if target_kind == Some(RegexKind::ExecResult) && !right_exec {
+                self.gate(
+                    a.span.start,
+                    "An exec-result binding cannot be assigned a non-exec-result value",
+                    "Assign another `.exec(...)` result",
+                    "mx-js-syntax",
+                );
+            } else if target_kind == Some(RegexKind::Regex) {
+                self.gate(
+                    a.span.start,
+                    "RegExp bindings cannot be reassigned",
+                    "Bind each literal to its own local",
+                    "mx-js-syntax",
+                );
+            }
+            if let Some(object) = assignment_target_object(&a.left) {
+                if self.is_regex_or_exec(object) {
+                    self.gate(
+                        a.left.span().start,
+                        "RegExp values have no supported writable members",
+                        "Assign to a local instead",
+                        "mx-js-member",
+                    );
+                }
+            }
+            oxc_ast_visit::walk::walk_assignment_expression(self, a);
+        }
+        fn visit_property_definition(&mut self, p: &PropertyDefinition<'a>) {
+            self.gate_annotation(p.type_annotation.as_deref(), p.span.start);
+            if p.computed {
+                if let Some(key) = p.key.as_expression() {
+                    self.gate_value(key, "as property keys");
+                }
+            }
+            if let Some(value) = &p.value {
+                self.gate_value(value, "in class fields");
+            }
+            oxc_ast_visit::walk::walk_property_definition(self, p);
+        }
+        fn visit_method_definition(&mut self, m: &MethodDefinition<'a>) {
+            self.gate_annotation(m.value.return_type.as_deref(), m.span.start);
+            if m.computed {
+                if let Some(key) = m.key.as_expression() {
+                    self.gate_value(key, "as property keys");
+                }
+            }
+            oxc_ast_visit::walk::walk_method_definition(self, m);
+        }
+        fn visit_ts_as_expression(&mut self, e: &TSAsExpression<'a>) {
+            let text = span_text(
+                self.content,
+                e.type_annotation.span().start,
+                e.type_annotation.span().end,
+            );
+            self.gate_type_text(text, e.span.start);
+            oxc_ast_visit::walk::walk_ts_as_expression(self, e);
+        }
+        fn visit_ts_satisfies_expression(&mut self, e: &TSSatisfiesExpression<'a>) {
+            let text = span_text(
+                self.content,
+                e.type_annotation.span().start,
+                e.type_annotation.span().end,
+            );
+            self.gate_type_text(text, e.span.start);
+            oxc_ast_visit::walk::walk_ts_satisfies_expression(self, e);
+        }
+        fn visit_ts_type_assertion(&mut self, e: &TSTypeAssertion<'a>) {
+            let text = span_text(
+                self.content,
+                e.type_annotation.span().start,
+                e.type_annotation.span().end,
+            );
+            self.gate_type_text(text, e.span.start);
+            oxc_ast_visit::walk::walk_ts_type_assertion(self, e);
+        }
+    }
+
+    let mut visitor = Visitor {
+        facts: &facts,
+        scoping,
+        content,
+        allowed_literals: HashSet::new(),
+        validated_literals: HashSet::new(),
+        allowed_callees: HashSet::new(),
+        out: Vec::new(),
+    };
+    visitor.visit_program(program);
+
+    let mut literal_spans = Vec::new();
+    RegexLiteralCollector { out: &mut literal_spans }.visit_program(program);
+    for span in literal_spans {
+        if !visitor.allowed_literals.contains(&span) {
+            visitor.gate(
+                span,
+                "Regular expression literals are only supported as local variable initializers or direct `.test`/`.exec` receivers",
+                "Bind the literal to a local first",
+                "mx-js-syntax",
+            );
+        }
+    }
+
+    visitor.out.sort_by_key(|(start, ..)| *start);
+    let mut out = Vec::new();
+    for (start, message, hint, code) in visitor.out {
+        let (line, col) = offset_to_line_col_fast(offsets, start);
+        out.push(LintError {
+            severity: "error".into(),
+            code: code.into(),
+            message,
+            suggestion: Some(hint),
+            file_path: file_path.into(),
+            line,
+            col,
+        });
+    }
+    out
+}
+
 /// `mx-js-method`: method calls on provably-typed receivers where the
 /// runtime type has no such method. Anything unprovable stays quiet;
 /// anything supported stays quiet; the rest names the exact method.
@@ -5235,6 +6114,8 @@ pub fn check(source: &str, file_path: &str) -> Vec<LintError> {
         // Date values in generic JS value positions (conversions,
         // operators, conditions, template literals, members).
         errors.extend(check_date_values(&ret.program, source, file_path, &offsets));
+        // Regex literal positions, flags, and `.test`/`.exec` results.
+        errors.extend(check_regexp_usage(&ret.program, source, file_path, &offsets));
         // Hoisting and temporal-dead-zone rules for `var`/`let`/`const`.
         errors.extend(check_js_declarations(&ret.program, file_path, &offsets));
         // Unimplemented methods on provably-typed receivers.
@@ -9741,6 +10622,96 @@ mod tests {
     }
 
     #[test]
+    fn regexp_subset_is_supported_and_gated() {
+        let ok = "import { morphState } from 'morph'\nconst shared = /x/\nexport default function App() {\n  const re = /ab+c/i\n  const alias = re\n  const ok = alias.test(\"ABBC\") && shared.test(\"x\")\n  const m = re.exec(\"xABBC\")\n  const first = m ? m[0] : \"\"\n  const idx = m ? m.index : -1\n  const len = m ? m.length : 0\n  const input = m ? m.input : \"\"\n  const groups = m ? m.groups : undefined\n  const indices = m ? m.indices : undefined\n  const missing = m === null\n  const present = m !== null\n  const notM = !m\n  let slot = re.exec(\"one\")\n  slot = /n/.exec(\"one\")\n  if (m) {\n    console.log(first, idx, len, input, groups, indices, missing, present, notM, ok, slot ? slot[0] : \"\")\n  }\n  return (<div>{first}</div>)\n}\n";
+        let errs = check(ok, "App.mx");
+        for code in ["mx-js-syntax", "mx-js-member", "mx-js-op", "mx-undefined"] {
+            assert!(!codes(&errs).contains(&code), "{code}: {errs:?}");
+        }
+
+        for (body, code) in [
+            ("const v = /a/g\n  console.log(v.test(\"a\"))", "mx-js-syntax"),
+            ("const v = /(?<=a)b/\n  console.log(v.test(\"ab\"))", "mx-js-syntax"),
+            ("const v = /(?<name>a)/\n  console.log(v.test(\"a\"))", "mx-js-syntax"),
+            ("const v = /(a)\\1/\n  console.log(v.test(\"aa\"))", "mx-js-syntax"),
+            ("const v = /[\\S]/\n  console.log(v.test(\"a\"))", "mx-js-syntax"),
+            ("const v = /[\\d-a]/\n  console.log(v.test(\"a\"))", "mx-js-syntax"),
+            ("const v = /a{/\n  console.log(v.test(\"a\"))", "mx-js-syntax"),
+            ("const v = /[z-a]/\n  console.log(v.test(\"a\"))", "mx-js-syntax"),
+            ("const v = new RegExp(\"a\")\n  console.log(v.test(\"a\"))", "mx-js-member"),
+            ("const v = RegExp(\"a\")\n  console.log(v)", "mx-js-member"),
+            ("const v = re.source", "mx-js-member"),
+            ("const v = re[\"source\"]", "mx-js-member"),
+            ("const v = re.test", "mx-js-member"),
+            ("const v = re.test(\"a\", \"b\")", "mx-js-syntax"),
+            ("const v = re.test()", "mx-js-syntax"),
+            ("const v = re.test(...[\"a\"])", "mx-js-syntax"),
+            ("const v = re.exec(\"a\", \"b\")", "mx-js-syntax"),
+            ("const v = re + \"\"", "mx-js-op"),
+            ("const v = re === re", "mx-js-op"),
+            ("const v = !re", "mx-js-op"),
+            ("const v = re && 1", "mx-js-op"),
+            ("if (re) { console.log(1) }", "mx-js-syntax"),
+            ("const v = re ? 1 : 2", "mx-js-syntax"),
+            ("const v = String(re)", "mx-js-syntax"),
+            ("const v = [re]", "mx-js-syntax"),
+            ("const v = { re }", "mx-js-syntax"),
+            ("const v = `${re}`", "mx-js-syntax"),
+            ("const v = <span>{re}</span>", "mx-js-syntax"),
+            ("return re", "mx-js-syntax"),
+            ("throw re", "mx-js-syntax"),
+            ("const v = re()", "mx-js-syntax"),
+            ("const [v] = re.exec(\"a\")", "mx-js-syntax"),
+            ("re = /b/", "mx-js-syntax"),
+            ("re += \"x\"", "mx-js-op"),
+            ("class C { pattern = re }\n  console.log(new C().pattern)", "mx-js-syntax"),
+            ("function f(pattern = re) { console.log(pattern) }\n  f()", "mx-js-syntax"),
+            ("const v: RegExp = re", "mx-js-syntax"),
+            ("function f(pattern: RegExp) { console.log(pattern) }\n  f(re)", "mx-js-syntax"),
+            ("const v = re as RegExp", "mx-js-syntax"),
+            ("const m = re.exec(\"a\")\n  console.log(m.foo)", "mx-js-member"),
+            ("const m = re.exec(\"a\")\n  console.log(m + 1)", "mx-js-op"),
+            ("const m = re.exec(\"a\")\n  console.log(m)", "mx-js-syntax"),
+        ] {
+            let content = format!(
+                "import {{ morphState }} from 'morph'\nexport default function App() {{\n  const re = /a/\n  {body}\n  return (<div>x</div>)\n}}\n"
+            );
+            let found = check(&content, "App.mx");
+            assert!(
+                found.iter().any(|e| e.code == code),
+                "{body:?} should report {code}, got {found:?}"
+            );
+        }
+
+        // Aliases of exec results may be reassigned from another exec call.
+        let alias_ok = "import { morphState } from 'morph'\nexport default function App() {\n  const re = /a/\n  const m = re.exec(\"a\")\n  let alias = m\n  alias = re.exec(\"b\")\n  console.log(alias ? alias[0] : \"\")\n  return (<div>x</div>)\n}\n";
+        let errs = check(alias_ok, "App.mx");
+        assert!(!codes(&errs).contains(&"mx-js-syntax"), "{errs:?}");
+    }
+
+    #[test]
+    fn regexp_values_cannot_cross_module_boundaries() {
+        for content in [
+            "export const re = /a/\nexport default function App() { return (<div>x</div>) }\n",
+            "const re = /a/\nexport { re }\nexport default function App() { return (<div>x</div>) }\n",
+            "export default /a/\n",
+            "export function make(): RegExp { return /a/ }\nexport default function App() { return (<div>x</div>) }\n",
+        ] {
+            let found = check(content, "pattern.ts");
+            assert!(
+                found.iter().any(|e| {
+                    e.code == "mx-js-syntax" && e.message.contains("exported across modules")
+                }),
+                "{content}: {found:?}"
+            );
+        }
+
+        let ok = "export const answer = 42\nexport function matches(text: string): boolean { return /a/.test(text) }\nexport default function App() { return (<div>{answer}</div>) }\n";
+        let errs = check(ok, "pattern.ts");
+        assert!(!codes(&errs).contains(&"mx-js-syntax"), "{errs:?}");
+    }
+
+    #[test]
     fn date_values_cannot_cross_module_boundaries() {
         // Importers have no Date type facts, so exporting a Date (or a
         // Date-producing function/class) would let `morph check` pass and
@@ -9973,7 +10944,6 @@ mod tests {
     #[test]
     fn runtime_only_syntax_rejections_error() {
         let cases = [
-            ("const r = /ab+c/;", "regular expression literal"),
             ("enum Color { Red }", "`enum` declaration"),
             ("function f(...xs: number[]) { return xs }", "rest parameter"),
         ];

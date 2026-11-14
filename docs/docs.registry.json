@@ -544,7 +544,7 @@
         "file": "javascript/overview",
         "status": "production",
         "author": "PIYUSH",
-        "description": "How Morph turns your TypeScript and JavaScript logic into native C++: no interpreter or JIT, your component code compiles and runs as machine code at build time — including Promise statics, fetch request options and the Response API, the native Date subset, destructured parameters, class fields, and late-assigned values.",
+        "description": "How Morph turns your TypeScript and JavaScript logic into native C++: no interpreter or JIT, your component code compiles and runs as machine code at build time — including Promise statics, fetch request options and the Response API, the native Date and RegExp subsets, destructured parameters, class fields, and late-assigned values.",
         "keywords": [
           "morph javascript to c++",
           "morph typescript compile",
@@ -570,9 +570,13 @@
           "morph response headers",
           "morph date support",
           "morph date parse",
-          "morph toisostring"
+          "morph toisostring",
+          "morph regexp support",
+          "morph regex literal",
+          "morph regexp test",
+          "morph regexp exec"
         ],
-        "lastUpdated": "2026-11-12",
+        "lastUpdated": "2026-11-14",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -658,7 +662,7 @@
         "file": "javascript/types",
         "status": "production",
         "author": "PIYUSH",
-        "description": "How JavaScript runtime types work in Morph: JsNumber, JsString, JsArray, JsObject, and the native Date subset with its typed-boundary and value-position gates, and how JS values behave when executed natively in C++.",
+        "description": "How JavaScript runtime types work in Morph: JsNumber, JsString, JsArray, JsObject, the native Date subset with its typed-boundary gates, and the RegExp subset with UTF-16 code-unit matching, test/exec, and array-like exec results, and how JS values behave when executed natively in C++.",
         "keywords": [
           "morph runtime types",
           "JsNumber",
@@ -671,9 +675,15 @@
           "toISOString",
           "morph date conversion",
           "morph date operators",
-          "morph date annotations"
+          "morph date annotations",
+          "morph regexp type",
+          "morph regex literal",
+          "RegExp.test",
+          "RegExp.exec",
+          "morph regexp exec result",
+          "morph utf16 regex"
         ],
-        "lastUpdated": "2026-11-13",
+        "lastUpdated": "2026-11-14",
         "publishedAt": "2026-08-18",
         "priority": 0.8,
         "changefreq": "weekly"
@@ -2602,7 +2612,7 @@
         "file": "future/javascript/coverage",
         "status": "development",
         "author": "PIYUSH",
-        "description": "The contract and dependency-ordered plan for making Morph's TypeScript subset cover ordinary app logic: check/build/semantics invariants, shipped widening bindings and class model, precise contract rejections, async/JSON, fetch request/response coverage, Promise statics, the native Date subset and its value-position gates, standard library, language surface, platform services, JSX, and docs truth-up.",
+        "description": "The contract and dependency-ordered plan for making Morph's TypeScript subset cover ordinary app logic: check/build/semantics invariants, shipped widening bindings and class model, precise contract rejections, async/JSON, fetch request/response coverage, Promise statics, the native Date and RegExp subsets with their value-position gates, standard library, language surface, platform services, JSX, and docs truth-up.",
         "keywords": [
           "morph typescript coverage",
           "morph javascript translator",
@@ -2629,6 +2639,11 @@
           "morph toisostring",
           "morph date conversion",
           "morph date operators",
+          "morph regexp subset",
+          "morph regex literal",
+          "morph regexp test",
+          "morph regexp exec",
+          "morph regexp exec result",
           "morph jsx spread props",
           "morph array methods",
           "morph object spread",
@@ -2643,7 +2658,7 @@
           "morph fetch json",
           "morph response headers"
         ],
-        "lastUpdated": "2026-11-12",
+        "lastUpdated": "2026-11-14",
         "publishedAt": "2026-08-20",
         "priority": 0.5,
         "changefreq": "monthly"

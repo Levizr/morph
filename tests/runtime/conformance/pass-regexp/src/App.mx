@@ -1,0 +1,77 @@
+export const windowConfig = { title: "pass-regexp", width: 800, height: 600 }
+
+export default function App() {
+  return (
+    <body>
+      <text>pass-regexp</text>
+    </body>
+  )
+}
+
+// Part 4B: regex literals, aliases, `.test`, `.exec`, and the array-like
+// exec result. The runtime test runs headlessly via `--morph-self-test`;
+// module initializers execute before the self-test branch.
+function run() {
+  const re = /ab+c/i
+  const alias = re
+  console.log("test", alias.test("xABBC"), re.test("ac"), re.test(123))
+
+  const m = re.exec("xABBC")
+  console.log(
+    "exec",
+    m !== null,
+    m ? m[0] : "",
+    m ? m.index : -1,
+    m ? m.length : 0,
+    m ? m.input : "",
+  )
+
+  const groups = /(a)?(b)/.exec("b")
+  console.log(
+    "groups",
+    groups ? groups[0] : "",
+    groups ? groups[1] : "?",
+    groups ? groups[2] : "?",
+    groups ? groups.index : -1,
+    groups ? groups.length : 0,
+  )
+
+  const miss = /z/.exec("abc")
+  console.log("miss", miss === null, miss !== null)
+
+  const dot = /^.$/
+  console.log("dot", dot.test("a"), dot.test("\n"), dot.test("😀"))
+
+  console.log("astral", /^😀+$/.test("😀😀"), /^[😀]$/.test("😀"))
+
+  const ws = /\s/
+  console.log("ws", ws.test(" "), ws.test("\u00a0"), ws.test("a"))
+
+  const neg = /\S/
+  console.log("negws", neg.test(" "), neg.test("a"))
+
+  console.log("unicode", /\u00e9/.test("é"), /\x41/.test("A"), /\cA/.test("\u0001"))
+
+  const lazy = /a+?/.exec("aaa")
+  console.log("lazy", lazy ? lazy[0] : "", lazy ? lazy.index : -1)
+
+  console.log("lookahead", /a(?=b)/.test("ab"), /a(?!b)/.test("ac"))
+
+  const idxm = /b/.exec("abcb")
+  console.log("index", idxm ? idxm.index : -1)
+
+  let slot = re.exec("one")
+  slot = /n/.exec("one")
+  console.log("reassign", slot ? slot[0] : "")
+
+  const truthy = re.exec("ab")
+  if (truthy) {
+    console.log("truthy", truthy[0])
+  }
+
+  console.log("class", /[a-b-c]/.test("-"), /[^\n\r]/.test("a"), /[\b]/.test("\b"))
+  console.log("empty", /[]/.test(""), /[^]/.test("\n"), /(?!)/.test(""))
+  console.log("noncapture", /(?:a)b/.test("ab"))
+}
+
+run()

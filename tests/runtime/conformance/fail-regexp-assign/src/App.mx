@@ -1,0 +1,12 @@
+export const windowConfig = { title: "fail-regexp-assign", width: 800, height: 600 }
+
+export default function App() {
+  let re = /a/
+  re = /b/
+  console.log(re.test("b"))
+  return (
+    <body>
+      <text>fail-regexp</text>
+    </body>
+  )
+}

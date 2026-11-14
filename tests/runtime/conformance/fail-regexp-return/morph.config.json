@@ -1,0 +1,7 @@
+{
+  "name": "fail-regexp-return",
+  "entry": "src/App.mx",
+  "window": { "width": 800, "height": 600, "title": "fail-regexp-return" },
+  "dependencies": {},
+  "cpp_sources": []
+}

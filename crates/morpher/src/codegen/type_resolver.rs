@@ -373,6 +373,7 @@ pub fn headers_for(cpp_type: &str) -> Vec<&'static str> {
         ("JsUndefined", "\"../../runtime/cpp/types/js_types.h\""),
         ("JsNull", "\"../../runtime/cpp/types/js_types.h\""),
         ("morph::Date", "\"../../runtime/cpp/types/js_date.h\""),
+        ("morph::RegExp", "\"../../runtime/cpp/types/js_regexp.h\""),
         ("morph::Result", "\"../../runtime/cpp/reactivity/promise.h\""),
         ("morph::Task", "\"../../runtime/cpp/reactivity/task.h\""),
         ("morph::net", "\"../../runtime/cpp/net/net.h\""),

@@ -163,6 +163,25 @@ Invalid dates return `NaN` from `getTime`/`valueOf`/getters; `toISOString()` thr
 
 Date values are native value types, not `JsValue`s. They can be constructed, stored in Date-typed locals and fields, passed to functions that take `Date`, returned, logged with `console.log`, and used with the methods above. Every boundary must be explicit: a parameter, return type, class field, or variable that holds a Date needs an exact `: Date` annotation. Unannotated boundaries (generic parameters, untyped fields and locals, unannotated returns, constructor parameters, and callbacks), destructuring a Date, assigning a Date to an untyped target, and exporting a Date or a Date-producing function/class across modules are rejected by `morph check`. Generic JS value positions have no lowering and are rejected too: `String(date)`, `Number(date)`, `Boolean(date)`, `parseInt`/`parseFloat(date)`, `Math.*`/`Number.is*` with a Date argument, `JSON.stringify(date)`, `Date.parse(date)`, template interpolation, string concatenation/arithmetic/comparisons, conditions, `switch`, array/object literals, JSX text, `for...of`/`for...in`, and unsupported members. Convert explicitly with `.getTime()` or `.toISOString()` first.
 
+## RegExp
+
+Regex literals lower to the native `morph::RegExp` value type (`runtime/cpp/types/js_regexp.h`), which matches UTF-16 code units through `std::wregex` — the same units JavaScript uses without the `u` flag. Only two flag sets are accepted: no flags, or `i` (ASCII-only case folding; Unicode case pairs are not folded). Every other flag (`g`, `m`, `s`, `u`, `y`, `d`, `v`) is an `mx-js-syntax` error.
+
+Bind a literal to a local, then use it directly or through an alias:
+
+```
+const re = /ab+c/i
+const alias = re
+const ok = alias.test("xABBC")     // true
+const m = re.exec("xABBC")
+```
+
+Supported pattern syntax: literals, `.`, `^`/`$`, character classes and ranges, `\d`/`\D`/`\w`/`\W`, JS-aware `\s`/`\S`, `\b`/`\B`, `\n`/`\r`/`\t`/`\f`/`\v`/`\0`, `\xHH`, `\uXXXX`, `\cX`, identity escapes, capture groups, `(?:...)`, lookaheads `(?=...)`/`(?!...)`, and greedy/lazy `*`, `+`, `?`, `{m}`, `{m,}`, `{m,n}`. `.` excludes `\n`, `\r`, U+2028, and U+2029 like JS.
+
+`morph check` rejects constructs whose JS semantics `std::regex` cannot reproduce: lookbehind and named groups, backreferences (`\1`, `\k<name>`), Unicode property escapes (`\p{...}`), `\u{...}`, surrogate escapes, octal escapes, `\S` inside a character class, ranges with escape classes (`[\d-a]`), bare `{`, malformed or out-of-order quantifiers, quantifiers on lookaheads, and repeated quantifiers. `new RegExp(...)` and bare `RegExp` are rejected (`mx-js-member`); `: RegExp` annotations are rejected (`mx-js-syntax`).
+
+`.test(text)` returns a `bool`. `.exec(text)` returns `null` on a miss, or an array-like `JsValue` on a match with numeric keys (`m[0]` is the full match, `m[1]`… are captures), `length`, `index`, `input`, and `groups`/`indices` set to `undefined`. Exec results may be indexed, read through those properties, compared with `null`, used as truthiness conditions, aliased, and assigned to another exec-result local. Every other sink (call arguments, returns, template interpolation, operators, array/object literals, JSX, exports, and assignment to a non-exec target) is rejected instead of emitting a native value that would not compile. Regex values themselves support only direct `.test`/`.exec` calls — no member reads, computed access, operators, conditions, reassignment, or exports. There is no `lastIndex` state because `g`/`y` are not implemented.
+
 ## JsBoolean
 
 Wrapper around `bool` with truthiness semantics.

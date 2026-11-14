@@ -1,0 +1,12 @@
+export const windowConfig = { title: "fail-regexp-spread", width: 800, height: 600 }
+
+export default function App() {
+  const re = /a/
+  const args = ["a"]
+  console.log(re.test(...args))
+  return (
+    <body>
+      <text>fail-regexp</text>
+    </body>
+  )
+}
